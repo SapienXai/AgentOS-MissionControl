@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-display: "Futura", "Avenir Next", sans-serif;
+    --font-body: "Avenir Next", "Helvetica Neue", sans-serif;
+    --font-mono: "SF Mono", "Menlo", monospace;
+    --background: 220 24% 8%;
+    --foreground: 210 20% 96%;
+    --card: 222 24% 11%;
+    --card-foreground: 210 20% 97%;
+    --popover: 222 24% 11%;
+    --popover-foreground: 210 20% 97%;
+    --primary: 194 86% 62%;
+    --primary-foreground: 220 28% 10%;
+    --secondary: 220 19% 17%;
+    --secondary-foreground: 210 24% 96%;
+    --muted: 220 16% 16%;
+    --muted-foreground: 217 14% 67%;
+    --accent: 212 24% 20%;
+    --accent-foreground: 210 24% 96%;
+    --destructive: 0 73% 57%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 194 86% 62%;
+    --radius: 1.125rem;
+    --chart-cyan: 188 91% 56%;
+    --chart-blue: 213 86% 64%;
+    --chart-amber: 38 92% 60%;
+    --chart-emerald: 153 71% 49%;
+    --chart-rose: 347 77% 62%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply min-h-screen bg-background font-sans text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at 22% 18%, rgba(53, 118, 255, 0.2), transparent 28%),
+      radial-gradient(circle at 78% 18%, rgba(38, 88, 190, 0.16), transparent 24%),
+      radial-gradient(circle at 50% 50%, rgba(9, 29, 68, 0.45), transparent 56%),
+      linear-gradient(180deg, #020611 0%, #051224 52%, #030813 100%);
+  }
+
+  pre,
+  code {
+    @apply font-mono;
+  }
+}
+
+@layer utilities {
+  .panel-surface {
+    @apply border backdrop-blur-xl;
+    border-color: rgba(255, 255, 255, 0.08);
+    background:
+      linear-gradient(180deg, rgba(12, 19, 34, 0.82), rgba(8, 13, 24, 0.82)),
+      rgba(4, 9, 18, 0.64);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.02),
+      0 24px 90px rgba(0, 0, 0, 0.38);
+  }
+
+  .panel-glow {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 18px 58px rgba(0, 0, 0, 0.34);
+  }
+
+  .status-ring {
+    position: relative;
+  }
+
+  .status-ring::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 1px solid currentColor;
+    opacity: 0.15;
+  }
+}
+
+.mission-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(98, 165, 255, 0.16) 1px, transparent 1.5px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(circle at center, black 38%, transparent 100%);
+  opacity: 0.42;
+}
+
+.mission-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at center, transparent 44%, rgba(2, 6, 17, 0.36) 82%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%);
+}
+
+.react-flow__renderer {
+  background: transparent;
+}
+
+.react-flow__background {
+  opacity: 0.62;
+}
+
+.react-flow__edge path {
+  filter: drop-shadow(0 0 8px rgba(89, 153, 255, 0.08));
+}
+
+.react-flow__controls-button {
+  @apply border-white/10 bg-transparent text-white transition-colors hover:bg-white/10;
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+.mission-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.mission-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 9999px;
+}
+
+.mission-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

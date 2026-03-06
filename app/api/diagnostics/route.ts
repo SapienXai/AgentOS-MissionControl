@@ -1,0 +1,16 @@
+import { NextResponse } from "next/server";
+
+import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const snapshot = await getMissionControlSnapshot({ force: true });
+  return NextResponse.json({
+    generatedAt: snapshot.generatedAt,
+    mode: snapshot.mode,
+    diagnostics: snapshot.diagnostics,
+    presence: snapshot.presence
+  });
+}
