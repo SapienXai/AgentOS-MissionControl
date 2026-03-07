@@ -1,11 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import {
-  CreateAgentDialog
-} from "@/components/mission-control/create-agent-dialog";
+import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
 import {
   AlertTriangle,
   Bot,
@@ -14,6 +12,7 @@ import {
   Cpu,
   FolderKanban,
   Home,
+  MoreHorizontal,
   Workflow
 } from "lucide-react";
 
@@ -26,8 +25,7 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-  DialogTrigger
+  DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,6 +44,13 @@ import {
   getAgentPresetMeta,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
+import {
+  AGENT_HEARTBEAT_INTERVAL_OPTIONS,
+  applyPresetHeartbeat,
+  defaultHeartbeatForPreset,
+  resolveHeartbeatDraft,
+  type AgentHeartbeatDraft
+} from "@/lib/openclaw/agent-heartbeat";
 import { compactPath, formatContextWindow, formatModelLabel, toneForHealth } from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -59,6 +64,7 @@ type AgentDraft = {
   theme: string;
   avatar: string;
   policy: AgentPolicy;
+  heartbeat: AgentHeartbeatDraft;
 };
 
 type WorkspaceDraft = {
@@ -73,6 +79,7 @@ type SidebarSectionId = "overview" | "workspaces" | "agents" | "models";
 export function MissionSidebar({
   snapshot,
   activeWorkspaceId,
+  requestedAgentAction,
   connectionState,
   collapsed,
   onToggleCollapsed,
@@ -81,6 +88,11 @@ export function MissionSidebar({
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
+  requestedAgentAction?: {
+    requestId: string;
+    kind: "edit" | "delete";
+    agentId: string;
+  } | null;
   connectionState: "connecting" | "live" | "retrying";
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -103,11 +115,16 @@ export function MissionSidebar({
   const [isEditWorkspaceOpen, setIsEditWorkspaceOpen] = useState(false);
   const [isDeleteWorkspaceOpen, setIsDeleteWorkspaceOpen] = useState(false);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [isDeleteAgentOpen, setIsDeleteAgentOpen] = useState(false);
+  const [isDeletingAgent, setIsDeletingAgent] = useState(false);
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
   const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDraft | null>(null);
   const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
   const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
+  const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
+  const [agentDeleteConfirmText, setAgentDeleteConfirmText] = useState("");
   const [activeSection, setActiveSection] = useState<SidebarSectionId>("workspaces");
+  const handledRequestedAgentActionIdRef = useRef<string | null>(null);
 
   const visibleAgents = useMemo(
     () =>
@@ -124,6 +141,9 @@ export function MissionSidebar({
   );
   const activeWorkspace =
     snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? snapshot.workspaces[0] ?? null;
+  const showEditAgentHeartbeatControls = editDraft
+    ? isEditAgentAdvancedOpen || editDraft.policy.preset === "monitoring"
+    : false;
   const navItems: Array<{
     id: SidebarSectionId;
     label: string;
@@ -178,6 +198,21 @@ export function MissionSidebar({
 
     return snapshot.runtimes.filter((runtime) => runtime.workspaceId === workspaceDeleteTarget.id);
   }, [workspaceDeleteTarget, snapshot.runtimes]);
+  const agentDeleteRuntimes = useMemo(() => {
+    if (!agentDeleteTarget) {
+      return [];
+    }
+
+    return snapshot.runtimes.filter((runtime) => runtime.agentId === agentDeleteTarget.id);
+  }, [agentDeleteTarget, snapshot.runtimes]);
+  const agentDeleteWorkspace = agentDeleteTarget
+    ? snapshot.workspaces.find((workspace) => workspace.id === agentDeleteTarget.workspaceId) ?? null
+    : null;
+  const agentDeleteIsLive = agentDeleteTarget
+    ? agentDeleteTarget.status === "engaged" ||
+      agentDeleteTarget.status === "monitoring" ||
+      agentDeleteTarget.status === "ready"
+    : false;
 
   const openEditWorkspace = (workspace: MissionControlSnapshot["workspaces"][number]) => {
     setWorkspaceDraft({
@@ -195,6 +230,33 @@ export function MissionSidebar({
     setIsDeleteWorkspaceOpen(true);
   };
 
+  const openDeleteAgent = (agent: MissionControlSnapshot["agents"][number]) => {
+    setAgentDeleteTarget(agent);
+    setAgentDeleteConfirmText("");
+    setIsDeleteAgentOpen(true);
+  };
+
+  useEffect(() => {
+    if (!requestedAgentAction || handledRequestedAgentActionIdRef.current === requestedAgentAction.requestId) {
+      return;
+    }
+
+    const agent = snapshot.agents.find((entry) => entry.id === requestedAgentAction.agentId);
+
+    if (!agent) {
+      return;
+    }
+
+    handledRequestedAgentActionIdRef.current = requestedAgentAction.requestId;
+
+    if (requestedAgentAction.kind === "edit") {
+      openEditAgent(agent);
+      return;
+    }
+
+    openDeleteAgent(agent);
+  }, [requestedAgentAction, snapshot.agents]);
+
   const openEditAgent = (agent: MissionControlSnapshot["agents"][number]) => {
     setEditDraft({
       ...buildAgentDraft(agent.workspaceId, {
@@ -204,7 +266,11 @@ export function MissionSidebar({
         emoji: agent.identity.emoji ?? "",
         theme: agent.identity.theme ?? "",
         avatar: agent.identity.avatar ?? "",
-        policy: agent.policy
+        policy: agent.policy,
+        heartbeat: resolveHeartbeatDraft(agent.policy.preset, {
+          enabled: agent.heartbeat.enabled,
+          every: agent.heartbeat.every ?? undefined
+        })
       })
     });
     setIsEditAgentAdvancedOpen(false);
@@ -335,6 +401,56 @@ export function MissionSidebar({
       });
     } finally {
       setIsSavingWorkspace(false);
+    }
+  };
+
+  const submitDeleteAgent = async () => {
+    if (!agentDeleteTarget) {
+      return;
+    }
+
+    setIsDeletingAgent(true);
+
+    try {
+      const response = await fetch("/api/agents", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          agentId: agentDeleteTarget.id
+        })
+      });
+
+      const result = (await response.json()) as {
+        agentId?: string;
+        deletedRuntimeCount?: number;
+        error?: string;
+      };
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || "OpenClaw could not delete the agent.");
+      }
+
+      toast.success("Agent deleted from OpenClaw.", {
+        description: result.agentId || agentDeleteTarget.id
+      });
+
+      if (editDraft?.id === agentDeleteTarget.id) {
+        setIsEditAgentOpen(false);
+        setEditDraft(null);
+      }
+
+      setIsDeleteAgentOpen(false);
+      setAgentDeleteTarget(null);
+      setAgentDeleteConfirmText("");
+      await onRefresh();
+    } catch (error) {
+      toast.error("Agent deletion failed.", {
+        description: error instanceof Error ? error.message : "Unknown agent error."
+      });
+    } finally {
+      setIsDeletingAgent(false);
     }
   };
 
@@ -615,15 +731,20 @@ export function MissionSidebar({
                               <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
                                 {agent.id}
                               </p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Badge variant={getAgentPresetMeta(agent.policy.preset).badgeVariant}>
+                                  {formatAgentPresetLabel(agent.policy.preset)}
+                                </Badge>
+                                <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
+                                  {agent.status}
+                                </Badge>
+                              </div>
                             </div>
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Badge variant={getAgentPresetMeta(agent.policy.preset).badgeVariant}>
-                                {formatAgentPresetLabel(agent.policy.preset)}
-                              </Badge>
-                              <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
-                                {agent.status}
-                              </Badge>
-                            </div>
+                            <AgentActionMenu
+                              agentName={agent.name}
+                              onEdit={() => openEditAgent(agent)}
+                              onDelete={() => openDeleteAgent(agent)}
+                            />
                           </div>
 
                           <div className="mt-3 flex items-center gap-2">
@@ -632,14 +753,6 @@ export function MissionSidebar({
                                 {agent.modelId === "unassigned" ? "default model" : formatModelLabel(agent.modelId)}
                               </span>
                             </div>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="h-8 shrink-0 rounded-full px-3 text-[11px]"
-                              onClick={() => openEditAgent(agent)}
-                            >
-                              Edit
-                            </Button>
                           </div>
 
                           {!activeWorkspaceId ? (
@@ -866,6 +979,90 @@ export function MissionSidebar({
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isDeleteAgentOpen} onOpenChange={setIsDeleteAgentOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete OpenClaw agent</DialogTitle>
+            <DialogDescription>
+              This removes the selected agent from OpenClaw and detaches its workspace binding.
+            </DialogDescription>
+          </DialogHeader>
+
+          {agentDeleteTarget ? (
+            <div className="space-y-4">
+              <div className="rounded-[20px] border border-rose-400/20 bg-rose-500/[0.08] px-4 py-3.5">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-full border border-rose-300/20 bg-rose-400/10 p-2 text-rose-200">
+                    <AlertTriangle className="h-4 w-4" />
+                  </div>
+                  <div className="space-y-1.5 text-sm text-rose-50">
+                    <p className="font-medium">This action cannot be undone.</p>
+                    <p className="text-rose-100/80">
+                      OpenClaw will delete this agent, remove its config entry, and prune agent-specific workspace metadata.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DeleteMetric label="Status" value={agentDeleteTarget.status} danger={agentDeleteIsLive} />
+                <DeleteMetric label="Runs" value={String(agentDeleteRuntimes.length)} />
+                <DeleteMetric label="Workspace" value={agentDeleteWorkspace?.name ?? "Unknown"} />
+              </div>
+
+              <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3.5 py-3">
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Agent id</p>
+                <p className="mt-1.5 break-all font-mono text-xs text-slate-300">{agentDeleteTarget.id}</p>
+              </div>
+
+              {agentDeleteIsLive || agentDeleteRuntimes.length > 0 ? (
+                <div className="rounded-[18px] border border-amber-400/15 bg-amber-400/[0.08] px-3.5 py-3 text-sm text-amber-100">
+                  {agentDeleteIsLive
+                    ? "This agent is still active or recently engaged. Delete it only if you want to stop using it entirely."
+                    : `${agentDeleteRuntimes.length} runtime records are still associated with this agent.`}
+                </div>
+              ) : null}
+
+              <FormField
+                label={`Type ${agentDeleteTarget.id} to confirm`}
+                htmlFor="delete-agent-confirm"
+              >
+                <Input
+                  id="delete-agent-confirm"
+                  value={agentDeleteConfirmText}
+                  onChange={(event) => setAgentDeleteConfirmText(event.target.value)}
+                  placeholder={agentDeleteTarget.id}
+                />
+              </FormField>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setIsDeleteAgentOpen(false);
+                setAgentDeleteTarget(null);
+                setAgentDeleteConfirmText("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={submitDeleteAgent}
+              disabled={
+                isDeletingAgent ||
+                !agentDeleteTarget ||
+                agentDeleteConfirmText.trim() !== agentDeleteTarget.id
+              }
+            >
+              {isDeletingAgent ? "Deleting…" : "Delete agent"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isEditAgentOpen} onOpenChange={setIsEditAgentOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
@@ -1028,6 +1225,76 @@ export function MissionSidebar({
                     {isEditAgentAdvancedOpen ? "Hide" : "Show"}
                   </Button>
                 </div>
+
+                {showEditAgentHeartbeatControls ? (
+                  <div className="mt-4 rounded-[18px] border border-white/10 bg-slate-950/40 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">Heartbeat</p>
+                        <p className="mt-1 text-xs leading-5 text-slate-400">
+                          Use this only for periodic watch or triage agents. Leave it off for normal task execution.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant={editDraft.heartbeat.enabled ? "default" : "secondary"}
+                        size="sm"
+                        className="h-8 rounded-full px-3 text-[11px]"
+                        onClick={() =>
+                          setEditDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  heartbeat: current.heartbeat.enabled
+                                    ? { ...current.heartbeat, enabled: false }
+                                    : {
+                                        ...current.heartbeat,
+                                        enabled: true,
+                                        every:
+                                          current.heartbeat.every ||
+                                          defaultHeartbeatForPreset(current.policy.preset).every
+                                      }
+                                }
+                              : current
+                          )
+                        }
+                      >
+                        {editDraft.heartbeat.enabled ? "On" : "Off"}
+                      </Button>
+                    </div>
+
+                    {editDraft.heartbeat.enabled ? (
+                      <div className="mt-3">
+                        <FormField label="Interval" htmlFor="edit-agent-heartbeat-every">
+                          <select
+                            id="edit-agent-heartbeat-every"
+                            value={editDraft.heartbeat.every}
+                            onChange={(event) =>
+                              setEditDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      heartbeat: {
+                                        ...current.heartbeat,
+                                        every: event.target.value
+                                      }
+                                    }
+                                  : current
+                              )
+                            }
+                            className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+                          >
+                            {AGENT_HEARTBEAT_INTERVAL_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </FormField>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {isEditAgentAdvancedOpen ? (
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1338,6 +1605,7 @@ function AgentPolicySelect<T extends string>({
 function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): AgentDraft {
   const policy = resolveAgentPolicy(seed.policy?.preset ?? "worker", seed.policy);
   const presetMeta = getAgentPresetMeta(policy.preset);
+  const heartbeat = resolveHeartbeatDraft(policy.preset, seed.heartbeat);
 
   return {
     id: seed.id ?? "",
@@ -1347,7 +1615,8 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
     emoji: seed.emoji ?? presetMeta.defaultEmoji,
     theme: seed.theme ?? presetMeta.defaultTheme,
     avatar: seed.avatar ?? "",
-    policy
+    policy,
+    heartbeat
   };
 }
 
@@ -1361,7 +1630,8 @@ function applyAgentPreset(draft: AgentDraft, preset: AgentPreset): AgentDraft {
     name: !draft.name || draft.name === previousMeta.defaultName ? nextMeta.defaultName : draft.name,
     emoji: !draft.emoji || draft.emoji === previousMeta.defaultEmoji ? nextMeta.defaultEmoji : draft.emoji,
     theme: !draft.theme || draft.theme === previousMeta.defaultTheme ? nextMeta.defaultTheme : draft.theme,
-    policy: nextPolicy
+    policy: nextPolicy,
+    heartbeat: applyPresetHeartbeat(draft.heartbeat, draft.policy.preset, preset)
   };
 }
 
@@ -1380,6 +1650,90 @@ function sidebarPathLabel(value: string) {
 
 function isUuidSegment(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function AgentActionMenu({
+  agentName,
+  onEdit,
+  onDelete
+}: {
+  agentName: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        aria-label={`${agentName} actions`}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl">
+          <AgentMenuButton
+            label="Edit"
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          />
+          <AgentMenuButton
+            label="Delete"
+            danger
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentMenuButton({
+  label,
+  onClick,
+  danger = false
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
+        danger ? "text-rose-200 hover:bg-rose-400/10 hover:text-rose-100" : "text-slate-200 hover:bg-white/[0.06] hover:text-white"
+      )}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+    </button>
+  );
 }
 
 function DeleteMetric({

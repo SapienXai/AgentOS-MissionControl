@@ -28,6 +28,12 @@ type ComposeIntent = {
   sourceLabel?: string;
 };
 
+type AgentActionRequest = {
+  requestId: string;
+  kind: "edit" | "delete";
+  agentId: string;
+};
+
 type SurfaceTheme = "dark" | "light";
 
 const surfaceThemeStorageKey = "mission-control-surface-theme";
@@ -48,6 +54,7 @@ export function MissionControlShell({
   const [pendingMission, setPendingMission] = useState<PendingMissionCard | null>(null);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
+  const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
@@ -127,6 +134,7 @@ export function MissionControlShell({
           <MissionSidebar
             snapshot={snapshot}
             activeWorkspaceId={activeWorkspaceId}
+            requestedAgentAction={agentActionRequest}
             connectionState={connectionState}
             collapsed={!isSidebarOpen}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
@@ -239,6 +247,22 @@ export function MissionControlShell({
                 selectedNodeId={selectedNodeId}
                 pendingMission={pendingMission}
                 hiddenRuntimeIds={hiddenRuntimeIds}
+                onEditAgent={(agentId) => {
+                  setSelectedNodeId(agentId);
+                  setAgentActionRequest({
+                    requestId: `edit:${agentId}:${Date.now()}`,
+                    kind: "edit",
+                    agentId
+                  });
+                }}
+                onDeleteAgent={(agentId) => {
+                  setSelectedNodeId(agentId);
+                  setAgentActionRequest({
+                    requestId: `delete:${agentId}:${Date.now()}`,
+                    kind: "delete",
+                    agentId
+                  });
+                }}
                 onReplyRuntime={(runtime) => {
                   setComposeIntent({
                     id: `reply:${runtime.id}:${Date.now()}`,

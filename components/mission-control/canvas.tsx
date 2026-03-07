@@ -54,6 +54,8 @@ export function MissionCanvas({
   selectedNodeId,
   pendingMission,
   hiddenRuntimeIds,
+  onEditAgent,
+  onDeleteAgent,
   onReplyRuntime,
   onCopyRuntimePrompt,
   onHideRuntime,
@@ -64,6 +66,8 @@ export function MissionCanvas({
   selectedNodeId: string | null;
   pendingMission: PendingMissionCard | null;
   hiddenRuntimeIds: string[];
+  onEditAgent: (agentId: string) => void;
+  onDeleteAgent: (agentId: string) => void;
   onReplyRuntime: (runtime: RuntimeRecord) => void;
   onCopyRuntimePrompt: (runtime: RuntimeRecord) => void;
   onHideRuntime: (runtimeId: string) => void;
@@ -81,6 +85,8 @@ export function MissionCanvas({
     pendingMission,
     justCreatedRuntimeIds,
     hiddenRuntimeIds,
+    onEditAgent,
+    onDeleteAgent,
     onReplyRuntime,
     onCopyRuntimePrompt,
     onHideRuntime
@@ -95,6 +101,8 @@ export function MissionCanvas({
       pendingMission,
       justCreatedRuntimeIds,
       hiddenRuntimeIds,
+      onEditAgent,
+      onDeleteAgent,
       onReplyRuntime,
       onCopyRuntimePrompt,
       onHideRuntime
@@ -107,6 +115,8 @@ export function MissionCanvas({
     pendingMission,
     justCreatedRuntimeIds,
     hiddenRuntimeIds,
+    onEditAgent,
+    onDeleteAgent,
     onReplyRuntime,
     onCopyRuntimePrompt,
     onHideRuntime,
@@ -238,6 +248,8 @@ function buildCanvasGraph(
   pendingMission: PendingMissionCard | null,
   justCreatedRuntimeIds: string[],
   hiddenRuntimeIds: string[],
+  onEditAgent: (agentId: string) => void,
+  onDeleteAgent: (agentId: string) => void,
   onReplyRuntime: (runtime: RuntimeRecord) => void,
   onCopyRuntimePrompt: (runtime: RuntimeRecord) => void,
   onHideRuntime: (runtimeId: string) => void
@@ -288,7 +300,9 @@ function buildCanvasGraph(
         selected: false,
         data: {
           agent,
-          emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id
+          emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          onEdit: onEditAgent,
+          onDelete: onDeleteAgent
         }
       });
 

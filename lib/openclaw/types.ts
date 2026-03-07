@@ -4,7 +4,7 @@ export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offl
 
 export type RuntimeStatus = "active" | "queued" | "idle" | "completed" | "partial" | "error";
 
-export type AgentPreset = "worker" | "setup" | "browser" | "custom";
+export type AgentPreset = "worker" | "setup" | "browser" | "monitoring" | "custom";
 
 export type AgentMissingToolBehavior = "fallback" | "ask-setup" | "route-setup" | "allow-install";
 
@@ -20,6 +20,11 @@ export interface AgentPolicy {
   installScope: AgentInstallScope;
   fileAccess: AgentFileAccess;
   networkAccess: AgentNetworkAccess;
+}
+
+export interface AgentHeartbeatInput {
+  enabled: boolean;
+  every?: string;
 }
 
 export interface GatewayDiagnostics {
@@ -261,6 +266,7 @@ export interface WorkspaceAgentBlueprintInput {
   modelId?: string;
   isPrimary?: boolean;
   policy?: AgentPolicy;
+  heartbeat?: AgentHeartbeatInput;
 }
 
 export interface WorkspaceCreateInput {
@@ -307,6 +313,7 @@ export interface AgentCreateInput {
   theme?: string;
   avatar?: string;
   policy?: AgentPolicy;
+  heartbeat?: AgentHeartbeatInput;
 }
 
 export interface AgentUpdateInput {
@@ -318,4 +325,9 @@ export interface AgentUpdateInput {
   theme?: string;
   avatar?: string;
   policy?: AgentPolicy;
+  heartbeat?: AgentHeartbeatInput;
+}
+
+export interface AgentDeleteInput {
+  agentId: string;
 }

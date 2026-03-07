@@ -30,6 +30,13 @@ import {
   getAgentPresetMeta,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
+import {
+  AGENT_HEARTBEAT_INTERVAL_OPTIONS,
+  applyPresetHeartbeat,
+  defaultHeartbeatForPreset,
+  resolveHeartbeatDraft,
+  type AgentHeartbeatDraft
+} from "@/lib/openclaw/agent-heartbeat";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +49,7 @@ type AgentDraft = {
   theme: string;
   avatar: string;
   policy: AgentPolicy;
+  heartbeat: AgentHeartbeatDraft;
 };
 
 export function CreateAgentDialog({
@@ -81,6 +89,7 @@ export function CreateAgentDialog({
     : null;
   const canSubmit =
     Boolean(normalizedAgentId && draft.workspaceId) && !isSaving && existingAgentCollision === null;
+  const showHeartbeatControls = isAdvancedOpen || draft.policy.preset === "monitoring";
 
   useEffect(() => {
     if (!open) {
@@ -322,6 +331,66 @@ export function CreateAgentDialog({
               </Button>
             </div>
 
+            {showHeartbeatControls ? (
+              <div className="mt-4 rounded-[18px] border border-white/10 bg-slate-950/40 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-white">Heartbeat</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      Use this only for periodic watch or triage agents. Leave it off for normal task execution.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant={draft.heartbeat.enabled ? "default" : "secondary"}
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-[11px]"
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        heartbeat: current.heartbeat.enabled
+                          ? { ...current.heartbeat, enabled: false }
+                          : {
+                              ...current.heartbeat,
+                              enabled: true,
+                              every: current.heartbeat.every || defaultHeartbeatForPreset(current.policy.preset).every
+                            }
+                      }))
+                    }
+                  >
+                    {draft.heartbeat.enabled ? "On" : "Off"}
+                  </Button>
+                </div>
+
+                {draft.heartbeat.enabled ? (
+                  <div className="mt-3">
+                    <FormField label="Interval" htmlFor="create-agent-heartbeat-every">
+                      <select
+                        id="create-agent-heartbeat-every"
+                        value={draft.heartbeat.every}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            heartbeat: {
+                              ...current.heartbeat,
+                              every: event.target.value
+                            }
+                          }))
+                        }
+                        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+                      >
+                        {AGENT_HEARTBEAT_INTERVAL_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </FormField>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {isAdvancedOpen ? (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <AgentPolicySelect
@@ -513,6 +582,7 @@ function AgentPolicySelect<T extends string>({
 function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): AgentDraft {
   const policy = resolveAgentPolicy(seed.policy?.preset ?? "worker", seed.policy);
   const presetMeta = getAgentPresetMeta(policy.preset);
+  const heartbeat = resolveHeartbeatDraft(policy.preset, seed.heartbeat);
 
   return {
     id: seed.id ?? "",
@@ -522,7 +592,8 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
     emoji: seed.emoji ?? presetMeta.defaultEmoji,
     theme: seed.theme ?? presetMeta.defaultTheme,
     avatar: seed.avatar ?? "",
-    policy
+    policy,
+    heartbeat
   };
 }
 
@@ -552,6 +623,7 @@ function applyAgentPreset(draft: AgentDraft, preset: AgentPreset): AgentDraft {
     name: !draft.name || draft.name === previousMeta.defaultName ? nextMeta.defaultName : draft.name,
     emoji: !draft.emoji || draft.emoji === previousMeta.defaultEmoji ? nextMeta.defaultEmoji : draft.emoji,
     theme: !draft.theme || draft.theme === previousMeta.defaultTheme ? nextMeta.defaultTheme : draft.theme,
-    policy: nextPolicy
+    policy: nextPolicy,
+    heartbeat: applyPresetHeartbeat(draft.heartbeat, draft.policy.preset, preset)
   };
 }

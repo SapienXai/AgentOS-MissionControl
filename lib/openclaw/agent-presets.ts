@@ -49,6 +49,14 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "blue",
     badgeVariant: "success"
   },
+  monitoring: {
+    label: "Monitoring",
+    description: "Periodically checks workspace health, drift, and blockers, then leaves triage handoffs.",
+    defaultName: "Monitoring Agent",
+    defaultEmoji: "🛰️",
+    defaultTheme: "teal",
+    badgeVariant: "warning"
+  },
   custom: {
     label: "Custom",
     description: "Starts from a safe default policy but leaves room for manual overrides.",
@@ -74,6 +82,12 @@ const DEFAULT_POLICY_BY_PRESET: Record<AgentPreset, Omit<AgentPolicy, "preset">>
   },
   browser: {
     missingToolBehavior: "ask-setup",
+    installScope: "none",
+    fileAccess: "workspace-only",
+    networkAccess: "enabled"
+  },
+  monitoring: {
+    missingToolBehavior: "fallback",
     installScope: "none",
     fileAccess: "workspace-only",
     networkAccess: "enabled"
@@ -195,6 +209,10 @@ export function inferAgentPresetFromContext(params: {
     return "browser";
   }
 
+  if (/monitor|heartbeat|watch|triage|observer/.test(combined)) {
+    return "monitoring";
+  }
+
   if (/setup|operator|ops|install|environment/.test(combined)) {
     return "setup";
   }
@@ -207,7 +225,7 @@ export function inferAgentPresetFromContext(params: {
 }
 
 export function isAgentPreset(value: unknown): value is AgentPreset {
-  return value === "worker" || value === "setup" || value === "browser" || value === "custom";
+  return value === "worker" || value === "setup" || value === "browser" || value === "monitoring" || value === "custom";
 }
 
 export function isAgentMissingToolBehavior(value: unknown): value is AgentMissingToolBehavior {

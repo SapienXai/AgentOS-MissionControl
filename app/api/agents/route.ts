@@ -1,17 +1,22 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { createAgent, getMissionControlSnapshot, updateAgent } from "@/lib/openclaw/service";
+import { createAgent, deleteAgent, getMissionControlSnapshot, updateAgent } from "@/lib/openclaw/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const agentPolicySchema = z.object({
-  preset: z.enum(["worker", "setup", "browser", "custom"]),
+  preset: z.enum(["worker", "setup", "browser", "monitoring", "custom"]),
   missingToolBehavior: z.enum(["fallback", "ask-setup", "route-setup", "allow-install"]),
   installScope: z.enum(["none", "workspace", "system"]),
   fileAccess: z.enum(["workspace-only", "extended"]),
   networkAccess: z.enum(["restricted", "enabled"])
+});
+
+const heartbeatSchema = z.object({
+  enabled: z.boolean(),
+  every: z.string().optional()
 });
 
 const createAgentSchema = z.object({
@@ -22,7 +27,8 @@ const createAgentSchema = z.object({
   emoji: z.string().optional(),
   theme: z.string().optional(),
   avatar: z.string().optional(),
-  policy: agentPolicySchema.optional()
+  policy: agentPolicySchema.optional(),
+  heartbeat: heartbeatSchema.optional()
 });
 
 const updateAgentSchema = z.object({
@@ -33,7 +39,12 @@ const updateAgentSchema = z.object({
   emoji: z.string().optional(),
   theme: z.string().optional(),
   avatar: z.string().optional(),
-  policy: agentPolicySchema.optional()
+  policy: agentPolicySchema.optional(),
+  heartbeat: heartbeatSchema.optional()
+});
+
+const deleteAgentSchema = z.object({
+  agentId: z.string().min(1)
 });
 
 export async function GET() {
@@ -67,6 +78,21 @@ export async function PATCH(request: Request) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unable to update agent."
+      },
+      { status: 400 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const input = deleteAgentSchema.parse(await request.json());
+    const deleted = await deleteAgent(input);
+    return NextResponse.json(deleted);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Unable to delete agent."
       },
       { status: 400 }
     );

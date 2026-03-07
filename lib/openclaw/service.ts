@@ -20,6 +20,10 @@ import {
   isAgentPreset,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
+import {
+  resolveHeartbeatDraft,
+  serializeHeartbeatConfig
+} from "@/lib/openclaw/agent-heartbeat";
 import { detectOpenClaw, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
 import {
   DEFAULT_WORKSPACE_RULES,
@@ -28,6 +32,8 @@ import {
 } from "@/lib/openclaw/workspace-presets";
 import type {
   AgentCreateInput,
+  AgentDeleteInput,
+  AgentHeartbeatInput,
   AgentPolicy,
   AgentStatus,
   AgentUpdateInput,
@@ -124,6 +130,9 @@ type AgentConfigPayload = Array<{
   name?: string;
   workspace: string;
   model?: string;
+  heartbeat?: {
+    every?: string;
+  };
   skills?: string[];
   tools?: {
     fs?: {
@@ -797,6 +806,7 @@ export async function createAgent(input: AgentCreateInput) {
   const displayName = normalizeOptionalValue(input.name) ?? presetMeta.defaultName;
   const emoji = normalizeOptionalValue(input.emoji) ?? presetMeta.defaultEmoji;
   const theme = normalizeOptionalValue(input.theme) ?? presetMeta.defaultTheme;
+  const heartbeat = serializeHeartbeatConfig(resolveHeartbeatDraft(policy.preset, input.heartbeat));
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup")?.id ?? null;
 
@@ -829,6 +839,7 @@ export async function createAgent(input: AgentCreateInput) {
   const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
     name: displayName,
     model: normalizeOptionalValue(input.modelId),
+    heartbeat,
     skills: [policySkillId],
     tools:
       policy.fileAccess === "workspace-only"
@@ -891,6 +902,12 @@ export async function updateAgent(input: AgentUpdateInput) {
   const currentName = normalizeOptionalValue(agent.name);
   const currentEmoji = normalizeOptionalValue(agent.identity.emoji);
   const currentTheme = normalizeOptionalValue(agent.identity.theme);
+  const heartbeat = serializeHeartbeatConfig(
+    resolveHeartbeatDraft(
+      policy.preset,
+      input.heartbeat ?? mapAgentHeartbeatToInput(agent.heartbeat)
+    )
+  );
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup" && entry.id !== agentId)?.id ??
     null;
@@ -905,6 +922,7 @@ export async function updateAgent(input: AgentUpdateInput) {
   const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
     name: normalizeOptionalValue(input.name),
     model: normalizeOptionalValue(input.modelId),
+    heartbeat,
     skills: [...agent.skills, policySkillId],
     tools:
       policy.fileAccess === "workspace-only"
@@ -936,6 +954,60 @@ export async function updateAgent(input: AgentUpdateInput) {
   return {
     agentId,
     workspaceId: workspace.id
+  };
+}
+
+export async function deleteAgent(input: AgentDeleteInput) {
+  const agentId = input.agentId.trim();
+
+  if (!agentId) {
+    throw new Error("Agent id is required.");
+  }
+
+  const snapshot = await getMissionControlSnapshot({ force: true });
+  const agent = snapshot.agents.find((entry) => entry.id === agentId);
+
+  if (!agent) {
+    throw new Error("Agent was not found.");
+  }
+
+  const workspace = snapshot.workspaces.find((entry) => entry.id === agent.workspaceId) ?? null;
+  const runtimeCount = snapshot.runtimes.filter((runtime) => runtime.agentId === agent.id).length;
+
+  await runOpenClaw(["agents", "delete", agent.id, "--force", "--json"]);
+
+  try {
+    const configList = await readAgentConfigList();
+    const nextConfigList = configList.filter((entry) => entry.id !== agent.id);
+
+    if (nextConfigList.length !== configList.length) {
+      await writeAgentConfigList(nextConfigList);
+    }
+  } catch {
+    // Ignore config cleanup failures if the CLI delete already removed the entry.
+  }
+
+  if (workspace) {
+    await removeWorkspaceProjectAgentMetadata(workspace.path, agent.id);
+
+    try {
+      await rm(path.join(workspace.path, "skills", buildAgentPolicySkillId(agent.id)), {
+        recursive: true,
+        force: true
+      });
+    } catch {
+      // Ignore skill cleanup failures for already-pruned workspaces.
+    }
+  }
+
+  snapshotCache = null;
+  runtimeHistoryCache = new Map();
+
+  return {
+    agentId: agent.id,
+    workspaceId: agent.workspaceId,
+    workspacePath: agent.workspacePath,
+    deletedRuntimeCount: runtimeCount
   };
 }
 
@@ -1373,6 +1445,7 @@ async function createBootstrappedWorkspaceAgent(params: {
   const configEntry = await upsertAgentConfigEntry(agentId, params.workspacePath, {
     name: normalizeOptionalValue(params.agent.name),
     model: modelId,
+    heartbeat: serializeHeartbeatConfig(params.agent.heartbeat),
     skills: [normalizeOptionalValue(params.agent.skillId), policySkillId].filter((value): value is string => Boolean(value)),
     tools: policy.fileAccess === "workspace-only"
       ? {
@@ -1457,6 +1530,15 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
     skillId: normalizeOptionalValue(agent.skillId),
     modelId: normalizeOptionalValue(agent.modelId),
     isPrimary: Boolean(agent.isPrimary),
+    heartbeat: resolveHeartbeatDraft(
+      agent.policy?.preset ??
+        inferAgentPresetFromContext({
+          skills: agent.skillId ? [agent.skillId] : [],
+          id: agent.id,
+          name: agent.name
+        }),
+      agent.heartbeat
+    ),
     policy: resolveAgentPolicy(
       agent.policy?.preset ??
         inferAgentPresetFromContext({
@@ -1741,6 +1823,8 @@ function buildAgentPolicyPromptLines(policy: AgentPolicy, setupAgentId?: string 
 
   if (policy.preset === "browser") {
     lines.push("- Prefer browser-native evidence capture, screenshots, and reproducible user-path validation.");
+  } else if (policy.preset === "monitoring") {
+    lines.push("- Periodically inspect the workspace, surface blockers, and leave concise triage handoffs without broad implementation changes.");
   } else if (policy.preset === "setup") {
     lines.push("- Prepare the environment, unblock other agents, and keep mutations minimal and explicit.");
   } else if (policy.preset === "worker") {
@@ -1928,6 +2012,13 @@ function assertWorkspaceBootstrapAgentIdsAvailable(
 
 function buildWorkspaceAgentStatePath(workspacePath: string, agentId: string) {
   return path.join(workspacePath, ".openclaw", "agents", agentId, "agent");
+}
+
+function mapAgentHeartbeatToInput(heartbeat: OpenClawAgent["heartbeat"]): AgentHeartbeatInput {
+  return {
+    enabled: heartbeat.enabled,
+    every: heartbeat.every ?? undefined
+  };
 }
 
 function buildAgentPolicySkillId(agentId: string) {
@@ -2329,6 +2420,7 @@ async function upsertAgentConfigEntry(
   updates: {
     name?: string;
     model?: string;
+    heartbeat?: { every?: string } | null;
     skills?: string[];
     tools?: MutableAgentConfigEntry["tools"] | null;
   }
@@ -2353,6 +2445,14 @@ async function upsertAgentConfigEntry(
     nextEntry.model = updates.model;
   } else {
     delete nextEntry.model;
+  }
+
+  if (updates.heartbeat?.every) {
+    nextEntry.heartbeat = {
+      every: updates.heartbeat.every
+    };
+  } else if (updates.heartbeat === null) {
+    delete nextEntry.heartbeat;
   }
 
   if (Array.isArray(updates.skills) && updates.skills.length > 0) {
@@ -3148,6 +3248,44 @@ async function upsertWorkspaceProjectAgentMetadata(
   parsed.name = typeof parsed.name === "string" ? parsed.name : path.basename(workspacePath);
   parsed.updatedAt = new Date().toISOString();
   parsed.agents = agents;
+
+  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
+}
+
+async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentId: string) {
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+  let parsed: Record<string, unknown> = {};
+
+  try {
+    const raw = await readFile(projectFilePath, "utf8");
+    const candidate = JSON.parse(raw);
+    parsed = isObjectRecord(candidate) ? candidate : {};
+  } catch {
+    return;
+  }
+
+  if (!Array.isArray(parsed.agents)) {
+    return;
+  }
+
+  const existingAgents = parsed.agents
+    .map((entry) => parseWorkspaceProjectManifestAgent(entry))
+    .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry));
+  const nextAgents = existingAgents.filter((entry) => entry.id !== agentId);
+
+  if (nextAgents.length === existingAgents.length) {
+    return;
+  }
+
+  if (nextAgents.length > 0 && !nextAgents.some((entry) => entry.isPrimary)) {
+    nextAgents[0] = {
+      ...nextAgents[0],
+      isPrimary: true
+    };
+  }
+
+  parsed.updatedAt = new Date().toISOString();
+  parsed.agents = nextAgents;
 
   await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }

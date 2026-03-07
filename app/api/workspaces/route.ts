@@ -12,11 +12,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const agentPolicySchema = z.object({
-  preset: z.enum(["worker", "setup", "browser", "custom"]),
+  preset: z.enum(["worker", "setup", "browser", "monitoring", "custom"]),
   missingToolBehavior: z.enum(["fallback", "ask-setup", "route-setup", "allow-install"]),
   installScope: z.enum(["none", "workspace", "system"]),
   fileAccess: z.enum(["workspace-only", "extended"]),
   networkAccess: z.enum(["restricted", "enabled"])
+});
+
+const heartbeatSchema = z.object({
+  enabled: z.boolean(),
+  every: z.string().optional()
 });
 
 const workspaceSchema = z.object({
@@ -50,7 +55,8 @@ const workspaceSchema = z.object({
         skillId: z.string().optional(),
         modelId: z.string().optional(),
         isPrimary: z.boolean().optional(),
-        policy: agentPolicySchema.optional()
+        policy: agentPolicySchema.optional(),
+        heartbeat: heartbeatSchema.optional()
       })
     )
     .optional()

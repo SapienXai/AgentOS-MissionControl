@@ -1,7 +1,9 @@
 "use client";
 
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { BrainCircuit } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
+import { MoreHorizontal } from "lucide-react";
 import { motion } from "motion/react";
 
 import type { AgentNodeData } from "@/components/mission-control/canvas-types";
@@ -10,9 +12,11 @@ import { Badge } from "@/components/ui/badge";
 import { formatModelLabel, toneForAgentStatus } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
-type AgentFlowNode = Node<AgentNodeData, "agent">;
+type AgentFlowNode = FlowNode<AgentNodeData, "agent">;
 
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const tone = toneForAgentStatus(data.agent.status);
   const dotTone =
     data.agent.status === "engaged"
@@ -24,6 +28,21 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           : data.agent.status === "offline"
             ? "bg-rose-300"
             : "bg-slate-500";
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [menuOpen]);
 
   return (
     <motion.div
@@ -54,8 +73,43 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           </p>
         </div>
 
-        <div className="rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300">
-          <BrainCircuit className="h-3 w-3" />
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            aria-label={`${data.agent.name} actions`}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuOpen((current) => !current);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            className="inline-flex rounded-full border border-white/[0.08] bg-white/[0.05] p-1.5 text-slate-300 transition-colors hover:bg-white/[0.1] hover:text-white"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+
+          {menuOpen ? (
+            <div
+              className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <AgentMenuButton
+                label="Edit"
+                onClick={() => {
+                  data.onEdit?.(data.agent.id);
+                  setMenuOpen(false);
+                }}
+              />
+              <AgentMenuButton
+                label="Delete"
+                danger
+                onClick={() => {
+                  data.onDelete?.(data.agent.id);
+                  setMenuOpen(false);
+                }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -73,5 +127,30 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         <p className={cn("mt-1.5 text-[9px] uppercase tracking-[0.2em]", tone)}>{data.agent.id}</p>
       </div>
     </motion.div>
+  );
+}
+
+function AgentMenuButton({
+  label,
+  onClick,
+  danger = false
+}: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
+        danger
+          ? "text-rose-200 hover:bg-rose-400/10 hover:text-rose-100"
+          : "text-slate-200 hover:bg-white/[0.06] hover:text-white"
+      )}
+      onClick={onClick}
+    >
+      <span>{label}</span>
+    </button>
   );
 }
