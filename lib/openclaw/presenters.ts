@@ -71,12 +71,29 @@ export function toneForRuntimeStatus(status: RuntimeStatus) {
       return "text-cyan-300";
     case "completed":
       return "text-emerald-300";
+    case "partial":
+      return "text-amber-200";
     case "error":
       return "text-rose-200";
     case "queued":
       return "text-amber-200";
     default:
       return "text-slate-400";
+  }
+}
+
+export function badgeVariantForRuntimeStatus(status: RuntimeStatus) {
+  switch (status) {
+    case "active":
+      return "default";
+    case "completed":
+      return "success";
+    case "partial":
+      return "warning";
+    case "error":
+      return "danger";
+    default:
+      return "muted";
   }
 }
 

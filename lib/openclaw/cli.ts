@@ -36,9 +36,20 @@ export async function runOpenClawJson<T>(
   args: string[],
   options: CommandOptions = {}
 ): Promise<T> {
-  const result = await runOpenClaw(args, options);
+  try {
+    const result = await runOpenClaw(args, options);
+    return parseJsonOutput<T>(result.stdout || result.stderr);
+  } catch (error) {
+    const failedResult = extractFailedCommandResult(error);
 
-  return parseJsonOutput<T>(result.stdout || result.stderr);
+    if (failedResult) {
+      try {
+        return parseJsonOutput<T>(failedResult.stdout || failedResult.stderr);
+      } catch {}
+    }
+
+    throw error;
+  }
 }
 
 export async function detectOpenClaw(): Promise<boolean> {
@@ -80,4 +91,31 @@ function parseJsonOutput<T>(text: string): T {
   }
 
   throw new Error(`Unable to parse OpenClaw JSON output:\n${trimmed.slice(0, 800)}`);
+}
+
+function extractFailedCommandResult(error: unknown): CommandResult | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const stdout = "stdout" in error ? stringifyStream(error.stdout) : "";
+  const stderr = "stderr" in error ? stringifyStream(error.stderr) : "";
+
+  if (!stdout && !stderr) {
+    return null;
+  }
+
+  return { stdout, stderr };
+}
+
+function stringifyStream(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString();
+  }
+
+  return "";
 }

@@ -27,6 +27,7 @@ import {
   getAgentPresetMeta
 } from "@/lib/openclaw/agent-presets";
 import {
+  badgeVariantForRuntimeStatus,
   compactPath,
   formatContextWindow,
   formatRelativeTime,
@@ -525,17 +526,7 @@ function WorkspaceContent({
                     {runtime.subtitle} · {shortId(runtime.runId || runtime.id, 10)}
                   </p>
                 </div>
-                <Badge
-                  variant={
-                    runtime.status === "active"
-                      ? "default"
-                      : runtime.status === "completed"
-                        ? "success"
-                        : runtime.status === "error"
-                          ? "danger"
-                          : "muted"
-                  }
-                >
+                <Badge variant={badgeVariantForRuntimeStatus(runtime.status)}>
                   {runtime.status}
                 </Badge>
               </div>
@@ -707,7 +698,7 @@ function AgentContent({
               <p className="truncate text-[13px] text-white">{runtime.title}</p>
               <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">{runtime.subtitle}</p>
             </div>
-            <Badge variant={runtime.status === "active" ? "default" : runtime.status === "completed" ? "success" : "muted"}>
+            <Badge variant={badgeVariantForRuntimeStatus(runtime.status)}>
               {runtime.status}
             </Badge>
           </div>
@@ -757,6 +748,8 @@ function RuntimeContent({
 }) {
   const runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
   const createdFiles = dedupeCreatedFiles(runtimeOutput?.createdFiles ?? (runtime ? extractCreatedFilesFromRuntime(runtime) : []));
+  const runtimeWarnings = runtimeOutput?.warnings ?? (runtime ? extractWarningsFromRuntime(runtime) : []);
+  const runtimeWarningSummary = runtimeOutput?.warningSummary ?? runtimeWarnings[0] ?? null;
 
   if (!runtime) {
     return null;
@@ -784,6 +777,11 @@ function RuntimeContent({
         {!runtimeOutputLoading && !runtimeOutputError ? (
           <p className="whitespace-pre-wrap text-[13px] leading-5 text-slate-100">
             {runtimeOutput?.finalText || runtimeOutput?.errorMessage || "No assistant output has been recorded for this runtime yet."}
+          </p>
+        ) : null}
+        {runtimeWarningSummary ? (
+          <p className="mt-3 rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+            Fallback used: {runtimeWarningSummary}
           </p>
         ) : null}
         {runtimeOutput?.finalTimestamp ? (
@@ -839,6 +837,12 @@ function RuntimeOutputContent({
 
   return (
     <div className="space-y-3.5">
+      {runtimeOutput.warningSummary ? (
+        <InfoCard icon={Radar} title="Warnings" value={String(runtimeOutput.warnings.length)}>
+          <p>{runtimeOutput.warningSummary}</p>
+        </InfoCard>
+      ) : null}
+
       <InfoCard icon={FileJson} title="Created files" value={String(runtimeOutput.createdFiles.length)}>
         <InspectorCreatedFileList
           files={runtimeOutput.createdFiles}
@@ -1157,6 +1161,16 @@ function extractCreatedFilesFromRuntime(runtime: MissionControlSnapshot["runtime
       } satisfies RuntimeCreatedFile
     ];
   });
+}
+
+function extractWarningsFromRuntime(runtime: MissionControlSnapshot["runtimes"][number]) {
+  const rawWarnings = runtime.metadata.warnings;
+
+  if (!Array.isArray(rawWarnings)) {
+    return [];
+  }
+
+  return rawWarnings.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
 }
 
 function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {

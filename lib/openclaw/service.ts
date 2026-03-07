@@ -239,6 +239,13 @@ type SessionTranscriptEntry = {
     toolCallId?: string;
     toolName?: string;
     isError?: boolean;
+    details?: {
+      status?: string;
+      exitCode?: number;
+      durationMs?: number;
+      aggregated?: string;
+      cwd?: string;
+    };
     usage?: {
       input?: number;
       output?: number;
@@ -263,6 +270,8 @@ type TranscriptTurn = {
   errorMessage: string | null;
   tokenUsage?: RuntimeRecord["tokenUsage"];
   createdFiles: RuntimeCreatedFile[];
+  warnings: string[];
+  warningSummary: string | null;
 };
 
 let snapshotCache: { snapshot: MissionControlSnapshot; expiresAt: number } | null = null;
@@ -678,7 +687,9 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       stopReason: null,
       errorMessage: "Runtime was not found in the current OpenClaw snapshot.",
       items: [],
-      createdFiles: []
+      createdFiles: [],
+      warnings: [],
+      warningSummary: null
     };
   }
 
@@ -702,7 +713,9 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
           isError: false
         }
       ],
-      createdFiles: []
+      createdFiles: [],
+      warnings: [],
+      warningSummary: null
     };
   }
 
@@ -717,7 +730,9 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       stopReason: null,
       errorMessage: "This runtime does not expose a session transcript yet.",
       items: [],
-      createdFiles: []
+      createdFiles: [],
+      warnings: [],
+      warningSummary: null
     };
   }
 
@@ -735,7 +750,9 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       stopReason: null,
       errorMessage: "No transcript file was found for this runtime session.",
       items: [],
-      createdFiles: []
+      createdFiles: [],
+      warnings: [],
+      warningSummary: null
     };
   }
 
@@ -753,7 +770,9 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
       stopReason: null,
       errorMessage: error instanceof Error ? error.message : "Unable to read runtime transcript.",
       items: [],
-      createdFiles: []
+      createdFiles: [],
+      warnings: [],
+      warningSummary: null
     };
   }
 }
@@ -2378,7 +2397,9 @@ function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?:
     stopReason: null,
     errorMessage: "No transcript entries were found for this runtime.",
     items: [],
-    createdFiles: []
+    createdFiles: [],
+    warnings: [],
+    warningSummary: null
   };
 }
 
@@ -2393,7 +2414,9 @@ function runtimeOutputFromTurn(runtime: RuntimeRecord, turn: TranscriptTurn): Ru
     stopReason: turn.stopReason,
     errorMessage: turn.errorMessage,
     items: turn.items.slice(-12),
-    createdFiles: turn.createdFiles
+    createdFiles: turn.createdFiles,
+    warnings: turn.warnings,
+    warningSummary: turn.warningSummary
   };
 }
 
@@ -2402,7 +2425,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
   const turns: TranscriptTurn[] = [];
   let sessionCwd = workspacePath;
   let currentTurn:
-    | (Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "errorMessage"> & {
+    | (Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "errorMessage" | "warningSummary"> & {
         errorMessage: string | null;
         pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
       })
@@ -2436,6 +2459,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
 
       const text = extractTranscriptText(entry.message.content);
       const errorMessage = entry.message.errorMessage ?? null;
+      const warningMessage = resolveNonFatalToolWarning(role, entry.message, text, errorMessage);
 
       if (!text && !errorMessage) {
         if (role !== "assistant" || !entry.message.content?.some((item) => item.type === "toolCall")) {
@@ -2454,6 +2478,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
             : undefined,
         stopReason: role === "assistant" ? entry.message.stopReason ?? null : null,
         errorMessage,
+        isWarning: Boolean(warningMessage),
         isError:
           Boolean(errorMessage) ||
           entry.message.isError === true ||
@@ -2477,6 +2502,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
           tokenUsage: undefined,
           errorMessage: null,
           createdFiles: [],
+          warnings: [],
           pendingCreatedFiles: new Map()
         };
         continue;
@@ -2516,6 +2542,10 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
       currentTurn.updatedAt = item.timestamp;
       currentTurn.errorMessage ||= errorMessage;
 
+      if (warningMessage && !currentTurn.warnings.includes(warningMessage)) {
+        currentTurn.warnings.push(warningMessage);
+      }
+
       if (
         role === "toolResult" &&
         entry.message.isError !== true &&
@@ -2551,7 +2581,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
 }
 
 function finalizeTranscriptTurn(
-  turn: Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason"> & {
+  turn: Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "warningSummary"> & {
     errorMessage: string | null;
     pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
   }
@@ -2567,11 +2597,15 @@ function finalizeTranscriptTurn(
     finalAssistant?.isError === true ||
     stopReason === "error" ||
     stopReason === "aborted";
+  const warnings = unique(turn.warnings);
+  const hasWarnings = warnings.length > 0;
   const status =
     hasError
       ? "error"
       : lastItem?.role === "assistant" && lastItem.stopReason && lastItem.stopReason !== "toolUse"
-        ? "completed"
+        ? hasWarnings
+          ? "partial"
+          : "completed"
         : "active";
 
   return {
@@ -2581,18 +2615,23 @@ function finalizeTranscriptTurn(
     finalTimestamp: finalAssistant?.timestamp ?? null,
     stopReason,
     errorMessage: turn.errorMessage || finalAssistant?.errorMessage || null,
-    createdFiles: dedupeCreatedFiles(turn.createdFiles)
+    createdFiles: dedupeCreatedFiles(turn.createdFiles),
+    warnings,
+    warningSummary: warnings[0] ?? null
   };
 }
 
 function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): RuntimeRecord {
   const updatedAt = Date.parse(turn.updatedAt);
   const title = formatTurnTitle(turn.prompt, runtime.agentId);
-  const subtitle = turn.finalText
-    ? summarizeText(turn.finalText, 90)
-    : turn.status === "error"
-      ? "Run ended with an error"
-      : "Main session run";
+  const subtitle =
+    turn.status === "partial"
+      ? summarizeText(turn.warningSummary ? `Completed with fallback: ${turn.warningSummary}` : "Completed with warnings", 90)
+      : turn.finalText
+        ? summarizeText(turn.finalText, 90)
+        : turn.status === "error"
+          ? "Run ended with an error"
+          : "Main session run";
 
   return {
     id: `runtime:${runtime.sessionId}:${turn.id}`,
@@ -2615,7 +2654,9 @@ function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): Runtim
       turnPrompt: turn.prompt,
       stage: "main.turn",
       historical: turn.status !== "active",
-      createdFiles: turn.createdFiles
+      createdFiles: turn.createdFiles,
+      warnings: turn.warnings,
+      warningSummary: turn.warningSummary
     }
   };
 }
@@ -2690,6 +2731,37 @@ function summarizeText(value: string, maxLength: number) {
   }
 
   return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
+}
+
+function resolveNonFatalToolWarning(
+  role: NonNullable<SessionTranscriptEntry["message"]>["role"],
+  message: NonNullable<SessionTranscriptEntry["message"]>,
+  text: string,
+  errorMessage: string | null
+) {
+  if (role !== "toolResult" || message.isError === true || errorMessage) {
+    return null;
+  }
+
+  const exitCode = message.details?.exitCode;
+
+  if (typeof exitCode !== "number" || exitCode === 0) {
+    return null;
+  }
+
+  const sourceText = message.details?.aggregated || text;
+  const cleaned = sourceText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^\(Command exited with code \d+\)$/i.test(line));
+  const primaryLine =
+    cleaned.find((line) => !line.startsWith("[WARNING]")) ||
+    cleaned.find((line) => line.startsWith("[WARNING]")) ||
+    `${message.toolName || "tool"} exited with code ${exitCode}`;
+  const normalized = primaryLine.replace(/^\[WARNING\]\s*/i, "").trim();
+
+  return summarizeText(normalized || `${message.toolName || "tool"} exited with code ${exitCode}`, 160);
 }
 
 function isHeartbeatTurn(prompt: string) {
@@ -3346,7 +3418,7 @@ function mergeRuntimeHistory(currentRuntimes: RuntimeRecord[]) {
 
     const historicalRuntime = {
       ...runtime,
-      status: runtime.status === "error" ? "error" : "completed",
+      status: runtime.status === "error" ? "error" : runtime.status === "partial" ? "partial" : "completed",
       metadata: {
         ...runtime.metadata,
         historical: true
@@ -3452,6 +3524,10 @@ function resolveAgentAction(params: {
 
       if (params.runtime.status === "completed") {
         return `Recent task ${params.runtime.taskId.slice(0, 8)} completed`;
+      }
+
+      if (params.runtime.status === "partial") {
+        return `Recent task ${params.runtime.taskId.slice(0, 8)} completed with warnings`;
       }
 
       if (params.runtime.status === "error") {

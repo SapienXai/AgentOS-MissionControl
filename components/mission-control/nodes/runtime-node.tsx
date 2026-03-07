@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RuntimeNodeData } from "@/components/mission-control/canvas-types";
 import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
-import { formatTokens, shortId, toneForRuntimeStatus } from "@/lib/openclaw/presenters";
+import { badgeVariantForRuntimeStatus, formatTokens, shortId, toneForRuntimeStatus } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type RuntimeFlowNode = Node<RuntimeNodeData, "runtime">;
@@ -23,16 +23,7 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
   const isPendingCreation = Boolean(data.pendingCreation);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const badgeVariant =
-    isPendingCreation
-      ? "warning"
-      : data.runtime.status === "completed"
-      ? "success"
-      : data.runtime.status === "error"
-        ? "danger"
-        : data.runtime.status === "active"
-          ? "default"
-          : "warning";
+  const badgeVariant = isPendingCreation ? "warning" : badgeVariantForRuntimeStatus(data.runtime.status);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -101,6 +92,8 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
               tone={
                 isPendingCreation
                   ? "bg-cyan-300"
+                  : data.runtime.status === "partial"
+                    ? "bg-amber-200"
                   : data.runtime.status === "completed"
                     ? "bg-emerald-300"
                     : data.runtime.status === "active"

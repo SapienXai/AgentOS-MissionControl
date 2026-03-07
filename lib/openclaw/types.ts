@@ -2,7 +2,7 @@ export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 
 export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offline";
 
-export type RuntimeStatus = "active" | "queued" | "idle" | "completed" | "error";
+export type RuntimeStatus = "active" | "queued" | "idle" | "completed" | "partial" | "error";
 
 export type AgentPreset = "worker" | "setup" | "browser" | "custom";
 
@@ -170,6 +170,7 @@ export interface RuntimeOutputItem {
   stopReason?: string | null;
   errorMessage?: string | null;
   isError?: boolean;
+  isWarning?: boolean;
 }
 
 export interface RuntimeCreatedFile {
@@ -188,6 +189,8 @@ export interface RuntimeOutputRecord {
   errorMessage: string | null;
   items: RuntimeOutputItem[];
   createdFiles: RuntimeCreatedFile[];
+  warnings: string[];
+  warningSummary: string | null;
 }
 
 export type RelationshipKind = "contains" | "uses-model" | "active-run";
