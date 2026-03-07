@@ -22,8 +22,8 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
         selected && "border-cyan-300/[0.16]"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1.5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-1.5">
           <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-slate-950/75 px-2.5 py-1.5 shadow-[0_14px_28px_rgba(0,0,0,0.2)]">
             <div className="rounded-full border border-white/10 bg-white/[0.06] p-1.5">
               <FolderKanban className="h-3 w-3 text-cyan-200" />
@@ -41,13 +41,21 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
           </p>
         </div>
 
-        <Badge variant={selected ? "default" : "muted"}>{data.workspace.health}</Badge>
-      </div>
+        <div className="flex shrink-0 max-w-[48%] flex-wrap items-center justify-end gap-1.5">
+          <Badge
+            variant="muted"
+            data-health={data.workspace.health}
+            className={cn("workspace-node__health", workspaceHealthBadgeClasses(data.workspace.health))}
+          >
+            {data.workspace.health}
+          </Badge>
 
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-1">
-        <Metric icon={Orbit} label="Agents" value={String(data.workspace.agentIds.length)} />
-        <Metric icon={Layers3} label="Models" value={String(data.workspace.modelIds.length)} />
-        <Metric icon={Sparkles} label="Runs" value={String(data.workspace.activeRuntimeIds.length)} />
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <Metric icon={Orbit} label="Agents" value={String(data.workspace.agentIds.length)} />
+            <Metric icon={Layers3} label="Models" value={String(data.workspace.modelIds.length)} />
+            <Metric icon={Sparkles} label="Runs" value={String(data.workspace.activeRuntimeIds.length)} />
+          </div>
+        </div>
       </div>
     </motion.div>
   );
@@ -71,4 +79,19 @@ function Metric({
       <span className="font-display text-[12px] text-white">{value}</span>
     </div>
   );
+}
+
+function workspaceHealthBadgeClasses(health: WorkspaceNodeData["workspace"]["health"]) {
+  switch (health) {
+    case "engaged":
+      return "border-cyan-300/30 bg-cyan-300/14 text-cyan-50";
+    case "monitoring":
+      return "border-emerald-300/30 bg-emerald-300/14 text-emerald-50";
+    case "ready":
+      return "border-amber-300/30 bg-amber-300/14 text-amber-50";
+    case "offline":
+      return "border-rose-300/30 bg-rose-300/14 text-rose-50";
+    default:
+      return "border-white/12 bg-white/[0.07] text-slate-100";
+  }
 }

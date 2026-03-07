@@ -172,11 +172,57 @@
 }
 
 .mission-shell--light .workspace-node__path {
-  color: #cdb7a8;
+  color: #7b6455;
 }
 
 .mission-shell--light .workspace-node__metric-label {
   color: #d9c8bb;
+}
+
+.mission-shell--light .workspace-node__health {
+  border-width: 1px;
+  color: #8a7261;
+  box-shadow: 0 10px 18px rgba(105, 79, 61, 0.12);
+}
+
+.mission-shell--light .workspace-node__health[data-health="engaged"] {
+  border-color: rgba(116, 160, 177, 0.34);
+  background: rgba(125, 173, 192, 0.22);
+}
+
+.mission-shell--light .workspace-node__health[data-health="monitoring"] {
+  border-color: rgba(126, 158, 135, 0.34);
+  background: rgba(138, 176, 149, 0.22);
+}
+
+.mission-shell--light .workspace-node__health[data-health="ready"] {
+  border-color: rgba(184, 149, 102, 0.34);
+  background: rgba(197, 164, 120, 0.22);
+}
+
+.mission-shell--light .workspace-node__health[data-health="standby"] {
+  border-color: rgba(141, 108, 86, 0.3);
+  background: rgba(163, 131, 107, 0.18);
+}
+
+.mission-shell--light .workspace-node__health[data-health="offline"] {
+  border-color: rgba(175, 122, 132, 0.34);
+  background: rgba(191, 136, 146, 0.22);
+}
+
+.workspace-node::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  opacity: 0.72;
+}
+
+.mission-shell--light .workspace-node::after {
+  border-color: rgba(185, 145, 114, 0.28);
+  opacity: 0.9;
 }
 
 .react-flow__renderer {
