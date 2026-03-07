@@ -27,7 +27,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
 
   return (
     <motion.div
-      layout
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       className={cn(

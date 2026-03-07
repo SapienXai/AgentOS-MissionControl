@@ -121,7 +121,7 @@ export function MissionCanvas({
         onSelectNode(node.id);
       }}
       fitView
-      fitViewOptions={{ padding: 0.12, duration: 700 }}
+      fitViewOptions={{ padding: 0.14, duration: 700, maxZoom: 0.9 }}
       minZoom={0.42}
       maxZoom={1.2}
       defaultEdgeOptions={{

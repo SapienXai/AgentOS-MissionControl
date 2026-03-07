@@ -51,7 +51,6 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
 
   return (
     <motion.div
-      layout
       initial={isPendingCreation ? { opacity: 0, scale: 0.94, x: 12 } : { opacity: 0, x: 8 }}
       animate={isPendingCreation ? { opacity: 1, scale: 1, x: 0 } : { opacity: 1, x: 0 }}
       className={cn(
