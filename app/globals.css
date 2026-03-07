@@ -167,6 +167,18 @@
     radial-gradient(circle, rgba(185, 145, 114, 0.24) 1.7px, transparent 2px);
 }
 
+.mission-shell--light .workspace-node__slug {
+  color: #d9c8bb;
+}
+
+.mission-shell--light .workspace-node__path {
+  color: #cdb7a8;
+}
+
+.mission-shell--light .workspace-node__metric-label {
+  color: #d9c8bb;
+}
+
 .react-flow__renderer {
   background: transparent;
 }

@@ -17,7 +17,7 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "h-full rounded-[26px] border border-white/[0.04] bg-[linear-gradient(180deg,rgba(4,11,22,0.18),rgba(4,9,18,0.06))] p-3 text-white backdrop-blur-[2px]",
+        "workspace-node h-full rounded-[26px] border border-white/[0.04] bg-[linear-gradient(180deg,rgba(4,11,22,0.18),rgba(4,9,18,0.06))] p-3 text-white backdrop-blur-[2px]",
         data.emphasis ? "opacity-100" : "opacity-75",
         selected && "border-cyan-300/[0.16]"
       )}
@@ -30,11 +30,13 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
             </div>
             <div>
               <p className="font-display text-[12px] tracking-[0.04em] text-white">{data.workspace.name}</p>
-              <p className="text-[9px] uppercase tracking-[0.22em] text-slate-500">{data.workspace.slug}</p>
+              <p className="workspace-node__slug text-[9px] uppercase tracking-[0.22em] text-slate-500">
+                {data.workspace.slug}
+              </p>
             </div>
           </div>
 
-          <p className="max-w-[300px] truncate pl-1 text-[9px] uppercase tracking-[0.16em] text-slate-600">
+          <p className="workspace-node__path max-w-[300px] truncate pl-1 text-[9px] uppercase tracking-[0.16em] text-slate-600">
             {compactPath(data.workspace.path)}
           </p>
         </div>
@@ -63,7 +65,9 @@ function Metric({
   return (
     <div className="inline-flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-slate-950/65 px-2.5 py-1 text-slate-300">
       <Icon className="h-3 w-3 text-slate-400" />
-      <span className="text-[9px] uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <span className="workspace-node__metric-label text-[9px] uppercase tracking-[0.16em] text-slate-500">
+        {label}
+      </span>
       <span className="font-display text-[12px] text-white">{value}</span>
     </div>
   );
