@@ -93,6 +93,8 @@ export function CommandBar({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [isComposerActive, setIsComposerActive] = useState(false);
+  const [isDesktopLayout, setIsDesktopLayout] = useState(false);
+  const [isDockHovered, setIsDockHovered] = useState(false);
   const [recentPrompts, setRecentPrompts] = useState<RecentPrompt[]>([]);
   const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -117,10 +119,18 @@ export function CommandBar({
   const draftScopeKey = buildDraftScopeKey(targetWorkspace?.id ?? activeWorkspaceId ?? null, effectiveTargetAgentId);
   const canSubmit = Boolean(mission.trim() && effectiveTargetAgentId && !isSubmitting);
   const dynamicPlaceholder = selectedAgent
-    ? `Message ${selectedAgent.name} with a clear next step...`
-    : "Select an agent to start a mission...";
+    ? `Compose for ${selectedAgent.name}...`
+    : "Compose a mission...";
   const inlineSuggestions = buildInlineSuggestions(snapshot, selectedAgent, recentPrompts);
   const showSuggestions = inlineSuggestions.length > 0;
+  const isDesktopCollapsed =
+    isDesktopLayout &&
+    !isDockHovered &&
+    !isComposerActive &&
+    !isAdvancedOpen &&
+    !isSubmitting &&
+    mission.trim().length === 0 &&
+    composeSuggestion === null;
 
   useEffect(() => {
     const selectionScope = `${activeWorkspaceId ?? "all"}:${selectedNodeId ?? "none"}:${availableAgents.map((agent) => agent.id).join(",")}`;
@@ -159,6 +169,24 @@ export function CommandBar({
     }
 
     setRecentPrompts(readRecentPrompts());
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = globalThis.matchMedia("(min-width: 1024px)");
+    const syncDesktopLayout = () => {
+      setIsDesktopLayout(mediaQuery.matches);
+
+      if (!mediaQuery.matches) {
+        setIsDockHovered(false);
+      }
+    };
+
+    syncDesktopLayout();
+    mediaQuery.addEventListener("change", syncDesktopLayout);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncDesktopLayout);
+    };
   }, []);
 
   useEffect(() => {
@@ -359,246 +387,297 @@ export function CommandBar({
   };
 
   return (
-    <div className="rounded-[30px] border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-3 shadow-[0_28px_80px_rgba(0,0,0,0.28)] backdrop-blur-[28px]">
-      <AnimatePresence initial={false}>
-        {composeSuggestion ? (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[12px] text-slate-400"
-          >
-            <span className="truncate">
-              From {composeSuggestion.sourceLabel}
-            </span>
-            <button
-              type="button"
-              className="text-slate-200 transition-colors hover:text-white"
-              onClick={() =>
-                applyMissionSnippet(composeSuggestion.mission, {
-                  mode: "replace"
-                })
-              }
-            >
-              Replace
-            </button>
-            <button
-              type="button"
-              className="text-slate-200 transition-colors hover:text-white"
-              onClick={() => applyMissionSnippet(composeSuggestion.mission)}
-            >
-              Append
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
-              onClick={() => setComposeSuggestion(null)}
-              aria-label="Dismiss runtime suggestion"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
-      <div
-        className={cn(
-          "rounded-[26px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] transition-all duration-200",
-          isComposerActive && "border-white/[0.14] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
-        )}
-        onFocusCapture={() => setIsComposerActive(true)}
-        onBlurCapture={(event) => {
-          const nextTarget = event.relatedTarget;
-          if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-            setIsComposerActive(false);
-          }
-        }}
-      >
-        <div className="flex items-center gap-2 px-3 pb-1 pt-3">
-          {selectedAgent ? (
-            <AgentSelectorChip
-              value={targetAgentId}
-              options={agentOptions}
-              onChange={handleTargetAgentChange}
-            />
-          ) : (
-            <SubtlePill>No agent</SubtlePill>
-          )}
-
-          {targetWorkspace ? (
-            <CreateAgentDialog
-              snapshot={snapshot}
-              defaultWorkspaceId={targetWorkspace.id}
-              onRefresh={onRefresh}
-              onAgentCreated={(agentId) => {
-                preferredCreatedAgentIdRef.current = agentId;
-                setTargetAgentId(agentId);
-              }}
-              trigger={
-                <button
-                  type="button"
-                  className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
-                >
-                  + Create Agent
-                </button>
-              }
-            />
-          ) : null}
-
-          <div className="ml-auto flex items-center gap-1">
-            <IconButton
-              label="Refresh mission control"
-              onClick={async () => {
-                setIsRefreshing(true);
-                await onRefresh();
-                setIsRefreshing(false);
-              }}
-            >
-              {isRefreshing ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-3.5 w-3.5" />
-              )}
-            </IconButton>
-
-            <WorkspaceCreateDialog
-              snapshot={snapshot}
-              onRefresh={onRefresh}
-              onWorkspaceCreated={onWorkspaceCreated}
-              trigger={
-                <IconButton label="Create workspace">
-                  <Plus className="h-3.5 w-3.5" />
-                </IconButton>
-              }
-            />
-
-            <IconButton
-              label="Composer settings"
-              onClick={() => setIsAdvancedOpen((current) => !current)}
-              active={isAdvancedOpen || thinking !== "medium"}
-            >
-              <span className="relative inline-flex">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                {thinking !== "medium" ? (
-                  <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-white/80" />
-                ) : null}
-              </span>
-            </IconButton>
-          </div>
-        </div>
-
-        <div className="px-3 pt-1">
-          <Textarea
-            ref={textareaRef}
-            value={mission}
-            onChange={(event) => setMission(event.target.value)}
-            onKeyDown={async (event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                event.preventDefault();
-
-                if (!canSubmit || !effectiveTargetAgentId) {
-                  return;
-                }
-
-                await submitMission({
-                  mission,
-                  agentId: effectiveTargetAgentId,
-                  workspaceId: activeWorkspaceId ?? undefined,
-                  thinking
-                });
-              }
-            }}
-            placeholder={dynamicPlaceholder}
-            className="min-h-[58px] max-h-[170px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-1 text-[15px] leading-[1.65] text-white placeholder:text-[#f6eee5]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
-          />
-        </div>
-
-        <div className="flex items-end justify-between gap-3 px-3 pb-3 pt-2">
-          <AnimatePresence initial={false}>
-            {showSuggestions ? (
-              <motion.div
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 4 }}
-                className="flex min-w-0 flex-wrap items-center gap-1.5"
-              >
-                {inlineSuggestions.map((suggestion) => (
-                  <SuggestionChip
-                    key={suggestion.id}
-                    label={suggestion.label}
-                    onClick={() =>
-                      applyMissionSnippet(suggestion.mission, {
-                        thinking: suggestion.thinking
-                      })
-                    }
-                  />
-                ))}
-              </motion.div>
-            ) : (
-              <div />
-            )}
-          </AnimatePresence>
-
-          <Button
-            className="h-10 rounded-full bg-white px-4 text-slate-950 shadow-none hover:bg-white/92"
-            disabled={!canSubmit}
-            onClick={async () => {
-              if (!effectiveTargetAgentId) {
-                return;
-              }
-
-              await submitMission({
-                mission,
-                agentId: effectiveTargetAgentId,
-                workspaceId: activeWorkspaceId ?? undefined,
-                thinking
+    <div
+      className={cn("mx-auto w-full transition-[width] duration-300", isDesktopCollapsed && "lg:w-[360px]")}
+      onMouseEnter={() => {
+        if (isDesktopLayout) {
+          setIsDockHovered(true);
+        }
+      }}
+      onMouseLeave={() => {
+        if (isDesktopLayout) {
+          setIsDockHovered(false);
+        }
+      }}
+    >
+      <AnimatePresence initial={false} mode="wait">
+        {isDesktopCollapsed ? (
+          <motion.button
+            key="collapsed"
+            type="button"
+            initial={{ opacity: 0, y: 8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            onFocus={() => setIsDockHovered(true)}
+            onClick={() => {
+              setIsDockHovered(true);
+              requestAnimationFrame(() => {
+                textareaRef.current?.focus();
               });
             }}
+            className="w-full rounded-full border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-2 text-left shadow-[0_24px_72px_rgba(0,0,0,0.22)] backdrop-blur-[28px]"
           >
-            {isSubmitting ? (
-              <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Send
-          </Button>
-        </div>
-      </div>
-
-      <AnimatePresence initial={false}>
-        {isAdvancedOpen ? (
+            <div className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.025))] px-3 py-2">
+              <span className="inline-flex h-7 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] text-slate-300">
+                {selectedAgent?.name || "No agent"}
+              </span>
+              <p className="min-w-0 flex-1 truncate text-[13px] text-[#f6eee5]/58">
+                {dynamicPlaceholder}
+              </p>
+              <span className="inline-flex h-8 items-center rounded-full bg-white px-3 text-[12px] font-medium text-slate-950">
+                <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                Send
+              </span>
+            </div>
+          </motion.button>
+        ) : (
           <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            className="mt-2 flex justify-end"
+            key="expanded"
+            initial={{ opacity: 0, y: 8, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.985 }}
+            className="rounded-[26px] border border-white/[0.08] bg-[rgba(9,14,22,0.58)] p-2.5 shadow-[0_24px_72px_rgba(0,0,0,0.26)] backdrop-blur-[28px]"
           >
-            <div className="w-full max-w-[232px] rounded-[20px] border border-white/[0.08] bg-[rgba(12,17,27,0.9)] p-3 shadow-[0_16px_32px_rgba(0,0,0,0.22)]">
-              <p className="text-[11px] text-slate-300">Thinking</p>
-              <div className="mt-2">
-                <InlineSelectChip
-                  ariaLabel="Select thinking level"
-                  value={thinking}
-                  options={[
-                    { label: "off", value: "off" },
-                    { label: "minimal", value: "minimal" },
-                    { label: "low", value: "low" },
-                    { label: "medium", value: "medium" },
-                    { label: "high", value: "high" }
-                  ]}
-                  onChange={(value) => setThinking(value as ThinkingLevel)}
+            <AnimatePresence initial={false}>
+              {composeSuggestion ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[12px] text-slate-400"
+                >
+                  <span className="truncate">From {composeSuggestion.sourceLabel}</span>
+                  <button
+                    type="button"
+                    className="text-slate-200 transition-colors hover:text-white"
+                    onClick={() =>
+                      applyMissionSnippet(composeSuggestion.mission, {
+                        mode: "replace"
+                      })
+                    }
+                  >
+                    Replace
+                  </button>
+                  <button
+                    type="button"
+                    className="text-slate-200 transition-colors hover:text-white"
+                    onClick={() => applyMissionSnippet(composeSuggestion.mission)}
+                  >
+                    Append
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
+                    onClick={() => setComposeSuggestion(null)}
+                    aria-label="Dismiss runtime suggestion"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <div
+              className={cn(
+                "rounded-[22px] border border-white/[0.07] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] transition-all duration-200",
+                isComposerActive && "border-white/[0.14] bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.04))]"
+              )}
+              onFocusCapture={() => setIsComposerActive(true)}
+              onBlurCapture={(event) => {
+                const nextTarget = event.relatedTarget;
+                if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                  setIsComposerActive(false);
+                }
+              }}
+            >
+              <div className="flex items-center gap-2 px-2.5 pb-1 pt-2.5">
+                {selectedAgent ? (
+                  <AgentSelectorChip
+                    value={targetAgentId}
+                    options={agentOptions}
+                    onChange={handleTargetAgentChange}
+                  />
+                ) : (
+                  <SubtlePill>No agent</SubtlePill>
+                )}
+
+                {targetWorkspace ? (
+                  <CreateAgentDialog
+                    snapshot={snapshot}
+                    defaultWorkspaceId={targetWorkspace.id}
+                    onRefresh={onRefresh}
+                    onAgentCreated={(agentId) => {
+                      preferredCreatedAgentIdRef.current = agentId;
+                      setTargetAgentId(agentId);
+                    }}
+                    trigger={
+                      <button
+                        type="button"
+                        className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
+                      >
+                        + Create Agent
+                      </button>
+                    }
+                  />
+                ) : null}
+
+                <div className="ml-auto flex items-center gap-1">
+                  <IconButton
+                    label="Refresh mission control"
+                    onClick={async () => {
+                      setIsRefreshing(true);
+                      await onRefresh();
+                      setIsRefreshing(false);
+                    }}
+                  >
+                    {isRefreshing ? (
+                      <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCcw className="h-3.5 w-3.5" />
+                    )}
+                  </IconButton>
+
+                  <WorkspaceCreateDialog
+                    snapshot={snapshot}
+                    onRefresh={onRefresh}
+                    onWorkspaceCreated={onWorkspaceCreated}
+                    trigger={
+                      <IconButton label="Create workspace">
+                        <Plus className="h-3.5 w-3.5" />
+                      </IconButton>
+                    }
+                  />
+
+                  <IconButton
+                    label="Composer settings"
+                    onClick={() => setIsAdvancedOpen((current) => !current)}
+                    active={isAdvancedOpen || thinking !== "medium"}
+                  >
+                    <span className="relative inline-flex">
+                      <SlidersHorizontal className="h-3.5 w-3.5" />
+                      {thinking !== "medium" ? (
+                        <span className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-white/80" />
+                      ) : null}
+                    </span>
+                  </IconButton>
+                </div>
+              </div>
+
+              <div className="px-2.5 pt-0.5">
+                <Textarea
+                  ref={textareaRef}
+                  value={mission}
+                  onChange={(event) => setMission(event.target.value)}
+                  onKeyDown={async (event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                      event.preventDefault();
+
+                      if (!canSubmit || !effectiveTargetAgentId) {
+                        return;
+                      }
+
+                      await submitMission({
+                        mission,
+                        agentId: effectiveTargetAgentId,
+                        workspaceId: activeWorkspaceId ?? undefined,
+                        thinking
+                      });
+                    }
+                  }}
+                  placeholder={dynamicPlaceholder}
+                  className="min-h-[50px] max-h-[150px] resize-none overflow-y-auto border-0 bg-transparent px-0 py-0.5 text-[15px] leading-[1.6] text-white placeholder:text-[#f6eee5]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
               </div>
-              <button
-                type="button"
-                className="mt-3 text-[12px] text-slate-400 transition-colors hover:text-white"
-                onClick={clearCurrentDraft}
-              >
-                Clear draft
-              </button>
+
+              <div className="flex items-end justify-between gap-2.5 px-2.5 pb-2.5 pt-1.5">
+                <AnimatePresence initial={false}>
+                  {showSuggestions ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 4 }}
+                      className="flex min-w-0 flex-wrap items-center gap-1.5"
+                    >
+                      {inlineSuggestions.map((suggestion) => (
+                        <SuggestionChip
+                          key={suggestion.id}
+                          label={suggestion.label}
+                          onClick={() =>
+                            applyMissionSnippet(suggestion.mission, {
+                              thinking: suggestion.thinking
+                            })
+                          }
+                        />
+                      ))}
+                    </motion.div>
+                  ) : (
+                    <div />
+                  )}
+                </AnimatePresence>
+
+                <Button
+                  className="h-9 rounded-full bg-white px-3.5 text-slate-950 shadow-none hover:bg-white/92"
+                  disabled={!canSubmit}
+                  onClick={async () => {
+                    if (!effectiveTargetAgentId) {
+                      return;
+                    }
+
+                    await submitMission({
+                      mission,
+                      agentId: effectiveTargetAgentId,
+                      workspaceId: activeWorkspaceId ?? undefined,
+                      thinking
+                    });
+                  }}
+                >
+                  {isSubmitting ? (
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                  )}
+                  Send
+                </Button>
+              </div>
             </div>
+
+            <AnimatePresence initial={false}>
+              {isAdvancedOpen ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  className="mt-2 flex justify-end"
+                >
+                  <div className="w-full max-w-[232px] rounded-[20px] border border-white/[0.08] bg-[rgba(12,17,27,0.9)] p-3 shadow-[0_16px_32px_rgba(0,0,0,0.22)]">
+                    <p className="text-[11px] text-slate-300">Thinking</p>
+                    <div className="mt-2">
+                      <InlineSelectChip
+                        ariaLabel="Select thinking level"
+                        value={thinking}
+                        options={[
+                          { label: "off", value: "off" },
+                          { label: "minimal", value: "minimal" },
+                          { label: "low", value: "low" },
+                          { label: "medium", value: "medium" },
+                          { label: "high", value: "high" }
+                        ]}
+                        onChange={(value) => setThinking(value as ThinkingLevel)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-3 text-[12px] text-slate-400 transition-colors hover:text-white"
+                      onClick={clearCurrentDraft}
+                    >
+                      Clear draft
+                    </button>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </motion.div>
-        ) : null}
+        )}
       </AnimatePresence>
     </div>
   );
@@ -908,7 +987,7 @@ function resizeTextarea(textarea: HTMLTextAreaElement | null) {
   }
 
   textarea.style.height = "0px";
-  textarea.style.height = `${Math.min(textarea.scrollHeight, 170)}px`;
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`;
 }
 
 function mergeMissionText(current: string, next: string) {

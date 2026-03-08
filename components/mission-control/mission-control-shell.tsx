@@ -853,7 +853,7 @@ export function MissionControlShell({
           />
         </div>
 
-        <div className="order-4 lg:absolute lg:bottom-6 lg:left-1/2 lg:z-40 lg:w-[min(860px,calc(100vw-280px))] lg:-translate-x-1/2">
+        <div className="order-4 lg:absolute lg:bottom-6 lg:left-1/2 lg:z-40 lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
           <CommandBar
             snapshot={snapshot}
             activeWorkspaceId={activeWorkspaceId}
