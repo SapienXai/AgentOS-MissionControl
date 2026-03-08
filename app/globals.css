@@ -131,6 +131,47 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.46), transparent 18%);
 }
 
+.mission-canvas-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.mission-canvas-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at center, rgba(56, 189, 248, 0.1), transparent 60%),
+    linear-gradient(180deg, rgba(4, 11, 22, 0.08), rgba(4, 11, 22, 0.02));
+}
+
+.mission-canvas-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+  background:
+    radial-gradient(circle at center, transparent 34%, rgba(2, 6, 17, 0.22) 82%),
+    linear-gradient(180deg, rgba(2, 6, 17, 0.02), rgba(2, 6, 17, 0.18));
+}
+
+.mission-shell--light .mission-canvas-backdrop::before {
+  background:
+    radial-gradient(circle at center, rgba(229, 215, 204, 0.44), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(229, 215, 204, 0.08));
+}
+
+.mission-shell--light .mission-canvas-backdrop::after {
+  background:
+    radial-gradient(circle at center, transparent 34%, rgba(214, 196, 183, 0.18) 82%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(214, 196, 183, 0.2));
+}
+
 .mission-canvas-frame::before {
   content: "";
   position: absolute;

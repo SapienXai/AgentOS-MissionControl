@@ -268,6 +268,38 @@ export type OpenClawUpdateStreamEvent =
       snapshot?: MissionControlSnapshot;
     };
 
+export type OpenClawOnboardingPhase =
+  | "detecting"
+  | "installing-cli"
+  | "installing-gateway"
+  | "starting-gateway"
+  | "verifying"
+  | "ready";
+
+export type OpenClawOnboardingStreamEvent =
+  | {
+      type: "status";
+      phase: OpenClawOnboardingPhase;
+      message: string;
+    }
+  | {
+      type: "log";
+      stream: "stdout" | "stderr";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      phase: OpenClawOnboardingPhase;
+      message: string;
+      exitCode?: number | null;
+      stdout: string;
+      stderr: string;
+      snapshot?: MissionControlSnapshot;
+      manualCommand?: string;
+      docsUrl?: string;
+    };
+
 export type WorkspaceSourceMode = "empty" | "clone" | "existing";
 
 export type WorkspaceTemplate = "software" | "frontend" | "backend" | "research" | "content";

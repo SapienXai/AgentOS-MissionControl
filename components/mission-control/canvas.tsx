@@ -27,6 +27,7 @@ import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { RuntimeNode } from "@/components/mission-control/nodes/runtime-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
 import type { MissionControlSnapshot, RuntimeRecord } from "@/lib/openclaw/types";
+import { cn } from "@/lib/utils";
 
 type PendingMissionCard = {
   id: string;
@@ -59,7 +60,8 @@ export function MissionCanvas({
   onReplyRuntime,
   onCopyRuntimePrompt,
   onHideRuntime,
-  onSelectNode
+  onSelectNode,
+  className
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
@@ -72,6 +74,7 @@ export function MissionCanvas({
   onCopyRuntimePrompt: (runtime: RuntimeRecord) => void;
   onHideRuntime: (runtimeId: string) => void;
   onSelectNode: (nodeId: string) => void;
+  className?: string;
 }) {
   const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
   const pendingMissionRef = useRef<PendingMissionCard | null>(null);
@@ -237,7 +240,7 @@ export function MissionCanvas({
         }
       }}
       proOptions={{ hideAttribution: true }}
-      className="rounded-[30px]"
+      className={cn("h-full w-full rounded-[30px]", className)}
     />
   );
 }

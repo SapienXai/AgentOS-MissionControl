@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { OPENCLAW_BIN } from "@/lib/openclaw/cli";
+import { resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { getMissionControlSnapshot } from "@/lib/openclaw/service";
 import type { OpenClawUpdateStreamEvent } from "@/lib/openclaw/types";
 
@@ -53,10 +53,6 @@ export async function POST(request: Request) {
   };
 
   void (async () => {
-    const child = spawn(OPENCLAW_BIN, ["update"], {
-      cwd: process.cwd(),
-      env: process.env
-    });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -71,6 +67,28 @@ export async function POST(request: Request) {
       await writeChain;
       await writer.close();
     };
+
+    let openClawBin: string;
+
+    try {
+      openClawBin = await resolveOpenClawBin();
+    } catch (error) {
+      await send({
+        type: "done",
+        ok: false,
+        message: error instanceof Error ? error.message : "OpenClaw CLI could not be resolved.",
+        exitCode: null,
+        stdout,
+        stderr
+      });
+      await closeWriter();
+      return;
+    }
+
+    const child = spawn(openClawBin, ["update"], {
+      cwd: process.cwd(),
+      env: process.env
+    });
 
     const timer = setTimeout(() => {
       timedOut = true;
