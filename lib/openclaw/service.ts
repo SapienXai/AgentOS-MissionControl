@@ -347,6 +347,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
   try {
     const [
       gatewayStatusResult,
+      gatewayRemoteUrlResult,
       statusResult,
       agentsResult,
       agentConfigResult,
@@ -355,6 +356,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       presenceResult
     ] = await Promise.allSettled([
       runOpenClawJson<GatewayStatusPayload>(["gateway", "status", "--json"]),
+      runOpenClawJson<string>(["config", "get", "gateway.remote.url", "--json"]),
       runOpenClawJson<StatusPayload>(["status", "--json"]),
       runOpenClawJson<AgentPayload>(["agents", "list", "--json"]),
       runOpenClawJson<AgentConfigPayload>(["config", "get", "agents.list", "--json"]),
@@ -365,6 +367,10 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
 
     const gatewayStatus =
       gatewayStatusResult.status === "fulfilled" ? gatewayStatusResult.value : undefined;
+    const configuredGatewayUrl =
+      gatewayRemoteUrlResult.status === "fulfilled"
+        ? normalizeOptionalValue(gatewayRemoteUrlResult.value)
+        : undefined;
     const status = statusResult.status === "fulfilled" ? statusResult.value : undefined;
     const agentsList = agentsResult.status === "fulfilled" ? agentsResult.value : [];
     const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
@@ -630,6 +636,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       workspaceRoot: resolveWorkspaceRoot(),
       dashboardUrl: `http://127.0.0.1:${gatewayStatus?.gateway?.port ?? 18789}/`,
       gatewayUrl: gatewayStatus?.gateway?.probeUrl || "ws://127.0.0.1:18789",
+      configuredGatewayUrl: configuredGatewayUrl ?? null,
       bindMode: gatewayStatus?.gateway?.bindMode,
       port: gatewayStatus?.gateway?.port,
       updateChannel: status?.updateChannel || "stable",
@@ -1319,6 +1326,87 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
     deletedAgentIds: workspaceAgents.map((agent) => agent.id),
     deletedRuntimeCount: runtimeCount
   };
+}
+
+export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null }) {
+  const gatewayUrl = normalizeGatewayRemoteUrl(input.gatewayUrl);
+
+  if (gatewayUrl) {
+    await runOpenClaw(["config", "set", "gateway.remote.url", gatewayUrl]);
+  } else if (await hasGatewayRemoteUrlConfig()) {
+    await runOpenClaw(["config", "unset", "gateway.remote.url"]);
+  }
+
+  snapshotCache = null;
+  runtimeHistoryCache = new Map();
+
+  return getMissionControlSnapshot({ force: true });
+}
+
+function normalizeGatewayRemoteUrl(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `ws://${trimmed}`;
+  let parsed: URL;
+
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("Gateway address must be a valid WebSocket URL.");
+  }
+
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error("Gateway address must start with ws:// or wss://.");
+  }
+
+  if (!parsed.hostname) {
+    throw new Error("Gateway address must include a hostname.");
+  }
+
+  return parsed.toString().replace(/\/$/, "");
+}
+
+async function hasGatewayRemoteUrlConfig() {
+  try {
+    await runOpenClaw(["config", "get", "gateway.remote.url", "--json"]);
+    return true;
+  } catch (error) {
+    const detail = stringifyCommandFailure(error);
+
+    if (detail.includes("Config path not found")) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function stringifyCommandFailure(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "";
+  }
+
+  const stdout = "stdout" in error ? stringifyFailureChunk(error.stdout) : "";
+  const stderr = "stderr" in error ? stringifyFailureChunk(error.stderr) : "";
+  const message = "message" in error && typeof error.message === "string" ? error.message : "";
+
+  return `${message}\n${stdout}\n${stderr}`;
+}
+
+function stringifyFailureChunk(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value).toString();
+  }
+
+  return "";
 }
 
 type ResolvedWorkspaceBootstrapInput = {

@@ -18,6 +18,8 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
 import { compactPath } from "@/lib/openclaw/presenters";
@@ -79,6 +81,8 @@ export function MissionControlShell({
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
+  const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
+  const [isSavingGateway, setIsSavingGateway] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [updateRunState, setUpdateRunState] = useState<UpdateRunState>("idle");
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
@@ -168,6 +172,14 @@ export function MissionControlShell({
   useEffect(() => {
     globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
   }, [surfaceTheme]);
+
+  useEffect(() => {
+    if (isSettingsOpen || isSavingGateway) {
+      return;
+    }
+
+    setGatewayDraft(resolveGatewayDraft(snapshot));
+  }, [snapshot, isSettingsOpen, isSavingGateway]);
 
   useEffect(() => {
     if (isOpenClawReady) {
@@ -550,6 +562,43 @@ export function MissionControlShell({
     }
   };
 
+  const saveGatewaySettings = async (nextGatewayUrl: string | null) => {
+    setIsSavingGateway(true);
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          gatewayUrl: nextGatewayUrl
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Gateway settings could not be updated.");
+      }
+
+      const result = (await response.json()) as { snapshot: MissionControlSnapshot };
+      setSnapshot(result.snapshot);
+      setGatewayDraft(resolveGatewayDraft(result.snapshot));
+
+      toast.success("Gateway updated.", {
+        description: nextGatewayUrl?.trim()
+          ? `Mission Control now targets ${result.snapshot.diagnostics.configuredGatewayUrl || result.snapshot.diagnostics.gatewayUrl}.`
+          : "Mission Control reverted to the local default gateway."
+      });
+    } catch (error) {
+      toast.error("Gateway update failed.", {
+        description: error instanceof Error ? error.message : "Unable to update the OpenClaw gateway."
+      });
+    } finally {
+      setIsSavingGateway(false);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -635,12 +684,16 @@ export function MissionControlShell({
           surfaceTheme={surfaceTheme}
           settingsRef={settingsRef}
           isSettingsOpen={isSettingsOpen}
+          gatewayDraft={gatewayDraft}
+          isSavingGateway={isSavingGateway}
           isCheckingForUpdates={isCheckingForUpdates}
           lastCheckedAt={lastCheckedAt}
           onToggleTheme={() =>
             setSurfaceTheme((current) => (current === "light" ? "dark" : "light"))
           }
           onToggleSettings={() => setIsSettingsOpen((current) => !current)}
+          onGatewayDraftChange={setGatewayDraft}
+          onSaveGatewaySettings={saveGatewaySettings}
           onCheckForUpdates={checkForUpdates}
           onOpenUpdateDialog={() => {
             resetUpdateDialogState();
@@ -1028,10 +1081,14 @@ function CanvasTopBar({
   surfaceTheme,
   settingsRef,
   isSettingsOpen,
+  gatewayDraft,
+  isSavingGateway,
   isCheckingForUpdates,
   lastCheckedAt,
   onToggleTheme,
   onToggleSettings,
+  onGatewayDraftChange,
+  onSaveGatewaySettings,
   onCheckForUpdates,
   onOpenUpdateDialog
 }: {
@@ -1039,10 +1096,14 @@ function CanvasTopBar({
   surfaceTheme: SurfaceTheme;
   settingsRef: MutableRefObject<HTMLDivElement | null>;
   isSettingsOpen: boolean;
+  gatewayDraft: string;
+  isSavingGateway: boolean;
   isCheckingForUpdates: boolean;
   lastCheckedAt: number | null;
   onToggleTheme: () => void;
   onToggleSettings: () => void;
+  onGatewayDraftChange: (value: string) => void;
+  onSaveGatewaySettings: (value: string | null) => Promise<void>;
   onCheckForUpdates: () => Promise<void>;
   onOpenUpdateDialog: () => void;
 }) {
@@ -1139,7 +1200,7 @@ function CanvasTopBar({
             role="menu"
             aria-label="OpenClaw settings"
             className={cn(
-              "absolute right-0 top-[calc(100%+12px)] z-[70] w-[272px] rounded-[22px] border p-3.5 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
+              "absolute right-0 top-[calc(100%+12px)] z-[70] w-[320px] rounded-[22px] border p-3.5 shadow-[0_22px_64px_rgba(0,0,0,0.24)] backdrop-blur-2xl",
               surfaceTheme === "light"
                 ? "border-[#dbc9bc]/90 bg-[rgba(252,247,241,0.95)] text-[#4a382c] shadow-[0_24px_60px_rgba(161,125,101,0.18)]"
                 : "border-cyan-300/12 bg-[rgba(10,16,28,0.9)] text-slate-100"
@@ -1327,6 +1388,118 @@ function CanvasTopBar({
               </p>
             </div>
 
+            <div
+              className={cn(
+                "mt-2.5 rounded-[18px] border px-3 py-3",
+                surfaceTheme === "light"
+                  ? "border-[#e6d7cb] bg-[#fffaf6]"
+                  : "border-white/8 bg-white/[0.03]"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <Label
+                    htmlFor="gateway-url"
+                    className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}
+                  >
+                    OpenClaw gateway
+                  </Label>
+                  <p
+                    className={cn(
+                      "mt-1 text-[11px] leading-[1.15rem]",
+                      surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+                    )}
+                  >
+                    Enter a `ws://` or `wss://` endpoint. Leave it empty to use the local default gateway.
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
+                      : "border-white/10 bg-white/[0.05] text-slate-300"
+                  )}
+                >
+                  {snapshot.diagnostics.bindMode || "default"}
+                </span>
+              </div>
+
+              <Input
+                id="gateway-url"
+                value={gatewayDraft}
+                onChange={(event) => onGatewayDraftChange(event.target.value)}
+                placeholder="ws://127.0.0.1:18789"
+                disabled={isSavingGateway}
+                className={cn(
+                  "mt-3 h-10 rounded-[16px] px-3 text-[12px]",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] placeholder:text-[#b29b8b] focus-visible:ring-[#c8946f]/45"
+                    : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
+                )}
+              />
+
+              <p
+                className={cn(
+                  "mt-2 break-all font-mono text-[10px] leading-[1.1rem]",
+                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
+                )}
+              >
+                Configured endpoint: {snapshot.diagnostics.configuredGatewayUrl || "local default"}
+              </p>
+              <p
+                className={cn(
+                  "mt-1 break-all font-mono text-[10px] leading-[1.1rem]",
+                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
+                )}
+              >
+                Effective endpoint: {snapshot.diagnostics.gatewayUrl}
+              </p>
+
+              <div className="mt-3 flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={isSavingGateway}
+                  onClick={() => {
+                    void onSaveGatewaySettings(null);
+                  }}
+                  className={cn(
+                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
+                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
+                  )}
+                >
+                  Use local
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isSavingGateway}
+                  onClick={() => {
+                    void onSaveGatewaySettings(gatewayDraft);
+                  }}
+                  className={cn(
+                    "rounded-[14px] px-3 text-[10px] uppercase tracking-[0.2em]",
+                    surfaceTheme === "light"
+                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                      : ""
+                  )}
+                >
+                  {isSavingGateway ? (
+                    <>
+                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save gateway"
+                  )}
+                </Button>
+              </div>
+            </div>
+
             <button
               type="button"
               role="menuitem"
@@ -1393,6 +1566,14 @@ function resolveRuntimePrompt(runtime: RuntimeRecord) {
   }
 
   return runtime.subtitle.trim() || "Continue this run.";
+}
+
+function formatGatewayDraft(gatewayUrl: string) {
+  return gatewayUrl.replace(/\/$/, "");
+}
+
+function resolveGatewayDraft(snapshot: MissionControlSnapshot) {
+  return formatGatewayDraft(snapshot.diagnostics.configuredGatewayUrl || snapshot.diagnostics.gatewayUrl);
 }
 
 function resolveOnboardingAction(snapshot: MissionControlSnapshot) {

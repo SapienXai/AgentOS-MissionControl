@@ -19,6 +19,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       workspaceRoot,
       dashboardUrl: "http://127.0.0.1:18789/",
       gatewayUrl: "ws://127.0.0.1:18789",
+      configuredGatewayUrl: null,
       securityWarnings: [],
       issues: [reason]
     },

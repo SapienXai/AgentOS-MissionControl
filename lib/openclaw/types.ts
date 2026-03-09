@@ -42,6 +42,7 @@ export interface GatewayDiagnostics {
   workspaceRoot: string;
   dashboardUrl: string;
   gatewayUrl: string;
+  configuredGatewayUrl: string | null;
   bindMode?: string;
   port?: number;
   updateChannel?: string;
