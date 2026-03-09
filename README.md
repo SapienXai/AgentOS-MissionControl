@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/readme/agentos1.webp" alt="AgentOS mission-control interface" width="100%" />
 
-# AgentOS
+# AgentOS | Mission Control
 
 **Human operating layer for coordinating AI agents, projects, and companies from a single workspace.**
 
