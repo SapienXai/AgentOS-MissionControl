@@ -1835,7 +1835,7 @@ function PromptFirstPlannerIntake({
                   onSubmit();
                 }
               }}
-              placeholder="Example: key2web3.com topluluğu için ilk olarak Telegram grubunu otonom yöneten bir workspace kur. Siteden context topla, ekip ve iş akışlarını öner, şimdilik sıfırdan başlayacağız."
+              placeholder="Example: Set up a workspace that autonomously runs the Telegram community for key2web3.com. Gather context from the website, suggest the team and workflows, and start from scratch for now."
               className="min-h-[128px] max-h-[28vh] border-0 bg-transparent px-0 py-0 text-sm leading-6 text-white placeholder:text-slate-500 focus-visible:ring-0 md:text-[15px]"
             />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
