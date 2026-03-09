@@ -42,13 +42,15 @@ import {
   createPlannerHookSpec,
   createPlannerMessage,
   createPlannerWorkflowSpec,
-  enrichWorkspacePlan
+  enrichWorkspacePlan,
+  getPlannerWorkspaceSizeProfile
 } from "@/lib/openclaw/planner-core";
 import type {
   MissionControlSnapshot,
   PlannerAutomationSpec,
   PlannerChannelType,
   PlannerPersistentAgentSpec,
+  PlannerWorkspaceSize,
   WorkspacePlan,
   WorkspacePlanDeployResult,
   WorkspaceTemplate
@@ -115,6 +117,28 @@ const sourceModeOptions = [
   { value: "empty", label: "Empty" },
   { value: "clone", label: "Clone repo" },
   { value: "existing", label: "Existing folder" }
+] as const;
+
+const workspaceSizeOptions: Array<{
+  value: PlannerWorkspaceSize;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "small",
+    label: "Small",
+    description: "Lean chat view. Draft 1 agent and 1 task."
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Balanced view. Draft 3 agents, 3 tasks, and 1 automation."
+  },
+  {
+    value: "large",
+    label: "Large",
+    description: "Fuller operating view. Draft 5 agents, 4 tasks, 2 automations, and 1 channel."
+  }
 ] as const;
 
 const modelProfileOptions = [
@@ -197,6 +221,8 @@ export function WorkspacePlannerDialog({
         })),
     [plan]
   );
+  const selectedSize = plan?.intake.size ?? "medium";
+  const selectedSizeProfile = useMemo(() => getPlannerWorkspaceSizeProfile(selectedSize), [selectedSize]);
   const intakeStarted = plan?.intake.started ?? false;
   const reviewRequested = Boolean(plan?.intake.reviewRequested || plan?.status === "deploying" || plan?.status === "deployed");
   const guidedMode =
@@ -529,12 +555,14 @@ export function WorkspacePlannerDialog({
                   </div>
                 ) : (
                   <DialogDescription className="mt-1.5 text-xs leading-5 text-slate-400">
-                    Start with one prompt. The architect will inspect links, infer the workspace, and only ask you to confirm unclear decisions.
+                    {selectedSizeProfile.label} mode keeps the chat lean while the architect still inspects links, pulls context,
+                    and drafts the full workspace blueprint.
                   </DialogDescription>
                 )}
               </div>
               {intakeStarted ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="muted">{selectedSizeProfile.label} mode</Badge>
                   {plan ? (
                     <Badge
                       variant={
@@ -602,10 +630,17 @@ export function WorkspacePlannerDialog({
             </div>
           ) : !intakeStarted ? (
             <PromptFirstPlannerIntake
+              size={selectedSize}
               value={message}
               isSending={isSending}
               sendStatus={sendStatus}
               onChange={setMessage}
+              onSelectSize={(size) =>
+                updatePlan((current) => {
+                  current.intake.size = size;
+                  return current;
+                })
+              }
               onSubmit={() => void submitTurn()}
             />
           ) : guidedMode ? (
@@ -1784,47 +1819,74 @@ function CompactMetric({
 }
 
 function PromptFirstPlannerIntake({
+  size,
   value,
   isSending,
   sendStatus,
   onChange,
+  onSelectSize,
   onSubmit
 }: {
+  size: PlannerWorkspaceSize;
   value: string;
   isSending: boolean;
   sendStatus: PlannerBusyStatus | null;
   onChange: (value: string) => void;
+  onSelectSize: (size: PlannerWorkspaceSize) => void;
   onSubmit: () => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-      <div className="w-full max-w-3xl">
-        <div className="rounded-[24px] border border-white/10 bg-[rgba(9,14,22,0.84)] p-5 md:p-6">
-          <Badge variant="muted">Workspace Assistant</Badge>
-          <h2 className="mt-4 text-[1.95rem] font-medium tracking-tight text-white md:text-[2.45rem]">
+    <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto px-4 py-3 sm:px-6 sm:py-4">
+      <div className="w-full max-w-2xl">
+        <div className="rounded-[22px] border border-white/10 bg-[rgba(8,12,18,0.78)] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.24)] backdrop-blur-sm md:p-5">
+          <Badge
+            variant="muted"
+            className="border-white/8 bg-white/[0.04] px-2 py-0 text-[10px] tracking-[0.18em] text-slate-300"
+          >
+            Workspace Assistant
+          </Badge>
+          <h2 className="mt-3 text-[1.45rem] font-medium tracking-[-0.03em] text-white md:text-[1.8rem]">
             Start the workspace conversation.
           </h2>
-          <p className="mt-2.5 max-w-2xl text-sm leading-6 text-slate-300 md:text-[15px]">
-            Paste the project goal in plain language. You can include a website URL, repo URL, or an existing folder path.
-            The architect will gather context, draft the team and workflows, and only ask you to confirm unclear decisions.
+          <p className="mt-2 max-w-xl text-[13px] leading-5 text-slate-300 md:text-sm">
+            Share the goal in plain language. Add a website, repo, or folder if it helps. The architect will gather
+            context and draft the workspace with minimal back-and-forth.
           </p>
 
-          <div className="mt-5 grid gap-2.5 md:grid-cols-3">
-            <IntakeHint
-              title="Goal"
-              text="What should this company or workspace make autonomous first?"
-            />
-            <IntakeHint
-              title="Context"
-              text="Paste the website, repo, docs link, or describe the existing operation."
-            />
-            <IntakeHint
-              title="Start mode"
-              text="Say whether we begin from scratch, clone a repo, or attach an existing folder."
-            />
+          <div className="mt-4">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Workspace size</p>
+              <p className="text-[11px] text-slate-400">Full context is always harvested.</p>
+            </div>
+            <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
+              {workspaceSizeOptions.map((option) => {
+                const profile = getPlannerWorkspaceSizeProfile(option.value);
+
+                return (
+                  <WorkspaceSizeCard
+                    key={option.value}
+                    label={option.label}
+                    description={option.description}
+                    metrics={[
+                      `${profile.agentCount} agent${profile.agentCount === 1 ? "" : "s"}`,
+                      `${profile.workflowCount} task${profile.workflowCount === 1 ? "" : "s"}`,
+                      profile.automationCount > 0 ? `${profile.automationCount} automation${profile.automationCount === 1 ? "" : "s"}` : "No automation",
+                      profile.externalChannelCount > 0 ? `${profile.externalChannelCount} channel` : "Internal only"
+                    ]}
+                    selected={size === option.value}
+                    onSelect={() => onSelectSize(option.value)}
+                  />
+                );
+              })}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
+              <span>Goal in plain language</span>
+              <span>Website, repo, docs, or folder path</span>
+              <span>New workspace, clone, or existing folder</span>
+            </div>
           </div>
 
-          <div className="mt-5 rounded-[20px] border border-white/10 bg-slate-950/50 p-3.5 md:p-4">
+          <div className="mt-4 rounded-[18px] border border-white/10 bg-slate-950/45 p-3 md:p-3.5">
             <Textarea
               autoFocus
               value={value}
@@ -1836,9 +1898,9 @@ function PromptFirstPlannerIntake({
                 }
               }}
               placeholder="Example: key2web3.com topluluğu için ilk olarak Telegram grubunu otonom yöneten bir workspace kur. Siteden context topla, ekip ve iş akışlarını öner, şimdilik sıfırdan başlayacağız."
-              className="min-h-[128px] max-h-[28vh] border-0 bg-transparent px-0 py-0 text-sm leading-6 text-white placeholder:text-slate-500 focus-visible:ring-0 md:text-[15px]"
+              className="min-h-[104px] max-h-[24vh] border-0 bg-transparent px-0 py-0 text-sm leading-6 text-white placeholder:text-slate-500 focus-visible:ring-0 md:text-[15px]"
             />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3">
               <p className="text-xs text-slate-500">Cmd/Ctrl + Enter to start planning.</p>
               <Button size="sm" onClick={onSubmit} disabled={!value.trim() || isSending}>
                 {isSending ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
@@ -1882,6 +1944,9 @@ function GuidedPlannerWorkspace({
 }) {
   const progressItems = buildGuidedProgressItems(plan);
   const overviewItems = buildGuidedOverviewItems(plan);
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+  const visibleSuggestions = plan.intake.suggestedReplies.slice(0, sizeProfile.suggestedReplyLimit);
+  const compactContextView = plan.intake.size === "small";
 
   return (
     <div className="grid min-h-0 flex-1 grid-rows-[auto,minmax(0,1fr),auto] xl:grid-cols-[188px,minmax(0,1fr),280px] xl:grid-rows-1">
@@ -1979,9 +2044,9 @@ function GuidedPlannerWorkspace({
           </div>
 
           <div className="border-t border-white/10 px-3 py-3 sm:px-4">
-            {plan.intake.suggestedReplies.length > 0 ? (
+            {visibleSuggestions.length > 0 ? (
               <div className="mb-2.5 flex flex-wrap gap-1.5">
-                {plan.intake.suggestedReplies.map((suggestion) => (
+                {visibleSuggestions.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
@@ -2023,7 +2088,11 @@ function GuidedPlannerWorkspace({
         <div className="rounded-[18px] border border-white/10 bg-white/[0.02] p-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">Overview</p>
-            <Badge variant="muted">{plan.intake.inferences.length} inferred</Badge>
+            <Badge variant="muted">{sizeProfile.label} mode</Badge>
+          </div>
+          <div className="mt-3 rounded-[14px] border border-white/10 bg-slate-950/35 px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Draft target</p>
+            <p className="mt-1 text-[12px] leading-5 text-slate-300">{buildGuidedModeDescription(plan)}</p>
           </div>
           <div className="mt-3 space-y-2">
             {overviewItems.map((item) => (
@@ -2055,17 +2124,25 @@ function GuidedPlannerWorkspace({
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Context</p>
                 <Badge variant="muted">{plan.intake.sources.length}</Badge>
               </div>
-              <div className="mt-2.5 space-y-2">
-                {plan.intake.sources.map((source) => (
-                  <div key={source.id} className="rounded-[12px] border border-white/8 bg-white/[0.02] px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate text-[12px] font-medium text-white">{source.label}</p>
-                      <Badge variant={source.status === "error" ? "warning" : "muted"}>{source.kind}</Badge>
+              {compactContextView ? (
+                <p className="mt-2 text-[12px] leading-5 text-slate-300">
+                  {plan.intake.sources[0]?.label
+                    ? `${plan.intake.sources[0].label}${plan.intake.sources.length > 1 ? ` + ${plan.intake.sources.length - 1} more sources` : ""}`
+                    : "Linked sources are feeding the blueprint."}
+                </p>
+              ) : (
+                <div className="mt-2.5 space-y-2">
+                  {plan.intake.sources.map((source) => (
+                    <div key={source.id} className="rounded-[12px] border border-white/8 bg-white/[0.02] px-2.5 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-[12px] font-medium text-white">{source.label}</p>
+                        <Badge variant={source.status === "error" ? "warning" : "muted"}>{source.kind}</Badge>
+                      </div>
+                      <p className="mt-1 text-[11px] leading-[18px] text-slate-400">{source.summary}</p>
                     </div>
-                    <p className="mt-1 text-[11px] leading-[18px] text-slate-400">{source.summary}</p>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
 
@@ -2083,18 +2160,51 @@ function GuidedPlannerWorkspace({
   );
 }
 
-function IntakeHint({
-  title,
-  text
+function WorkspaceSizeCard({
+  label,
+  description,
+  metrics,
+  selected,
+  onSelect
 }: {
-  title: string;
-  text: string;
+  label: string;
+  description: string;
+  metrics: string[];
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <div className="rounded-[16px] border border-white/10 bg-white/[0.03] p-3.5">
-      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{title}</p>
-      <p className="mt-1.5 text-[13px] leading-5 text-slate-300">{text}</p>
-    </div>
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "rounded-[16px] border px-3 py-3 text-left transition-colors",
+        selected
+          ? "border-cyan-400/30 bg-cyan-400/10"
+          : "border-white/8 bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.04]"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-white">{label}</p>
+        {selected ? <Badge variant="muted">Selected</Badge> : null}
+      </div>
+      <p className="mt-2 text-[12px] leading-5 text-slate-300">{description}</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {metrics.map((metric) => (
+          <span
+            key={metric}
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]",
+              selected
+                ? "border-cyan-300/25 bg-cyan-300/10 text-cyan-100"
+                : "border-white/10 bg-white/[0.03] text-slate-400"
+            )}
+          >
+            {metric}
+          </span>
+        ))}
+      </div>
+    </button>
   );
 }
 
@@ -2720,9 +2830,24 @@ function buildGuidedProgressItems(plan: WorkspacePlan): Array<{
   description: string;
   tone: "muted" | "success" | "warning";
 }> {
-  const coreMissing = countGuidedCoreMissing(plan);
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+  const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
+  const enabledWorkflows = plan.operations.workflows.filter((workflow) => workflow.enabled).length;
+  const enabledAutomations = plan.operations.automations.filter((automation) => automation.enabled).length;
+  const configuredExternalChannels = plan.operations.channels.filter((channel) => channel.type !== "internal").length;
+  const structureReady =
+    enabledAgents >= sizeProfile.agentCount &&
+    enabledWorkflows >= sizeProfile.workflowCount &&
+    enabledAutomations >= sizeProfile.automationCount &&
+    configuredExternalChannels >= sizeProfile.externalChannelCount;
 
   return [
+    {
+      label: "Mode",
+      value: sizeProfile.label.charAt(0),
+      description: buildGuidedModeDescription(plan),
+      tone: "muted"
+    },
     {
       label: "Decisions Pending",
       value: String(plan.intake.confirmations.length),
@@ -2731,23 +2856,19 @@ function buildGuidedProgressItems(plan: WorkspacePlan): Array<{
       tone: plan.intake.confirmations.length > 0 ? "warning" : "success"
     },
     {
-      label: "Core Fields Missing",
-      value: String(coreMissing),
+      label: "Draft Structure",
+      value: structureReady ? "OK" : String(enabledWorkflows),
+      description: buildGuidedStructureDescription(plan),
+      tone: structureReady ? "success" : "warning"
+    },
+    {
+      label: "Context Harvested",
+      value: String(plan.intake.sources.length),
       description:
-        coreMissing > 0 ? "Company, product, and audience details are still being shaped." : "Core direction is captured.",
-      tone: coreMissing > 0 ? "warning" : "success"
-    },
-    {
-      label: "Drafting in Background",
-      value: String(Math.max(1, plan.intake.inferences.length)),
-      description: `${plan.team.persistentAgents.filter((agent) => agent.enabled).length} agents and ${plan.operations.workflows.filter((workflow) => workflow.enabled).length} workflows are already drafted.`,
-      tone: "muted"
-    },
-    {
-      label: "Review Status",
-      value: plan.intake.reviewRequested ? "On" : "Off",
-      description: plan.intake.reviewRequested ? "True deploy blockers are visible now." : "Open review when the chat draft feels right.",
-      tone: plan.intake.reviewRequested ? "success" : "muted"
+        plan.intake.sources.length > 0
+          ? "Linked context is already feeding the blueprint."
+          : "Add a website, repo, or folder path to sharpen the draft.",
+      tone: plan.intake.sources.length > 0 ? "success" : "muted"
     }
   ];
 }
@@ -2760,7 +2881,9 @@ function buildGuidedOverviewItems(plan: WorkspacePlan): Array<{
   variant: "muted" | "success" | "warning" | "danger";
   icon: typeof Building2;
 }> {
-  return plannerSections.map((section) => {
+  const visibleSectionIds = getGuidedVisibleSectionIds(plan.intake.size);
+
+  return plannerSections.filter((section) => visibleSectionIds.includes(section.id)).map((section) => {
     const health = getPlannerSectionHealth(plan, section.id);
 
     return {
@@ -2772,16 +2895,6 @@ function buildGuidedOverviewItems(plan: WorkspacePlan): Array<{
       icon: section.icon
     };
   });
-}
-
-function countGuidedCoreMissing(plan: WorkspacePlan) {
-  return [
-    plan.company.name,
-    plan.company.mission,
-    plan.company.targetCustomer,
-    plan.product.offer,
-    plan.workspace.name
-  ].filter((value) => !value.trim()).length;
 }
 
 function summarizeGuidedSection(plan: WorkspacePlan, sectionId: PlannerSectionId) {
@@ -2797,7 +2910,7 @@ function summarizeGuidedSection(plan: WorkspacePlan, sectionId: PlannerSectionId
     case "product":
       return plan.product.offer || "Offer and V1 scope are still being drafted.";
     case "operations":
-      return `${plan.operations.workflows.filter((workflow) => workflow.enabled).length} workflows, ${plan.operations.automations.filter((automation) => automation.enabled).length} automations`;
+      return `${plan.operations.workflows.filter((workflow) => workflow.enabled).length} tasks, ${plan.operations.automations.filter((automation) => automation.enabled).length} automations`;
     case "deploy":
     default:
       return plan.intake.reviewRequested ? "Deploy review is open." : "Review not started.";
@@ -2813,11 +2926,53 @@ function summarizeGuidedSectionBadge(
     case "team":
       return `${plan.team.persistentAgents.filter((agent) => agent.enabled).length} Agents`;
     case "operations":
-      return `${plan.operations.workflows.filter((workflow) => workflow.enabled).length} Workflows`;
+      return `${plan.operations.workflows.filter((workflow) => workflow.enabled).length} Tasks`;
     case "deploy":
       return plan.intake.reviewRequested ? `${plan.deploy.blockers.length} Blockers` : "Review Pending";
     default:
       return fallback;
+  }
+}
+
+function buildGuidedModeDescription(plan: WorkspacePlan) {
+  const profile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+
+  return `${profile.agentCount} agent${profile.agentCount === 1 ? "" : "s"}, ${profile.workflowCount} task${profile.workflowCount === 1 ? "" : "s"}${
+    profile.automationCount > 0 ? `, ${profile.automationCount} automation${profile.automationCount === 1 ? "" : "s"}` : ""
+  }${profile.externalChannelCount > 0 ? `, ${profile.externalChannelCount} channel` : ""}.`;
+}
+
+function buildGuidedStructureDescription(plan: WorkspacePlan) {
+  const profile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+  const parts = [
+    `${plan.team.persistentAgents.filter((agent) => agent.enabled).length}/${profile.agentCount} agents`,
+    `${plan.operations.workflows.filter((workflow) => workflow.enabled).length}/${profile.workflowCount} tasks`
+  ];
+
+  if (profile.automationCount > 0) {
+    parts.push(
+      `${plan.operations.automations.filter((automation) => automation.enabled).length}/${profile.automationCount} automations`
+    );
+  }
+
+  if (profile.externalChannelCount > 0) {
+    parts.push(
+      `${plan.operations.channels.filter((channel) => channel.type !== "internal").length}/${profile.externalChannelCount} channels`
+    );
+  }
+
+  return `${parts.join(" · ")} targeted for ${profile.label.toLowerCase()} mode.`;
+}
+
+function getGuidedVisibleSectionIds(size: PlannerWorkspaceSize): PlannerSectionId[] {
+  switch (size) {
+    case "small":
+      return ["company", "workspace", "deploy"];
+    case "medium":
+      return ["company", "product", "workspace", "operations", "deploy"];
+    case "large":
+    default:
+      return ["company", "product", "workspace", "team", "operations", "deploy"];
   }
 }
 

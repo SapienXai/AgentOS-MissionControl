@@ -20,6 +20,7 @@ import type {
   PlannerPersistentAgentSpec,
   PlannerRuntimeState,
   PlannerSandboxSpec,
+  PlannerWorkspaceSize,
   PlannerWorkflowSpec,
   WorkspacePlan,
   WorkspaceTemplate
@@ -33,6 +34,52 @@ const advisorNames: Record<PlannerAdvisorId, string> = {
   growth: "Growth",
   reviewer: "Reviewer"
 };
+
+export type PlannerWorkspaceSizeProfile = {
+  label: string;
+  agentCount: number;
+  workflowCount: number;
+  automationCount: number;
+  externalChannelCount: number;
+  confirmationLimit: number;
+  suggestedReplyLimit: number;
+};
+
+export const plannerWorkspaceSizeOrder: PlannerWorkspaceSize[] = ["small", "medium", "large"];
+
+const plannerWorkspaceSizeProfiles: Record<PlannerWorkspaceSize, PlannerWorkspaceSizeProfile> = {
+  small: {
+    label: "Small",
+    agentCount: 1,
+    workflowCount: 1,
+    automationCount: 0,
+    externalChannelCount: 0,
+    confirmationLimit: 1,
+    suggestedReplyLimit: 2
+  },
+  medium: {
+    label: "Medium",
+    agentCount: 3,
+    workflowCount: 3,
+    automationCount: 1,
+    externalChannelCount: 0,
+    confirmationLimit: 2,
+    suggestedReplyLimit: 3
+  },
+  large: {
+    label: "Large",
+    agentCount: 5,
+    workflowCount: 4,
+    automationCount: 2,
+    externalChannelCount: 1,
+    confirmationLimit: 3,
+    suggestedReplyLimit: 4
+  }
+};
+
+export function getPlannerWorkspaceSizeProfile(size: PlannerWorkspaceSize): PlannerWorkspaceSizeProfile {
+  return plannerWorkspaceSizeProfiles[size] ?? plannerWorkspaceSizeProfiles.medium;
+}
 
 const channelDefinitions: Record<
   PlannerChannelType,
@@ -275,6 +322,10 @@ export function createPlannerIntakeState(seed?: Partial<PlannerIntakeState>): Pl
       .filter(Boolean)
       .slice(0, 3),
     mode: seed?.mode === "advanced" ? "advanced" : "guided",
+    size:
+      seed?.size === "small" || seed?.size === "large"
+        ? seed.size
+        : "medium",
     reviewRequested: Boolean(seed?.reviewRequested),
     turnCount: Math.max(0, Math.floor(seed?.turnCount ?? 0)),
     inferences: (seed?.inferences ?? []).map((inference) => createPlannerInference(inference)),
@@ -525,6 +576,252 @@ export function buildRecommendedFirstMissions(plan: WorkspacePlan) {
   );
 }
 
+function buildSupplementalPlannerAgents(template: WorkspaceTemplate) {
+  const opsLead = createPlannerAgentSpec({
+    id: "ops-lead",
+    role: "Operations Lead",
+    name: "Operations Lead",
+    purpose: "Own automations, reporting cadence, and cross-agent handoffs for the workspace.",
+    responsibilities: ["Maintain the operating cadence", "Wire recurring automations", "Keep handoffs durable"],
+    outputs: ["ops brief", "automation notes"]
+  });
+
+  if (template === "research") {
+    return [
+      createPlannerAgentSpec({
+        id: "analyst",
+        role: "Analyst",
+        name: "Analyst",
+        purpose: "Turn gathered evidence into patterns, themes, and decision-ready summaries.",
+        responsibilities: ["Cluster findings", "Spot repeated signals", "Prepare concise summaries"],
+        outputs: ["insight summary", "theme map"]
+      }),
+      opsLead
+    ];
+  }
+
+  return [opsLead];
+}
+
+function buildSupplementalPlannerWorkflows(
+  template: WorkspaceTemplate,
+  agents: PlannerPersistentAgentSpec[]
+) {
+  const primaryAgentId = agents.find((agent) => agent.enabled && agent.isPrimary)?.id;
+  const reviewerAgentId = findAgentId(agents, "review");
+  const learnerAgentId = findAgentId(agents, "learn");
+  const opsAgentId = findAgentId(agents, "ops");
+
+  return [
+    createPlannerWorkflowSpec({
+      id: "context-sync",
+      name: template === "research" ? "Evidence sync" : "Context sync",
+      goal: "Pull new context from linked sources and keep the blueprint aligned with reality.",
+      trigger: "manual",
+      ownerAgentId: learnerAgentId ?? primaryAgentId,
+      collaboratorAgentIds: [primaryAgentId, reviewerAgentId].filter(Boolean) as string[],
+      successDefinition: "New context is reflected in durable docs, scope, and decision notes.",
+      outputs: ["memory/blueprint.md", "deliverables/<run>/context-sync.md"]
+    }),
+    createPlannerWorkflowSpec({
+      id: "ops-rhythm",
+      name: "Operating rhythm",
+      goal: "Review handoffs, automations, and next-step ownership on a repeatable cadence.",
+      trigger: "cron",
+      ownerAgentId: opsAgentId ?? reviewerAgentId ?? learnerAgentId ?? primaryAgentId,
+      collaboratorAgentIds: [primaryAgentId].filter(Boolean) as string[],
+      successDefinition: "The workspace has a fresh operator brief and an explicit next batch of work.",
+      outputs: ["deliverables/<run>/ops-rhythm.md"]
+    })
+  ];
+}
+
+function buildRecommendedExternalPlannerChannels(template: WorkspaceTemplate) {
+  const channelOrder: PlannerChannelType[] =
+    template === "content"
+      ? ["telegram", "discord", "slack"]
+      : ["slack", "discord", "telegram"];
+
+  return channelOrder.map((type) =>
+    createPlannerChannelSpec(type, {
+      id: `${type}-ops`,
+      purpose:
+        template === "content"
+          ? "Optional distribution or community surface for a larger operating setup."
+          : "Optional external operating surface for a larger workspace.",
+      enabled: false,
+      announce: true
+    })
+  );
+}
+
+function applyPlannerWorkspaceSizeProfile(plan: WorkspacePlan) {
+  const nextPlan = clonePlan(plan);
+  const profile = getPlannerWorkspaceSizeProfile(nextPlan.intake.size);
+
+  nextPlan.team.persistentAgents = resizePlannerAgents(
+    nextPlan.workspace.template,
+    nextPlan.team.persistentAgents,
+    profile.agentCount
+  );
+  nextPlan.operations.channels = resizePlannerChannels(
+    nextPlan.workspace.template,
+    nextPlan.operations.channels,
+    profile.externalChannelCount
+  );
+  nextPlan.operations.workflows = resizePlannerWorkflows(
+    nextPlan.workspace.template,
+    nextPlan.operations.workflows,
+    nextPlan.team.persistentAgents,
+    profile.workflowCount
+  );
+  nextPlan.operations.automations = resizePlannerAutomations(
+    nextPlan.workspace.template,
+    nextPlan.operations.automations,
+    nextPlan.team.persistentAgents,
+    nextPlan.operations.channels,
+    profile.automationCount
+  );
+
+  return nextPlan;
+}
+
+function resizePlannerAgents(
+  template: WorkspaceTemplate,
+  currentAgents: PlannerPersistentAgentSpec[],
+  targetCount: number
+) {
+  if (targetCount <= 0) {
+    return [];
+  }
+
+  const catalog = dedupeById(
+    prioritizePrimaryAgent([
+      ...currentAgents,
+      ...buildRecommendedPlannerAgents(template),
+      ...buildSupplementalPlannerAgents(template)
+    ])
+  );
+
+  return catalog.slice(0, targetCount).map((agent, index) =>
+    createPlannerAgentSpec({
+      ...agent,
+      enabled: true,
+      isPrimary: agent.isPrimary || index === 0
+    })
+  );
+}
+
+function resizePlannerChannels(
+  template: WorkspaceTemplate,
+  currentChannels: PlannerChannelSpec[],
+  externalTargetCount: number
+) {
+  const internalChannel =
+    currentChannels.find((channel) => channel.type === "internal") ??
+    buildRecommendedPlannerChannels()[0];
+  const externalCatalog = dedupeByType([
+    ...currentChannels.filter((channel) => channel.type !== "internal"),
+    ...buildRecommendedExternalPlannerChannels(template)
+  ]);
+
+  return [
+    createPlannerChannelSpec("internal", {
+      ...internalChannel,
+      enabled: true
+    }),
+    ...externalCatalog.slice(0, externalTargetCount)
+  ];
+}
+
+function resizePlannerWorkflows(
+  template: WorkspaceTemplate,
+  currentWorkflows: PlannerWorkflowSpec[],
+  agents: PlannerPersistentAgentSpec[],
+  targetCount: number
+) {
+  if (targetCount <= 0) {
+    return [];
+  }
+
+  const catalog = dedupeById([
+    ...currentWorkflows,
+    ...buildRecommendedPlannerWorkflows(template, agents),
+    ...buildSupplementalPlannerWorkflows(template, agents)
+  ]);
+
+  return catalog.slice(0, targetCount).map((workflow) => alignPlannerWorkflowAgents(workflow, agents));
+}
+
+function resizePlannerAutomations(
+  template: WorkspaceTemplate,
+  currentAutomations: PlannerAutomationSpec[],
+  agents: PlannerPersistentAgentSpec[],
+  channels: PlannerChannelSpec[],
+  targetCount: number
+) {
+  if (targetCount <= 0) {
+    return [];
+  }
+
+  const catalog = dedupeById([
+    ...currentAutomations,
+    ...buildRecommendedPlannerAutomations(template, agents, channels)
+  ]);
+
+  return catalog
+    .slice(0, targetCount)
+    .map((automation) => alignPlannerAutomationDependencies(automation, agents, channels));
+}
+
+function alignPlannerWorkflowAgents(
+  workflow: PlannerWorkflowSpec,
+  agents: PlannerPersistentAgentSpec[]
+) {
+  const enabledAgentIds = new Set(agents.filter((agent) => agent.enabled).map((agent) => agent.id));
+  const primaryAgentId = agents.find((agent) => agent.enabled && agent.isPrimary)?.id;
+  const reviewerAgentId = findAgentId(agents, "review");
+  const learnerAgentId = findAgentId(agents, "learn");
+  const ownerAgentId =
+    workflow.ownerAgentId && enabledAgentIds.has(workflow.ownerAgentId)
+      ? workflow.ownerAgentId
+      : reviewerAgentId ?? learnerAgentId ?? primaryAgentId;
+
+  return createPlannerWorkflowSpec({
+    ...workflow,
+    ownerAgentId,
+    collaboratorAgentIds: workflow.collaboratorAgentIds.filter(
+      (agentId) => enabledAgentIds.has(agentId) && agentId !== ownerAgentId
+    ),
+    enabled: true
+  });
+}
+
+function alignPlannerAutomationDependencies(
+  automation: PlannerAutomationSpec,
+  agents: PlannerPersistentAgentSpec[],
+  channels: PlannerChannelSpec[]
+) {
+  const enabledAgentIds = new Set(agents.filter((agent) => agent.enabled).map((agent) => agent.id));
+  const knownChannelIds = new Set(channels.map((channel) => channel.id));
+  const primaryAgentId = agents.find((agent) => agent.enabled && agent.isPrimary)?.id;
+  const reviewerAgentId = findAgentId(agents, "review");
+  const learnerAgentId = findAgentId(agents, "learn");
+
+  return createPlannerAutomationSpec({
+    ...automation,
+    agentId:
+      automation.agentId && enabledAgentIds.has(automation.agentId)
+        ? automation.agentId
+        : reviewerAgentId ?? learnerAgentId ?? primaryAgentId,
+    channelId:
+      automation.channelId && knownChannelIds.has(automation.channelId)
+        ? automation.channelId
+        : channels[0]?.id,
+    enabled: true
+  });
+}
+
 export function createInitialWorkspacePlan(id = createWorkspacePlanId()): WorkspacePlan {
   const createdAt = new Date().toISOString();
   const template: WorkspaceTemplate = "software";
@@ -629,7 +926,7 @@ export function applyPlannerTemplate(plan: WorkspacePlan, template: WorkspaceTem
 }
 
 export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
-  const nextPlan = clonePlan(plan);
+  let nextPlan = clonePlan(plan);
   nextPlan.runtime = createPlannerRuntimeState(nextPlan.id, nextPlan.runtime);
 
   nextPlan.intake = createPlannerIntakeState({
@@ -720,6 +1017,8 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
       (automation, index, automations) =>
         automations.findIndex((entry) => entry.id === automation.id) === index
     );
+
+  nextPlan = applyPlannerWorkspaceSizeProfile(nextPlan);
 
   nextPlan.operations.hooks = nextPlan.operations.hooks
     .map((hook) => createPlannerHookSpec(hook))
@@ -1129,8 +1428,10 @@ function buildArchitectSummary(
   warnings: string[],
   reviewMode: boolean
 ) {
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+
   if (!plan.intake.started) {
-    return "Start with one prompt. Share the project goal, website, repo, or folder and the architect will draft the workspace before asking for confirmation.";
+    return `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests full project context, drafts the team, and prepares the workspace blueprint.`;
   }
 
   const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
@@ -1151,7 +1452,7 @@ function buildArchitectSummary(
       plan.intake.sources.length > 0
         ? `I already harvested ${plan.intake.sources.length} context source${plan.intake.sources.length === 1 ? "" : "s"}.`
         : "Give me a website, repo, or short brief and I will infer the first draft.",
-      `${enabledAgents} agents, ${enabledWorkflows} workflows, and ${enabledAutomations} automations are drafted in the background.`,
+      `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are drafted for ${sizeProfile.label.toLowerCase()} mode.`,
       confirmations > 0
         ? `Only ${confirmations} high-value decision${confirmations === 1 ? "" : "s"} still need your input.`
         : "The draft is coherent. I can open the full blueprint or move into deploy review."
@@ -1165,7 +1466,7 @@ function buildArchitectSummary(
     plan.company.targetCustomer
       ? `Primary audience: ${plan.company.targetCustomer}.`
       : "Target customer is still missing.",
-    `${enabledAgents} agents, ${enabledWorkflows} workflows, and ${enabledAutomations} automations are configured.`,
+    `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
     confirmations > 0
       ? `${confirmations} confirmation item${confirmations === 1 ? "" : "s"} still need your input.`
       : blockers.length > 0
@@ -1369,6 +1670,7 @@ function collectPlanBlockers(plan: WorkspacePlan) {
 
 function collectPlanWarnings(plan: WorkspacePlan) {
   const warnings: string[] = [];
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
 
   if (plan.product.nonGoals.length === 0) {
     warnings.push("No non-goals are defined for V1.");
@@ -1386,15 +1688,18 @@ function collectPlanWarnings(plan: WorkspacePlan) {
     warnings.push("Critical stack decisions are not captured yet.");
   }
 
-  if (!plan.operations.automations.some((entry) => entry.enabled)) {
+  if (sizeProfile.automationCount > 0 && !plan.operations.automations.some((entry) => entry.enabled)) {
     warnings.push("No automation loops are enabled.");
   }
 
-  if (!plan.operations.channels.some((entry) => entry.enabled && entry.type !== "internal")) {
+  if (
+    sizeProfile.externalChannelCount > 0 &&
+    !plan.operations.channels.some((entry) => entry.type !== "internal")
+  ) {
     warnings.push("Only internal channels are configured.");
   }
 
-  if (plan.team.maxParallelRuns < 2) {
+  if (sizeProfile.agentCount >= 3 && plan.team.maxParallelRuns < 2) {
     warnings.push("Parallel run limit is conservative for a multi-agent workspace.");
   }
 
@@ -1403,6 +1708,7 @@ function collectPlanWarnings(plan: WorkspacePlan) {
 
 function buildPlannerConfirmations(plan: WorkspacePlan) {
   const confirmations: string[] = [];
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const hasReadyWebsiteSource = plan.intake.sources.some(
     (entry) => entry.kind === "website" && entry.status === "ready"
   );
@@ -1458,7 +1764,10 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
     confirmations.push(`I could not inspect ${source.label}. Confirm the company context manually if this source matters.`);
   }
 
-  return uniqueStrings(confirmations).slice(0, hasReadyWebsiteSource ? 2 : 3);
+  return uniqueStrings(confirmations).slice(
+    0,
+    Math.min(hasReadyWebsiteSource ? 2 : 3, sizeProfile.confirmationLimit)
+  );
 }
 
 function buildPlannerInferences(plan: WorkspacePlan) {
@@ -1603,6 +1912,7 @@ function buildPlannerInferences(plan: WorkspacePlan) {
 
 function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string[]) {
   const suggestions: string[] = [];
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const sourceAudience = inferAudienceFromPlannerSources(plan);
 
   if (!plan.company.targetCustomer) {
@@ -1644,7 +1954,7 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
     suggestions.push("Move into deploy review.");
   }
 
-  return uniqueStrings(suggestions).slice(0, 4);
+  return uniqueStrings(suggestions).slice(0, sizeProfile.suggestedReplyLimit);
 }
 
 function buildTargetCustomerPrompt(plan: WorkspacePlan) {
@@ -2155,6 +2465,24 @@ function describeRecommendedOutputs(id: string, template: WorkspaceTemplate) {
   return template === "research"
     ? ["research summary", "evidence log"]
     : ["implementation artifacts", "handoff summary"];
+}
+
+function prioritizePrimaryAgent(agents: PlannerPersistentAgentSpec[]) {
+  const primaryAgent = agents.find((agent) => agent.isPrimary) ?? agents[0];
+
+  if (!primaryAgent) {
+    return agents;
+  }
+
+  return [primaryAgent, ...agents.filter((agent) => agent.id !== primaryAgent.id)];
+}
+
+function dedupeById<T extends { id: string }>(items: T[]) {
+  return items.filter((item, index, list) => list.findIndex((entry) => entry.id === item.id) === index);
+}
+
+function dedupeByType<T extends { type: string }>(items: T[]) {
+  return items.filter((item, index, list) => list.findIndex((entry) => entry.type === item.type) === index);
 }
 
 function normalizeText(value: string) {

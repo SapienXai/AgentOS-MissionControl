@@ -20,6 +20,7 @@ import {
   createPlannerSandboxSpec,
   createPlannerWorkflowSpec,
   enrichWorkspacePlan,
+  getPlannerWorkspaceSizeProfile,
   synthesizePlannerAdvisors
 } from "@/lib/openclaw/planner-core";
 import {
@@ -834,6 +835,8 @@ function buildPlannerArchitectPrompt(
   harvestedContext: PlannerHarvestResult,
   advisorNotes: PlannerAdvisorNote[]
 ) {
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+
   return [
     "You are Workspace Architect, the primary planning agent inside Mission Control.",
     "Return valid JSON only. Do not wrap the JSON in markdown fences.",
@@ -847,12 +850,23 @@ function buildPlannerArchitectPrompt(
     "- When the operator gives a company or workspace name, apply it immediately.",
     "- When a domain implies a likely brand name, use it unless contradicted.",
     "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
+    "- Respect the selected workspace size. Keep the operator-facing chat as lean as the selected size, but still complete the underlying project context and blueprint.",
     "- Patch only fields that should change.",
     "",
     "Context JSON:",
     JSON.stringify(
       {
         operatorMessage: latestMessage,
+        selectedWorkspaceSize: {
+          id: plan.intake.size,
+          label: sizeProfile.label,
+          targets: {
+            agents: sizeProfile.agentCount,
+            tasks: sizeProfile.workflowCount,
+            automations: sizeProfile.automationCount,
+            externalChannels: sizeProfile.externalChannelCount
+          }
+        },
         architectSummary: plan.architectSummary,
         currentPlan: createPlannerPromptContext(plan),
         harvestedContext,
@@ -904,6 +918,8 @@ function buildPlannerAdvisorPrompt(
 }
 
 function createPlannerPromptContext(plan: WorkspacePlan) {
+  const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+
   return {
     company: plan.company,
     product: plan.product,
@@ -917,6 +933,13 @@ function createPlannerPromptContext(plan: WorkspacePlan) {
     operations: plan.operations,
     intake: {
       mode: plan.intake.mode,
+      size: plan.intake.size,
+      sizeTargets: {
+        agents: sizeProfile.agentCount,
+        tasks: sizeProfile.workflowCount,
+        automations: sizeProfile.automationCount,
+        externalChannels: sizeProfile.externalChannelCount
+      },
       reviewRequested: plan.intake.reviewRequested,
       confirmations: plan.intake.confirmations,
       sources: plan.intake.sources,

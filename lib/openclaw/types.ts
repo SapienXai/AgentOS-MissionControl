@@ -432,6 +432,8 @@ export type PlannerContextSourceStatus = "ready" | "error";
 
 export type PlannerExperienceMode = "guided" | "advanced";
 
+export type PlannerWorkspaceSize = "small" | "medium" | "large";
+
 export type PlannerDecisionStatus = "inferred" | "confirmed" | "needs-confirmation";
 
 export type PlannerRuntimeMode = "agent" | "fallback";
@@ -482,6 +484,7 @@ export interface PlannerIntakeState {
   sources: PlannerContextSource[];
   confirmations: string[];
   mode: PlannerExperienceMode;
+  size: PlannerWorkspaceSize;
   reviewRequested: boolean;
   turnCount: number;
   inferences: PlannerInference[];
