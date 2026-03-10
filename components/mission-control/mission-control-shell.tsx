@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { ArrowUpCircle, LoaderCircle, MoonStar, RefreshCw, Settings2, SunMedium } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 
@@ -1096,14 +1095,17 @@ function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
               : "border-white/[0.08] bg-white/[0.03]"
           )}
         >
-          <Image
-            src="/assets/logo.png"
-            alt="AgentOS logo"
-            width={22}
-            height={22}
-            className="h-[22px] w-[22px] object-contain"
-            draggable={false}
-          />
+          <video
+            aria-hidden="true"
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            className="h-full w-full scale-[1.15] object-cover"
+          >
+            <source src="/assets/logo.webm" type="video/webm" />
+          </video>
         </span>
         <p
           className={cn(
