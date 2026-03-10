@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/readme/agentos1.webp" alt="AgentOS mission-control interface" width="100%" />
+  <img src="public/readme/banner.jpeg" alt="AgentOS mission-control interface" width="100%" />
 
 # AgentOS | Mission Control
 
