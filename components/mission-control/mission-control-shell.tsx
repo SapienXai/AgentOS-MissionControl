@@ -1,6 +1,15 @@
 "use client";
 
-import { ArrowUpCircle, LoaderCircle, MoonStar, RefreshCw, Settings2, SunMedium } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  CheckCircle2,
+  LoaderCircle,
+  MoonStar,
+  RefreshCw,
+  Settings2,
+  SunMedium
+} from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 
 import { MissionCanvas } from "@/components/mission-control/canvas";
@@ -133,6 +142,10 @@ export function MissionControlShell({
   ]
     .filter(Boolean)
     .join(" · ");
+  const isUpdateRunning = updateRunState === "running";
+  const isUpdateFinished = updateRunState === "success" || updateRunState === "error";
+  const updateDialogTitle = resolveUpdateDialogTitle(updateRunState);
+  const updateDialogDescription = resolveUpdateDialogDescription(updateRunState);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const shouldShowOnboarding =
     (!isOpenClawReady && !isOnboardingDismissed) || showOnboardingReadyState || isOnboardingForcedOpen;
@@ -1213,7 +1226,7 @@ export function MissionControlShell({
         >
           <DialogContent
             className={cn(
-              "max-w-[560px]",
+              "max-w-[468px] gap-5 p-5 sm:p-6",
               surfaceTheme === "light"
                 ? "border-[#d7c5b7] bg-[rgba(252,247,241,0.98)] text-[#4a382c] shadow-[0_30px_80px_rgba(161,125,101,0.2)]"
                 : "border-white/10 bg-slate-950/94 text-slate-100"
@@ -1221,143 +1234,234 @@ export function MissionControlShell({
           >
             <DialogHeader>
               <DialogTitle className={surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"}>
-                Update OpenClaw
+                {updateDialogTitle}
               </DialogTitle>
               <DialogDescription className={surfaceTheme === "light" ? "text-[#7e6555]" : "text-slate-400"}>
-                This runs <span className="font-mono">openclaw update</span> against the installed CLI and may briefly
-                interrupt local gateway activity.
+                {updateDialogDescription}
               </DialogDescription>
             </DialogHeader>
 
-            <div
-              className={cn(
-                "rounded-[22px] border px-4 py-4",
-                surfaceTheme === "light"
-                  ? "border-[#e3d4c8] bg-[#fffaf6]"
-                  : "border-white/8 bg-white/[0.03]"
-              )}
-            >
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <p
-                    className={cn(
-                      "text-[10px] uppercase tracking-[0.24em]",
-                      surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                    )}
-                  >
-                    Version target
-                  </p>
-                  <div className="mt-2 flex items-baseline gap-2">
-                    <p
-                      className={cn(
-                        "font-display text-[1.2rem]",
-                        surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
-                      )}
-                    >
-                      v{snapshot.diagnostics.latestVersion || snapshot.diagnostics.version || "unknown"}
-                    </p>
-                    <p className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
-                      from v{snapshot.diagnostics.version || "unknown"}
-                    </p>
-                  </div>
-                </div>
-                {snapshot.diagnostics.updateAvailable ? (
-                  <span
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.22em]",
-                      surfaceTheme === "light"
-                        ? "border-amber-300 bg-amber-100 text-amber-900"
-                        : "border-amber-300/35 bg-amber-300/14 text-amber-100"
-                    )}
-                  >
-                    Update pending
-                  </span>
-                ) : null}
-              </div>
-
-              <div className="mt-4 space-y-3 text-xs">
-                <div>
-                  <p className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}>Install root</p>
-                  <p
-                    className={cn(
-                      "mt-1 break-all font-mono leading-5",
-                      surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                    )}
-                  >
-                    {snapshot.diagnostics.updateRoot || "Unavailable"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"}>
-                    Install mode
-                  </span>
-                  <span
-                    className={cn(
-                      "rounded-full border px-2 py-1 font-mono text-[11px]",
-                      surfaceTheme === "light"
-                        ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#7b6453]"
-                        : "border-white/10 bg-white/[0.05] text-slate-300"
-                    )}
-                  >
-                    {updateInstallDescriptor || "unknown"}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div
-              className={cn(
-                "rounded-[20px] border px-4 py-3 text-sm",
-                activeRuntimeCount > 0
-                  ? surfaceTheme === "light"
-                    ? "border-rose-300/80 bg-rose-50 text-rose-800"
-                    : "border-rose-300/25 bg-rose-300/10 text-rose-100"
-                  : surfaceTheme === "light"
-                    ? "border-[#e3d4c8] bg-[#fffaf6] text-[#745e4f]"
-                    : "border-white/8 bg-white/[0.03] text-slate-300"
-              )}
-            >
-              {activeRuntimeCount > 0
-                ? `${activeRuntimeCount} active or queued runtime${activeRuntimeCount === 1 ? "" : "s"} may be interrupted during the update.`
-                : "No active runtimes are currently tracked, so the update risk is lower."}
-            </div>
-
-            <div
-              className={cn(
-                "rounded-[22px] border",
-                surfaceTheme === "light"
-                  ? "border-[#e3d4c8] bg-[#fffaf6]"
-                  : "border-white/8 bg-white/[0.03]"
-              )}
-            >
+            {isUpdateFinished ? (
               <div
                 className={cn(
-                  "flex items-center justify-between border-b px-4 py-3",
-                  surfaceTheme === "light" ? "border-[#eadccf]" : "border-white/8"
-                )}
-              >
-                <p
-                  className={cn(
-                    "text-[10px] uppercase tracking-[0.24em]",
-                    surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                  )}
-                >
-                  Update log
-                </p>
-                <span className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
-                  {updateStatusMessage || updateResultMessage || "Waiting for confirmation"}
-                </span>
-              </div>
-              <pre
-                className={cn(
-                  "max-h-[240px] min-h-[140px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[11px] leading-5",
+                  "space-y-4",
                   surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
                 )}
               >
-                {updateLog ||
-                  "No command output yet.\n\nConfirm the update to run openclaw update and stream its output here."}
-              </pre>
-            </div>
+                <div
+                  className={cn(
+                    "rounded-[24px] border px-4 py-5",
+                    resolveUpdateResultPanelClassName(updateRunState, surfaceTheme)
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={cn(
+                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
+                        resolveUpdateResultIconWrapClassName(updateRunState, surfaceTheme)
+                      )}
+                    >
+                      {updateRunState === "success" ? (
+                        <CheckCircle2 className="h-5 w-5" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-display text-[1.05rem] leading-6">
+                        {updateRunState === "success" ? "OpenClaw is up to date" : "Update needs attention"}
+                      </p>
+                      <p className="mt-1 text-sm leading-6">
+                        {updateResultMessage ||
+                          (updateRunState === "success"
+                            ? "The update finished successfully."
+                            : "The update did not finish cleanly.")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div
+                      className={cn(
+                        "rounded-[18px] border px-3 py-3",
+                        surfaceTheme === "light" ? "border-white/70 bg-white/70" : "border-white/10 bg-slate-950/30"
+                      )}
+                    >
+                      <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
+                        Installed version
+                      </p>
+                      <p className="mt-2 font-display text-lg text-inherit">
+                        v{snapshot.diagnostics.version || snapshot.diagnostics.latestVersion || "unknown"}
+                      </p>
+                    </div>
+                    <div
+                      className={cn(
+                        "rounded-[18px] border px-3 py-3",
+                        surfaceTheme === "light" ? "border-white/70 bg-white/70" : "border-white/10 bg-slate-950/30"
+                      )}
+                    >
+                      <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
+                        Install mode
+                      </p>
+                      <p className="mt-2 text-sm font-medium text-inherit">{updateInstallDescriptor || "unknown"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className={cn(
+                    "rounded-[20px] border",
+                    surfaceTheme === "light"
+                      ? "border-[#e3d4c8] bg-[#fffaf6]"
+                      : "border-white/8 bg-white/[0.03]"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "flex items-center justify-between border-b px-4 py-3",
+                      surfaceTheme === "light" ? "border-[#eadccf]" : "border-white/8"
+                    )}
+                  >
+                    <p
+                      className={cn(
+                        "text-[10px] uppercase tracking-[0.24em]",
+                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                      )}
+                    >
+                      Update log
+                    </p>
+                    <span className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
+                      {updateRunState === "success" ? "Completed" : "Failed"}
+                    </span>
+                  </div>
+                  <pre
+                    className={cn(
+                      "max-h-[180px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[11px] leading-5",
+                      surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                    )}
+                  >
+                    {updateLog || "No command output was captured."}
+                  </pre>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div
+                  className={cn(
+                    "grid gap-3 sm:grid-cols-2",
+                    surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "rounded-[20px] border px-4 py-4",
+                      surfaceTheme === "light"
+                        ? "border-[#e3d4c8] bg-[#fffaf6]"
+                        : "border-white/8 bg-white/[0.03]"
+                    )}
+                  >
+                    <p
+                      className={cn(
+                        "text-[10px] uppercase tracking-[0.24em]",
+                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                      )}
+                    >
+                      Version target
+                    </p>
+                    <p className="mt-2 font-display text-[1.1rem] leading-6 text-inherit">
+                      v{snapshot.diagnostics.latestVersion || snapshot.diagnostics.version || "unknown"}
+                    </p>
+                    <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
+                      Current: v{snapshot.diagnostics.version || "unknown"}
+                    </p>
+                  </div>
+
+                  <div
+                    className={cn(
+                      "rounded-[20px] border px-4 py-4",
+                      surfaceTheme === "light"
+                        ? "border-[#e3d4c8] bg-[#fffaf6]"
+                        : "border-white/8 bg-white/[0.03]"
+                    )}
+                  >
+                    <p
+                      className={cn(
+                        "text-[10px] uppercase tracking-[0.24em]",
+                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                      )}
+                    >
+                      Install mode
+                    </p>
+                    <p className="mt-2 text-sm font-medium leading-6 text-inherit">{updateInstallDescriptor || "unknown"}</p>
+                    <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
+                      {compactPath(snapshot.diagnostics.updateRoot || "") || "Install root unavailable"}
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className={cn(
+                    "rounded-[20px] border px-4 py-3 text-sm",
+                    activeRuntimeCount > 0
+                      ? surfaceTheme === "light"
+                        ? "border-rose-300/80 bg-rose-50 text-rose-800"
+                        : "border-rose-300/25 bg-rose-300/10 text-rose-100"
+                      : surfaceTheme === "light"
+                        ? "border-[#e3d4c8] bg-[#fffaf6] text-[#745e4f]"
+                        : "border-white/8 bg-white/[0.03] text-slate-300"
+                  )}
+                >
+                  {activeRuntimeCount > 0
+                    ? `${activeRuntimeCount} active or queued runtime${activeRuntimeCount === 1 ? "" : "s"} may be interrupted during the update.`
+                    : "No active runtimes are currently tracked, so the update risk is lower."}
+                </div>
+
+                {isUpdateRunning ? (
+                  <div
+                    className={cn(
+                      "rounded-[20px] border",
+                      surfaceTheme === "light"
+                        ? "border-[#e3d4c8] bg-[#fffaf6]"
+                        : "border-white/8 bg-white/[0.03]"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 border-b px-4 py-3",
+                        surfaceTheme === "light" ? "border-[#eadccf]" : "border-white/8"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 items-center justify-center rounded-2xl border",
+                          surfaceTheme === "light"
+                            ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#7b6453]"
+                            : "border-white/10 bg-white/[0.05] text-slate-200"
+                        )}
+                      >
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className={surfaceTheme === "light" ? "text-sm font-medium text-[#4a382c]" : "text-sm font-medium text-white"}>
+                          Update in progress
+                        </p>
+                        <p className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
+                          {updateStatusMessage || "Streaming OpenClaw output..."}
+                        </p>
+                      </div>
+                    </div>
+                    <pre
+                      className={cn(
+                        "max-h-[180px] min-h-[120px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[11px] leading-5",
+                        surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                      )}
+                    >
+                      {updateLog || "Waiting for command output..."}
+                    </pre>
+                  </div>
+                ) : null}
+              </>
+            )}
 
             <DialogFooter>
               <Button
@@ -1367,39 +1471,97 @@ export function MissionControlShell({
                   setIsUpdateDialogOpen(false);
                   resetUpdateDialogState();
                 }}
-                disabled={updateRunState === "running"}
+                disabled={isUpdateRunning}
                 className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
               >
-                {updateRunState === "success" || updateRunState === "error" ? "Close" : "Cancel"}
+                {isUpdateFinished ? "Done" : "Cancel"}
               </Button>
-              <Button
-                type="button"
-                onClick={runOpenClawUpdate}
-                disabled={updateRunState === "running"}
-                className={cn(
-                  snapshot.diagnostics.updateAvailable
-                    ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-400/20 hover:bg-amber-300"
-                    : "",
-                  surfaceTheme === "light" && !snapshot.diagnostics.updateAvailable
-                    ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                    : ""
-                )}
-              >
-                {updateRunState === "running" ? (
-                  <>
-                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                    Updating...
-                  </>
-                ) : (
-                  "Update now"
-                )}
-              </Button>
+              {isUpdateFinished ? null : (
+                <Button
+                  type="button"
+                  onClick={runOpenClawUpdate}
+                  disabled={isUpdateRunning}
+                  className={cn(
+                    snapshot.diagnostics.updateAvailable
+                      ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-400/20 hover:bg-amber-300"
+                      : "",
+                    surfaceTheme === "light" && !snapshot.diagnostics.updateAvailable
+                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                      : ""
+                  )}
+                >
+                  {isUpdateRunning ? (
+                    <>
+                      <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    "Update now"
+                  )}
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
     </div>
   );
+}
+
+function resolveUpdateDialogTitle(runState: UpdateRunState) {
+  if (runState === "running") {
+    return "Updating OpenClaw";
+  }
+
+  if (runState === "success") {
+    return "Update complete";
+  }
+
+  if (runState === "error") {
+    return "Update failed";
+  }
+
+  return "Update OpenClaw";
+}
+
+function resolveUpdateDialogDescription(runState: UpdateRunState) {
+  if (runState === "running") {
+    return "OpenClaw is being updated now. Local gateway activity may pause briefly while the CLI is replaced.";
+  }
+
+  if (runState === "success") {
+    return "The CLI update finished. Review the result below, then close this panel when you are done.";
+  }
+
+  if (runState === "error") {
+    return "The update did not complete cleanly. Review the result and captured output before trying again.";
+  }
+
+  return "This runs openclaw update against the installed CLI and may briefly interrupt local gateway activity.";
+}
+
+function resolveUpdateResultPanelClassName(runState: UpdateRunState, surfaceTheme: SurfaceTheme) {
+  if (runState === "success") {
+    return surfaceTheme === "light"
+      ? "border-emerald-300 bg-emerald-50/80 text-emerald-950"
+      : "border-emerald-300/25 bg-emerald-300/10 text-emerald-50";
+  }
+
+  return surfaceTheme === "light"
+    ? "border-rose-300 bg-rose-50/90 text-rose-950"
+    : "border-rose-300/25 bg-rose-300/10 text-rose-50";
+}
+
+function resolveUpdateResultIconWrapClassName(runState: UpdateRunState, surfaceTheme: SurfaceTheme) {
+  if (runState === "success") {
+    return surfaceTheme === "light"
+      ? "border-emerald-300 bg-white/80 text-emerald-700"
+      : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200";
+  }
+
+  return surfaceTheme === "light"
+    ? "border-rose-300 bg-white/80 text-rose-700"
+    : "border-rose-300/25 bg-rose-300/10 text-rose-200";
 }
 
 function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
@@ -1520,6 +1682,13 @@ function CanvasTopBar({
     snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk && snapshot.diagnostics.modelReadiness.ready;
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
+  const settingsSecondaryButtonStyles = settingsButtonClassName(surfaceTheme, "secondary");
+  const settingsPrimaryButtonStyles = settingsButtonClassName(surfaceTheme, "primary");
+  const settingsWarningButtonStyles = settingsButtonClassName(surfaceTheme, "warning");
+  const settingsWarningSolidButtonStyles = settingsButtonClassName(surfaceTheme, "warningSolid");
+  const settingsChromeButtonStyles = settingsChromeButtonClassName(surfaceTheme);
+  const settingsThemeSwitchTrackStyles = settingsThemeSwitchTrackClassName(surfaceTheme);
+  const settingsThemeSwitchThumbStyles = settingsThemeSwitchThumbClassName(surfaceTheme);
 
   return (
     <div className="flex w-full items-center justify-between px-0 pt-6">
@@ -1570,20 +1739,10 @@ function CanvasTopBar({
             aria-label={surfaceTheme === "light" ? "Switch to dark theme" : "Switch to light theme"}
             aria-checked={surfaceTheme === "light"}
             onClick={onToggleTheme}
-            className={cn(
-              "relative inline-flex h-7 w-14 items-center rounded-full border transition-colors",
-              surfaceTheme === "light"
-                ? "border-[#d0bcae] bg-[#eaded3]"
-                : "border-white/10 bg-white/[0.08]"
-            )}
+            className={settingsThemeSwitchTrackStyles}
           >
             <span
-              className={cn(
-                "absolute left-1 inline-flex h-5 w-5 items-center justify-center rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.18)] transition-transform",
-                surfaceTheme === "light"
-                  ? "translate-x-7 bg-[#c8946f] text-white"
-                  : "translate-x-0 bg-cyan-300 text-slate-950"
-              )}
+              className={settingsThemeSwitchThumbStyles}
             >
               {surfaceTheme === "light" ? (
                 <SunMedium className="h-3 w-3" />
@@ -1598,12 +1757,7 @@ function CanvasTopBar({
             aria-expanded={isSettingsOpen}
             aria-haspopup="menu"
             onClick={onToggleSettings}
-            className={cn(
-              "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors",
-              surfaceTheme === "light"
-                ? "border-[#d0bcae] bg-[#efe5dc] text-[#7f6554] hover:bg-[#e7d9ce]"
-                : "border-white/10 bg-white/[0.08] text-slate-200 hover:bg-white/[0.12]"
-            )}
+            className={settingsChromeButtonStyles}
           >
             <Settings2 className="h-3.5 w-3.5" />
           </button>
@@ -1707,12 +1861,7 @@ function CanvasTopBar({
                 <button
                   type="button"
                   onClick={onOpenUpdateDialog}
-                  className={cn(
-                    "mt-2.5 inline-flex items-center justify-center rounded-[12px] border px-2.5 py-1 text-[9px] uppercase tracking-[0.18em] transition-colors",
-                    surfaceTheme === "light"
-                      ? "border-amber-400/90 bg-amber-900 text-amber-50 hover:bg-amber-800"
-                      : "border-amber-300/40 bg-amber-300/18 text-amber-100 hover:bg-amber-300/24"
-                  )}
+                  className={cn("mt-2.5 inline-flex items-center justify-center py-1", settingsWarningSolidButtonStyles)}
                 >
                   Update now
                 </button>
@@ -1766,6 +1915,49 @@ function CanvasTopBar({
                 {snapshot.diagnostics.updateInfo?.trim() ||
                   "No additional update message was returned in the latest OpenClaw status snapshot."}
               </p>
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    void onCheckForUpdates();
+                  }}
+                  disabled={isCheckingForUpdates}
+                  className={cn(
+                    "w-full disabled:cursor-wait",
+                    snapshot.diagnostics.updateAvailable
+                      ? settingsWarningButtonStyles
+                      : settingsSecondaryButtonStyles
+                  )}
+                >
+                  {isCheckingForUpdates ? (
+                    <>
+                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                      Check for updates
+                    </>
+                  )}
+                </Button>
+                {lastCheckedAt ? (
+                  <p
+                    className={cn(
+                      "mt-2 text-center text-[9px]",
+                      surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+                    )}
+                  >
+                    Last checked at{" "}
+                    {new Date(lastCheckedAt).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit"
+                    })}
+                  </p>
+                ) : null}
+              </div>
             </div>
 
             <div
@@ -1817,12 +2009,7 @@ function CanvasTopBar({
                   size="sm"
                   variant="secondary"
                   onClick={() => onOpenSetupWizard(snapshot.diagnostics.rpcOk ? "models" : "system")}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                  )}
+                  className={settingsSecondaryButtonStyles}
                 >
                   Open wizard
                 </Button>
@@ -1834,12 +2021,7 @@ function CanvasTopBar({
                   onClick={() => {
                     void onRunModelRefresh();
                   }}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                  )}
+                  className={settingsSecondaryButtonStyles}
                 >
                   Refresh setup
                 </Button>
@@ -1896,12 +2078,7 @@ function CanvasTopBar({
                     onClick={() => {
                       void onControlGateway("start");
                     }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#b89374] bg-[#ecd4c1] text-[#4a3426] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e4c6af] hover:text-[#38261b]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
+                    className={settingsSecondaryButtonStyles}
                   >
                     {gatewayControlAction === "start" ? "Starting..." : "Start"}
                   </Button>
@@ -1913,12 +2090,7 @@ function CanvasTopBar({
                     onClick={() => {
                       void onControlGateway("restart");
                     }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#b89374] bg-[#ecd4c1] text-[#4a3426] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e4c6af] hover:text-[#38261b]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
+                    className={settingsSecondaryButtonStyles}
                   >
                     {gatewayControlAction === "restart" ? "Restarting..." : "Restart"}
                   </Button>
@@ -1930,12 +2102,7 @@ function CanvasTopBar({
                     onClick={() => {
                       void onControlGateway("stop");
                     }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#b89374] bg-[#ecd4c1] text-[#4a3426] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e4c6af] hover:text-[#38261b]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
+                    className={settingsSecondaryButtonStyles}
                   >
                     {gatewayControlAction === "stop" ? "Stopping..." : "Stop"}
                   </Button>
@@ -2010,12 +2177,7 @@ function CanvasTopBar({
                     onClick={() => {
                       void onRunModelSetDefault();
                     }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
+                    className={settingsSecondaryButtonStyles}
                   >
                     {isModelActionRunning ? "Working..." : "Use selected"}
                   </Button>
@@ -2027,12 +2189,7 @@ function CanvasTopBar({
                     onClick={() => {
                       onOpenSetupWizard("models");
                     }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
+                    className={settingsSecondaryButtonStyles}
                   >
                     +Add more
                   </Button>
@@ -2115,12 +2272,7 @@ function CanvasTopBar({
                   onClick={() => {
                     void onSaveWorkspaceRootSettings(null);
                   }}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                  )}
+                  className={settingsSecondaryButtonStyles}
                 >
                   Use default
                 </Button>
@@ -2131,12 +2283,7 @@ function CanvasTopBar({
                   onClick={() => {
                     void onSaveWorkspaceRootSettings(workspaceRootDraft);
                   }}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                      : ""
-                  )}
+                  className={settingsPrimaryButtonStyles}
                 >
                   {isSavingWorkspaceRoot ? (
                     <>
@@ -2228,12 +2375,7 @@ function CanvasTopBar({
                   onClick={() => {
                     void onSaveGatewaySettings(null);
                   }}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                      : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                  )}
+                  className={settingsSecondaryButtonStyles}
                 >
                   Use local
                 </Button>
@@ -2244,12 +2386,7 @@ function CanvasTopBar({
                   onClick={() => {
                     void onSaveGatewaySettings(gatewayDraft);
                   }}
-                  className={cn(
-                    "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                      : ""
-                  )}
+                  className={settingsPrimaryButtonStyles}
                 >
                   {isSavingGateway ? (
                     <>
@@ -2263,50 +2400,6 @@ function CanvasTopBar({
               </div>
             </div>
 
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                void onCheckForUpdates();
-              }}
-              disabled={isCheckingForUpdates}
-              className={cn(
-                "mt-2.5 inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[13px] border px-3 text-[9px] uppercase tracking-[0.18em] transition-colors disabled:cursor-wait disabled:opacity-70",
-                snapshot.diagnostics.updateAvailable
-                  ? surfaceTheme === "light"
-                    ? "border-amber-400/90 bg-amber-100 text-amber-900 hover:bg-amber-200"
-                    : "border-amber-300/35 bg-amber-300/16 text-amber-100 hover:bg-amber-300/22"
-                  : surfaceTheme === "light"
-                    ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                    : "border-cyan-400/18 bg-cyan-400/10 text-cyan-100 hover:bg-cyan-400/14"
-              )}
-            >
-              {isCheckingForUpdates ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-              {isCheckingForUpdates
-                ? "Checking..."
-                : snapshot.diagnostics.updateAvailable
-                  ? "Update available"
-                  : "Check for update"}
-            </button>
-
-            {lastCheckedAt ? (
-              <p
-                className={cn(
-                  "mt-2 text-center text-[9px]",
-                  surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
-                )}
-              >
-                Last checked at{" "}
-                {new Date(lastCheckedAt).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit"
-                })}
-              </p>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -2432,6 +2525,74 @@ function formatHealthLabel(health: MissionControlSnapshot["diagnostics"]["health
     default:
       return "Offline";
   }
+}
+
+type SettingsButtonTone = "secondary" | "primary" | "warning" | "warningSolid";
+
+function settingsButtonClassName(surfaceTheme: SurfaceTheme, tone: SettingsButtonTone) {
+  const base =
+    "h-8 rounded-[12px] border px-2.5 text-[9px] uppercase tracking-[0.18em] transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:scale-[0.985]";
+
+  if (tone === "primary") {
+    return cn(
+      base,
+      surfaceTheme === "light"
+        ? "border-[#c8946f] bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461] hover:border-[#b88461] hover:text-white active:bg-[#a97553] active:border-[#a97553]"
+        : "border-cyan-300/30 bg-cyan-300 text-slate-950 shadow-[0_12px_28px_rgba(34,211,238,0.2)] hover:bg-cyan-200 hover:border-cyan-200 hover:text-slate-950 active:bg-cyan-100 active:border-cyan-100"
+    );
+  }
+
+  if (tone === "warning") {
+    return cn(
+      base,
+      surfaceTheme === "light"
+        ? "border-amber-400/90 bg-amber-100 text-amber-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-amber-200 hover:border-amber-400 hover:text-amber-900 active:bg-amber-300"
+        : "border-amber-300/35 bg-amber-300/16 text-amber-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] hover:bg-amber-300/24 hover:border-amber-300/45 hover:text-amber-50 active:bg-amber-300/30"
+    );
+  }
+
+  if (tone === "warningSolid") {
+    return cn(
+      base,
+      surfaceTheme === "light"
+        ? "border-amber-900 bg-amber-900 text-amber-50 shadow-[0_12px_28px_rgba(146,64,14,0.18)] hover:bg-amber-800 hover:border-amber-800 hover:text-amber-50 active:bg-amber-700 active:border-amber-700"
+        : "border-amber-300 bg-amber-300 text-slate-950 shadow-[0_12px_28px_rgba(245,158,11,0.18)] hover:bg-amber-200 hover:border-amber-200 hover:text-slate-950 active:bg-amber-100 active:border-amber-100"
+    );
+  }
+
+  return cn(
+    base,
+    surfaceTheme === "light"
+      ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#ead8ca] hover:border-[#caa98f] hover:text-[#5f4a3d] active:bg-[#dfc9b7] active:border-[#bf9c82]"
+      : "border-white/12 bg-white/[0.05] text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] hover:bg-white/[0.1] hover:border-white/16 hover:text-slate-100 active:bg-white/[0.14] active:border-white/20"
+  );
+}
+
+function settingsChromeButtonClassName(surfaceTheme: SurfaceTheme) {
+  return cn(
+    "inline-flex h-8 w-8 items-center justify-center rounded-full border transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.96]",
+    surfaceTheme === "light"
+      ? "border-[#d0bcae] bg-[#efe5dc] text-[#7f6554] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e7d9ce] hover:border-[#c8b09f] hover:text-[#5f4a3d] active:bg-[#ddcdbf]"
+      : "border-white/12 bg-white/[0.08] text-slate-200 hover:bg-white/[0.12] hover:border-white/16 hover:text-slate-100 active:bg-white/[0.16]"
+  );
+}
+
+function settingsThemeSwitchTrackClassName(surfaceTheme: SurfaceTheme) {
+  return cn(
+    "relative inline-flex h-7 w-14 items-center rounded-full border transition-[background-color,border-color,transform] duration-150 active:scale-[0.98]",
+    surfaceTheme === "light"
+      ? "border-[#d0bcae] bg-[#eaded3] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e3d5c8] hover:border-[#c8b09f] active:bg-[#d9c8ba]"
+      : "border-white/12 bg-white/[0.08] hover:bg-white/[0.12] hover:border-white/16 active:bg-white/[0.16]"
+  );
+}
+
+function settingsThemeSwitchThumbClassName(surfaceTheme: SurfaceTheme) {
+  return cn(
+    "absolute left-1 inline-flex h-5 w-5 items-center justify-center rounded-full shadow-[0_4px_12px_rgba(0,0,0,0.18)] transition-[transform,background-color,color] duration-150",
+    surfaceTheme === "light"
+      ? "translate-x-7 bg-[#c8946f] text-white"
+      : "translate-x-0 bg-cyan-300 text-slate-950"
+  );
 }
 
 function statusBadgeClassName(
