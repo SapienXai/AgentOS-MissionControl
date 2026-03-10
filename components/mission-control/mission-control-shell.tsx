@@ -212,21 +212,22 @@ export function MissionControlShell({
 
   useEffect(() => {
     setSelectedOnboardingModelId((current) => {
-      const stillAvailable =
-        snapshot.models.some((model) => model.id === current && model.available !== false && !model.missing) ||
-        discoveredModels.some((model) => model.modelId === current);
+      const availableModelIds = snapshot.models
+        .filter((model) => model.available !== false && !model.missing)
+        .map((model) => model.id);
+      const recommendedModelId = snapshot.diagnostics.modelReadiness.recommendedModelId;
 
-      if (stillAvailable) {
+      if (current && availableModelIds.includes(current)) {
         return current;
       }
 
-      if (discoveredModels.length > 0) {
-        return discoveredModels[0].modelId;
+      if (recommendedModelId && availableModelIds.includes(recommendedModelId)) {
+        return recommendedModelId;
       }
 
-      return snapshot.diagnostics.modelReadiness.recommendedModelId || "";
+      return availableModelIds[0] || "";
     });
-  }, [discoveredModels, snapshot.models, snapshot.diagnostics.modelReadiness.recommendedModelId]);
+  }, [snapshot.models, snapshot.diagnostics.modelReadiness.recommendedModelId]);
 
   useEffect(() => {
     if (!isOpenClawSystemReady) {
@@ -313,13 +314,6 @@ export function MissionControlShell({
     }
 
     setDiscoveredModels(nextDiscoveredModels);
-    setSelectedOnboardingModelId((current) => {
-      if (current && nextDiscoveredModels.some((model) => model.modelId === current)) {
-        return current;
-      }
-
-      return nextDiscoveredModels[0]?.modelId || current;
-    });
   };
 
   useEffect(() => {
@@ -755,14 +749,8 @@ export function MissionControlShell({
     await runModelAutoOnboarding();
   };
 
-  const runModelProviderLogin = async (provider: string) => {
-    await runModelOnboarding({
-      intent: "login-provider",
-      provider
-    });
-  };
-
   const openSetupWizard = (stage: OnboardingWizardStage = isOpenClawSystemReady ? "models" : "system") => {
+    setIsSettingsOpen(false);
     setOnboardingStage(stage);
     setIsOnboardingDismissed(false);
     setShowOnboardingReadyState(false);
@@ -1035,7 +1023,6 @@ export function MissionControlShell({
           isSavingWorkspaceRoot={isSavingWorkspaceRoot}
           isCheckingForUpdates={isCheckingForUpdates}
           selectedModelId={selectedOnboardingModelId}
-          discoveredModels={discoveredModels}
           modelOnboardingRunState={modelOnboardingRunState}
           gatewayControlAction={gatewayControlAction}
           lastCheckedAt={lastCheckedAt}
@@ -1051,11 +1038,8 @@ export function MissionControlShell({
           onCheckForUpdates={checkForUpdates}
           onControlGateway={controlGateway}
           onOpenSetupWizard={openSetupWizard}
-          onRunModelAutoSetup={runModelAutoOnboarding}
-          onRunModelDiscover={runModelDiscover}
           onRunModelRefresh={runModelRefresh}
           onRunModelSetDefault={runModelSetDefault}
-          onRunModelProviderLogin={runModelProviderLogin}
           onOpenUpdateDialog={() => {
             resetUpdateDialogState();
             setIsUpdateDialogOpen(true);
@@ -1159,7 +1143,6 @@ export function MissionControlShell({
             onRunModelDiscover={runModelDiscover}
             onRunModelRefresh={runModelRefresh}
             onRunModelSetDefault={runModelSetDefault}
-            onRunModelProviderLogin={runModelProviderLogin}
             onContinueToModels={() => setOnboardingStage("models")}
             onBackToSystem={() => setOnboardingStage("system")}
             onDismiss={dismissOnboarding}
@@ -1489,7 +1472,6 @@ function CanvasTopBar({
   isSavingWorkspaceRoot,
   isCheckingForUpdates,
   selectedModelId,
-  discoveredModels,
   modelOnboardingRunState,
   gatewayControlAction,
   lastCheckedAt,
@@ -1503,11 +1485,8 @@ function CanvasTopBar({
   onCheckForUpdates,
   onControlGateway,
   onOpenSetupWizard,
-  onRunModelAutoSetup,
-  onRunModelDiscover,
   onRunModelRefresh,
   onRunModelSetDefault,
-  onRunModelProviderLogin,
   onOpenUpdateDialog
 }: {
   snapshot: MissionControlSnapshot;
@@ -1520,7 +1499,6 @@ function CanvasTopBar({
   isSavingWorkspaceRoot: boolean;
   isCheckingForUpdates: boolean;
   selectedModelId: string;
-  discoveredModels: DiscoveredModelCandidate[];
   modelOnboardingRunState: UpdateRunState;
   gatewayControlAction: GatewayControlAction | null;
   lastCheckedAt: number | null;
@@ -1534,23 +1512,14 @@ function CanvasTopBar({
   onCheckForUpdates: () => Promise<void>;
   onControlGateway: (action: GatewayControlAction) => Promise<void>;
   onOpenSetupWizard: (stage?: OnboardingWizardStage) => void;
-  onRunModelAutoSetup: () => Promise<void>;
-  onRunModelDiscover: () => Promise<void>;
   onRunModelRefresh: () => Promise<void>;
   onRunModelSetDefault: (modelId?: string) => Promise<void>;
-  onRunModelProviderLogin: (provider: string) => Promise<void>;
   onOpenUpdateDialog: () => void;
 }) {
-  const preferredConnectProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
-    (provider) => !provider.connected && provider.canLogin
-  );
   const isOpenClawReady =
     snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk && snapshot.diagnostics.modelReadiness.ready;
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
-  const selectableDiscoveredModels = discoveredModels.filter(
-    (model) => !snapshot.models.some((existingModel) => existingModel.id === model.modelId)
-  );
 
   return (
     <div className="flex w-full items-center justify-between px-0 pt-6">
@@ -2030,15 +1999,6 @@ function CanvasTopBar({
                         {model.name} · {model.provider}
                       </option>
                     ))}
-                  {selectableDiscoveredModels.length > 0 ? (
-                    <optgroup label="Discovered routes">
-                      {selectableDiscoveredModels.map((model) => (
-                        <option key={model.modelId} value={model.modelId}>
-                          {model.name} · {formatProviderLabel(model.provider)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null}
                 </select>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2065,7 +2025,7 @@ function CanvasTopBar({
                     variant="secondary"
                     disabled={isModelActionRunning}
                     onClick={() => {
-                      void onRunModelDiscover();
+                      onOpenSetupWizard("models");
                     }}
                     className={cn(
                       "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
@@ -2074,130 +2034,9 @@ function CanvasTopBar({
                         : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
                     )}
                   >
-                    Discover models
+                    +Add more
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isModelActionRunning}
-                    onClick={() => {
-                      void onRunModelAutoSetup();
-                    }}
-                    className={cn(
-                      "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                      surfaceTheme === "light"
-                        ? "border-[#d3bba9] bg-[#f1e3d7] text-[#6f5949] hover:bg-[#ead8ca]"
-                        : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                    )}
-                  >
-                    Auto configure
-                  </Button>
-                  {preferredConnectProvider ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      disabled={isModelActionRunning}
-                      onClick={() => {
-                        void onRunModelProviderLogin(preferredConnectProvider.provider);
-                      }}
-                      className={cn(
-                        "h-8 rounded-[12px] px-2.5 text-[9px] uppercase tracking-[0.18em]",
-                        surfaceTheme === "light"
-                          ? "border-[#b89374] bg-[#ecd4c1] text-[#4a3426] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e4c6af] hover:text-[#38261b]"
-                          : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                      )}
-                    >
-                      {resolveProviderTerminalActionLabel(preferredConnectProvider.provider)}
-                    </Button>
-                  ) : null}
                 </div>
-
-                {selectableDiscoveredModels.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    <p
-                      className={cn(
-                        "text-[8px] uppercase tracking-[0.16em]",
-                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                      )}
-                    >
-                      Discovered routes
-                    </p>
-                    <div className="space-y-1.5">
-                      {selectableDiscoveredModels.slice(0, 3).map((model) => (
-                        <div
-                          key={model.modelId}
-                          className={cn(
-                            "flex items-center justify-between gap-2 rounded-[12px] border px-2 py-1.5",
-                            surfaceTheme === "light"
-                              ? "border-[#eadcd0] bg-[#fff7f2]"
-                              : "border-white/10 bg-white/[0.03]"
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <p
-                              className={cn(
-                                "truncate text-[10px]",
-                                surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                              )}
-                            >
-                              {model.name}
-                            </p>
-                            <p
-                              className={cn(
-                                "mt-0.5 text-[9px]",
-                                surfaceTheme === "light" ? "text-[#816958]" : "text-slate-500"
-                              )}
-                            >
-                              {formatProviderLabel(model.provider)}
-                              {model.isFree ? " · free" : ""}
-                              {model.supportsTools ? " · tools" : ""}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            disabled={isModelActionRunning}
-                            onClick={() => {
-                              void onRunModelSetDefault(model.modelId);
-                            }}
-                            className={cn(
-                              "h-7 rounded-[10px] px-2 text-[8px] uppercase tracking-[0.16em]",
-                              surfaceTheme === "light"
-                                ? "border-[#b89374] bg-[#ecd4c1] text-[#4a3426] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] hover:bg-[#e4c6af] hover:text-[#38261b]"
-                                : "border-white/10 bg-white/[0.05] text-slate-200 hover:bg-white/[0.1]"
-                            )}
-                          >
-                            Use
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                    <p
-                      className={cn(
-                        "text-[9px] leading-[1rem]",
-                        surfaceTheme === "light" ? "text-[#816958]" : "text-slate-500"
-                      )}
-                    >
-                      Selecting a discovered route keeps auth inside OpenClaw. If the provider still
-                      needs credentials, Mission Control will surface a connect action instead of raw
-                      API fields.
-                    </p>
-                  </div>
-                ) : null}
-
-                {preferredConnectProvider?.detail ? (
-                  <p
-                    className={cn(
-                      "mt-1.5 text-[9px] leading-[1rem]",
-                      surfaceTheme === "light" ? "text-[#816958]" : "text-slate-500"
-                    )}
-                  >
-                    {preferredConnectProvider.detail}
-                  </p>
-                ) : null}
               </div>
             </div>
 
@@ -2502,43 +2341,6 @@ function resolveGatewayDraft(snapshot: MissionControlSnapshot) {
 
 function resolveWorkspaceRootDraft(snapshot: MissionControlSnapshot) {
   return compactPath(snapshot.diagnostics.configuredWorkspaceRoot || snapshot.diagnostics.workspaceRoot);
-}
-
-function formatProviderLabel(provider: string) {
-  const normalized = provider.trim().toLowerCase();
-
-  if (normalized === "openrouter") {
-    return "OpenRouter";
-  }
-
-  if (normalized === "openai-codex") {
-    return "OpenAI Codex";
-  }
-
-  if (normalized === "openai") {
-    return "OpenAI";
-  }
-
-  if (normalized === "anthropic") {
-    return "Anthropic";
-  }
-
-  if (normalized === "ollama") {
-    return "Ollama";
-  }
-
-  return provider
-    .split("-")
-    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
-    .join(" ");
-}
-
-function resolveProviderTerminalActionLabel(provider: string) {
-  if (provider.trim().toLowerCase() === "openrouter") {
-    return `Add ${formatProviderLabel(provider)} API key`;
-  }
-
-  return `Connect ${formatProviderLabel(provider)} in terminal`;
 }
 
 function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent): OpenClawModelOnboardingPhase {

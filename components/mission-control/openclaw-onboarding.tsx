@@ -46,7 +46,6 @@ export function OpenClawOnboarding({
   onRunModelDiscover,
   onRunModelRefresh,
   onRunModelSetDefault,
-  onRunModelProviderLogin,
   onContinueToModels,
   onBackToSystem,
   onDismiss,
@@ -69,7 +68,6 @@ export function OpenClawOnboarding({
   onRunModelDiscover: () => void;
   onRunModelRefresh: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
-  onRunModelProviderLogin: (provider: string) => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
   onDismiss: () => void;
@@ -82,17 +80,6 @@ export function OpenClawOnboarding({
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
   const selectableDiscoveredModels = discoveredModels.filter(
     (model) => !availableModels.some((availableModel) => availableModel.id === model.modelId)
-  );
-  const selectedDiscoveredModel = selectableDiscoveredModels.find(
-    (model) => model.modelId === selectedModelId
-  );
-  const selectedProviderAuth = selectedDiscoveredModel
-    ? snapshot.diagnostics.modelReadiness.authProviders.find(
-        (provider) => provider.provider === selectedDiscoveredModel.provider
-      )
-    : null;
-  const selectedProviderNeedsAuth = Boolean(
-    selectedDiscoveredModel && selectedProviderAuth && !selectedProviderAuth.connected && selectedProviderAuth.canLogin
   );
   const stageRun = stage === "system" ? systemRun : modelRun;
   const stageStatusCopy = stageRun.statusMessage || stageRun.resultMessage || resolveStageDescription(stage, systemActionDescription);
@@ -107,8 +94,7 @@ export function OpenClawOnboarding({
     modelReady,
     systemActionLabel,
     selectedModelId,
-    availableModelIds: availableModels.map((model) => model.id),
-    selectedModelLoginProvider: selectedProviderNeedsAuth ? selectedDiscoveredModel?.provider ?? null : null
+    availableModelIds: availableModels.map((model) => model.id)
   });
 
   return (
@@ -261,6 +247,7 @@ export function OpenClawOnboarding({
             onSelectedModelIdChange={onSelectedModelIdChange}
             onRunModelDiscover={onRunModelDiscover}
             onRunModelRefresh={onRunModelRefresh}
+            onRunModelSetDefault={onRunModelSetDefault}
           />
         )}
 
@@ -347,11 +334,6 @@ export function OpenClawOnboarding({
 
                 if (primaryAction.kind === "set-default") {
                   onRunModelSetDefault();
-                  return;
-                }
-
-                if (primaryAction.kind === "connect-provider") {
-                  onRunModelProviderLogin(primaryAction.provider);
                   return;
                 }
 
@@ -495,7 +477,8 @@ function ModelStage({
   discoveredModels,
   onSelectedModelIdChange,
   onRunModelDiscover,
-  onRunModelRefresh
+  onRunModelRefresh,
+  onRunModelSetDefault
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
@@ -509,15 +492,9 @@ function ModelStage({
   onSelectedModelIdChange: (value: string) => void;
   onRunModelDiscover: () => void;
   onRunModelRefresh: () => void;
+  onRunModelSetDefault: (modelId?: string) => void;
 }) {
   const modelReadiness = snapshot.diagnostics.modelReadiness;
-  const selectedDiscoveredModel = discoveredModels.find((model) => model.modelId === selectedModelId);
-  const selectedProviderAuth = selectedDiscoveredModel
-    ? modelReadiness.authProviders.find((provider) => provider.provider === selectedDiscoveredModel.provider)
-    : null;
-  const selectedProviderNeedsAuth = Boolean(
-    selectedDiscoveredModel && selectedProviderAuth && !selectedProviderAuth.connected && selectedProviderAuth.canLogin
-  );
 
   return (
     <>
@@ -612,15 +589,6 @@ function ModelStage({
                   {model.name} · {model.provider}
                 </option>
               ))}
-              {discoveredModels.length > 0 ? (
-                <optgroup label="Discovered routes">
-                  {discoveredModels.map((model) => (
-                    <option key={model.modelId} value={model.modelId}>
-                      {model.name} · {formatProviderLabel(model.provider)}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null}
             </select>
           </label>
 
@@ -690,19 +658,6 @@ function ModelStage({
           </div>
         ) : null}
 
-        {selectedProviderNeedsAuth ? (
-          <p
-            className={cn(
-              "mt-2.5 rounded-[10px] border px-2 py-1.5 text-[9px] leading-[0.92rem]",
-              surfaceTheme === "light"
-                ? "border-amber-200 bg-amber-50 text-amber-800"
-                : "border-amber-300/20 bg-amber-300/10 text-amber-100"
-            )}
-          >
-            {resolveProviderRequirementCopy(selectedDiscoveredModel?.provider || "")}
-          </p>
-        ) : null}
-
         {discoveredModels.length > 0 ? (
           <div className="mt-2.5 space-y-1.5">
             <p
@@ -748,11 +703,11 @@ function ModelStage({
                     type="button"
                     variant="secondary"
                     size="sm"
-                    onClick={() => onSelectedModelIdChange(model.modelId)}
+                    onClick={() => onRunModelSetDefault(model.modelId)}
                     disabled={run.runState === "running"}
                     className={secondaryActionClassName(surfaceTheme)}
                   >
-                    {selectedModelId === model.modelId ? "Selected" : "Select"}
+                    Use
                   </Button>
                 </div>
               ))}
@@ -763,8 +718,9 @@ function ModelStage({
                 surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
               )}
             >
-              Discovered routes stay inside OpenClaw. If a provider still needs credentials, the
-              next step is a connect action instead of raw API setup fields.
+              The dropdown only shows routes that are already configured. Use a discovered route
+              here to add it first; if credentials are missing, Mission Control will hand you off
+              to OpenClaw.
             </p>
           </div>
         ) : null}
@@ -1102,7 +1058,6 @@ function resolvePrimaryAction(params: {
   systemActionLabel: string;
   selectedModelId: string;
   availableModelIds: string[];
-  selectedModelLoginProvider: string | null;
 }) {
   if (params.stage === "system") {
     if (params.systemReady && params.modelReady) {
@@ -1118,14 +1073,6 @@ function resolvePrimaryAction(params: {
 
   if (params.modelReady) {
     return { kind: "dismiss" as const, label: "Enter Mission Control" };
-  }
-
-  if (params.selectedModelLoginProvider) {
-    return {
-      kind: "connect-provider" as const,
-      provider: params.selectedModelLoginProvider,
-      label: resolveProviderTerminalActionLabel(params.selectedModelLoginProvider)
-    };
   }
 
   if (params.selectedModelId && params.availableModelIds.includes(params.selectedModelId)) {
@@ -1268,22 +1215,6 @@ function formatProviderLabel(provider: string) {
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
     .join(" ");
-}
-
-function resolveProviderTerminalActionLabel(provider: string) {
-  if (provider.trim().toLowerCase() === "openrouter") {
-    return `Add ${formatProviderLabel(provider)} API key`;
-  }
-
-  return `Connect ${formatProviderLabel(provider)} in terminal`;
-}
-
-function resolveProviderRequirementCopy(provider: string) {
-  if (provider.trim().toLowerCase() === "openrouter") {
-    return `Selected route needs your ${formatProviderLabel(provider)} API key. Add it in Terminal, then refresh setup.`;
-  }
-
-  return `Selected route needs ${formatProviderLabel(provider)} auth. Continue in terminal, then refresh setup.`;
 }
 
 function stepContainerClassName(state: StepState, surfaceTheme: SurfaceTheme) {
