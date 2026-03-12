@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,10 @@ const bundledServerPath = path.join(bundleDir, "server.js");
 const packageJson = JSON.parse(await readTextFile(packageJsonPath));
 const defaultInstallRoot = path.join(os.homedir(), ".agentos");
 const defaultBinDir = path.join(os.homedir(), ".local", "bin");
+const runtimeInstallRoot = resolveRuntimeInstallRoot();
+const runtimeStateDir = path.join(runtimeInstallRoot, "run");
+const stopPollIntervalMs = 100;
+const stopTimeoutMs = 5_000;
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -47,6 +51,16 @@ async function main() {
     return;
   }
 
+  if (firstArg === "stop") {
+    if (args[1] === "--help" || args[1] === "-h" || args[1] === "help") {
+      printStopHelp();
+      return;
+    }
+
+    await runStop(args.slice(1));
+    return;
+  }
+
   if (firstArg === "uninstall") {
     if (args[1] === "--help" || args[1] === "-h" || args[1] === "help") {
       printUninstallHelp();
@@ -69,8 +83,20 @@ async function startServer(rawArgs) {
   ensureBundleExists();
 
   const options = parseStartArgs(rawArgs);
+  const runtimeStatePath = resolveRuntimeStatePath(options.port);
+  const trackedState = readRuntimeState(runtimeStatePath);
   const openClawCheck = detectOpenClaw();
   const browserOpener = detectBrowserOpener();
+
+  if (trackedState?.pid && isProcessRunning(trackedState.pid)) {
+    throw new Error(
+      `AgentOS is already running on port ${options.port} (PID ${trackedState.pid}). Use "agentos stop --port ${options.port}" first.`
+    );
+  }
+
+  if (trackedState) {
+    clearRuntimeState(runtimeStatePath);
+  }
 
   const url = `http://${displayHost(options.host)}:${options.port}`;
   console.log(`Starting AgentOS on ${url}`);
@@ -97,12 +123,42 @@ async function startServer(rawArgs) {
     }
   });
 
+  if (!child.pid) {
+    child.kill("SIGTERM");
+    throw new Error("AgentOS could not determine the server PID.");
+  }
+
+  try {
+    writeRuntimeState(runtimeStatePath, {
+      pid: child.pid,
+      port: options.port,
+      host: options.host,
+      startedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    child.kill("SIGTERM");
+    throw error;
+  }
+
   const browserState = { opened: false };
   const relayStdout = createRelay(process.stdout, options, url, browserOpener, browserState);
   const relayStderr = createRelay(process.stderr, options, url, browserOpener, browserState);
 
   child.stdout.on("data", relayStdout);
   child.stderr.on("data", relayStderr);
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+
+    cleanedUp = true;
+    process.off("SIGINT", forwardSignal);
+    process.off("SIGTERM", forwardSignal);
+    process.off("SIGQUIT", forwardSignal);
+    clearRuntimeState(runtimeStatePath, child.pid);
+  };
 
   const forwardSignal = (signal) => {
     if (!child.killed) {
@@ -112,10 +168,16 @@ async function startServer(rawArgs) {
 
   process.on("SIGINT", forwardSignal);
   process.on("SIGTERM", forwardSignal);
+  process.on("SIGQUIT", forwardSignal);
+
+  child.on("error", (error) => {
+    cleanup();
+    console.error(`AgentOS failed to start: ${error.message}`);
+    process.exit(1);
+  });
 
   child.on("exit", (code, signal) => {
-    process.off("SIGINT", forwardSignal);
-    process.off("SIGTERM", forwardSignal);
+    cleanup();
 
     if (signal) {
       process.kill(process.pid, signal);
@@ -189,6 +251,48 @@ function runDoctor() {
   }
 }
 
+async function runStop(rawArgs) {
+  const options = parseStopArgs(rawArgs);
+  const runtimeStatePath = resolveRuntimeStatePath(options.port);
+  const trackedState = readRuntimeState(runtimeStatePath);
+  const targetPid = trackedState?.pid ?? findListeningPidForPort(options.port);
+
+  if (!targetPid) {
+    clearRuntimeState(runtimeStatePath);
+    console.log(`No running AgentOS process was found on port ${options.port}.`);
+    return;
+  }
+
+  console.log(`Stopping AgentOS on port ${options.port} (PID ${targetPid})...`);
+
+  try {
+    process.kill(targetPid, options.force ? "SIGKILL" : "SIGTERM");
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+      clearRuntimeState(runtimeStatePath);
+      console.log(`AgentOS is not running on port ${options.port}.`);
+      return;
+    }
+
+    throw error;
+  }
+
+  const stopped = await waitForProcessExit(targetPid, options.force ? 1_000 : stopTimeoutMs);
+
+  if (!stopped) {
+    console.error(
+      options.force
+        ? `AgentOS did not stop after SIGKILL on port ${options.port}.`
+        : `AgentOS did not stop within ${Math.round(stopTimeoutMs / 1000)} seconds. Re-run "agentos stop --port ${options.port} --force" if you want to terminate it.`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  clearRuntimeState(runtimeStatePath);
+  console.log(`Stopped AgentOS on port ${options.port}.`);
+}
+
 function parseStartArgs(rawArgs) {
   const envPort = process.env.AGENTOS_PORT || process.env.PORT;
   const options = {
@@ -237,6 +341,42 @@ function parseStartArgs(rawArgs) {
 
     if (arg === "--no-open") {
       options.open = false;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
+
+function parseStopArgs(rawArgs) {
+  const envPort = process.env.AGENTOS_PORT || process.env.PORT;
+  const options = {
+    port: envPort && /^\d+$/.test(envPort) ? Number(envPort) : 3000,
+    force: false
+  };
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index];
+
+    if (arg === "--port" || arg === "-p") {
+      const value = rawArgs[index + 1];
+      index += 1;
+      assertPort(value);
+      options.port = Number(value);
+      continue;
+    }
+
+    if (arg.startsWith("--port=")) {
+      const value = arg.slice("--port=".length);
+      assertPort(value);
+      options.port = Number(value);
+      continue;
+    }
+
+    if (arg === "--force" || arg === "-f") {
+      options.force = true;
       continue;
     }
 
@@ -358,15 +498,32 @@ function printHelp() {
 Usage:
   agentos
   agentos start --port 3000 --host 127.0.0.1 --open
+  agentos stop --port 3000 [--force]
   agentos doctor
   agentos uninstall [--yes]
   agentos --version
 
 Options:
-  --port, -p   Port to bind the local server (default: 3000)
-  --host, -H   Host to bind the local server (default: 127.0.0.1)
-  --open, -o   Open AgentOS in the default browser after startup
-  --no-open    Disable browser auto-open even if AGENTOS_OPEN is set
+  start: --port, -p   Port to bind the local server (default: 3000)
+  start: --host, -H   Host to bind the local server (default: 127.0.0.1)
+  start: --open, -o   Open AgentOS in the default browser after startup
+  start: --no-open    Disable browser auto-open even if AGENTOS_OPEN is set
+  stop:  --port, -p   Port to stop (default: 3000)
+  stop:  --force, -f  Send SIGKILL if SIGTERM does not stop the server
+`);
+}
+
+function printStopHelp() {
+  console.log(`Stop a running AgentOS server.
+
+Usage:
+  agentos stop
+  agentos stop --port 3000
+  agentos stop --port 3000 --force
+
+Options:
+  --port, -p    Port to stop (default: 3000)
+  --force, -f   Send SIGKILL if SIGTERM does not stop the server
 `);
 }
 
@@ -583,6 +740,131 @@ function detectManagedLauncher(installedPackagePath) {
 
 function normalizeForMatch(value) {
   return value.replaceAll("\\", "/");
+}
+
+function resolveRuntimeInstallRoot() {
+  if (process.env.AGENTOS_INSTALL_ROOT) {
+    return path.resolve(process.env.AGENTOS_INSTALL_ROOT);
+  }
+
+  if (path.basename(packageRoot) === "package") {
+    return path.dirname(packageRoot);
+  }
+
+  return defaultInstallRoot;
+}
+
+function resolveRuntimeStatePath(port) {
+  return path.join(runtimeStateDir, `agentos-${port}.json`);
+}
+
+function readRuntimeState(runtimeStatePath) {
+  if (!existsSync(runtimeStatePath)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(readFileSync(runtimeStatePath, "utf8"));
+
+    if (!payload || typeof payload !== "object" || !Number.isInteger(payload.pid) || payload.pid <= 0) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function writeRuntimeState(runtimeStatePath, payload) {
+  mkdirSync(runtimeStateDir, {
+    recursive: true
+  });
+  writeFileSync(runtimeStatePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function clearRuntimeState(runtimeStatePath, expectedPid) {
+  if (existsSync(runtimeStatePath)) {
+    if (expectedPid) {
+      const payload = readRuntimeState(runtimeStatePath);
+
+      if (payload?.pid && payload.pid !== expectedPid) {
+        return;
+      }
+    }
+
+    rmSync(runtimeStatePath, {
+      force: true
+    });
+  }
+
+  if (!existsSync(runtimeStateDir)) {
+    return;
+  }
+
+  if (readdirSync(runtimeStateDir).length === 0) {
+    rmdirSync(runtimeStateDir);
+  }
+}
+
+function isProcessRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error) {
+      if (error.code === "ESRCH") {
+        return false;
+      }
+
+      if (error.code === "EPERM") {
+        return true;
+      }
+    }
+
+    throw error;
+  }
+}
+
+function findListeningPidForPort(port) {
+  if (process.platform === "win32") {
+    return null;
+  }
+
+  const result = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8"
+  });
+
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  const firstLine = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  if (!firstLine || !/^\d+$/.test(firstLine)) {
+    return null;
+  }
+
+  return Number(firstLine);
+}
+
+async function waitForProcessExit(pid, timeoutMs) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, stopPollIntervalMs);
+    });
+  }
+
+  return !isProcessRunning(pid);
 }
 
 async function confirmUninstall(install) {

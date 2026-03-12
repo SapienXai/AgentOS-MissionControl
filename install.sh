@@ -113,6 +113,7 @@ print_completion() {
   echo "Launcher: $launcher_path"
   echo "Try: agentos doctor"
   echo "Then: agentos start --open"
+  echo "Stop later: agentos stop"
   echo "Remove later: agentos uninstall"
 
   case ":$PATH:" in

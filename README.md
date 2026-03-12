@@ -208,6 +208,7 @@ GitHub Release installer:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | bash
 agentos start --open
+agentos stop
 agentos doctor
 ```
 
@@ -222,7 +223,14 @@ npm launcher:
 ```bash
 pnpm add -g @sapienx/agentos
 agentos start --open
+agentos stop
 agentos doctor
+```
+
+Stop a running server:
+
+```bash
+agentos stop
 ```
 
 Uninstall:
