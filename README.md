@@ -203,6 +203,30 @@ export OPENCLAW_BIN=/absolute/path/to/openclaw
 
 ### Install
 
+GitHub Release installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | bash
+agentos start --open
+agentos doctor
+```
+
+Install a specific published version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.2 bash
+```
+
+npm launcher:
+
+```bash
+pnpm add -g @sapienx/agentos
+agentos start --open
+agentos doctor
+```
+
+Local development:
+
 ```bash
 pnpm install
 openclaw --version
@@ -215,6 +239,22 @@ If the gateway service is missing or not loaded:
 openclaw gateway install --json
 openclaw gateway status --json
 ```
+
+### Releases
+
+Push a tag in the format below to build platform-specific release assets on GitHub Releases:
+
+```bash
+git tag agentos-v0.1.2
+git push origin agentos-v0.1.2
+```
+
+The release workflow uploads:
+
+- `agentos-darwin-arm64.tgz`
+- `agentos-darwin-x64.tgz`
+- `agentos-linux-x64.tgz`
+- matching `.sha256` files
 
 ### Run The App
 

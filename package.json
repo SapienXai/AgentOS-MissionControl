@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:agentos-package": "pnpm exec next build --webpack && node packages/agentos/scripts/prepare-bundle.mjs",
+    "pack:agentos": "npm pack ./packages/agentos --pack-destination /tmp",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish:agentos": "cd packages/agentos && npm publish --access public"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.3",

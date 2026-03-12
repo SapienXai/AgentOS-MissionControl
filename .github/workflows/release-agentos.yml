@@ -1,0 +1,166 @@
+name: Release AgentOS
+
+on:
+  push:
+    tags:
+      - "agentos-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: package
+        shell: bash
+        run: |
+          echo "version=$(node -p "require('./packages/agentos/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - id: tag
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#agentos-v}"
+
+          if [ "$VERSION" = "$TAG" ]; then
+            echo "Unexpected tag format: $TAG" >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure tag matches package version
+        shell: bash
+        run: |
+          if [ "${{ steps.package.outputs.version }}" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "Tag version (${{ steps.tag.outputs.version }}) does not match packages/agentos/package.json (${{ steps.package.outputs.version }})." >&2
+            exit 1
+          fi
+
+  build-release-assets:
+    needs: validate-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux
+            arch: x64
+          - runner: macos-13
+            platform: darwin
+            arch: x64
+          - runner: macos-14
+            platform: darwin
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Pack AgentOS release asset
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          TARBALL="$(npm pack ./packages/agentos --pack-destination dist | tail -n 1)"
+          VERSION="${{ needs.validate-release.outputs.version }}"
+          VERSIONED="agentos-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.tgz"
+          STABLE="agentos-${{ matrix.platform }}-${{ matrix.arch }}.tgz"
+
+          mv "dist/${TARBALL}" "dist/${VERSIONED}"
+          cp "dist/${VERSIONED}" "dist/${STABLE}"
+
+      - name: Create SHA-256 checksums
+        shell: bash
+        run: |
+          node <<'EOF'
+          const crypto = require("node:crypto");
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          for (const fileName of fs.readdirSync("dist")) {
+            if (!fileName.endsWith(".tgz")) {
+              continue;
+            }
+
+            const filePath = path.join("dist", fileName);
+            const digest = crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+            fs.writeFileSync(`${filePath}.sha256`, `${digest}  ${fileName}\n`);
+          }
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentos-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  create-release:
+    needs:
+      - validate-release
+      - build-release-assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agentos-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          cat > release-notes.md <<EOF
+          ## Install
+
+          macOS / Linux:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | bash
+          \`\`\`
+
+          Specific version:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=${{ needs.validate-release.outputs.version }} bash
+          \`\`\`
+
+          ## Included assets
+
+          - \`agentos-darwin-arm64.tgz\`
+          - \`agentos-darwin-x64.tgz\`
+          - \`agentos-linux-x64.tgz\`
+          EOF
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: AgentOS ${{ needs.validate-release.outputs.version }}
+          body_path: release-notes.md
+          generate_release_notes: true
+          files: |
+            install.sh
+            release-assets/*

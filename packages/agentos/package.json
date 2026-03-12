@@ -1,0 +1,30 @@
+{
+  "name": "@sapienx/agentos",
+  "version": "0.1.2",
+  "description": "AgentOS Mission Control launcher",
+  "type": "module",
+  "bin": {
+    "agentos": "./bin/agentos.js"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "bundle"
+  ],
+  "scripts": {
+    "prepare:bundle": "node scripts/prepare-bundle.mjs",
+    "prepack": "pnpm --dir ../.. exec next build --webpack && node scripts/prepare-bundle.mjs"
+  },
+  "keywords": [
+    "agentos",
+    "openclaw",
+    "agents",
+    "ai"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

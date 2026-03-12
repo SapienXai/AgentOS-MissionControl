@@ -2,4 +2,6 @@
 /node_modules
 /.next
 /.mission-control
+/packages/agentos/bundle
+/packages/agentos/*.tgz
 tsconfig.tsbuildinfo
