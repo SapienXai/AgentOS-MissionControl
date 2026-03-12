@@ -4,4 +4,5 @@
 /.mission-control
 /packages/agentos/bundle
 /packages/agentos/*.tgz
+/deliverables
 tsconfig.tsbuildinfo
