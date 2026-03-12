@@ -1855,9 +1855,9 @@ async function runPlannerKickoffMissions(
         mission: assignment.mission,
         thinking: "medium"
       });
-      runIds.push(response.runId);
+      runIds.push(response.runId || response.dispatchId || assignment.agentId);
       await options.onProgress?.({
-        message: `Kickoff mission started for ${assignment.agentId}. Run ${response.runId}.`,
+        message: `Kickoff mission queued for ${assignment.agentId}. ${response.runId ? `Run ${response.runId}.` : `Dispatch ${response.dispatchId ?? "pending"}.`}`,
         percent: Math.round(((index + 1) / kickoffAssignments.length) * 100),
         status: "done"
       });

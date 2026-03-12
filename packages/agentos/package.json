@@ -1,6 +1,6 @@
 {
   "name": "@sapienx/agentos",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "AgentOS Mission Control launcher",
   "type": "module",
   "bin": {

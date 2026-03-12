@@ -49,6 +49,21 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         ],
         issues: []
       },
+      runtime: {
+        stateRoot: path.join(os.homedir(), ".openclaw"),
+        stateWritable: false,
+        sessionStoreWritable: false,
+        sessionStores: [],
+        smokeTest: {
+          status: "not-run",
+          checkedAt: null,
+          agentId: null,
+          runId: null,
+          summary: null,
+          error: null
+        },
+        issues: [reason]
+      },
       securityWarnings: [],
       issues: [reason]
     },
@@ -204,7 +219,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         key: "agent:agent-demo-planner:task:demo-plan:stage:in_progress",
         title: "Mission planning task",
         subtitle: "Fallback surface while OpenClaw is unavailable",
-        status: "active",
+        status: "running",
         updatedAt: now - 120000,
         ageMs: 120000,
         agentId: "agent-demo-planner",

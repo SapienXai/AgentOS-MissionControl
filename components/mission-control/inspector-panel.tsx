@@ -327,11 +327,41 @@ function GatewayOverview({
   snapshot: MissionControlSnapshot;
   lastMission: MissionResponse | null;
 }) {
+  const runtimePreflightValue =
+    snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable
+      ? snapshot.diagnostics.runtime.smokeTest.status === "passed"
+        ? "verified"
+        : "pending smoke test"
+      : "attention";
+
   return (
     <>
       <InfoCard icon={Radar} title="Gateway health" value={snapshot.diagnostics.health}>
         <p>{snapshot.diagnostics.gatewayUrl}</p>
         <p>{snapshot.diagnostics.dashboardUrl}</p>
+      </InfoCard>
+
+      <InfoCard icon={FolderGit2} title="Runtime preflight" value={runtimePreflightValue}>
+        <p className="font-mono text-xs text-slate-400">{snapshot.diagnostics.runtime.stateRoot}</p>
+        <p>
+          {snapshot.diagnostics.runtime.sessionStores.length > 0
+            ? `${snapshot.diagnostics.runtime.sessionStores.filter((entry) => entry.writable).length}/${snapshot.diagnostics.runtime.sessionStores.length} session stores writable`
+            : "No agent session stores have been probed yet."}
+        </p>
+        {snapshot.diagnostics.runtime.smokeTest.checkedAt ? (
+          <p>
+            Smoke test {snapshot.diagnostics.runtime.smokeTest.status} ·{" "}
+            {snapshot.diagnostics.runtime.smokeTest.agentId || "unknown agent"} ·{" "}
+            {formatRelativeTime(Date.parse(snapshot.diagnostics.runtime.smokeTest.checkedAt))}
+          </p>
+        ) : (
+          <p>No runtime smoke test has been recorded yet.</p>
+        )}
+        {snapshot.diagnostics.runtime.issues[0] ? (
+          <div className="rounded-[14px] border border-amber-400/15 bg-amber-400/8 px-3 py-2 text-[13px] text-amber-50">
+            {snapshot.diagnostics.runtime.issues[0]}
+          </div>
+        ) : null}
       </InfoCard>
 
       <InfoCard icon={TerminalSquare} title="Presence beacons" value={String(snapshot.presence.length)}>
@@ -352,7 +382,9 @@ function GatewayOverview({
       {lastMission ? (
         <InfoCard icon={Cpu} title="Last mission" value={lastMission.status}>
           <p className="text-sm text-white">{lastMission.summary}</p>
-          <p className="font-mono text-xs text-slate-500">Run {lastMission.runId}</p>
+          <p className="font-mono text-xs text-slate-500">
+            {lastMission.runId ? `Run ${lastMission.runId}` : `Dispatch ${lastMission.dispatchId ?? "pending"}`}
+          </p>
           {typeof lastMission.meta?.outputDirRelative === "string" ? (
             <p className="font-mono text-xs text-slate-400">{lastMission.meta.outputDirRelative}</p>
           ) : null}
@@ -388,7 +420,7 @@ function WorkspaceContent({
   }
 
   const liveRuntimes = workspaceRuntimes.filter((runtime) =>
-    runtime.status === "active" || runtime.status === "queued" || runtime.status === "idle"
+    runtime.status === "running" || runtime.status === "queued" || runtime.status === "idle"
   );
   const latestRuntime = workspaceRuntimes[0] ?? null;
   const createdFiles = dedupeCreatedFiles(workspaceRuntimes.flatMap(extractCreatedFilesFromRuntime)).slice(0, 8);

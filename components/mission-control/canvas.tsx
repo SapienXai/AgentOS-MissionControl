@@ -155,6 +155,7 @@ export function MissionCanvas({
       .filter(
         (runtime) =>
           !hiddenRuntimeIds.includes(runtime.id) &&
+          !runtime.id.startsWith("runtime:dispatch:") &&
           runtime.agentId === candidatePendingMission.agentId &&
           (runtime.updatedAt ?? 0) >= candidatePendingMission.submittedAt - 1500
       )
@@ -425,10 +426,10 @@ function buildEdgesForNodes(runtimes: RuntimeRecord[], nodes: CanvasNode[]) {
       targetHandle: "target-left",
       type: "simplebezier",
       zIndex: 4,
-      animated: runtime.status === "active",
+      animated: runtime.status === "running",
       style: {
-        stroke: runtime.status === "active" ? "rgba(107, 190, 255, 0.85)" : "rgba(148, 163, 184, 0.28)",
-        strokeWidth: runtime.status === "active" ? 1.45 : 1.05
+        stroke: runtime.status === "running" ? "rgba(107, 190, 255, 0.85)" : "rgba(148, 163, 184, 0.28)",
+        strokeWidth: runtime.status === "running" ? 1.45 : 1.05
       }
     });
   }

@@ -62,7 +62,7 @@ export async function getResetPreview(target: ResetTarget): Promise<ResetPreview
       return (
         typeof runtime.workspaceId === "string" &&
         workspaceIds.has(runtime.workspaceId) &&
-        (runtime.status === "active" || runtime.status === "queued")
+        (runtime.status === "running" || runtime.status === "queued")
       );
     }).length
   };

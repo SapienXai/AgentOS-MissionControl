@@ -17,7 +17,7 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
   const tone = toneForRuntimeStatus(data.runtime.status);
   const runtimeLabel =
     data.runtime.source === "turn"
-      ? shortId(data.runtime.runId, 10)
+      ? shortId(data.runtime.runId || data.runtime.id, 10)
       : shortId(data.runtime.taskId || data.runtime.sessionId);
   const isPendingCreation = Boolean(data.pendingCreation);
   const isJustCreated = Boolean(data.justCreated);
@@ -118,11 +118,11 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
               tone={
                 isPendingCreation
                   ? "bg-cyan-300"
-                  : data.runtime.status === "partial"
+                  : data.runtime.status === "stalled"
                     ? "bg-amber-200"
                   : data.runtime.status === "completed"
                     ? "bg-emerald-300"
-                    : data.runtime.status === "active"
+                    : data.runtime.status === "running"
                       ? "bg-cyan-300"
                       : "bg-amber-200"
               }
@@ -207,7 +207,7 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
             : isJustCreated
               ? "Just created"
             : data.runtime.ageMs
-              ? `${Math.round(data.runtime.ageMs / 60000)}m active`
+              ? `${Math.round(data.runtime.ageMs / 60000)}m ${data.runtime.status}`
               : "live"}
         </p>
       </div>

@@ -5,7 +5,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
+import { ensureOpenClawRuntimeStateAccess, getMissionControlSnapshot } from "@/lib/openclaw/service";
 import type {
   MissionControlSnapshot,
   OpenClawOnboardingPhase,
@@ -293,6 +294,28 @@ export async function POST(request: Request) {
         }
       }
 
+      try {
+        const runtimeAgentId = snapshot.agents.find((agent) => agent.isDefault)?.id || snapshot.agents[0]?.id || null;
+        snapshot = await ensureOpenClawRuntimeStateAccess({
+          agentId: runtimeAgentId
+        });
+      } catch (error) {
+        aggregatedStderr = aggregatedStderr
+          ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Runtime state verification failed."}`
+          : error instanceof Error
+            ? error.message
+            : "Runtime state verification failed.";
+
+        await fail(
+          "verifying",
+          "OpenClaw is online, but Mission Control cannot write to the OpenClaw runtime state yet.",
+          {
+            snapshot: await getMissionControlSnapshot({ force: true })
+          }
+        );
+        return;
+      }
+
       await send({
         type: "done",
         ok: true,
@@ -450,7 +473,7 @@ async function waitForReadySnapshot() {
 }
 
 function isOpenClawReady(snapshot: MissionControlSnapshot) {
-  return snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
+  return isOpenClawSystemReady(snapshot);
 }
 
 async function repairGatewayModeIfNeeded(

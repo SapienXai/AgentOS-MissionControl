@@ -33,6 +33,10 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
 import { compactPath } from "@/lib/openclaw/presenters";
+import {
+  isOpenClawMissionReady as resolveOpenClawMissionReady,
+  isOpenClawSystemReady as resolveOpenClawSystemReady
+} from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
   MissionResponse,
@@ -148,10 +152,10 @@ export function MissionControlShell({
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
-    (runtime) => runtime.status === "active" || runtime.status === "queued"
+    (runtime) => runtime.status === "running" || runtime.status === "queued"
   ).length;
-  const isOpenClawSystemReady = snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
-  const isOpenClawReady = isOpenClawSystemReady && snapshot.diagnostics.modelReadiness.ready;
+  const isOpenClawSystemReady = resolveOpenClawSystemReady(snapshot);
+  const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
   const updateInstallDescriptor = [
     snapshot.diagnostics.updatePackageManager,
     snapshot.diagnostics.updateInstallKind
@@ -1711,8 +1715,8 @@ export function MissionControlShell({
                   )}
                 >
                   {activeRuntimeCount > 0
-                    ? `${activeRuntimeCount} active or queued runtime${activeRuntimeCount === 1 ? "" : "s"} may be interrupted during the update.`
-                    : "No active runtimes are currently tracked, so the update risk is lower."}
+                    ? `${activeRuntimeCount} running or queued runtime${activeRuntimeCount === 1 ? "" : "s"} may be interrupted during the update.`
+                    : "No running runtimes are currently tracked, so the update risk is lower."}
                 </div>
 
                 {isUpdateRunning ? (
@@ -1979,8 +1983,7 @@ function CanvasTopBar({
   onOpenUpdateDialog: () => void;
   onOpenResetDialog: (target: ResetTarget) => void;
 }) {
-  const isOpenClawReady =
-    snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk && snapshot.diagnostics.modelReadiness.ready;
+  const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
   const settingsSecondaryButtonStyles = settingsButtonClassName(surfaceTheme, "secondary");
@@ -2856,10 +2859,17 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
     };
   }
 
-  if (snapshot.diagnostics.rpcOk) {
+  if (resolveOpenClawSystemReady(snapshot)) {
     return {
       label: "Enter Mission Control",
-      description: "OpenClaw is online."
+      description: "OpenClaw is online and the runtime state is writable."
+    };
+  }
+
+  if (snapshot.diagnostics.rpcOk) {
+    return {
+      label: "Repair runtime access",
+      description: "OpenClaw is online, but Mission Control still needs verified write access to the runtime state."
     };
   }
 

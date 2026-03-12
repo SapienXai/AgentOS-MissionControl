@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/readme/banner.jpeg" alt="AgentOS mission-control interface" width="100%" />
+  <img src="public/readme/agentos1.webp" alt="AgentOS mission-control interface" width="100%" />
 
 # AgentOS | Mission Control
 
@@ -215,7 +215,7 @@ agentos doctor
 Install a specific published version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.4 bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.5 bash
 ```
 
 npm launcher:
@@ -267,8 +267,8 @@ openclaw gateway status --json
 Push a tag in the format below to build platform-specific release assets on GitHub Releases:
 
 ```bash
-git tag agentos-v0.1.4
-git push origin agentos-v0.1.4
+git tag agentos-v0.1.5
+git push origin agentos-v0.1.5
 ```
 
 The release workflow uploads:

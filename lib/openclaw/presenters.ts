@@ -67,14 +67,12 @@ export function toneForAgentStatus(status: AgentStatus) {
 
 export function toneForRuntimeStatus(status: RuntimeStatus) {
   switch (status) {
-    case "active":
+    case "running":
       return "text-cyan-300";
     case "completed":
       return "text-emerald-300";
-    case "partial":
+    case "stalled":
       return "text-amber-200";
-    case "error":
-      return "text-rose-200";
     case "queued":
       return "text-amber-200";
     default:
@@ -84,14 +82,12 @@ export function toneForRuntimeStatus(status: RuntimeStatus) {
 
 export function badgeVariantForRuntimeStatus(status: RuntimeStatus) {
   switch (status) {
-    case "active":
+    case "running":
       return "default";
     case "completed":
       return "success";
-    case "partial":
+    case "stalled":
       return "warning";
-    case "error":
-      return "danger";
     default:
       return "muted";
   }

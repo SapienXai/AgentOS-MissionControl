@@ -2,7 +2,9 @@ export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 
 export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offline";
 
-export type RuntimeStatus = "active" | "queued" | "idle" | "completed" | "partial" | "error";
+export type RuntimeStatus = "running" | "queued" | "idle" | "completed" | "stalled";
+
+export type MissionDispatchStatus = "queued" | "running" | "completed" | "stalled";
 
 export type AgentPreset = "worker" | "setup" | "browser" | "monitoring" | "custom";
 
@@ -32,6 +34,33 @@ export interface ModelAuthProviderStatus {
   connected: boolean;
   canLogin: boolean;
   detail: string | null;
+}
+
+export type OpenClawRuntimeSmokeTestStatus = "not-run" | "passed" | "failed";
+
+export interface OpenClawRuntimeSessionStore {
+  id: string;
+  path: string;
+  writable: boolean;
+  issue?: string | null;
+}
+
+export interface OpenClawRuntimeSmokeTest {
+  status: OpenClawRuntimeSmokeTestStatus;
+  checkedAt: string | null;
+  agentId: string | null;
+  runId: string | null;
+  summary: string | null;
+  error: string | null;
+}
+
+export interface OpenClawRuntimeDiagnostics {
+  stateRoot: string;
+  stateWritable: boolean;
+  sessionStoreWritable: boolean;
+  sessionStores: OpenClawRuntimeSessionStore[];
+  smokeTest: OpenClawRuntimeSmokeTest;
+  issues: string[];
 }
 
 export interface ModelReadiness {
@@ -84,6 +113,7 @@ export interface GatewayDiagnostics {
   updateInfo?: string;
   serviceLabel?: string;
   modelReadiness: ModelReadiness;
+  runtime: OpenClawRuntimeDiagnostics;
   securityWarnings: string[];
   issues: string[];
 }
@@ -273,9 +303,10 @@ export interface MissionSubmission {
 }
 
 export interface MissionResponse {
-  runId: string;
+  dispatchId?: string;
+  runId: string | null;
   agentId: string;
-  status: string;
+  status: MissionDispatchStatus;
   summary: string;
   payloads: Array<{
     text: string;

@@ -4,7 +4,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { resolveOpenClawBin } from "@/lib/openclaw/cli";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+import {
+  isOpenClawMissionReady,
+  isOpenClawSystemReady
+} from "@/lib/openclaw/readiness";
+import {
+  ensureOpenClawRuntimeSmokeTest,
+  getMissionControlSnapshot
+} from "@/lib/openclaw/service";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
@@ -143,6 +150,39 @@ export async function POST(request: Request) {
       }
 
       await send({
+        type: "status",
+        phase: "verifying",
+        message: "Running a live runtime smoke test..."
+      });
+
+      const smokeTest = await ensureOpenClawRuntimeSmokeTest({ force: true });
+
+      if (smokeTest.status !== "passed") {
+        const freshSnapshot = await getMissionControlSnapshot({ force: true });
+        aggregatedStderr = aggregatedStderr
+          ? `${aggregatedStderr}\n${smokeTest.error || "Runtime smoke test failed."}`
+          : smokeTest.error || "Runtime smoke test failed.";
+
+        await fail(
+          "verifying",
+          smokeTest.error
+            ? `Mission Control could not verify a real agent turn. ${smokeTest.error}`
+            : "Mission Control could not verify a real agent turn yet.",
+          {
+            snapshot: freshSnapshot,
+            manualCommand: manualCommand ?? buildModelManualCommand(freshSnapshot, preferredModelId),
+            docsUrl
+          }
+        );
+        return null;
+      }
+
+      aggregatedStdout = aggregatedStdout
+        ? `${aggregatedStdout}\n${smokeTest.summary || "Runtime smoke test passed."}`
+        : smokeTest.summary || "Runtime smoke test passed.";
+      const readySnapshot = await getMissionControlSnapshot({ force: true });
+
+      await send({
         type: "done",
         ok: true,
         phase: "ready",
@@ -150,10 +190,10 @@ export async function POST(request: Request) {
         exitCode: 0,
         stdout: aggregatedStdout,
         stderr: aggregatedStderr,
-        snapshot
+        snapshot: readySnapshot
       });
       await closeWriter();
-      return snapshot;
+      return readySnapshot;
     };
 
     try {
@@ -179,12 +219,12 @@ export async function POST(request: Request) {
       }
 
       if (input.intent === "refresh") {
-        if (isModelReady(snapshot)) {
+        if (isOpenClawMissionReady(snapshot)) {
           await send({
             type: "done",
             ok: true,
             phase: "ready",
-            message: "A usable default model is already configured.",
+            message: "A usable default model and runtime preflight are already configured.",
             exitCode: 0,
             stdout: aggregatedStdout,
             stderr: aggregatedStderr,
@@ -342,12 +382,12 @@ export async function POST(request: Request) {
         return;
       }
 
-      if (isModelReady(snapshot)) {
+      if (isOpenClawMissionReady(snapshot)) {
         await send({
           type: "done",
           ok: true,
           phase: "ready",
-          message: "A usable default model is already configured.",
+          message: "A usable default model and runtime preflight are already configured.",
           exitCode: 0,
           stdout: aggregatedStdout,
           stderr: aggregatedStderr,
@@ -491,7 +531,7 @@ async function runCommand(
 }
 
 function isSystemReady(snapshot: MissionControlSnapshot) {
-  return snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
+  return isOpenClawSystemReady(snapshot);
 }
 
 function isModelReady(snapshot: MissionControlSnapshot) {

@@ -1,6 +1,5 @@
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -22,9 +21,8 @@ await cp(staticDir, path.join(bundleDir, ".next", "static"), {
   recursive: true,
   dereference: true
 });
-await cp(publicDir, path.join(bundleDir, "public"), {
-  recursive: true,
-  dereference: true
+await copyDirectoryTree(publicDir, path.join(bundleDir, "public"), {
+  tolerateReadErrors: true
 });
 await rm(path.join(bundleDir, ".mission-control"), { recursive: true, force: true });
 await removeDotStoreFiles(bundleDir);
@@ -49,6 +47,41 @@ async function copyDirectoryContents(sourceDir, targetDir) {
     await cp(sourcePath, targetPath, {
       dereference: true
     });
+  }
+}
+
+async function copyDirectoryTree(
+  sourceDir,
+  targetDir,
+  options = {
+    tolerateReadErrors: false
+  }
+) {
+  await mkdir(targetDir, { recursive: true });
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+
+    try {
+      if (entry.isDirectory()) {
+        await copyDirectoryTree(sourcePath, targetPath, options);
+        continue;
+      }
+
+      await cp(sourcePath, targetPath, {
+        recursive: false,
+        dereference: true
+      });
+    } catch (error) {
+      if (!options.tolerateReadErrors) {
+        throw error;
+      }
+
+      const code = typeof error === "object" && error && "code" in error ? error.code : "unknown";
+      console.warn(`Skipped unreadable asset during bundle prep: ${sourcePath} (${code})`);
+    }
   }
 }
 

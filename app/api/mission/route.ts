@@ -18,7 +18,9 @@ export async function POST(request: Request) {
     const input = missionSchema.parse(await request.json());
     const result = await submitMission(input);
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      status: result.status === "queued" || result.status === "running" ? 202 : 200
+    });
   } catch (error) {
     return NextResponse.json(
       {

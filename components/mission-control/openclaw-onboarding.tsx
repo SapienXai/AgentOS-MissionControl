@@ -6,6 +6,10 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
+import {
+  isOpenClawMissionReady,
+  isOpenClawSystemReady
+} from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
@@ -73,8 +77,8 @@ export function OpenClawOnboarding({
   onDismiss: () => void;
   canDismiss: boolean;
 }) {
-  const systemReady = snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
-  const modelReady = systemReady && snapshot.diagnostics.modelReadiness.ready;
+  const systemReady = isOpenClawSystemReady(snapshot);
+  const modelReady = isOpenClawMissionReady(snapshot);
   const wizardSteps = buildWizardSteps(stage, systemReady, modelReady);
   const systemSteps = buildSystemSteps(snapshot, systemPhase);
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
@@ -985,14 +989,14 @@ function buildWizardSteps(stage: WizardStage, systemReady: boolean, modelReady: 
       id: "system",
       order: 1,
       label: "System setup",
-      description: "CLI, gateway service, live RPC",
+      description: "CLI, gateway service, live RPC, runtime state",
       state: resolveStepState(systemReady, stage === "system" && !systemReady)
     },
     {
       id: "models",
       order: 2,
       label: "Model setup",
-      description: "Default model, provider auth, usable route",
+      description: "Default model, provider auth, live smoke test",
       state: resolveStepState(modelReady, stage === "models" && !modelReady)
     }
   ] as Array<{ id: string; order: number; label: string; description: string; state: StepState }>;
@@ -1013,6 +1017,9 @@ function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboa
     phase === "verifying" ||
     phase === "ready";
   const liveComplete = snapshot.diagnostics.rpcOk || phase === "ready";
+  const runtimeStateComplete =
+    (snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable) ||
+    phase === "ready";
 
   return [
     {
@@ -1046,6 +1053,18 @@ function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboa
         liveComplete,
         !liveComplete &&
           (phase === "starting-gateway" || phase === "verifying" || (gatewayComplete && phase === "detecting"))
+      )
+    },
+    {
+      id: "state",
+      label: "Runtime state",
+      description:
+        snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable
+          ? "Mission Control can write to the OpenClaw state root and agent session stores."
+          : "Verify write access to the OpenClaw runtime state before live work begins.",
+      state: resolveStepState(
+        runtimeStateComplete,
+        !runtimeStateComplete && (phase === "verifying" || liveComplete)
       )
     }
   ] as Array<{ id: string; label: string; description: string; state: StepState }>;
@@ -1166,8 +1185,12 @@ function resolveSystemPhaseLabel(
   phase: OpenClawOnboardingPhase | null,
   snapshot: MissionControlSnapshot
 ) {
-  if (snapshot.diagnostics.rpcOk) {
+  if (isOpenClawSystemReady(snapshot)) {
     return "ready";
+  }
+
+  if (snapshot.diagnostics.rpcOk) {
+    return "verifying access";
   }
 
   if (snapshot.diagnostics.loaded && !snapshot.diagnostics.rpcOk) {
@@ -1181,8 +1204,12 @@ function resolveModelPhaseLabel(
   phase: OpenClawModelOnboardingPhase | null,
   snapshot: MissionControlSnapshot
 ) {
-  if (snapshot.diagnostics.modelReadiness.ready) {
+  if (isOpenClawMissionReady(snapshot)) {
     return "ready";
+  }
+
+  if (snapshot.diagnostics.modelReadiness.ready && snapshot.diagnostics.runtime.smokeTest.status !== "passed") {
+    return "smoke test";
   }
 
   return phase ? phase.replace("-", " ") : "waiting";
