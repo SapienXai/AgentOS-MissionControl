@@ -65,7 +65,7 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.runner }}
     env:
-      NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm-cache
     steps:
       - uses: actions/checkout@v4
 
