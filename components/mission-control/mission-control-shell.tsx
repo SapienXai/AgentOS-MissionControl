@@ -16,6 +16,7 @@ import { MissionCanvas } from "@/components/mission-control/canvas";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
+import { ResetDialog } from "@/components/mission-control/reset-dialog";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,9 @@ import type {
   OpenClawModelOnboardingStreamEvent,
   OpenClawOnboardingPhase,
   OpenClawOnboardingStreamEvent,
+  ResetPreview,
+  ResetStreamEvent,
+  ResetTarget,
   OpenClawUpdateStreamEvent,
   RuntimeRecord
 } from "@/lib/openclaw/types";
@@ -69,6 +73,7 @@ type AgentActionRequest = {
 
 type SurfaceTheme = "dark" | "light";
 type UpdateRunState = "idle" | "running" | "success" | "error";
+type ResetPreviewState = "idle" | "loading" | "ready" | "error";
 type OnboardingWizardStage = "system" | "models";
 type GatewayControlAction = "start" | "stop" | "restart";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
@@ -96,6 +101,16 @@ export function MissionControlShell({
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
+  const [resetDialogTarget, setResetDialogTarget] = useState<ResetTarget | null>(null);
+  const [resetPreviewState, setResetPreviewState] = useState<ResetPreviewState>("idle");
+  const [resetPreview, setResetPreview] = useState<ResetPreview | null>(null);
+  const [resetPreviewError, setResetPreviewError] = useState<string | null>(null);
+  const [resetRunState, setResetRunState] = useState<UpdateRunState>("idle");
+  const [resetStatusMessage, setResetStatusMessage] = useState<string | null>(null);
+  const [resetResultMessage, setResetResultMessage] = useState<string | null>(null);
+  const [resetBackgroundLogPath, setResetBackgroundLogPath] = useState<string | null>(null);
+  const [resetLog, setResetLog] = useState("");
+  const [resetConfirmText, setResetConfirmText] = useState("");
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
   const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
   const [isSavingGateway, setIsSavingGateway] = useState(false);
@@ -317,6 +332,13 @@ export function MissionControlShell({
 
   const appendModelOnboardingLog = (text: string) => {
     setModelOnboardingLog((current) => {
+      const next = `${current}${text}`;
+      return next.length > 40000 ? next.slice(next.length - 40000) : next;
+    });
+  };
+
+  const appendResetLog = (text: string) => {
+    setResetLog((current) => {
       const next = `${current}${text}`;
       return next.length > 40000 ? next.slice(next.length - 40000) : next;
     });
@@ -946,6 +968,243 @@ export function MissionControlShell({
     }
   };
 
+  const clearMissionControlBrowserState = () => {
+    if (typeof globalThis.localStorage === "undefined") {
+      return;
+    }
+
+    const exactKeys = [
+      "mission-control-surface-theme",
+      "mission-control-workspace-plan-id",
+      "mission-control-recent-prompts"
+    ];
+    const prefixKeys = ["mission-control-composer-draft:"];
+
+    for (const key of exactKeys) {
+      globalThis.localStorage.removeItem(key);
+    }
+
+    for (let index = globalThis.localStorage.length - 1; index >= 0; index -= 1) {
+      const key = globalThis.localStorage.key(index);
+
+      if (!key) {
+        continue;
+      }
+
+      if (prefixKeys.some((prefix) => key.startsWith(prefix))) {
+        globalThis.localStorage.removeItem(key);
+      }
+    }
+  };
+
+  const resetResetDialogState = () => {
+    setResetPreviewState("idle");
+    setResetPreview(null);
+    setResetPreviewError(null);
+    setResetRunState("idle");
+    setResetStatusMessage(null);
+    setResetResultMessage(null);
+    setResetBackgroundLogPath(null);
+    setResetLog("");
+    setResetConfirmText("");
+  };
+
+  const loadResetPreview = async (target: ResetTarget) => {
+    setResetPreviewState("loading");
+    setResetPreview(null);
+    setResetPreviewError(null);
+
+    try {
+      const response = await fetch("/api/reset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          intent: "preview",
+          target
+        })
+      });
+
+      const result = (await response.json().catch(() => null)) as
+        | { preview?: ResetPreview; error?: string }
+        | null;
+
+      if (!response.ok || !result?.preview) {
+        throw new Error(result?.error || "Reset preview could not be loaded.");
+      }
+
+      setResetPreview(result.preview);
+      setResetPreviewState("ready");
+    } catch (error) {
+      setResetPreviewState("error");
+      setResetPreviewError(error instanceof Error ? error.message : "Reset preview failed.");
+    }
+  };
+
+  const openResetDialog = async (target: ResetTarget) => {
+    setIsSettingsOpen(false);
+    setResetDialogTarget(target);
+    resetResetDialogState();
+    await loadResetPreview(target);
+  };
+
+  const runReset = async () => {
+    if (!resetDialogTarget) {
+      return;
+    }
+
+    setResetRunState("running");
+    setResetStatusMessage(
+      resetDialogTarget === "full-uninstall"
+        ? "Starting full uninstall..."
+        : "Starting Mission Control reset..."
+    );
+    setResetResultMessage(null);
+    setResetBackgroundLogPath(null);
+    setResetLog("");
+
+    try {
+      const response = await fetch("/api/reset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          intent: "execute",
+          target: resetDialogTarget,
+          confirmed: true
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Reset request failed.");
+      }
+
+      if (!response.body) {
+        throw new Error("Reset request did not return a readable stream.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let sawDone = false;
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex = buffer.indexOf("\n");
+
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (line) {
+            const event = JSON.parse(line) as ResetStreamEvent;
+
+            if (event.type === "status") {
+              setResetStatusMessage(event.message);
+              appendResetLog(`\n> ${event.message}\n`);
+            } else if (event.type === "log") {
+              appendResetLog(`${event.text}\n`);
+            } else {
+              sawDone = true;
+              setResetStatusMessage(null);
+              setResetResultMessage(event.message);
+              setResetBackgroundLogPath(event.backgroundLogPath ?? null);
+              setResetRunState(event.ok ? "success" : "error");
+
+              if (event.snapshot) {
+                setSnapshot(event.snapshot);
+              }
+
+              if (event.ok) {
+                clearMissionControlBrowserState();
+                toast.success(
+                  resetDialogTarget === "full-uninstall"
+                    ? "Full uninstall started."
+                    : "Mission Control reset completed.",
+                  {
+                    description: event.message
+                  }
+                );
+              } else {
+                toast.error(
+                  resetDialogTarget === "full-uninstall"
+                    ? "Full uninstall failed."
+                    : "Mission Control reset failed.",
+                  {
+                    description: event.message
+                  }
+                );
+              }
+            }
+          }
+
+          newlineIndex = buffer.indexOf("\n");
+        }
+      }
+
+      const trailing = buffer.trim();
+
+      if (trailing) {
+        const event = JSON.parse(trailing) as ResetStreamEvent;
+
+        if (event.type === "done") {
+          sawDone = true;
+          setResetStatusMessage(null);
+          setResetResultMessage(event.message);
+          setResetBackgroundLogPath(event.backgroundLogPath ?? null);
+          setResetRunState(event.ok ? "success" : "error");
+
+          if (event.snapshot) {
+            setSnapshot(event.snapshot);
+          }
+
+          if (event.ok) {
+            clearMissionControlBrowserState();
+          }
+        }
+      }
+
+      if (!sawDone) {
+        throw new Error("Reset stream ended unexpectedly.");
+      }
+    } catch (error) {
+      setResetRunState("error");
+      setResetStatusMessage(null);
+      setResetResultMessage(error instanceof Error ? error.message : "Reset failed.");
+      toast.error(
+        resetDialogTarget === "full-uninstall"
+          ? "Full uninstall failed."
+          : "Mission Control reset failed.",
+        {
+          description: error instanceof Error ? error.message : "Unknown reset error."
+        }
+      );
+    }
+  };
+
+  const handleResetDialogOpenChange = (open: boolean) => {
+    if (open) {
+      return;
+    }
+
+    if (resetRunState === "running") {
+      return;
+    }
+
+    setResetDialogTarget(null);
+    resetResetDialogState();
+  };
+
   return (
     <div
       className={cn(
@@ -1057,6 +1316,9 @@ export function MissionControlShell({
           onOpenUpdateDialog={() => {
             resetUpdateDialogState();
             setIsUpdateDialogOpen(true);
+          }}
+          onOpenResetDialog={(target) => {
+            void openResetDialog(target);
           }}
         />
       </div>
@@ -1186,6 +1448,33 @@ export function MissionControlShell({
             setActiveWorkspaceId(workspaceId);
             setSelectedNodeId(workspaceId);
           }}
+        />
+
+        <ResetDialog
+          open={resetDialogTarget !== null}
+          target={resetDialogTarget}
+          surfaceTheme={surfaceTheme}
+          previewState={resetPreviewState}
+          preview={resetPreview}
+          previewError={resetPreviewError}
+          runState={resetRunState}
+          statusMessage={resetStatusMessage}
+          resultMessage={resetResultMessage}
+          backgroundLogPath={resetBackgroundLogPath}
+          log={resetLog}
+          confirmText={resetConfirmText}
+          onConfirmTextChange={setResetConfirmText}
+          onRefreshPreview={() => {
+            if (!resetDialogTarget) {
+              return;
+            }
+
+            void loadResetPreview(resetDialogTarget);
+          }}
+          onExecute={() => {
+            void runReset();
+          }}
+          onOpenChange={handleResetDialogOpenChange}
         />
 
         <div
@@ -1659,7 +1948,8 @@ function CanvasTopBar({
   onOpenSetupWizard,
   onRunModelRefresh,
   onRunModelSetDefault,
-  onOpenUpdateDialog
+  onOpenUpdateDialog,
+  onOpenResetDialog
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
@@ -1687,6 +1977,7 @@ function CanvasTopBar({
   onRunModelRefresh: () => Promise<void>;
   onRunModelSetDefault: (modelId?: string) => Promise<void>;
   onOpenUpdateDialog: () => void;
+  onOpenResetDialog: (target: ResetTarget) => void;
 }) {
   const isOpenClawReady =
     snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk && snapshot.diagnostics.modelReadiness.ready;
@@ -2406,6 +2697,73 @@ function CanvasTopBar({
                   ) : (
                     "Save gateway"
                   )}
+                </Button>
+              </div>
+            </div>
+
+            <div
+              className={cn(
+                "mt-2 rounded-[16px] border px-2.5 py-2.5",
+                surfaceTheme === "light"
+                  ? "border-rose-200 bg-[linear-gradient(135deg,rgba(255,245,245,0.96),rgba(255,236,236,0.92))]"
+                  : "border-rose-400/18 bg-[linear-gradient(135deg,rgba(62,16,24,0.46),rgba(24,10,15,0.82))]"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p
+                    className={cn(
+                      "text-[8px] uppercase tracking-[0.18em]",
+                      surfaceTheme === "light" ? "text-rose-700/80" : "text-rose-200/75"
+                    )}
+                  >
+                    Danger zone
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-1 text-[10px] leading-[1.05rem]",
+                      surfaceTheme === "light" ? "text-rose-900/80" : "text-rose-100/80"
+                    )}
+                  >
+                    Review exactly which workspaces, agents, integration files, and packages would be removed before taking irreversible actions.
+                  </p>
+                </div>
+                <AlertTriangle
+                  className={cn(
+                    "mt-0.5 h-4 w-4",
+                    surfaceTheme === "light" ? "text-rose-700" : "text-rose-200"
+                  )}
+                />
+              </div>
+
+              <div className="mt-3 grid gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onOpenResetDialog("mission-control")}
+                  className={cn(
+                    "justify-start",
+                    surfaceTheme === "light"
+                      ? "border-rose-200 bg-white text-rose-900 hover:bg-rose-50 hover:text-rose-900"
+                      : "border-rose-400/20 bg-white/[0.04] text-rose-100 hover:bg-rose-500/10"
+                  )}
+                >
+                  Reset Mission Control
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onOpenResetDialog("full-uninstall")}
+                  className={cn(
+                    "justify-start",
+                    surfaceTheme === "light"
+                      ? "border-rose-300 bg-rose-600 text-white hover:bg-rose-700"
+                      : "border-rose-400/24 bg-rose-500/90 text-white hover:bg-rose-500"
+                  )}
+                >
+                  Full Uninstall
                 </Button>
               </div>
             </div>

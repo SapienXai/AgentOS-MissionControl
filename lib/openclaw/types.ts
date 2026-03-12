@@ -807,3 +807,73 @@ export interface AgentUpdateInput {
 export interface AgentDeleteInput {
   agentId: string;
 }
+
+export type ResetTarget = "mission-control" | "full-uninstall";
+
+export type ResetWorkspaceAction = "delete-folder" | "clean-integration";
+
+export interface ResetPreviewWorkspace {
+  workspaceId: string;
+  name: string;
+  path: string;
+  sourceMode: WorkspaceSourceMode | null;
+  action: ResetWorkspaceAction;
+  agentCount: number;
+  runtimeCount: number;
+  liveAgentCount: number;
+  reasons: string[];
+}
+
+export interface ResetPreviewPackageAction {
+  packageName: string;
+  manager: string | null;
+  command: string | null;
+  detected: boolean;
+  reason: string | null;
+}
+
+export interface ResetPreview {
+  target: ResetTarget;
+  generatedAt: string;
+  summary: {
+    deleteFolderCount: number;
+    metadataOnlyCount: number;
+    agentCount: number;
+    liveAgentCount: number;
+    activeRuntimeCount: number;
+  };
+  workspaces: ResetPreviewWorkspace[];
+  missionControlPaths: string[];
+  browserStorageKeys: string[];
+  openClawPaths: string[];
+  packageActions: ResetPreviewPackageAction[];
+  warnings: string[];
+}
+
+export type ResetStreamPhase =
+  | "planning"
+  | "agents"
+  | "workspaces"
+  | "mission-control-state"
+  | "openclaw-state"
+  | "package-removal"
+  | "refreshing";
+
+export type ResetStreamEvent =
+  | {
+      type: "status";
+      phase: ResetStreamPhase;
+      message: string;
+    }
+  | {
+      type: "log";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      target: ResetTarget;
+      message: string;
+      snapshot?: MissionControlSnapshot;
+      backgroundLogPath?: string;
+    };

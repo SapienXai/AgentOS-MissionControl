@@ -363,6 +363,11 @@ let snapshotCache: SnapshotCacheEntry | null = null;
 let snapshotPromise: Promise<SnapshotPair> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 
+export function clearMissionControlCaches() {
+  snapshotCache = null;
+  runtimeHistoryCache = new Map();
+}
+
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
   if (!options.force && snapshotCache && snapshotCache.expiresAt > Date.now()) {
     return options.includeHidden ? snapshotCache.full : snapshotCache.visible;
@@ -1433,7 +1438,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
     throw new Error("Workspace id is required.");
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
   const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
 
   if (!workspace) {
@@ -1462,8 +1467,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
 
   await rm(workspace.path, { recursive: true, force: true });
 
-  snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearMissionControlCaches();
 
   return {
     workspaceId: workspace.id,
