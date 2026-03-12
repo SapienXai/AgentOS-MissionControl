@@ -247,6 +247,14 @@ export async function POST(request: Request) {
       }
 
       if (!isOpenClawReady(snapshot)) {
+        const repairedGatewayMode = await repairGatewayModeIfNeeded(openClawBin, send, appendOutput);
+
+        if (repairedGatewayMode) {
+          snapshot = await getMissionControlSnapshot({ force: true });
+        }
+      }
+
+      if (!isOpenClawReady(snapshot)) {
         await send({
           type: "status",
           phase: "verifying",
@@ -256,15 +264,31 @@ export async function POST(request: Request) {
         try {
           snapshot = await waitForReadySnapshot();
         } catch (error) {
+          const gatewayStatus = await readGatewayStatus(openClawBin);
+          const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatus);
           aggregatedStderr = aggregatedStderr
             ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Gateway verification failed."}`
             : error instanceof Error
               ? error.message
               : "Gateway verification failed.";
 
-          await fail("verifying", "OpenClaw did not become ready in time.", {
-            manualCommand: "openclaw gateway status --json"
-          });
+          if (gatewayStatus?.rpc?.error) {
+            aggregatedStderr = aggregatedStderr
+              ? `${aggregatedStderr}\n${gatewayStatus.rpc.error}`
+              : gatewayStatus.rpc.error;
+          }
+
+          await fail(
+            "verifying",
+            gatewayModeBlocked
+              ? "OpenClaw gateway needs local mode enabled before Mission Control can connect."
+              : "OpenClaw did not become ready in time.",
+            {
+              manualCommand: gatewayModeBlocked
+                ? "openclaw config set gateway.mode local && openclaw gateway restart --json"
+                : "openclaw gateway status --json"
+            }
+          );
           return;
         }
       }
@@ -429,10 +453,80 @@ function isOpenClawReady(snapshot: MissionControlSnapshot) {
   return snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
 }
 
+async function repairGatewayModeIfNeeded(
+  openClawBin: string,
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>,
+  appendOutput: (result: CommandResult) => void
+) {
+  const gatewayStatus = await readGatewayStatus(openClawBin);
+
+  if (!needsGatewayModeLocalRepair(gatewayStatus)) {
+    return false;
+  }
+
+  await send({
+    type: "status",
+    phase: "starting-gateway",
+    message: "Configuring OpenClaw gateway for local Mission Control access..."
+  });
+
+  const setModeResult = await runCommand(openClawBin, ["config", "set", "gateway.mode", "local"], send);
+  appendOutput(setModeResult);
+
+  if (setModeResult.errorMessage || setModeResult.timedOut || setModeResult.code !== 0) {
+    throw new Error("Mission Control could not set gateway.mode=local automatically.");
+  }
+
+  await send({
+    type: "status",
+    phase: "starting-gateway",
+    message: "Restarting the local gateway service with gateway.mode=local..."
+  });
+
+  const restartResult = await runCommand(openClawBin, ["gateway", "restart", "--json"], send);
+  appendOutput(restartResult);
+
+  if (restartResult.errorMessage || restartResult.timedOut || restartResult.code !== 0) {
+    throw new Error("Mission Control updated gateway.mode, but the gateway restart failed.");
+  }
+
+  return true;
+}
+
+async function readGatewayStatus(openClawBin: string) {
+  const result = await runCommand(openClawBin, ["gateway", "status", "--json"], async () => {});
+
+  if (result.errorMessage || result.timedOut || result.code !== 0) {
+    return null;
+  }
+
+  return parseGatewayStatusPayload(result.stdout || result.stderr);
+}
+
+function needsGatewayModeLocalRepair(payload: GatewayStatusPayload | null) {
+  if (!payload || payload.rpc?.ok) {
+    return false;
+  }
+
+  const diagnosticText = [payload.lastError, payload.rpc?.error].filter(Boolean).join("\n");
+  return /gateway\.mode=local|current:\s*unset|allow-unconfigured/i.test(diagnosticText);
+}
+
 type GatewayCommandPayload = {
   result?: string;
   ok?: boolean;
   message?: string;
+};
+
+type GatewayStatusPayload = {
+  lastError?: string;
+  service?: {
+    loaded?: boolean;
+  };
+  rpc?: {
+    ok?: boolean;
+    error?: string;
+  };
 };
 
 function parseGatewayCommandPayload(stdout: string): GatewayCommandPayload | null {
@@ -454,6 +548,31 @@ function parseGatewayCommandPayload(stdout: string): GatewayCommandPayload | nul
 
     try {
       return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as GatewayCommandPayload;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function parseGatewayStatusPayload(stdout: string): GatewayStatusPayload | null {
+  const trimmed = stdout.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed) as GatewayStatusPayload;
+  } catch {
+    const firstBrace = trimmed.indexOf("{");
+    const lastBrace = trimmed.lastIndexOf("}");
+
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as GatewayStatusPayload;
     } catch {
       return null;
     }
