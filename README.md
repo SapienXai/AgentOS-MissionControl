@@ -214,7 +214,7 @@ agentos doctor
 Install a specific published version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.3 bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.4 bash
 ```
 
 npm launcher:
@@ -259,8 +259,8 @@ openclaw gateway status --json
 Push a tag in the format below to build platform-specific release assets on GitHub Releases:
 
 ```bash
-git tag agentos-v0.1.3
-git push origin agentos-v0.1.3
+git tag agentos-v0.1.4
+git push origin agentos-v0.1.4
 ```
 
 The release workflow uploads:
