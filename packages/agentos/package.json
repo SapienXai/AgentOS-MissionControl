@@ -4,7 +4,7 @@
   "description": "AgentOS Mission Control launcher",
   "type": "module",
   "bin": {
-    "agentos": "./bin/agentos.js"
+    "agentos": "bin/agentos.js"
   },
   "files": [
     "README.md",
