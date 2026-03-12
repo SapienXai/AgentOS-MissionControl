@@ -5,6 +5,9 @@ on:
     tags:
       - "agentos-v*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: write
 
@@ -15,9 +18,9 @@ jobs:
       version: ${{ steps.package.outputs.version }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
 
@@ -57,7 +60,7 @@ jobs:
           - runner: ubuntu-latest
             platform: linux
             arch: x64
-          - runner: macos-13
+          - runner: macos-15-intel
             platform: darwin
             arch: x64
           - runner: macos-14
@@ -67,13 +70,13 @@ jobs:
     env:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10.30.3
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: pnpm
@@ -120,7 +123,7 @@ jobs:
           }
           EOF
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: agentos-${{ matrix.platform }}-${{ matrix.arch }}
           path: dist/*
@@ -134,9 +137,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: agentos-*
           merge-multiple: true
