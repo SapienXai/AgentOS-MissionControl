@@ -152,31 +152,25 @@ In practice, that means:
 
 ## Product Highlights
 
-<table>
-  <tr>
-    <td width="33%" align="center" valign="top">
-      <img src="public/readme/setup.webp" alt="Guided OpenClaw setup and onboarding flow" width="100%" />
-      <br />
-      <strong>One-Click OpenClaw Setup</strong>
-      <br />
-      Go from zero to a live control plane in minutes. AgentOS detects what is missing, installs OpenClaw, and guides operators through system and model onboarding without the usual setup friction.
-    </td>
-    <td width="33%" align="center" valign="top">
-      <img src="public/readme/create.webp" alt="AI architect flow for creating workspaces, tasks, and agents" width="100%" />
-      <br />
-      <strong>AI Workspace Architect</strong>
-      <br />
-      Turn a rough idea into an operational blueprint. The architect flow uses OpenClaw-backed planning to shape workspaces, tasks, and specialized agent roles before execution even begins.
-    </td>
-    <td width="33%" align="center" valign="top">
-      <img src="public/readme/wizzard.webp" alt="Workspace wizard for project context and agent setup" width="100%" />
-      <br />
-      <strong>Guided Workspace Wizards</strong>
-      <br />
-      Launch new projects with confidence. Structured wizards capture context, scaffold the right workspace shape, and assemble the agent team your project needs without manual busywork.
-    </td>
-  </tr>
-</table>
+Three flows define the current AgentOS experience:
+
+### One-Click OpenClaw Setup
+
+<img src="public/readme/setup.webp" alt="Guided OpenClaw setup and onboarding flow" width="100%" />
+
+Go from zero to a live control plane in minutes. AgentOS detects what is missing, installs OpenClaw, and guides operators through system and model onboarding without the usual setup friction.
+
+### AI Workspace Architect
+
+<img src="public/readme/create.webp" alt="AI architect flow for creating workspaces, tasks, and agents" width="100%" />
+
+Turn a rough idea into an operational blueprint. The architect flow uses OpenClaw-backed planning to shape workspaces, tasks, and specialized agent roles before execution even begins.
+
+### Guided Workspace Wizards
+
+<img src="public/readme/wizzard.webp" alt="Workspace wizard for project context and agent setup" width="100%" />
+
+Launch new projects with confidence. Structured wizards capture context, scaffold the right workspace shape, and assemble the agent team your project needs without manual busywork.
 
 ## UI Surfaces
 
