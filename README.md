@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/readme/agentos1.webp" alt="AgentOS mission-control interface" width="100%" />
+  <img src="public/readme/banner.jpeg" alt="AgentOS mission-control interface" width="100%" />
 
 # AgentOS | Mission Control
 
@@ -8,13 +8,19 @@
 Built on top of OpenClaw, the agent orchestration kernel.
 
 <p>
+  <a href="https://sapienx.app/agentos"><strong>Website</strong></a>
+  ·
   <a href="https://youtu.be/KKX52CFtZrI"><strong>Watch Demo</strong></a>
   ·
   <a href="#why-agentos"><strong>Why AgentOS</strong></a>
   ·
+  <a href="#quick-start"><strong>Quick Start</strong></a>
+  ·
   <a href="#architecture"><strong>Architecture</strong></a>
   ·
   <a href="#key-features"><strong>Features</strong></a>
+  ·
+  <a href="#product-highlights"><strong>Highlights</strong></a>
   ·
   <a href="#setup-and-development"><strong>Setup</strong></a>
   ·
@@ -53,6 +59,25 @@ AgentOS is built for that coordination problem:
 - Runtime output should be inspectable after the fact, including created files and transcript history.
 - Agent teams need structure: presets, policies, memory, workspace scaffolds, and repeatable operating conventions.
 - As the "one-person company" model emerges, the human needs a control layer, not just an orchestration engine.
+
+## Quick Start
+
+Install the packaged launcher:
+
+```bash
+pnpm add -g @sapienx/agentos
+agentos start --open
+agentos doctor
+```
+
+Run the app locally from this repository:
+
+```bash
+pnpm install
+pnpm dev
+```
+
+If OpenClaw is not ready yet, AgentOS starts in an explicit onboarding or fallback path instead of pretending a live control plane exists.
 
 ## Architecture
 
@@ -116,14 +141,42 @@ In practice, that means:
 - Mission dispatch that targets real OpenClaw agents and supports thinking levels.
 - Transcript-backed runtime inspection, including final output, warnings, token usage, and created files.
 - File reveal actions from the inspector for artifacts written to the local filesystem.
-- Workspace bootstrap wizard with source modes (`empty`, `clone`, `existing`), templates, team presets, model profiles, and kickoff missions.
+- Workspace wizard with basic create flow and advanced planner mode, including source modes (`empty`, `clone`, `existing`), templates, team presets, model profiles, and kickoff missions.
 - Structured workspace scaffolding with `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`, `docs/`, `memory/`, `deliverables/`, `skills/`, and `.openclaw/project-shell/`.
 - Agent creation and editing with policy presets (`worker`, `setup`, `browser`, `monitoring`, `custom`) plus heartbeat, file-access, install-scope, and network controls.
-- Guided workspace planner that models company, product, workspace, team, operations, and deploy decisions.
+- Guided workspace planner that models company, product, workspace, team, operations, and deploy decisions inside the workspace wizard.
 - Planner deploy flows that can turn a plan into a live workspace, agent team, automations, channels, and first missions.
-- OpenClaw onboarding and update flows directly from the UI.
+- OpenClaw onboarding, model setup, gateway control, reset, and update flows directly from the UI.
 - Configurable gateway endpoint and default workspace root from settings.
 - Explicit fallback mode when OpenClaw is unavailable, rather than pretending live control exists.
+
+## Product Highlights
+
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <img src="public/readme/setup.webp" alt="Guided OpenClaw setup and onboarding flow" width="100%" />
+      <br />
+      <strong>One-Click OpenClaw Setup</strong>
+      <br />
+      Go from zero to a live control plane in minutes. AgentOS detects what is missing, installs OpenClaw, and guides operators through system and model onboarding without the usual setup friction.
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="public/readme/create.webp" alt="AI architect flow for creating workspaces, tasks, and agents" width="100%" />
+      <br />
+      <strong>AI Workspace Architect</strong>
+      <br />
+      Turn a rough idea into an operational blueprint. The architect flow uses OpenClaw-backed planning to shape workspaces, tasks, and specialized agent roles before execution even begins.
+    </td>
+    <td width="33%" align="center" valign="top">
+      <img src="public/readme/wizzard.webp" alt="Workspace wizard for project context and agent setup" width="100%" />
+      <br />
+      <strong>Guided Workspace Wizards</strong>
+      <br />
+      Launch new projects with confidence. Structured wizards capture context, scaffold the right workspace shape, and assemble the agent team your project needs without manual busywork.
+    </td>
+  </tr>
+</table>
 
 ## UI Surfaces
 
@@ -133,11 +186,11 @@ In practice, that means:
 | `MissionCanvas` | Visual topology for workspaces, agents, and runtimes with selection and mission feedback |
 | `InspectorPanel` | Detailed inspection of selected entities, transcript output, raw payloads, and created files |
 | `CommandBar` | Mission composition, agent targeting, thinking level selection, refresh, and quick suggestions |
-| `WorkspaceCreateDialog` | Bootstrap a new workspace, scaffold files, create initial agents, and optionally kick off the first mission |
-| `WorkspacePlannerDialog` | Plan a workspace from company context through deploy, then provision the resulting operating structure |
-| `OpenClawOnboarding` | Detect, install, start, and verify OpenClaw when the local machine is not ready |
+| `WorkspaceWizardDialog` | Handle both basic workspace creation and advanced planner-driven workspace design and deploy |
+| `OpenClawOnboarding` | Detect, install, start, verify OpenClaw, and guide model readiness when the local machine is not ready |
+| `ResetDialog` | Preview Mission Control reset or full uninstall actions and stream execution progress and logs |
 
-## Current Repository Map
+## Repository Map (Key Files)
 
 ```text
 app/
@@ -145,13 +198,17 @@ app/
     agents/
     diagnostics/
     files/reveal/
+    gateway/control/
     mission/
     onboarding/
+    onboarding/models/
     planner/
+    reset/
     runtimes/[runtimeId]/
     settings/
     snapshot/
     stream/
+    system/open-terminal/
     update/
     workspaces/
   layout.tsx
@@ -164,28 +221,49 @@ components/mission-control/
   inspector-panel.tsx
   mission-control-shell.tsx
   openclaw-onboarding.tsx
+  operation-progress.tsx
+  reset-dialog.tsx
   sidebar.tsx
-  workspace-create-dialog.tsx
-  workspace-planner-dialog.tsx
+  nodes/
+  workspace-wizard/
+    workspace-wizard-dialog.tsx
+    workspace-wizard-draft-pane.tsx
+    workspace-wizard-header.tsx
+    wizard-composer.tsx
+    wizard-message-list.tsx
+    wizard-suggestion-chips.tsx
 
 hooks/
   use-mission-control-data.ts
+  use-workspace-wizard-draft.ts
 
 lib/openclaw/
+  agent-heartbeat.ts
   cli.ts
-  service.ts
+  agent-presets.ts
+  fallback.ts
+  operation-progress.ts
   planner.ts
   planner-core.ts
-  agent-presets.ts
-  workspace-presets.ts
-  agent-heartbeat.ts
-  fallback.ts
+  planner-presenters.ts
   presenters.ts
+  readiness.ts
+  reset.ts
+  service.ts
   types.ts
+  workspace-presets.ts
+  workspace-wizard-inference.ts
+  workspace-wizard-mappers.ts
+
+packages/agentos/
+  bin/
+  scripts/
+  README.md
+  package.json
 ```
 
-Many internal files still use `mission-control` naming.
-That is the current AgentOS control-plane application shipped in this repository.
+This is a representative map of the current control-plane code, not an exhaustive file listing.
+Many internal files still use `mission-control` naming; that is the current AgentOS application shipped in this repository.
 
 ## Setup And Development
 
@@ -218,10 +296,13 @@ Install a specific published version:
 curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.5 bash
 ```
 
-npm launcher:
+Package manager install:
 
 ```bash
 pnpm add -g @sapienx/agentos
+# or
+npm install -g @sapienx/agentos
+
 agentos start --open
 agentos stop
 agentos doctor
@@ -319,14 +400,18 @@ pnpm build
 | `/api/workspaces` | `GET`, `POST`, `PATCH`, `DELETE` | Read and mutate workspace projects |
 | `/api/runtimes/:runtimeId` | `GET` | Load transcript-backed runtime output |
 | `/api/onboarding` | `POST` | Install or start OpenClaw and verify readiness |
+| `/api/onboarding/models` | `POST` | Discover models, refresh readiness, set a default model, or guide provider login |
 | `/api/update` | `POST` | Run `openclaw update` and stream output |
+| `/api/gateway/control` | `POST` | Start, stop, or restart the OpenClaw gateway |
 | `/api/planner` | `POST` | Create a new workspace planning draft |
 | `/api/planner/:planId` | `GET`, `PUT` | Load or save a planning draft |
 | `/api/planner/:planId/turn` | `POST` | Process a planner conversation turn |
 | `/api/planner/:planId/simulate` | `POST` | Simulate the planner team |
 | `/api/planner/:planId/deploy` | `POST` | Deploy a planned workspace |
+| `/api/reset` | `POST` | Preview or execute a Mission Control reset or full uninstall flow |
 | `/api/settings/gateway` | `PATCH` | Update the OpenClaw gateway endpoint |
 | `/api/settings/workspace-root` | `PATCH` | Update the default workspace root |
+| `/api/system/open-terminal` | `POST` | Open a supported OpenClaw command in Terminal on macOS |
 | `/api/files/reveal` | `POST` | Reveal a local file in Finder, Explorer, or the platform file manager |
 
 ## Local State And Persistence
@@ -343,7 +428,7 @@ AgentOS keeps most durable operational state close to the workspace and to OpenC
 ## Screens And Workflows Worth Exploring
 
 - Create a workspace from scratch and inspect the generated scaffold files.
-- Open the workspace planner and move from company context to deploy.
+- Open the workspace wizard in advanced mode and move from company context to deploy.
 - Create agents with different presets and heartbeat policies.
 - Dispatch a mission, then inspect runtime output and created files from the inspector.
 - Change the gateway endpoint or workspace root from settings and watch the live snapshot refresh.
