@@ -52,7 +52,7 @@ type InlineSuggestion = {
   label: string;
   mission?: string;
   thinking?: ThinkingLevel;
-  action?: "apply-mission" | "open-workspace-create" | "open-workspace-planner";
+  action?: "apply-mission" | "open-workspace-create";
 };
 
 const composerDraftStoragePrefix = "mission-control-composer-draft";
@@ -66,7 +66,6 @@ export function CommandBar({
   composeIntent,
   onRefresh,
   onOpenWorkspaceCreate,
-  onOpenWorkspacePlanner,
   onMissionResponse,
   onMissionDispatchStart,
   onMissionDispatchComplete
@@ -77,7 +76,6 @@ export function CommandBar({
   composeIntent: ComposeIntent | null;
   onRefresh: () => Promise<void>;
   onOpenWorkspaceCreate: () => void;
-  onOpenWorkspacePlanner: () => void;
   onMissionResponse: (result: MissionResponse) => void;
   onMissionDispatchStart: (payload: {
     id: string;
@@ -97,7 +95,6 @@ export function CommandBar({
   const [isComposerActive, setIsComposerActive] = useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [isDockHovered, setIsDockHovered] = useState(false);
-  const [recentPrompts, setRecentPrompts] = useState<RecentPrompt[]>([]);
   const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const autoSelectionScopeRef = useRef<string | null>(null);
@@ -123,7 +120,7 @@ export function CommandBar({
   const dynamicPlaceholder = selectedAgent
     ? `Compose for ${selectedAgent.name}...`
     : "Compose a mission...";
-  const inlineSuggestions = buildInlineSuggestions(selectedAgent, recentPrompts);
+  const inlineSuggestions = buildInlineSuggestions();
   const showSuggestions = inlineSuggestions.length > 0;
   const isDesktopCollapsed =
     isDesktopLayout &&
@@ -164,14 +161,6 @@ export function CommandBar({
       );
     }
   }, [snapshot, activeWorkspaceId, selectedNodeId, targetAgentId, availableAgents]);
-
-  useEffect(() => {
-    if (typeof globalThis.localStorage === "undefined") {
-      return;
-    }
-
-    setRecentPrompts(readRecentPrompts());
-  }, []);
 
   useEffect(() => {
     const mediaQuery = globalThis.matchMedia("(min-width: 1024px)");
@@ -326,7 +315,7 @@ export function CommandBar({
       }
 
       if (resolvedAgentId) {
-        const nextRecent = saveRecentPrompt({
+        saveRecentPrompt({
           id: globalThis.crypto?.randomUUID?.() || `${submittedAt}`,
           mission: submittedMission,
           agentId: resolvedAgentId,
@@ -335,7 +324,6 @@ export function CommandBar({
           workspaceName: targetWorkspace?.name ?? null,
           submittedAt
         });
-        setRecentPrompts(nextRecent);
       }
 
       toast.success("Mission queued in OpenClaw.", {
@@ -428,7 +416,7 @@ export function CommandBar({
               </p>
               <span className="inline-flex h-8 items-center rounded-full bg-white px-3 text-[12px] font-medium text-slate-950">
                 <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
-                Send
+                Create task
               </span>
             </div>
           </motion.button>
@@ -503,26 +491,6 @@ export function CommandBar({
                 ) : (
                   <SubtlePill>No agent</SubtlePill>
                 )}
-
-                {targetWorkspace ? (
-                  <CreateAgentDialog
-                    snapshot={snapshot}
-                    defaultWorkspaceId={targetWorkspace.id}
-                    onRefresh={onRefresh}
-                    onAgentCreated={(agentId) => {
-                      preferredCreatedAgentIdRef.current = agentId;
-                      setTargetAgentId(agentId);
-                    }}
-                    trigger={
-                      <button
-                        type="button"
-                        className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
-                      >
-                        + Create Agent
-                      </button>
-                    }
-                  />
-                ) : null}
 
                 <div className="ml-auto flex items-center gap-1">
                   <IconButton
@@ -604,11 +572,6 @@ export function CommandBar({
                               return;
                             }
 
-                            if (suggestion.action === "open-workspace-planner") {
-                              onOpenWorkspacePlanner();
-                              return;
-                            }
-
                             if (!suggestion.mission) {
                               return;
                             }
@@ -619,6 +582,25 @@ export function CommandBar({
                           }}
                         />
                       ))}
+                      {targetWorkspace ? (
+                        <CreateAgentDialog
+                          snapshot={snapshot}
+                          defaultWorkspaceId={targetWorkspace.id}
+                          onRefresh={onRefresh}
+                          onAgentCreated={(agentId) => {
+                            preferredCreatedAgentIdRef.current = agentId;
+                            setTargetAgentId(agentId);
+                          }}
+                          trigger={
+                            <button
+                              type="button"
+                              className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
+                            >
+                              + Create Agent
+                            </button>
+                          }
+                        />
+                      ) : null}
                     </motion.div>
                   ) : (
                     <div />
@@ -646,7 +628,7 @@ export function CommandBar({
                   ) : (
                     <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
                   )}
-                  Send
+                  Create task
                 </Button>
               </div>
             </div>
@@ -838,10 +820,7 @@ function resolvePreferredAgentId(
   return workspaceAgents.find((agent) => agent.isDefault)?.id || workspaceAgents[0]?.id || snapshot.agents[0]?.id;
 }
 
-function buildInlineSuggestions(
-  selectedAgent: MissionControlSnapshot["agents"][number] | null,
-  recentPrompts: RecentPrompt[]
-) {
+function buildInlineSuggestions() {
   const suggestions: InlineSuggestion[] = [];
 
   suggestions.push({
@@ -849,36 +828,6 @@ function buildInlineSuggestions(
     label: "Create workspace",
     action: "open-workspace-create"
   });
-
-  suggestions.push({
-    id: "workspace-planner",
-    label: "Architect mode",
-    action: "open-workspace-planner"
-  });
-
-  if (selectedAgent) {
-    suggestions.push({
-      id: "link-agent",
-      label: `Link ${selectedAgent.name}`,
-      mission: `Link ${selectedAgent.name} into the mission plan and define its first handoff.`
-    });
-
-    suggestions.push({
-      id: "raise-priority",
-      label: "Raise priority",
-      mission: "Prioritize the mission and define the critical path.",
-      thinking: "high"
-    });
-  }
-
-  const recentPrompt = recentPrompts[0];
-  if (recentPrompt) {
-    suggestions.push({
-      id: `recent-${recentPrompt.id}`,
-      label: "Reuse recent",
-      mission: recentPrompt.mission
-    });
-  }
 
   const seen = new Set<string>();
 

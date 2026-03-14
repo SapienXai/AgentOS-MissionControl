@@ -1386,10 +1386,6 @@ export function MissionControlShell({
               setWorkspaceWizardInitialMode("basic");
               setIsWorkspaceWizardOpen(true);
             }}
-            onOpenWorkspacePlanner={() => {
-              setWorkspaceWizardInitialMode("advanced");
-              setIsWorkspaceWizardOpen(true);
-            }}
             onMissionResponse={setLastMission}
             onMissionDispatchStart={setPendingMission}
             onMissionDispatchComplete={(status) => {
