@@ -2,7 +2,7 @@
 
 set -eu
 
-REPO="${AGENTOS_REPO:-SapienXai/AgentOS-MissionControl}"
+REPO="${AGENTOS_REPO:-SapienXai/AgentOS}"
 INSTALL_ROOT="${AGENTOS_INSTALL_ROOT:-$HOME/.agentos}"
 BIN_DIR="${AGENTOS_BIN_DIR:-$HOME/.local/bin}"
 REQUESTED_VERSION="${AGENTOS_VERSION:-latest}"

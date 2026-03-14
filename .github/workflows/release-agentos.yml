@@ -155,13 +155,13 @@ jobs:
           macOS / Linux:
 
           \`\`\`bash
-          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
           \`\`\`
 
           Specific version:
 
           \`\`\`bash
-          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=${{ needs.validate-release.outputs.version }} bash
+          curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=${{ needs.validate-release.outputs.version }} bash
           \`\`\`
 
           ## Included assets

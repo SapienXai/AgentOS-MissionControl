@@ -278,7 +278,7 @@ export OPENCLAW_BIN=/absolute/path/to/openclaw
 GitHub Release installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
 agentos start --open
 agentos stop
 agentos doctor
@@ -287,7 +287,7 @@ agentos doctor
 Install a specific published version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS-MissionControl/main/install.sh | AGENTOS_VERSION=0.1.5 bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.1.5 bash
 ```
 
 Package manager install:
