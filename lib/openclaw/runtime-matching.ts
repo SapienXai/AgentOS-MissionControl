@@ -1,4 +1,4 @@
-import type { RuntimeRecord } from "@/lib/openclaw/types";
+import type { RuntimeRecord, TaskRecord } from "@/lib/openclaw/types";
 
 const missionRuntimeSlackMs = 1_500;
 
@@ -56,4 +56,29 @@ export function matchesMissionRuntime(
   }
 
   return matchesMissionText(runtimeMission, mission);
+}
+
+export function matchesMissionTask(
+  task: TaskRecord,
+  mission: string,
+  options: {
+    agentId?: string | null;
+    submittedAt?: number | null;
+  } = {}
+) {
+  if (options.agentId && !task.agentIds.includes(options.agentId)) {
+    return false;
+  }
+
+  if (typeof options.submittedAt === "number" && (task.updatedAt ?? 0) < options.submittedAt - missionRuntimeSlackMs) {
+    return false;
+  }
+
+  const candidate = task.mission || task.title;
+
+  if (!candidate) {
+    return false;
+  }
+
+  return matchesMissionText(candidate, mission);
 }

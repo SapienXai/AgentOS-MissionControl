@@ -808,6 +808,11 @@ function resolvePreferredAgentId(
     return selectedAgent.id;
   }
 
+  const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
+  if (selectedTask?.primaryAgentId) {
+    return selectedTask.primaryAgentId;
+  }
+
   const selectedRuntime = snapshot.runtimes.find((runtime) => runtime.id === selectedNodeId);
   if (selectedRuntime?.agentId) {
     return selectedRuntime.agentId;

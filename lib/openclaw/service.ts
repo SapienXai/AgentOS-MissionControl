@@ -39,7 +39,7 @@ import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
-import { matchesMissionText } from "@/lib/openclaw/runtime-matching";
+import { matchesMissionRuntime, matchesMissionText } from "@/lib/openclaw/runtime-matching";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
@@ -63,6 +63,9 @@ import type {
   OpenClawAgent,
   PresenceRecord,
   RelationshipRecord,
+  TaskDetailRecord,
+  TaskFeedEvent,
+  TaskRecord,
   RuntimeRecord,
   RuntimeOutputItem,
   RuntimeOutputRecord,
@@ -797,6 +800,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       ]
     } satisfies MissionControlSnapshot["diagnostics"];
 
+    const tasks = buildTaskRecords(runtimes, agents);
+    const visibleTasks = buildTaskRecords(visibleRuntimes, visibleAgents);
     const generatedAt = new Date().toISOString();
     const sharedSnapshotFields = {
       generatedAt,
@@ -827,6 +832,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
         agents,
         models: mapModels(agents),
         runtimes,
+        tasks,
         relationships
       },
       visible: {
@@ -835,6 +841,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
         agents: visibleAgents,
         models: mapModels(visibleAgents),
         runtimes: visibleRuntimes,
+        tasks: visibleTasks,
         relationships: visibleRelationships
       }
     };
@@ -850,6 +857,250 @@ function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
     visible: snapshot,
     full: snapshot
   };
+}
+
+function buildTaskRecords(runtimes: RuntimeRecord[], agents: OpenClawAgent[]): TaskRecord[] {
+  const groups = new Map<string, RuntimeRecord[]>();
+  const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+
+  for (const runtime of runtimes) {
+    const groupKey = resolveTaskGroupKey(runtime);
+    const group = groups.get(groupKey) ?? [];
+    group.push(runtime);
+    groups.set(groupKey, group);
+  }
+
+  return Array.from(groups.entries())
+    .map(([groupKey, groupedRuntimes]) =>
+      buildTaskRecord(groupKey, groupedRuntimes, agentNameById)
+    )
+    .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+}
+
+function buildTaskRecord(
+  groupKey: string,
+  runtimes: RuntimeRecord[],
+  agentNameById: Map<string, string>
+): TaskRecord {
+  const sortedRuntimes = [...runtimes].sort(sortRuntimesByUpdatedAtDesc);
+  const primaryRuntime =
+    [...sortedRuntimes].sort((left, right) => scoreTaskRuntime(right) - scoreTaskRuntime(left))[0] ??
+    sortedRuntimes[0];
+  const mission =
+    resolveRuntimeMissionText(primaryRuntime) ||
+    sortedRuntimes.map((runtime) => resolveRuntimeMissionText(runtime)).find(Boolean) ||
+    null;
+  const subtitle =
+    sortedRuntimes
+      .map((runtime) => runtime.subtitle?.trim())
+      .find((value): value is string => Boolean(value)) || "Awaiting OpenClaw updates.";
+  const createdFiles = dedupeCreatedFiles(
+    sortedRuntimes.flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
+  );
+  const warnings = uniqueStrings(
+    sortedRuntimes.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
+  );
+  const tokenUsage = aggregateRuntimeTokenUsage(sortedRuntimes);
+  const agentIds = uniqueStrings(
+    sortedRuntimes.flatMap((runtime) => (runtime.agentId ? [runtime.agentId] : []))
+  );
+  const sessionIds = uniqueStrings(
+    sortedRuntimes.flatMap((runtime) => (runtime.sessionId ? [runtime.sessionId] : []))
+  );
+  const runIds = uniqueStrings(
+    sortedRuntimes.flatMap((runtime) => (runtime.runId ? [runtime.runId] : []))
+  );
+  const primaryAgentId = primaryRuntime?.agentId || agentIds[0];
+  const primaryAgentName = primaryAgentId ? agentNameById.get(primaryAgentId) ?? null : null;
+
+  return {
+    id: createTaskRecordId(groupKey),
+    key: groupKey,
+    title: mission || primaryRuntime?.title || "Untitled task",
+    mission,
+    subtitle,
+    status: resolveTaskStatus(sortedRuntimes),
+    updatedAt: sortedRuntimes[0]?.updatedAt ?? null,
+    ageMs: sortedRuntimes[0]?.ageMs ?? null,
+    workspaceId: primaryRuntime?.workspaceId,
+    primaryAgentId,
+    primaryAgentName,
+    primaryRuntimeId: primaryRuntime?.id,
+    dispatchId: resolveDispatchId(sortedRuntimes),
+    runtimeIds: sortedRuntimes.map((runtime) => runtime.id),
+    agentIds,
+    sessionIds,
+    runIds,
+    runtimeCount: sortedRuntimes.length,
+    updateCount: sortedRuntimes.filter((runtime) => runtime.source === "turn").length,
+    liveRunCount: sortedRuntimes.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
+    artifactCount: createdFiles.length,
+    warningCount: warnings.length,
+    tokenUsage,
+    metadata: {
+      mission,
+      primaryRuntimeSource: primaryRuntime?.source ?? null
+    }
+  };
+}
+
+function resolveTaskGroupKey(runtime: RuntimeRecord) {
+  const taskId = runtime.taskId?.trim();
+  const dispatchId =
+    typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+  const mission = resolveRuntimeMissionText(runtime);
+  const sessionId = runtime.sessionId?.trim();
+
+  if (dispatchId) {
+    return `dispatch:${dispatchId}`;
+  }
+
+  if (taskId) {
+    return `task:${taskId}`;
+  }
+
+  if (mission) {
+    return `mission:${runtime.agentId ?? "unknown"}:${hashTaskKey(mission)}`;
+  }
+
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+
+  return `runtime:${runtime.id}`;
+}
+
+function resolveRuntimeMissionText(runtime: RuntimeRecord) {
+  const mission =
+    typeof runtime.metadata.mission === "string"
+      ? runtime.metadata.mission
+      : typeof runtime.metadata.turnPrompt === "string"
+        ? runtime.metadata.turnPrompt
+        : null;
+
+  if (!mission) {
+    return null;
+  }
+
+  const normalized = mission.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function scoreTaskRuntime(runtime: RuntimeRecord) {
+  const hasMission = resolveRuntimeMissionText(runtime) ? 8 : 0;
+  const sourceScore = runtime.source === "turn" ? 6 : runtime.source === "session" ? 4 : 2;
+  const statusScore =
+    runtime.status === "running"
+      ? 5
+      : runtime.status === "queued"
+        ? 4
+        : runtime.status === "stalled"
+          ? 3
+          : runtime.status === "idle"
+            ? 2
+            : 1;
+
+  return hasMission + sourceScore + statusScore;
+}
+
+function resolveTaskStatus(runtimes: RuntimeRecord[]): RuntimeRecord["status"] {
+  if (runtimes.some((runtime) => runtime.status === "running")) {
+    return "running";
+  }
+
+  if (runtimes.some((runtime) => runtime.status === "queued")) {
+    return "queued";
+  }
+
+  if (runtimes.some((runtime) => runtime.status === "stalled")) {
+    return "stalled";
+  }
+
+  if (runtimes.some((runtime) => runtime.status === "idle")) {
+    return "idle";
+  }
+
+  return runtimes[0]?.status ?? "completed";
+}
+
+function resolveDispatchId(runtimes: RuntimeRecord[]) {
+  for (const runtime of runtimes) {
+    if (typeof runtime.metadata.dispatchId === "string" && runtime.metadata.dispatchId.trim()) {
+      return runtime.metadata.dispatchId.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function aggregateRuntimeTokenUsage(runtimes: RuntimeRecord[]) {
+  const relevant = runtimes.filter((runtime) => runtime.tokenUsage);
+
+  if (relevant.length === 0) {
+    return undefined;
+  }
+
+  return relevant.reduce(
+    (aggregate, runtime) => ({
+      input: aggregate.input + (runtime.tokenUsage?.input ?? 0),
+      output: aggregate.output + (runtime.tokenUsage?.output ?? 0),
+      total: aggregate.total + (runtime.tokenUsage?.total ?? 0),
+      cacheRead: (aggregate.cacheRead ?? 0) + (runtime.tokenUsage?.cacheRead ?? 0)
+    }),
+    {
+      input: 0,
+      output: 0,
+      total: 0,
+      cacheRead: 0
+    }
+  );
+}
+
+function extractCreatedFilesFromRuntimeMetadata(runtime: RuntimeRecord) {
+  const rawCreatedFiles = runtime.metadata.createdFiles;
+
+  if (!Array.isArray(rawCreatedFiles)) {
+    return [];
+  }
+
+  return rawCreatedFiles.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return [];
+    }
+
+    const pathValue = "path" in entry && typeof entry.path === "string" ? entry.path : null;
+    const displayPathValue =
+      "displayPath" in entry && typeof entry.displayPath === "string" ? entry.displayPath : pathValue;
+
+    if (!pathValue || !displayPathValue) {
+      return [];
+    }
+
+    return [
+      {
+        path: pathValue,
+        displayPath: displayPathValue
+      } satisfies RuntimeCreatedFile
+    ];
+  });
+}
+
+function extractWarningsFromRuntimeMetadata(runtime: RuntimeRecord) {
+  const rawWarnings = runtime.metadata.warnings;
+
+  if (!Array.isArray(rawWarnings)) {
+    return [];
+  }
+
+  return rawWarnings.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function createTaskRecordId(groupKey: string) {
+  return `task:${hashTaskKey(groupKey)}`;
+}
+
+function hashTaskKey(value: string) {
+  return createHash("sha1").update(value).digest("hex").slice(0, 12);
 }
 
 function resolveRuntimeSmokeTestAgentId(
@@ -1257,9 +1508,13 @@ function matchMissionDispatchToRuntime(record: MissionDispatchRecord, runtimes: 
     .filter(
       (runtime) =>
         !isSyntheticDispatchRuntime(runtime) &&
-        runtime.source !== "turn" &&
         runtime.agentId === record.agentId &&
         (!sessionId || runtime.sessionId === sessionId) &&
+        (runtime.source !== "turn" ||
+          matchesMissionRuntime(runtime, record.mission, {
+            agentId: record.agentId,
+            submittedAt
+          })) &&
         (runtime.updatedAt ?? 0) >= (Number.isNaN(submittedAt) ? 0 : submittedAt - 1500)
     )
     .sort(sortRuntimesByUpdatedAtDesc)[0];
@@ -1501,67 +1756,68 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
     };
   }
 
+  return getRuntimeOutputForResolvedRuntime(runtime, snapshot);
+}
+
+export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
+  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let task = snapshot.tasks.find((entry) => entry.id === taskId);
+
+  if (!task) {
+    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    task = snapshot.tasks.find((entry) => entry.id === taskId);
+  }
+
+  if (!task) {
+    throw new Error("Task was not found in the current OpenClaw snapshot.");
+  }
+
+  const runs = task.runtimeIds
+    .map((runtimeId) => snapshot.runtimes.find((runtime) => runtime.id === runtimeId))
+    .filter((runtime): runtime is RuntimeRecord => Boolean(runtime))
+    .sort(sortRuntimesByUpdatedAtDesc);
+  const outputs = await Promise.all(
+    runs.map((runtime) => getRuntimeOutputForResolvedRuntime(runtime, snapshot))
+  );
+  const outputByRuntimeId = new Map(outputs.map((output) => [output.runtimeId, output]));
+  const createdFiles = dedupeCreatedFiles(
+    outputs.flatMap((output) => output.createdFiles).concat(
+      runs.flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
+    )
+  );
+  const warnings = uniqueStrings(
+    outputs.flatMap((output) => output.warnings).concat(
+      runs.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
+    )
+  );
+
+  return {
+    task,
+    runs,
+    outputs,
+    liveFeed: buildTaskFeed(task, runs, outputByRuntimeId, snapshot),
+    createdFiles,
+    warnings
+  };
+}
+
+async function getRuntimeOutputForResolvedRuntime(
+  runtime: RuntimeRecord,
+  snapshot: MissionControlSnapshot
+): Promise<RuntimeOutputRecord> {
   if (snapshot.mode === "fallback") {
-    return {
-      runtimeId,
-      sessionId: runtime.sessionId,
-      taskId: runtime.taskId,
-      status: "available",
-      finalText: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
-      finalTimestamp: new Date().toISOString(),
-      stopReason: "fallback",
-      errorMessage: null,
-      items: [
-        {
-          id: "fallback-assistant",
-          role: "assistant",
-          timestamp: new Date().toISOString(),
-          text: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
-          stopReason: "fallback",
-          isError: false
-        }
-      ],
-      createdFiles: [],
-      warnings: [],
-      warningSummary: null
-    };
+    return createFallbackRuntimeOutput(runtime);
   }
 
   if (!runtime.sessionId || !runtime.agentId) {
-    return {
-      runtimeId,
-      sessionId: runtime.sessionId,
-      taskId: runtime.taskId,
-      status: "missing",
-      finalText: null,
-      finalTimestamp: null,
-      stopReason: null,
-      errorMessage: "This runtime does not expose a session transcript yet.",
-      items: [],
-      createdFiles: [],
-      warnings: [],
-      warningSummary: null
-    };
+    return createMissingRuntimeOutput(runtime, "This runtime does not expose a session transcript yet.");
   }
 
   const agent = snapshot.agents.find((entry) => entry.id === runtime.agentId);
   const transcriptPath = await resolveRuntimeTranscriptPath(runtime.agentId, runtime.sessionId, agent?.workspacePath);
 
   if (!transcriptPath) {
-    return {
-      runtimeId,
-      sessionId: runtime.sessionId,
-      taskId: runtime.taskId,
-      status: "missing",
-      finalText: null,
-      finalTimestamp: null,
-      stopReason: null,
-      errorMessage: "No transcript file was found for this runtime session.",
-      items: [],
-      createdFiles: [],
-      warnings: [],
-      warningSummary: null
-    };
+    return createMissingRuntimeOutput(runtime, "No transcript file was found for this runtime session.");
   }
 
   try {
@@ -1569,7 +1825,7 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
     return parseRuntimeOutput(runtime, raw, agent?.workspacePath);
   } catch (error) {
     return {
-      runtimeId,
+      runtimeId: runtime.id,
       sessionId: runtime.sessionId,
       taskId: runtime.taskId,
       status: "error",
@@ -4001,6 +4257,166 @@ async function resolveRuntimeTranscriptPath(
   return null;
 }
 
+function createFallbackRuntimeOutput(runtime: RuntimeRecord): RuntimeOutputRecord {
+  const timestamp = new Date().toISOString();
+
+  return {
+    runtimeId: runtime.id,
+    sessionId: runtime.sessionId,
+    taskId: runtime.taskId,
+    status: "available",
+    finalText: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
+    finalTimestamp: timestamp,
+    stopReason: "fallback",
+    errorMessage: null,
+    items: [
+      {
+        id: `${runtime.id}:fallback`,
+        role: "assistant",
+        timestamp,
+        text: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
+        stopReason: "fallback",
+        isError: false
+      }
+    ],
+    createdFiles: [],
+    warnings: [],
+    warningSummary: null
+  };
+}
+
+function createMissingRuntimeOutput(runtime: RuntimeRecord, errorMessage: string): RuntimeOutputRecord {
+  return {
+    runtimeId: runtime.id,
+    sessionId: runtime.sessionId,
+    taskId: runtime.taskId,
+    status: "missing",
+    finalText: null,
+    finalTimestamp: null,
+    stopReason: null,
+    errorMessage,
+    items: [],
+    createdFiles: [],
+    warnings: [],
+    warningSummary: null
+  };
+}
+
+function buildTaskFeed(
+  task: TaskRecord,
+  runs: RuntimeRecord[],
+  outputsByRuntimeId: Map<string, RuntimeOutputRecord>,
+  snapshot: MissionControlSnapshot
+) {
+  const agentNameById = new Map(snapshot.agents.map((agent) => [agent.id, agent.name]));
+  const events: TaskFeedEvent[] = [];
+  const sortedRuns = [...runs].sort((left, right) => (left.updatedAt ?? 0) - (right.updatedAt ?? 0));
+
+  for (const runtime of sortedRuns) {
+    const output = outputsByRuntimeId.get(runtime.id);
+    const agentName = runtime.agentId ? agentNameById.get(runtime.agentId) ?? null : null;
+    const runtimeTimestamp = timestampFromRuntime(runtime, output?.finalTimestamp);
+
+    if (output?.items.length) {
+      for (const item of output.items) {
+        events.push({
+          id: `${runtime.id}:${item.id}`,
+          kind:
+            item.role === "assistant"
+              ? "assistant"
+              : item.role === "toolResult"
+                ? "tool"
+                : "user",
+          timestamp: item.timestamp,
+          title:
+            item.role === "assistant"
+              ? agentName || "Agent update"
+              : item.role === "toolResult"
+                ? item.toolName
+                  ? `Tool · ${item.toolName}`
+                  : "Tool update"
+                : "Mission",
+          detail: summarizeText(item.text.trim() || output.errorMessage || runtime.subtitle, 220),
+          runtimeId: runtime.id,
+          agentId: runtime.agentId,
+          toolName: item.toolName,
+          isError: item.isError
+        });
+      }
+    } else {
+      events.push({
+        id: `${runtime.id}:status`,
+        kind: "status",
+        timestamp: runtimeTimestamp,
+        title: agentName ? `${agentName} · ${runtime.status}` : `Run · ${runtime.status}`,
+        detail: summarizeText(output?.errorMessage || runtime.subtitle, 220),
+        runtimeId: runtime.id,
+        agentId: runtime.agentId,
+        isError: runtime.status === "stalled"
+      });
+    }
+
+    const warningValues = uniqueStrings(
+      (output?.warnings ?? []).concat(extractWarningsFromRuntimeMetadata(runtime))
+    );
+    for (const warning of warningValues) {
+      events.push({
+        id: `${runtime.id}:warning:${hashTaskKey(warning)}`,
+        kind: "warning",
+        timestamp: runtimeTimestamp,
+        title: "Fallback",
+        detail: summarizeText(warning, 220),
+        runtimeId: runtime.id,
+        agentId: runtime.agentId
+      });
+    }
+
+    const createdFiles = dedupeCreatedFiles(
+      (output?.createdFiles ?? []).concat(extractCreatedFilesFromRuntimeMetadata(runtime))
+    );
+    for (const file of createdFiles) {
+      events.push({
+        id: `${runtime.id}:artifact:${hashTaskKey(file.path)}`,
+        kind: "artifact",
+        timestamp: runtimeTimestamp,
+        title: "Created file",
+        detail: file.displayPath,
+        runtimeId: runtime.id,
+        agentId: runtime.agentId
+      });
+    }
+  }
+
+  if (events.length === 0 && task.mission) {
+    events.push({
+      id: `${task.id}:mission`,
+      kind: "user",
+      timestamp: timestampFromUnix(task.updatedAt),
+      title: "Mission",
+      detail: summarizeText(task.mission, 220),
+      agentId: task.primaryAgentId
+    });
+  }
+
+  return events
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+    .slice(-36);
+}
+
+function timestampFromRuntime(runtime: RuntimeRecord, preferred?: string | null) {
+  if (preferred) {
+    return preferred;
+  }
+
+  return timestampFromUnix(runtime.updatedAt);
+}
+
+function timestampFromUnix(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? new Date(value).toISOString()
+    : new Date().toISOString();
+}
+
 function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?: string): RuntimeOutputRecord {
   const turns = extractTranscriptTurns(raw, runtime, workspacePath);
 
@@ -4301,6 +4717,7 @@ function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): Runtim
     workspaceId: runtime.workspaceId,
     modelId: runtime.modelId,
     sessionId: runtime.sessionId,
+    taskId: runtime.taskId,
     runId: turn.runId || turn.id,
     tokenUsage: turn.tokenUsage,
     metadata: {

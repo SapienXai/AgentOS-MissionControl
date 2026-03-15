@@ -272,6 +272,61 @@ export interface RuntimeOutputRecord {
   warningSummary: string | null;
 }
 
+export interface TaskRecord {
+  id: string;
+  key: string;
+  title: string;
+  mission: string | null;
+  subtitle: string;
+  status: RuntimeStatus;
+  updatedAt: number | null;
+  ageMs: number | null;
+  workspaceId?: string;
+  primaryAgentId?: string;
+  primaryAgentName?: string | null;
+  primaryRuntimeId?: string;
+  dispatchId?: string;
+  runtimeIds: string[];
+  agentIds: string[];
+  sessionIds: string[];
+  runIds: string[];
+  runtimeCount: number;
+  updateCount: number;
+  liveRunCount: number;
+  artifactCount: number;
+  warningCount: number;
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+    cacheRead?: number;
+  };
+  metadata: Record<string, unknown>;
+}
+
+export type TaskFeedEventKind = "status" | "assistant" | "tool" | "artifact" | "warning" | "user";
+
+export interface TaskFeedEvent {
+  id: string;
+  kind: TaskFeedEventKind;
+  timestamp: string;
+  title: string;
+  detail: string;
+  runtimeId?: string;
+  agentId?: string;
+  toolName?: string;
+  isError?: boolean;
+}
+
+export interface TaskDetailRecord {
+  task: TaskRecord;
+  runs: RuntimeRecord[];
+  outputs: RuntimeOutputRecord[];
+  liveFeed: TaskFeedEvent[];
+  createdFiles: RuntimeCreatedFile[];
+  warnings: string[];
+}
+
 export type RelationshipKind = "contains" | "uses-model" | "active-run";
 
 export interface RelationshipRecord {
@@ -291,6 +346,7 @@ export interface MissionControlSnapshot {
   agents: OpenClawAgent[];
   models: ModelRecord[];
   runtimes: RuntimeRecord[];
+  tasks: TaskRecord[];
   relationships: RelationshipRecord[];
   missionPresets: string[];
 }
@@ -334,6 +390,20 @@ export type OpenClawUpdateStreamEvent =
       stdout: string;
       stderr: string;
       snapshot?: MissionControlSnapshot;
+    };
+
+export type TaskDetailStreamEvent =
+  | {
+      type: "task";
+      detail: TaskDetailRecord;
+    }
+  | {
+      type: "ready";
+      ok: boolean;
+    }
+  | {
+      type: "error";
+      error: string;
     };
 
 export type OpenClawOnboardingPhase =
@@ -401,6 +471,95 @@ export type OpenClawModelOnboardingStreamEvent =
       docsUrl?: string;
       discoveredModels?: DiscoveredModelCandidate[];
     };
+
+export type AddModelsProviderId =
+  | "openai-codex"
+  | "openrouter"
+  | "ollama"
+  | "openai"
+  | "anthropic"
+  | "xai";
+
+export type AddModelsProviderCategory = "primary" | "other";
+
+export type AddModelsProviderConnectKind = "oauth" | "apiKey" | "local";
+
+export type AddModelsFlowState =
+  | "idle"
+  | "connecting"
+  | "auth-error"
+  | "discovery-loading"
+  | "discovery-success"
+  | "discovery-empty"
+  | "add-success"
+  | "add-error";
+
+export interface AddModelsCatalogModel {
+  id: string;
+  name: string;
+  provider: string;
+  input: string;
+  contextWindow: number | null;
+  local: boolean;
+  available: boolean;
+  missing: boolean;
+  alreadyAdded: boolean;
+  recommended: boolean;
+  supportsTools: boolean;
+  isFree: boolean;
+  tags: string[];
+}
+
+export interface AddModelsProviderConnectionStatus {
+  provider: string;
+  connected: boolean;
+  canConnect: boolean;
+  needsTerminal: boolean;
+  detail: string | null;
+}
+
+export interface AddModelsEmptyState {
+  kind: "no-models" | "ollama-empty" | "ollama-missing";
+  title: string;
+  description: string;
+  commands?: string[];
+}
+
+export type AddModelsProviderAction = "status" | "connect" | "discover" | "add-models";
+
+export type AddModelsProviderActionRequest =
+  | {
+      action: "status";
+      provider: AddModelsProviderId;
+    }
+  | {
+      action: "connect";
+      provider: AddModelsProviderId;
+      apiKey?: string;
+      endpoint?: string;
+    }
+  | {
+      action: "discover";
+      provider: AddModelsProviderId;
+    }
+  | {
+      action: "add-models";
+      provider: AddModelsProviderId;
+      modelIds: string[];
+    };
+
+export interface AddModelsProviderActionResult {
+  ok: boolean;
+  action: AddModelsProviderAction;
+  provider: AddModelsProviderId;
+  message: string;
+  connection: AddModelsProviderConnectionStatus;
+  models: AddModelsCatalogModel[];
+  emptyState?: AddModelsEmptyState | null;
+  manualCommand?: string | null;
+  docsUrl?: string | null;
+  snapshot?: MissionControlSnapshot;
+}
 
 export type OperationProgressStepStatus = "pending" | "active" | "done" | "error";
 

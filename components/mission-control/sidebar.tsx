@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
@@ -9,10 +9,15 @@ import {
   Bot,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Cpu,
   FolderKanban,
   Home,
+  LoaderCircle,
   MoreHorizontal,
+  RefreshCw,
+  Sparkles,
+  SquareTerminal,
   Workflow
 } from "lucide-react";
 
@@ -52,7 +57,7 @@ import {
   type AgentHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
 import { compactPath, formatContextWindow, formatModelLabel, toneForHealth } from "@/lib/openclaw/presenters";
-import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {
@@ -82,9 +87,16 @@ export function MissionSidebar({
   requestedAgentAction,
   connectionState,
   collapsed,
+  modelManager,
   onToggleCollapsed,
   onSelectWorkspace,
-  onRefresh
+  onRefresh,
+  onRunModelRefresh,
+  onRunModelDiscover,
+  onRunModelSetDefault,
+  onConnectModelProvider,
+  onOpenModelSetup,
+  onOpenAddModels
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
@@ -95,9 +107,25 @@ export function MissionSidebar({
   } | null;
   connectionState: "connecting" | "live" | "retrying";
   collapsed: boolean;
+  modelManager: {
+    runState: "idle" | "running" | "success" | "error";
+    statusMessage: string | null;
+    resultMessage: string | null;
+    log: string;
+    manualCommand: string | null;
+    docsUrl: string | null;
+    discoveredModels: DiscoveredModelCandidate[];
+    systemReady: boolean;
+  };
   onToggleCollapsed: () => void;
   onSelectWorkspace: (workspaceId: string | null) => void;
   onRefresh: () => Promise<void>;
+  onRunModelRefresh: () => void;
+  onRunModelDiscover: () => void;
+  onRunModelSetDefault: (modelId?: string) => void;
+  onConnectModelProvider: (provider: string) => void;
+  onOpenModelSetup: () => void;
+  onOpenAddModels: () => void;
 }) {
   const healthTone = toneForHealth(snapshot.diagnostics.health);
   const statusDot =
@@ -124,6 +152,7 @@ export function MissionSidebar({
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
   const [agentDeleteConfirmText, setAgentDeleteConfirmText] = useState("");
   const [activeSection, setActiveSection] = useState<SidebarSectionId>("workspaces");
+  const [modelSelectionDraft, setModelSelectionDraft] = useState("");
   const handledRequestedAgentActionIdRef = useRef<string | null>(null);
 
   const visibleAgents = useMemo(
@@ -141,6 +170,23 @@ export function MissionSidebar({
   );
   const activeWorkspace =
     snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? snapshot.workspaces[0] ?? null;
+  const availableModels = useMemo(
+    () => snapshot.models.filter((model) => model.available !== false && !model.missing),
+    [snapshot.models]
+  );
+  const discoveredModels = useMemo(
+    () =>
+      modelManager.discoveredModels.filter(
+        (model) => !snapshot.models.some((availableModel) => availableModel.id === model.modelId)
+      ),
+    [modelManager.discoveredModels, snapshot.models]
+  );
+  const selectedModelId =
+    modelSelectionDraft &&
+    (availableModels.some((model) => model.id === modelSelectionDraft) ||
+      discoveredModels.some((model) => model.modelId === modelSelectionDraft))
+      ? modelSelectionDraft
+      : resolveSidebarModelSelection(snapshot);
   const showEditAgentHeartbeatControls = editDraft
     ? isEditAgentAdvancedOpen || editDraft.policy.preset === "monitoring"
     : false;
@@ -771,9 +817,199 @@ export function MissionSidebar({
                   <>
                     <SidebarSectionHeader
                       eyebrow="Models"
-                      title="Model deck"
-                      detail="Available routing targets and current usage across agents."
+                      title="Models & providers"
+                      detail="Connect providers, choose a default route, and manage live model readiness."
+                      action={
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 rounded-full px-3 text-[11px]"
+                            onClick={onOpenAddModels}
+                          >
+                            Add models
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 rounded-full px-3 text-[11px]"
+                            disabled={modelManager.runState === "running"}
+                            onClick={onRunModelRefresh}
+                          >
+                            {modelManager.runState === "running" ? (
+                              <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            Refresh
+                          </Button>
+                        </div>
+                      }
                     />
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <OverviewTile
+                        label="Default"
+                        value={
+                          snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+                          snapshot.diagnostics.modelReadiness.defaultModel ||
+                          "Not set"
+                        }
+                      />
+                      <OverviewTile
+                        label="Providers"
+                        value={String(
+                          snapshot.diagnostics.modelReadiness.authProviders.filter((provider) => provider.connected).length
+                        )}
+                      />
+                      <OverviewTile
+                        label="Routes"
+                        value={`${snapshot.diagnostics.modelReadiness.availableModelCount}/${snapshot.diagnostics.modelReadiness.totalModelCount}`}
+                      />
+                    </div>
+
+                    {!modelManager.systemReady ? (
+                      <div className="rounded-[20px] border border-amber-400/15 bg-amber-400/[0.08] p-4">
+                        <p className="text-[13px] font-medium text-amber-50">Finish system setup first</p>
+                        <p className="mt-1.5 text-[12px] leading-5 text-amber-100/80">
+                          Provider auth and model verification need a live OpenClaw gateway and writable runtime state.
+                        </p>
+                        <div className="mt-3">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 rounded-full px-3 text-[11px]"
+                            onClick={onOpenModelSetup}
+                          >
+                            Open setup
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-3">
+                      {snapshot.diagnostics.modelReadiness.authProviders.map((provider) => (
+                        <ProviderCard
+                          key={provider.provider}
+                          provider={provider}
+                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
+                          onConnect={() => onConnectModelProvider(provider.provider)}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-display text-[15px] text-white">Default route</p>
+                          <p className="mt-1 text-[12px] leading-5 text-slate-400">
+                            Pick the model AgentOS should prefer for live work, or discover new routes first.
+                          </p>
+                        </div>
+                        <Badge variant="muted">
+                          {snapshot.diagnostics.modelReadiness.localModelCount} local · {snapshot.diagnostics.modelReadiness.remoteModelCount} remote
+                        </Badge>
+                      </div>
+
+                      <label className="mt-3 block">
+                        <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Default model</span>
+                        <select
+                          value={selectedModelId}
+                          onChange={(event) => setModelSelectionDraft(event.target.value)}
+                          className="mt-1.5 h-10 w-full rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-100 outline-none"
+                        >
+                          <option value="">Auto choose</option>
+                          {availableModels.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.name} · {model.provider}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-8 rounded-full px-3 text-[11px]"
+                          onClick={onOpenAddModels}
+                        >
+                          Add models
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-8 rounded-full px-3 text-[11px]"
+                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
+                          onClick={() => onRunModelSetDefault(selectedModelId || undefined)}
+                        >
+                          {modelManager.runState === "running" ? "Working..." : "Use selected model"}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 rounded-full px-3 text-[11px]"
+                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
+                          onClick={onRunModelDiscover}
+                        >
+                          Discover routes
+                        </Button>
+                      </div>
+
+                      {snapshot.diagnostics.modelReadiness.issues.length > 0 ? (
+                        <div className="mt-3 space-y-2">
+                          {snapshot.diagnostics.modelReadiness.issues.map((issue) => (
+                            <div
+                              key={issue}
+                              className="rounded-[14px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2 text-[12px] leading-5 text-amber-100"
+                            >
+                              {issue}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {discoveredModels.length > 0 ? (
+                      <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-display text-[15px] text-white">Discovered routes</p>
+                            <p className="mt-1 text-[12px] leading-5 text-slate-400">
+                              Newly detected remote routes that are not configured in the current model deck yet.
+                            </p>
+                          </div>
+                          <Badge variant="muted">{discoveredModels.length}</Badge>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          {discoveredModels.slice(0, 6).map((model) => (
+                            <div
+                              key={model.modelId}
+                              className="flex items-center justify-between gap-3 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-medium text-white">{model.name}</p>
+                                <p className="mt-1 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                                  {formatProviderLabel(model.provider)}
+                                  {model.isFree ? " · free" : ""}
+                                  {model.supportsTools ? " · tools" : ""}
+                                </p>
+                              </div>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                className="h-8 rounded-full px-3 text-[11px]"
+                                disabled={!modelManager.systemReady || modelManager.runState === "running"}
+                                onClick={() => onRunModelSetDefault(model.modelId)}
+                              >
+                                Use
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
                     <div className="space-y-3">
                       {snapshot.models.slice(0, 8).map((model) => (
@@ -802,6 +1038,8 @@ export function MissionSidebar({
                         </div>
                       ))}
                     </div>
+
+                    <ModelManagerConsole manager={modelManager} />
                   </>
                 ) : null}
               </div>
@@ -1495,6 +1733,275 @@ function OverviewTile({
       <p className="mt-1.5 font-display text-[1.2rem] text-white">{value}</p>
     </div>
   );
+}
+
+function ProviderCard({
+  provider,
+  disabled,
+  onConnect
+}: {
+  provider: MissionControlSnapshot["diagnostics"]["modelReadiness"]["authProviders"][number];
+  disabled: boolean;
+  onConnect: () => void;
+}) {
+  const connectLabel =
+    provider.provider === "openai-codex"
+      ? "Connect ChatGPT"
+      : provider.provider === "openrouter"
+        ? "Add API key"
+        : "Connect";
+
+  return (
+    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="truncate font-display text-[15px] text-white">{formatProviderLabel(provider.provider)}</p>
+            <Badge variant={provider.connected ? "success" : provider.canLogin ? "warning" : "muted"}>
+              {provider.connected ? "connected" : provider.canLogin ? "needs auth" : "local"}
+            </Badge>
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-slate-400">
+            {provider.detail || resolveProviderSidebarDetail(provider.provider)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {provider.canLogin ? (
+          <Button
+            variant={provider.connected ? "ghost" : "secondary"}
+            size="sm"
+            className="h-8 rounded-full px-3 text-[11px]"
+            disabled={disabled}
+            onClick={onConnect}
+          >
+            {connectLabel}
+          </Button>
+        ) : null}
+        {provider.provider === "openai-codex" ? <Badge variant="muted">ChatGPT/Codex route</Badge> : null}
+      </div>
+    </div>
+  );
+}
+
+function ModelManagerConsole({
+  manager
+}: {
+  manager: {
+    runState: "idle" | "running" | "success" | "error";
+    statusMessage: string | null;
+    resultMessage: string | null;
+    log: string;
+    manualCommand: string | null;
+    docsUrl: string | null;
+  };
+}) {
+  const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
+  const canOpenTerminal = Boolean(manager.manualCommand?.trim().startsWith("openclaw "));
+  const statusCopy =
+    manager.statusMessage ||
+    manager.resultMessage ||
+    "Refresh provider status, connect a route, or choose a default model to keep AgentOS ready.";
+
+  const copyCommand = async () => {
+    if (!manager.manualCommand) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(manager.manualCommand);
+      toast.success("Command copied.", {
+        description: "Open Terminal and paste the command to continue model setup."
+      });
+    } catch (error) {
+      toast.error("Could not copy command.", {
+        description: error instanceof Error ? error.message : "Clipboard access is unavailable."
+      });
+    }
+  };
+
+  const openTerminal = async () => {
+    if (!manager.manualCommand || !canOpenTerminal) {
+      return;
+    }
+
+    setIsOpeningTerminal(true);
+
+    try {
+      const response = await fetch("/api/system/open-terminal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          command: manager.manualCommand
+        })
+      });
+
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok || result?.error) {
+        throw new Error(result?.error || "Unable to open Terminal.");
+      }
+
+      toast.success("Terminal opened.", {
+        description: "Finish the OpenClaw provider flow there, then return and refresh this panel."
+      });
+    } catch (error) {
+      toast.error("Could not open Terminal.", {
+        description: error instanceof Error ? error.message : "Open Terminal manually and run the command below."
+      });
+    } finally {
+      setIsOpeningTerminal(false);
+    }
+  };
+
+  return (
+    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="font-display text-[15px] text-white">Model setup console</p>
+            <Badge variant={modelRunBadgeVariant(manager.runState)}>
+              {manager.runState === "idle" ? "idle" : manager.runState}
+            </Badge>
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-slate-400">{statusCopy}</p>
+        </div>
+        {manager.runState === "running" ? (
+          <LoaderCircle className="mt-0.5 h-4 w-4 animate-spin text-cyan-200" />
+        ) : (
+          <Sparkles className="mt-0.5 h-4 w-4 text-cyan-200" />
+        )}
+      </div>
+
+      <pre className="mt-3 max-h-[180px] overflow-auto rounded-[16px] border border-white/[0.08] bg-slate-950/[0.72] px-3 py-2.5 font-mono text-[10px] leading-5 text-slate-300">
+        {manager.log || "No model-management output yet.\n\nProvider auth and model actions will stream here."}
+      </pre>
+
+      {manager.manualCommand ? (
+        <div className="mt-3 rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Manual command</p>
+          <p className="mt-1.5 break-all font-mono text-[11px] leading-5 text-slate-200">{manager.manualCommand}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="h-8 rounded-full px-3 text-[11px]"
+              onClick={copyCommand}
+            >
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+              Copy command
+            </Button>
+            {canOpenTerminal ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-full px-3 text-[11px]"
+                onClick={openTerminal}
+                disabled={isOpeningTerminal}
+              >
+                {isOpeningTerminal ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Opening...
+                  </>
+                ) : (
+                  <>
+                    <SquareTerminal className="mr-1.5 h-3.5 w-3.5" />
+                    Open Terminal
+                  </>
+                )}
+              </Button>
+            ) : null}
+          </div>
+          {manager.docsUrl ? (
+            <a
+              href={manager.docsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex items-center gap-1 text-[11px] text-slate-300 underline underline-offset-4"
+            >
+              Setup docs
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function resolveSidebarModelSelection(snapshot: MissionControlSnapshot) {
+  return (
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    snapshot.models.find((model) => model.available !== false && !model.missing)?.id ||
+    ""
+  );
+}
+
+function formatProviderLabel(provider: string) {
+  const normalized = provider.trim().toLowerCase();
+
+  if (normalized === "openrouter") {
+    return "OpenRouter";
+  }
+
+  if (normalized === "openai-codex") {
+    return "OpenAI Codex";
+  }
+
+  if (normalized === "openai") {
+    return "OpenAI";
+  }
+
+  if (normalized === "anthropic") {
+    return "Anthropic";
+  }
+
+  if (normalized === "ollama") {
+    return "Ollama";
+  }
+
+  return provider
+    .split("-")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
+function resolveProviderSidebarDetail(provider: string) {
+  if (provider === "openai-codex") {
+    return "Use the OpenClaw OpenAI Codex route. If your ChatGPT plan includes Codex access, connect that account here.";
+  }
+
+  if (provider === "openrouter") {
+    return "Paste an API key to unlock OpenRouter-hosted routes.";
+  }
+
+  if (provider === "ollama") {
+    return "Local model provider. Pull models locally to make new routes available.";
+  }
+
+  return "Connect this provider to make its remote routes available inside AgentOS.";
+}
+
+function modelRunBadgeVariant(
+  runState: "idle" | "running" | "success" | "error"
+): ComponentProps<typeof Badge>["variant"] {
+  if (runState === "success") {
+    return "success";
+  }
+
+  if (runState === "error") {
+    return "warning";
+  }
+
+  if (runState === "running") {
+    return "default";
+  }
+
+  return "muted";
 }
 
 function FormField({

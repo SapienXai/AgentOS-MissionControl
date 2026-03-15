@@ -2,6 +2,7 @@ import type {
   ModelRecord,
   OpenClawAgent,
   RuntimeRecord,
+  TaskRecord,
   WorkspaceProject
 } from "@/lib/openclaw/types";
 
@@ -25,6 +26,16 @@ export type RuntimeNodeData = Record<string, unknown> & {
   onReply?: (runtime: RuntimeRecord) => void;
   onCopyPrompt?: (runtime: RuntimeRecord) => void;
   onHide?: (runtimeId: string) => void;
+};
+
+export type TaskNodeData = Record<string, unknown> & {
+  task: TaskRecord;
+  emphasis: boolean;
+  pendingCreation?: boolean;
+  justCreated?: boolean;
+  onReply?: (task: TaskRecord) => void;
+  onCopyPrompt?: (task: TaskRecord) => void;
+  onHide?: (task: TaskRecord) => void;
 };
 
 export type ModelNodeData = Record<string, unknown> & {

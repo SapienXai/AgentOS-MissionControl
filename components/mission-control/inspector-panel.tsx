@@ -38,7 +38,9 @@ import type {
   MissionControlSnapshot,
   MissionResponse,
   RuntimeCreatedFile,
-  RuntimeOutputRecord
+  RuntimeOutputRecord,
+  TaskDetailRecord,
+  TaskDetailStreamEvent
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -63,19 +65,27 @@ function InspectorPanelContent({
 }: InspectorPanelProps) {
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === selectedNodeId);
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedNodeId);
+  const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
   const selectedRuntime = snapshot.runtimes.find((runtime) => runtime.id === selectedNodeId);
   const selectedModel = snapshot.models.find((model) => model.id === selectedNodeId);
-  const selectedEntity = selectedWorkspace || selectedAgent || selectedRuntime || selectedModel || null;
+  const selectedEntity =
+    selectedWorkspace || selectedAgent || selectedTask || selectedRuntime || selectedModel || null;
   const selectedRuntimeId = selectedRuntime?.id ?? null;
+  const selectedTaskId = selectedTask?.id ?? null;
   const [activeTab, setActiveTab] = useState("overview");
   const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
   const [runtimeOutputLoading, setRuntimeOutputLoading] = useState(Boolean(selectedRuntimeId));
   const [runtimeOutputError, setRuntimeOutputError] = useState<string | null>(null);
-  const showOutputTab = Boolean(selectedRuntime);
+  const [taskDetail, setTaskDetail] = useState<TaskDetailRecord | null>(null);
+  const [taskDetailLoading, setTaskDetailLoading] = useState(Boolean(selectedTaskId));
+  const [taskDetailError, setTaskDetailError] = useState<string | null>(null);
+  const showOutputTab = Boolean(selectedRuntime || selectedTask);
   const visibleActiveTab = activeTab === "output" && !showOutputTab ? "overview" : activeTab;
+  const outputTabLabel = selectedTask ? "Feed" : "Output";
   const selectedLabel =
     selectedWorkspace?.name ||
     selectedAgent?.name ||
+    selectedTask?.title ||
     selectedRuntime?.title ||
     selectedModel?.name ||
     "Gateway overview";
@@ -83,6 +93,8 @@ function InspectorPanelContent({
     ? "workspace focus"
     : selectedAgent
       ? "agent focus"
+      : selectedTask
+        ? "task focus"
       : selectedRuntime
         ? "run focus"
         : selectedModel
@@ -92,10 +104,10 @@ function InspectorPanelContent({
     () =>
       [
         { id: "overview", label: "Overview", icon: Eye, enabled: true },
-        { id: "output", label: "Output", icon: TerminalSquare, enabled: showOutputTab },
+        { id: "output", label: outputTabLabel, icon: TerminalSquare, enabled: showOutputTab },
         { id: "raw", label: "Raw", icon: FileJson, enabled: true }
       ] satisfies Array<{ id: string; label: string; icon: LucideIcon; enabled: boolean }>,
-    [showOutputTab]
+    [outputTabLabel, showOutputTab]
   );
 
   useEffect(() => {
@@ -131,6 +143,57 @@ function InspectorPanelContent({
 
     return () => controller.abort();
   }, [selectedRuntimeId]);
+
+  useEffect(() => {
+    if (!selectedTaskId) {
+      return;
+    }
+
+    const source = new EventSource(`/api/tasks/${encodeURIComponent(selectedTaskId)}/stream`);
+
+    const handleTask = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as TaskDetailStreamEvent;
+
+        if (payload.type !== "task") {
+          return;
+        }
+
+        setTaskDetail(payload.detail);
+        setTaskDetailError(null);
+        setTaskDetailLoading(false);
+      } catch (error) {
+        setTaskDetailError(error instanceof Error ? error.message : "Unable to parse task feed.");
+        setTaskDetailLoading(false);
+      }
+    };
+
+    const handleTaskError = (event: MessageEvent<string>) => {
+      try {
+        const payload = JSON.parse(event.data) as TaskDetailStreamEvent;
+
+        if (payload.type === "error") {
+          setTaskDetailError(payload.error);
+          setTaskDetailLoading(false);
+        }
+      } catch {
+        setTaskDetailError("Unable to load task detail.");
+        setTaskDetailLoading(false);
+      }
+    };
+
+    source.addEventListener("task", handleTask as EventListener);
+    source.addEventListener("task-error", handleTaskError as EventListener);
+    source.onerror = () => {
+      setTaskDetailError((current) => current ?? "Task feed disconnected. Reconnecting…");
+    };
+
+    return () => {
+      source.removeEventListener("task", handleTask as EventListener);
+      source.removeEventListener("task-error", handleTaskError as EventListener);
+      source.close();
+    };
+  }, [selectedTaskId]);
 
   return (
     <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
@@ -220,6 +283,12 @@ function InspectorPanelContent({
                   <Badge variant="muted">{selectedDetail}</Badge>
                 </div>
 
+                {selectedTask ? (
+                  <p className="mt-3 text-[12px] leading-5 text-slate-400">
+                    {selectedTask.runtimeCount} runs · {selectedTask.liveRunCount} live · {formatRelativeTime(selectedTask.updatedAt)}
+                  </p>
+                ) : null}
+
                 {selectedRuntime ? (
                   <p className="mt-3 text-[12px] leading-5 text-slate-400">
                     Run {shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · {selectedRuntime.status} · {formatRelativeTime(selectedRuntime.updatedAt)}
@@ -254,6 +323,15 @@ function InspectorPanelContent({
                     <>
                       {selectedWorkspace ? <WorkspaceContent snapshot={snapshot} workspaceId={selectedWorkspace.id} /> : null}
                       {selectedAgent ? <AgentContent snapshot={snapshot} agentId={selectedAgent.id} /> : null}
+                      {selectedTask ? (
+                        <TaskContent
+                          snapshot={snapshot}
+                          taskId={selectedTask.id}
+                          taskDetail={taskDetail}
+                          taskDetailLoading={taskDetailLoading}
+                          taskDetailError={taskDetailError}
+                        />
+                      ) : null}
                       {selectedRuntime ? (
                         <RuntimeContent
                           snapshot={snapshot}
@@ -268,6 +346,15 @@ function InspectorPanelContent({
                     </>
                   ) : null}
 
+                  {visibleActiveTab === "output" && selectedTask ? (
+                    <TaskFeedContent
+                      task={selectedTask}
+                      taskDetail={taskDetail}
+                      taskDetailLoading={taskDetailLoading}
+                      taskDetailError={taskDetailError}
+                    />
+                  ) : null}
+
                   {visibleActiveTab === "output" && selectedRuntime ? (
                     <RuntimeOutputContent
                       runtime={selectedRuntime}
@@ -280,9 +367,11 @@ function InspectorPanelContent({
                   {visibleActiveTab === "raw" ? (
                     <pre className="overflow-x-auto rounded-[18px] border border-white/[0.08] bg-slate-950/[0.72] p-3 text-[11px] leading-5 text-slate-300">
                       {JSON.stringify(
-                        selectedRuntime && runtimeOutput
-                          ? { runtime: selectedRuntime, output: runtimeOutput }
-                          : selectedEntity || snapshot,
+                        selectedTask && taskDetail
+                          ? taskDetail
+                          : selectedRuntime && runtimeOutput
+                            ? { runtime: selectedRuntime, output: runtimeOutput }
+                            : selectedEntity || snapshot,
                         null,
                         2
                       )}
@@ -301,7 +390,9 @@ function InspectorPanelContent({
                   <div className="min-w-0">
                     <p className="truncate font-display text-[15px] text-white">{selectedLabel}</p>
                     <p className="mt-1 text-[12px] text-slate-400">
-                      {selectedRuntime
+                      {selectedTask
+                        ? `${taskDetail?.liveFeed.length ?? 0} live feed events`
+                        : selectedRuntime
                         ? `${runtimeOutput?.items.length ?? 0} transcript entries`
                         : selectedAgent
                           ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
@@ -754,6 +845,158 @@ function AgentContent({
         </div>
       </InfoCard>
     </>
+  );
+}
+
+function TaskContent({
+  snapshot,
+  taskId,
+  taskDetail,
+  taskDetailLoading,
+  taskDetailError
+}: {
+  snapshot: MissionControlSnapshot;
+  taskId: string;
+  taskDetail: TaskDetailRecord | null;
+  taskDetailLoading: boolean;
+  taskDetailError: string | null;
+}) {
+  const task = snapshot.tasks.find((entry) => entry.id === taskId);
+  const workspace = snapshot.workspaces.find((entry) => entry.id === task?.workspaceId);
+  const primaryAgent = snapshot.agents.find((entry) => entry.id === task?.primaryAgentId);
+  const runs =
+    taskDetail?.runs ??
+    snapshot.runtimes
+      .filter((runtime) => task?.runtimeIds.includes(runtime.id))
+      .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const createdFiles =
+    taskDetail?.createdFiles ??
+    dedupeCreatedFiles(runs.flatMap((runtime) => extractCreatedFilesFromRuntime(runtime)));
+  const warnings = taskDetail?.warnings ?? [];
+
+  if (!task) {
+    return null;
+  }
+
+  return (
+    <>
+      <InfoCard icon={FolderGit2} title="Task overview" value={task.status}>
+        <p className="text-sm text-white">{task.mission || task.title}</p>
+        <p>{task.subtitle}</p>
+        <InspectorMetricGrid
+          items={[
+            { label: "Runs", value: String(task.runtimeCount) },
+            { label: "Feed", value: String(task.updateCount) },
+            { label: "Files", value: String(task.artifactCount) },
+            { label: "Live", value: String(task.liveRunCount) }
+          ]}
+        />
+        <div className="flex flex-wrap gap-2">
+          {workspace ? <Badge variant="muted">{workspace.name}</Badge> : null}
+          {primaryAgent ? <Badge variant="default">{primaryAgent.name}</Badge> : null}
+          {task.dispatchId ? <Badge variant="muted">dispatch {shortId(task.dispatchId, 8)}</Badge> : null}
+        </div>
+        {taskDetailLoading && !taskDetail ? <p>Connecting live task feed…</p> : null}
+        {taskDetailError ? (
+          <p className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+            {taskDetailError}
+          </p>
+        ) : null}
+      </InfoCard>
+
+      <InfoCard icon={TerminalSquare} title="Runs" value={String(runs.length)}>
+        {runs.length === 0 ? <p>No OpenClaw runs have been grouped into this task yet.</p> : null}
+        <div className="space-y-2">
+          {runs.map((runtime) => (
+            <div
+              key={runtime.id}
+              className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-[13px] text-white">{runtime.title}</p>
+                <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                  {runtime.subtitle}
+                </p>
+              </div>
+              <Badge variant={badgeVariantForRuntimeStatus(runtime.status)}>{runtime.status}</Badge>
+            </div>
+          ))}
+        </div>
+      </InfoCard>
+
+      <InfoCard icon={FileJson} title="Artifacts" value={String(createdFiles.length)}>
+        <InspectorCreatedFileList
+          files={createdFiles}
+          emptyLabel="This task has not produced a detectable file artifact yet."
+        />
+      </InfoCard>
+
+      {warnings.length > 0 ? (
+        <InfoCard icon={Radar} title="Warnings" value={String(warnings.length)}>
+          <InspectorBulletList items={warnings} emptyLabel="No warnings detected." />
+        </InfoCard>
+      ) : null}
+    </>
+  );
+}
+
+function TaskFeedContent({
+  task,
+  taskDetail,
+  taskDetailLoading,
+  taskDetailError
+}: {
+  task: MissionControlSnapshot["tasks"][number];
+  taskDetail: TaskDetailRecord | null;
+  taskDetailLoading: boolean;
+  taskDetailError: string | null;
+}) {
+  if (taskDetailLoading && !taskDetail) {
+    return (
+      <InfoCard icon={TerminalSquare} title="Live feed" value="connecting">
+        <p>Connecting to the task feed for {task.title}…</p>
+      </InfoCard>
+    );
+  }
+
+  if (taskDetailError && !taskDetail) {
+    return (
+      <InfoCard icon={TerminalSquare} title="Live feed" value="error">
+        <p>{taskDetailError}</p>
+      </InfoCard>
+    );
+  }
+
+  const liveFeed = taskDetail?.liveFeed ?? [];
+
+  return (
+    <InfoCard icon={TerminalSquare} title="Live feed" value={String(liveFeed.length)}>
+      {taskDetailError ? (
+        <p className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+          {taskDetailError}
+        </p>
+      ) : null}
+      {liveFeed.length === 0 ? <p>No streamed task events have arrived yet.</p> : null}
+      <div className="space-y-2">
+        {liveFeed.map((event) => (
+          <div
+            key={event.id}
+            className="rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2.5"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge variant={taskFeedBadgeVariant(event.kind, event.isError)}>{event.kind}</Badge>
+                <p className="truncate text-[12px] text-white">{event.title}</p>
+              </div>
+              <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                {formatRelativeTime(new Date(event.timestamp).getTime())}
+              </span>
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-5 text-slate-100">{event.detail}</p>
+          </div>
+        ))}
+      </div>
+    </InfoCard>
   );
 }
 
@@ -1211,6 +1454,27 @@ function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {
   }
 
   return deduped;
+}
+
+function taskFeedBadgeVariant(
+  kind: TaskDetailRecord["liveFeed"][number]["kind"],
+  isError?: boolean
+): React.ComponentProps<typeof Badge>["variant"] {
+  if (isError) {
+    return "danger";
+  }
+
+  switch (kind) {
+    case "assistant":
+      return "default";
+    case "tool":
+    case "warning":
+      return "warning";
+    case "artifact":
+      return "success";
+    default:
+      return "muted";
+  }
 }
 
 async function revealLocalFile(targetPath: string) {

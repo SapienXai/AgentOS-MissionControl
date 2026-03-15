@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 
+import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
 import { MissionCanvas } from "@/components/mission-control/canvas";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
@@ -39,6 +40,7 @@ import {
 } from "@/lib/openclaw/readiness";
 import { matchesMissionRuntime } from "@/lib/openclaw/runtime-matching";
 import type {
+  AddModelsProviderId,
   DiscoveredModelCandidate,
   MissionResponse,
   MissionControlSnapshot,
@@ -50,7 +52,7 @@ import type {
   ResetStreamEvent,
   ResetTarget,
   OpenClawUpdateStreamEvent,
-  RuntimeRecord
+  TaskRecord
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -150,6 +152,8 @@ export function MissionControlShell({
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
   const [isWorkspaceWizardOpen, setIsWorkspaceWizardOpen] = useState(false);
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
+  const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
+  const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
@@ -187,6 +191,7 @@ export function MissionControlShell({
     const exists =
       snapshot.workspaces.some((entry) => entry.id === selectedNodeId) ||
       snapshot.agents.some((entry) => entry.id === selectedNodeId) ||
+      snapshot.tasks.some((entry) => entry.id === selectedNodeId) ||
       snapshot.runtimes.some((entry) => entry.id === selectedNodeId) ||
       snapshot.models.some((entry) => entry.id === selectedNodeId);
 
@@ -196,10 +201,14 @@ export function MissionControlShell({
   }, [snapshot, selectedNodeId, activeWorkspaceId]);
 
   useEffect(() => {
-    if (selectedNodeId && hiddenRuntimeIds.includes(selectedNodeId)) {
+    const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
+    const taskHidden =
+      selectedTask?.runtimeIds.length && selectedTask.runtimeIds.every((runtimeId) => hiddenRuntimeIds.includes(runtimeId));
+
+    if (selectedNodeId && (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden)) {
       setSelectedNodeId(activeWorkspaceId || snapshot.workspaces[0]?.id || null);
     }
-  }, [selectedNodeId, hiddenRuntimeIds, activeWorkspaceId, snapshot.workspaces]);
+  }, [selectedNodeId, hiddenRuntimeIds, activeWorkspaceId, snapshot.workspaces, snapshot.tasks]);
 
   useEffect(() => {
     if (!pendingMission) {
@@ -778,6 +787,13 @@ export function MissionControlShell({
     });
   };
 
+  const runModelProviderLogin = async (provider: string) => {
+    await runModelOnboarding({
+      intent: "login-provider",
+      provider
+    });
+  };
+
   const runModelSetDefault = async (modelId?: string) => {
     const targetModelId = modelId || selectedOnboardingModelId;
 
@@ -844,6 +860,11 @@ export function MissionControlShell({
     } finally {
       setGatewayControlAction(null);
     }
+  };
+
+  const openAddModelsDialog = (provider?: AddModelsProviderId | null) => {
+    setInitialAddModelsProvider(provider ?? null);
+    setIsAddModelsDialogOpen(true);
   };
 
   const checkForUpdates = async () => {
@@ -1245,23 +1266,24 @@ export function MissionControlShell({
                 agentId
               });
             }}
-            onReplyRuntime={(runtime) => {
+            onReplyTask={(task) => {
+              const prompt = resolveTaskPrompt(task);
               setComposeIntent({
-                id: `reply:${runtime.id}:${Date.now()}`,
-                mission: resolveRuntimePrompt(runtime),
-                agentId: runtime.agentId,
+                id: `reply:${task.id}:${Date.now()}`,
+                mission: prompt,
+                agentId: task.primaryAgentId,
                 sourceKind: "reply",
-                sourceLabel: runtime.title.trim() || runtime.subtitle.trim() || runtime.id
+                sourceLabel: task.title.trim() || task.subtitle.trim() || task.id
               });
             }}
-            onCopyRuntimePrompt={async (runtime) => {
-              const prompt = resolveRuntimePrompt(runtime);
+            onCopyTaskPrompt={async (task) => {
+              const prompt = resolveTaskPrompt(task);
               setComposeIntent({
-                id: `copy:${runtime.id}:${Date.now()}`,
+                id: `copy:${task.id}:${Date.now()}`,
                 mission: prompt,
-                agentId: runtime.agentId,
+                agentId: task.primaryAgentId,
                 sourceKind: "copy",
-                sourceLabel: runtime.title.trim() || runtime.subtitle.trim() || runtime.id
+                sourceLabel: task.title.trim() || task.subtitle.trim() || task.id
               });
 
               try {
@@ -1275,10 +1297,12 @@ export function MissionControlShell({
                 });
               }
             }}
-            onHideRuntime={(runtimeId) => {
-              setHiddenRuntimeIds((current) =>
-                current.includes(runtimeId) ? current : [...current, runtimeId]
-              );
+            onHideTask={(task) => {
+              setHiddenRuntimeIds((current) => {
+                const next = new Set(current);
+                task.runtimeIds.forEach((runtimeId) => next.add(runtimeId));
+                return Array.from(next);
+              });
             }}
             onSelectNode={setSelectedNodeId}
           />
@@ -1320,6 +1344,7 @@ export function MissionControlShell({
           onOpenSetupWizard={openSetupWizard}
           onRunModelRefresh={runModelRefresh}
           onRunModelSetDefault={runModelSetDefault}
+          onOpenAddModels={openAddModelsDialog}
           onOpenUpdateDialog={() => {
             resetUpdateDialogState();
             setIsUpdateDialogOpen(true);
@@ -1349,12 +1374,28 @@ export function MissionControlShell({
             requestedAgentAction={agentActionRequest}
             connectionState={connectionState}
             collapsed={!isSidebarOpen}
+            modelManager={{
+              runState: modelOnboardingRunState,
+              statusMessage: modelOnboardingStatusMessage,
+              resultMessage: modelOnboardingResultMessage,
+              log: modelOnboardingLog,
+              manualCommand: modelOnboardingManualCommand,
+              docsUrl: modelOnboardingDocsUrl,
+              discoveredModels,
+              systemReady: isOpenClawSystemReady
+            }}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
               setActiveWorkspaceId(workspaceId);
               setSelectedNodeId(workspaceId);
             }}
             onRefresh={refresh}
+            onRunModelRefresh={runModelRefresh}
+            onRunModelDiscover={runModelDiscover}
+            onRunModelSetDefault={runModelSetDefault}
+            onConnectModelProvider={runModelProviderLogin}
+            onOpenModelSetup={() => openSetupWizard(isOpenClawSystemReady ? "models" : "system")}
+            onOpenAddModels={openAddModelsDialog}
           />
         </div>
 
@@ -1451,6 +1492,14 @@ export function MissionControlShell({
             setActiveWorkspaceId(workspaceId);
             setSelectedNodeId(workspaceId);
           }}
+        />
+
+        <AddModelsDialog
+          open={isAddModelsDialogOpen}
+          onOpenChange={setIsAddModelsDialogOpen}
+          snapshot={snapshot}
+          initialProvider={initialAddModelsProvider}
+          onSnapshotChange={setSnapshot}
         />
 
         <ResetDialog
@@ -1951,6 +2000,7 @@ function CanvasTopBar({
   onOpenSetupWizard,
   onRunModelRefresh,
   onRunModelSetDefault,
+  onOpenAddModels,
   onOpenUpdateDialog,
   onOpenResetDialog
 }: {
@@ -1979,6 +2029,7 @@ function CanvasTopBar({
   onOpenSetupWizard: (stage?: OnboardingWizardStage) => void;
   onRunModelRefresh: () => Promise<void>;
   onRunModelSetDefault: (modelId?: string) => Promise<void>;
+  onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenUpdateDialog: () => void;
   onOpenResetDialog: (target: ResetTarget) => void;
 }) {
@@ -2490,11 +2541,11 @@ function CanvasTopBar({
                     variant="secondary"
                     disabled={isModelActionRunning}
                     onClick={() => {
-                      onOpenSetupWizard("models");
+                      onOpenAddModels();
                     }}
                     className={settingsSecondaryButtonStyles}
                   >
-                    +Add more
+                    Add models
                   </Button>
                 </div>
               </div>
@@ -2777,21 +2828,16 @@ function CanvasTopBar({
   );
 }
 
-function resolveRuntimePrompt(runtime: RuntimeRecord) {
-  const turnPrompt =
-    typeof runtime.metadata.turnPrompt === "string" && runtime.metadata.turnPrompt.trim().length > 0
-      ? runtime.metadata.turnPrompt.trim()
-      : null;
-
-  if (turnPrompt) {
-    return turnPrompt;
+function resolveTaskPrompt(task: TaskRecord) {
+  if (task.mission?.trim()) {
+    return task.mission.trim();
   }
 
-  if (runtime.title?.trim()) {
-    return runtime.title.trim();
+  if (task.title.trim()) {
+    return task.title.trim();
   }
 
-  return runtime.subtitle.trim() || "Continue this run.";
+  return task.subtitle.trim() || "Continue this task.";
 }
 
 function formatGatewayDraft(gatewayUrl: string) {

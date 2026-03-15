@@ -238,6 +238,40 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
         }
       }
     ],
+    tasks: [
+      {
+        id: "task:demo-plan",
+        key: "task:demo-plan",
+        title: "Mission planning task",
+        mission: "Plan the first mission structure while OpenClaw is unavailable.",
+        subtitle: "Fallback surface while OpenClaw is unavailable",
+        status: "running",
+        updatedAt: now - 120000,
+        ageMs: 120000,
+        workspaceId: "workspace-demo",
+        primaryAgentId: "agent-demo-planner",
+        primaryAgentName: "Planner",
+        primaryRuntimeId: "runtime-demo-plan",
+        runtimeIds: ["runtime-demo-plan"],
+        agentIds: ["agent-demo-planner"],
+        sessionIds: ["session-demo-plan"],
+        runIds: [],
+        runtimeCount: 1,
+        updateCount: 1,
+        liveRunCount: 1,
+        artifactCount: 0,
+        warningCount: 0,
+        tokenUsage: {
+          input: 1800,
+          output: 220,
+          total: 2020,
+          cacheRead: 0
+        },
+        metadata: {
+          reason
+        }
+      }
+    ],
     relationships: [
       {
         id: "edge-demo-planner-model",

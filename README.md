@@ -10,7 +10,7 @@ Built on top of OpenClaw, the agent orchestration kernel.
 <p>
   <a href="https://sapienx.app/agentos"><strong>Website</strong></a>
   ·
-  <a href="https://youtu.be/KKX52CFtZrI"><strong>Watch Demo</strong></a>
+  <a href="https://www.youtube.com/watch?v=ujz-4bYDjdY"><strong>Watch Demo</strong></a>
   ·
   <a href="#why-agentos"><strong>Why AgentOS</strong></a>
   ·
