@@ -54,10 +54,7 @@ type DraftSectionKey =
   | "progress"
   | "setup-speed"
   | "architect-readout"
-  | "name"
-  | "source"
-  | "template"
-  | "path"
+  | "summary"
   | "defaults"
   | "readiness"
   | "deploy-review"
@@ -308,49 +305,19 @@ export function WorkspaceWizardDraftPane({
                 </TrackedSection>
               ) : null}
 
-              <TrackedSection sectionKey="name" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
-                sectionRefs.current.name = node;
+              <TrackedSection sectionKey="summary" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
+                sectionRefs.current.summary = node;
               }}>
-                <DraftCard
+                <BasicSummaryCard
                   surfaceTheme={surfaceTheme}
-                  icon={Sparkles}
-                  title="Name"
-                  value={resolvedName}
-                  subtitle={plan ? "Updated from Architect's latest read of the conversation." : "Resolved from your quick setup."}
-                />
-              </TrackedSection>
-              <TrackedSection sectionKey="source" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
-                sectionRefs.current.source = node;
-              }}>
-                <DraftCard
-                  surfaceTheme={surfaceTheme}
-                  icon={sourceAnalysis.kind === "clone" ? GitBranch : sourceAnalysis.kind === "website" ? Globe : FolderOpen}
-                  title="Source"
-                  value={sourceAnalysis.label}
-                  subtitle={plan ? "Source context Architect is currently using." : sourceAnalysis.hint}
-                />
-              </TrackedSection>
-              <TrackedSection sectionKey="template" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
-                sectionRefs.current.template = node;
-              }}>
-                <DraftCard
-                  surfaceTheme={surfaceTheme}
-                  icon={Sparkles}
-                  title="Template"
-                  value={templateLabels[resolvedTemplate]}
-                  subtitle="Inferred from the live conversation and source context."
-                />
-              </TrackedSection>
-              <TrackedSection sectionKey="path" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
-                sectionRefs.current.path = node;
-              }}>
-                <DraftCard
-                  surfaceTheme={surfaceTheme}
-                  icon={FolderOpen}
-                  title="Path"
-                  value={workspacePath}
-                  subtitle={`Root: ${snapshot.diagnostics.workspaceRoot}`}
-                  mono
+                  resolvedName={resolvedName}
+                  resolvedTemplate={resolvedTemplate}
+                  sourceAnalysis={sourceAnalysis}
+                  workspacePath={workspacePath}
+                  workspaceRoot={snapshot.diagnostics.workspaceRoot}
+                  summaryLabel={
+                    plan ? "Updated from Architect's latest read of the conversation." : "Resolved from your quick setup."
+                  }
                 />
               </TrackedSection>
 
@@ -507,10 +474,7 @@ type TrackedDraftSnapshot = {
   progressSignature: string;
     basic: {
       architectSignature: string;
-      nameSignature: string;
-      sourceSignature: string;
-      templateSignature: string;
-      pathSignature: string;
+      summarySignature: string;
       defaultsSignature: string;
     };
   advanced: {
@@ -551,10 +515,17 @@ function buildTrackedDraftSnapshot({
     progressSignature: progress ? JSON.stringify(progress) : "",
     basic: {
       architectSignature: plan ? `${plan.architectSummary}:${plan.intake.confirmations.join("|")}` : "",
-      nameSignature: resolvedName,
-      sourceSignature: `${sourceAnalysis.kind}:${sourceAnalysis.label}:${sourceAnalysis.hint}:${sourceAnalysis.repoUrl ?? ""}:${sourceAnalysis.existingPath ?? ""}:${sourceAnalysis.websiteUrl ?? ""}`,
-      templateSignature: resolvedTemplate,
-      pathSignature: workspacePath,
+      summarySignature: [
+        resolvedName,
+        resolvedTemplate,
+        sourceAnalysis.kind,
+        sourceAnalysis.label,
+        sourceAnalysis.hint,
+        sourceAnalysis.repoUrl ?? "",
+        sourceAnalysis.existingPath ?? "",
+        sourceAnalysis.websiteUrl ?? "",
+        workspacePath
+      ].join(":"),
       defaultsSignature: `${basicPreset}:${basicRules.generateStarterDocs}:${basicRules.generateMemory}:${basicRules.kickoffMission}`
     },
     advanced: {
@@ -583,7 +554,7 @@ function resolveTrackedDraftSection(
     return nextSnapshot.mode === "basic"
       ? nextSnapshot.basic.architectSignature
         ? "architect-readout"
-        : "name"
+        : "summary"
       : nextSnapshot.advanced.stage
         ? (`section-${getPlannerSectionForStage(nextSnapshot.advanced.stage)}` as DraftSectionKey)
         : "readiness";
@@ -605,20 +576,8 @@ function resolveTrackedDraftSection(
       return "architect-readout";
     }
 
-    if (previousSnapshot.basic.nameSignature !== nextSnapshot.basic.nameSignature) {
-      return "name";
-    }
-
-    if (previousSnapshot.basic.sourceSignature !== nextSnapshot.basic.sourceSignature) {
-      return "source";
-    }
-
-    if (previousSnapshot.basic.templateSignature !== nextSnapshot.basic.templateSignature) {
-      return "template";
-    }
-
-    if (previousSnapshot.basic.pathSignature !== nextSnapshot.basic.pathSignature) {
-      return "path";
+    if (previousSnapshot.basic.summarySignature !== nextSnapshot.basic.summarySignature) {
+      return "summary";
     }
 
     if (previousSnapshot.basic.defaultsSignature !== nextSnapshot.basic.defaultsSignature) {
@@ -703,20 +662,22 @@ function PaneHeader({
   );
 }
 
-function DraftCard({
+function BasicSummaryCard({
   surfaceTheme,
-  icon: Icon,
-  title,
-  value,
-  subtitle,
-  mono = false
+  resolvedName,
+  resolvedTemplate,
+  sourceAnalysis,
+  workspacePath,
+  workspaceRoot,
+  summaryLabel
 }: {
   surfaceTheme: SurfaceTheme;
-  icon: typeof Sparkles;
-  title: string;
-  value: string;
-  subtitle: string;
-  mono?: boolean;
+  resolvedName: string;
+  resolvedTemplate: WorkspaceTemplate;
+  sourceAnalysis: WorkspaceWizardSourceAnalysis;
+  workspacePath: string;
+  workspaceRoot: string;
+  summaryLabel: string;
 }) {
   const isLight = surfaceTheme === "light";
 
@@ -729,20 +690,94 @@ function DraftCard({
             isLight ? "border-[#e7e0d6] bg-[#faf6f1] text-[#5e5750]" : "border-white/10 bg-white/[0.05] text-slate-300"
           )}
         >
-          <Icon className="h-4 w-4" />
+          <Sparkles className="h-4 w-4" />
         </span>
-        <div className="min-w-0">
-          <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>{title}</p>
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
+            Fast-path snapshot
+          </p>
+          <p className={cn("mt-1 text-[12px] leading-5", isLight ? "text-[#776f65]" : "text-slate-400")}>
+            {summaryLabel}
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <SummaryMetric surfaceTheme={surfaceTheme} label="Name" value={resolvedName} icon={Sparkles} />
+            <SummaryMetric
+              surfaceTheme={surfaceTheme}
+              label="Template"
+              value={templateLabels[resolvedTemplate]}
+              icon={Zap}
+            />
+            <SummaryMetric
+              surfaceTheme={surfaceTheme}
+              label="Source"
+              value={sourceAnalysis.label}
+              icon={sourceAnalysis.kind === "clone" ? GitBranch : sourceAnalysis.kind === "website" ? Globe : FolderOpen}
+            />
+            <SummaryMetric
+              surfaceTheme={surfaceTheme}
+              label="Path"
+              value={workspacePath}
+              detail={`Root: ${workspaceRoot}`}
+              icon={FolderOpen}
+              mono
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryMetric({
+  surfaceTheme,
+  label,
+  value,
+  icon: Icon,
+  detail,
+  mono = false
+}: {
+  surfaceTheme: SurfaceTheme;
+  label: string;
+  value: string;
+  icon: typeof Sparkles;
+  detail?: string;
+  mono?: boolean;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={cn(
+        "rounded-[18px] border px-3 py-3",
+        isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]"
+      )}
+    >
+      <div className="flex items-start gap-2.5">
+        <span
+          className={cn(
+            "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full border",
+            isLight ? "border-[#e0d7cc] bg-white text-[#615a52]" : "border-white/10 bg-white/[0.05] text-slate-300"
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-[11px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
+            {label}
+          </p>
           <p
             className={cn(
-              "mt-1 truncate text-[14px] font-medium",
+              "mt-1 break-words text-[13px] font-medium leading-5",
               isLight ? "text-[#171410]" : "text-white",
               mono && "font-mono text-[12px]"
             )}
           >
             {value}
           </p>
-          <p className={cn("mt-1 text-[12px] leading-5", isLight ? "text-[#776f65]" : "text-slate-400")}>{subtitle}</p>
+          {detail ? (
+            <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#776f65]" : "text-slate-400")}>{detail}</p>
+          ) : null}
         </div>
       </div>
     </div>

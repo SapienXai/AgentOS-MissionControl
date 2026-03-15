@@ -65,6 +65,7 @@ export function useWorkspaceWizardDraft({
   const [mode, setMode] = useState<WorkspaceWizardMode>(initialMode);
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
+  const [hasStoredDraft, setHasStoredDraft] = useState(false);
   const [basicDraft, setBasicDraft] = useState<WorkspaceWizardBasicDraft>(createInitialWorkspaceWizardBasicDraft);
   const [basicRules, setBasicRules] = useState<WorkspaceCreateRules>(createWorkspaceWizardQuickCreateRules);
   const [notice, setNotice] = useState<WorkspaceWizardNotice | null>(null);
@@ -124,13 +125,19 @@ export function useWorkspaceWizardDraft({
     });
   }, []);
 
+  const getStoredPlanId = useCallback(() => {
+    return globalThis.localStorage?.getItem(plannerStorageKey) ?? null;
+  }, []);
+
   const clearStoredPlan = useCallback(() => {
     globalThis.localStorage?.removeItem(plannerStorageKey);
+    setHasStoredDraft(false);
   }, []);
 
   const commitPlan = useCallback(
     (nextPlan: WorkspacePlan | null) => {
       setPlan(nextPlan);
+      setHasStoredDraft(Boolean(nextPlan));
 
       if (!nextPlan) {
         setPlanId(null);
@@ -254,6 +261,11 @@ export function useWorkspaceWizardDraft({
       setMode("advanced");
     }
   }, [clearStoredPlan, ensurePlan, mode]);
+
+  const discardStoredDraft = useCallback(() => {
+    clearStoredPlan();
+    setNotice(null);
+  }, [clearStoredPlan]);
 
   const savePlan = useCallback(async () => {
     if (!plan || !planId) {
@@ -578,6 +590,45 @@ export function useWorkspaceWizardDraft({
     [basicDraft, commitPlan, ensurePlan, initialMode, plan]
   );
 
+  const resumeStoredDraft = useCallback(async () => {
+    const storedPlanId = getStoredPlanId();
+
+    if (!storedPlanId) {
+      setHasStoredDraft(false);
+      return false;
+    }
+
+    setIsPlanLoading(true);
+
+    try {
+      const response = await fetch(`/api/planner/${storedPlanId}`, {
+        cache: "no-store"
+      });
+      const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };
+
+      if (!response.ok || !result.plan) {
+        throw new Error(result.error || "Unable to load the stored planner draft.");
+      }
+
+      commitPlan(result.plan);
+      setMode("advanced");
+      setNotice({
+        tone: "muted",
+        title: "Resumed previous draft",
+        description: "Architect restored your earlier blueprint so you can keep shaping the same workspace."
+      });
+      return true;
+    } catch (error) {
+      toast.error("Stored draft could not be resumed.", {
+        description: error instanceof Error ? error.message : "Unknown planner error."
+      });
+      return false;
+    } finally {
+      setIsPlanLoading(false);
+      planRequestRef.current = null;
+    }
+  }, [commitPlan, getStoredPlanId]);
+
   const switchMode = useCallback(
     async (nextMode: WorkspaceWizardMode) => {
       if (nextMode === mode) {
@@ -721,6 +772,7 @@ export function useWorkspaceWizardDraft({
       setMode(initialMode);
       setPlan(null);
       setPlanId(null);
+      setHasStoredDraft(false);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
       setBasicRules(createWorkspaceWizardQuickCreateRules());
       setNotice(null);
@@ -731,7 +783,10 @@ export function useWorkspaceWizardDraft({
       return;
     }
 
+    const storedPlanId = getStoredPlanId();
+
     setMode(initialMode);
+    setHasStoredDraft(Boolean(storedPlanId));
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
     setBasicRules(createWorkspaceWizardQuickCreateRules());
     setNotice(null);
@@ -746,7 +801,17 @@ export function useWorkspaceWizardDraft({
 
         try {
           const nextPlan = await requestPlanner({ resumeStored: true });
-          return commitPlan(nextPlan);
+          const committedPlan = commitPlan(nextPlan);
+
+          if (storedPlanId && committedPlan) {
+            setNotice({
+              tone: "muted",
+              title: "Resumed previous draft",
+              description: "Architect restored the last saved blueprint. Start a new draft if you want a clean slate."
+            });
+          }
+
+          return committedPlan;
         } catch (error) {
           toast.error("Workspace architect could not start.", {
             description: error instanceof Error ? error.message : "Unknown planner error."
@@ -764,12 +829,13 @@ export function useWorkspaceWizardDraft({
       setPlan(null);
       setPlanId(null);
     }
-  }, [commitPlan, initialMode, open, requestPlanner]);
+  }, [commitPlan, getStoredPlanId, initialMode, open, requestPlanner]);
 
   return {
     mode,
     plan,
     planId,
+    hasStoredDraft,
     notice,
     sourceAnalysis,
     basicDraft,
@@ -794,6 +860,8 @@ export function useWorkspaceWizardDraft({
     updatePlan,
     switchMode,
     startFreshDraft,
+    discardStoredDraft,
+    resumeStoredDraft,
     savePlan,
     simulatePlan,
     requestReview,

@@ -131,17 +131,18 @@ export function WorkspaceWizardDialog({
         label: value,
         prompt: value
       }))
-      .slice(0, 4);
+      .slice(0, wizard.mode === "basic" ? 3 : 4);
 
     if (suggestedReplies.length > 0) {
       return suggestedReplies;
     }
 
-    return wizard.plan?.intake.started ? [] : basicSuggestions;
-  }, [wizard.plan?.intake.started, wizard.plan?.intake.suggestedReplies]);
+    return wizard.plan?.intake.started ? [] : basicSuggestions.slice(0, wizard.mode === "basic" ? 3 : 4);
+  }, [wizard.mode, wizard.plan?.intake.started, wizard.plan?.intake.suggestedReplies]);
 
   const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
   const isArchitectBusy = wizard.isSending || wizard.isPlanLoading || wizard.isDeploying || wizard.isCreating;
+  const showResumeBanner = wizard.mode === "basic" && wizard.hasStoredDraft && !wizard.plan && !wizard.isPlanLoading;
   const hasDraftToCreate = Boolean(
     wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim()
   );
@@ -266,22 +267,35 @@ export function WorkspaceWizardDialog({
                       ) : null
                     }
                     auxiliary={
-                      activeProgress ? (
-                        <div className="mx-auto w-full max-w-3xl">
-                          <OperationProgress
-                            progress={activeProgress}
-                            className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
+                      <>
+                        {showResumeBanner ? (
+                          <ResumeDraftBanner
+                            surfaceTheme={surfaceTheme}
+                            isBusy={isArchitectBusy}
+                            onResume={() => {
+                              void wizard.resumeStoredDraft();
+                            }}
+                            onStartFresh={wizard.discardStoredDraft}
                           />
-                        </div>
-                      ) : wizard.mode === "basic" && !wizard.plan?.intake.started && !wizard.pendingUserMessage ? (
-                        <BasicQuickStartCard
-                          surfaceTheme={surfaceTheme}
-                          name={wizard.basicDraft.name}
-                          source={wizard.basicDraft.source}
-                          onNameChange={wizard.setBasicName}
-                          onSourceChange={wizard.setBasicSource}
-                        />
-                      ) : null
+                        ) : null}
+
+                        {activeProgress ? (
+                          <div className="mx-auto w-full max-w-3xl">
+                            <OperationProgress
+                              progress={activeProgress}
+                              className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
+                            />
+                          </div>
+                        ) : wizard.mode === "basic" && !wizard.plan?.intake.started && !wizard.pendingUserMessage ? (
+                          <BasicQuickStartCard
+                            surfaceTheme={surfaceTheme}
+                            name={wizard.basicDraft.name}
+                            source={wizard.basicDraft.source}
+                            onNameChange={wizard.setBasicName}
+                            onSourceChange={wizard.setBasicSource}
+                          />
+                        ) : null}
+                      </>
                     }
                   />
                 </div>
@@ -329,7 +343,7 @@ export function WorkspaceWizardDialog({
                     isBusy={wizard.isSending}
                     helperText={
                       wizard.mode === "basic"
-                        ? "Architect fills the draft live. Create the workspace as soon as the fast path looks right."
+                        ? "Architect keeps the fast-path draft synced while you stay in one lightweight flow."
                         : "Architect updates the same structured draft with every turn."
                     }
                     toolbar={
@@ -440,8 +454,8 @@ export function WorkspaceWizardDialog({
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <p className={isLight ? "text-[13px] text-[#776f65]" : "text-[13px] text-slate-300"}>
                 {wizard.mode === "basic"
-                  ? "Basic stays fast, but the same Architect conversation keeps filling the draft underneath."
-                  : "Advanced keeps the conversation and blueprint aligned through review and deploy."}
+                  ? "One prompt is enough to start. Create now or open the richer blueprint."
+                  : "Advanced keeps the conversation and blueprint aligned through launch review."}
               </p>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -474,7 +488,7 @@ export function WorkspaceWizardDialog({
                       }}
                       disabled={wizard.isCreating || wizard.isSending || wizard.isPlanLoading}
                     >
-                      Open full blueprint
+                      Advanced details
                     </Button>
                     <Button
                       size="sm"
@@ -487,7 +501,7 @@ export function WorkspaceWizardDialog({
                       disabled={wizard.isCreating || wizard.isSending || wizard.isPlanLoading || !hasDraftToCreate}
                     >
                       {wizard.isCreating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      Create from this draft
+                      Create workspace
                     </Button>
                   </>
                 ) : (
@@ -504,21 +518,7 @@ export function WorkspaceWizardDialog({
                       disabled={!wizard.plan || wizard.isSaving || wizard.isPlanLoading}
                     >
                       {wizard.isSaving ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className={
-                        isLight
-                          ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
-                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
-                      }
-                      onClick={() => void wizard.simulatePlan()}
-                      disabled={!wizard.plan || wizard.isSimulating || wizard.isPlanLoading || wizard.isDeploying}
-                    >
-                      {wizard.isSimulating ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Simulate
+                      Save draft
                     </Button>
                     {!wizard.plan?.intake.reviewRequested ? (
                       <Button
@@ -531,7 +531,7 @@ export function WorkspaceWizardDialog({
                         onClick={() => wizard.requestReview()}
                         disabled={!wizard.plan || wizard.isSending || wizard.isDeploying}
                       >
-                        Request review
+                        Review blueprint
                       </Button>
                     ) : (
                       <Button
@@ -570,10 +570,10 @@ function BasicGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   return (
     <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
       <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
-        Talk to Architect, then create fast.
+        One message is enough to start.
       </p>
       <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
-        Describe the outcome, paste a source, and let Architect fill the draft while keeping the fast path open.
+        Describe the outcome, paste a source, and let Architect shape the workspace without pushing you into full planning too early.
       </p>
     </div>
   );
@@ -685,6 +685,69 @@ function BasicQuickStartCard({
   );
 }
 
+function ResumeDraftBanner({
+  surfaceTheme,
+  isBusy,
+  onResume,
+  onStartFresh
+}: {
+  surfaceTheme: SurfaceTheme;
+  isBusy: boolean;
+  onResume: () => void;
+  onStartFresh: () => void;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={
+        isLight
+          ? "mx-auto w-full max-w-3xl rounded-[22px] border border-[#e4ddd3] bg-[#fffaf3] px-4 py-4 shadow-[0_18px_48px_rgba(56,47,38,0.05)]"
+          : "mx-auto w-full max-w-3xl rounded-[22px] border border-white/10 bg-white/[0.05] px-4 py-4"
+      }
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
+            Previous draft found
+          </p>
+          <p className={isLight ? "mt-1 text-[14px] leading-6 text-[#30261d]" : "mt-1 text-[14px] leading-6 text-white"}>
+            Architect still has an earlier workspace blueprint. Resume it or start fresh before creating a new one.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            className={
+              isLight
+                ? "rounded-full border-[#dfd8ce] bg-white text-[#403934] hover:bg-[#f7f2eb]"
+                : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+            }
+            onClick={onStartFresh}
+            disabled={isBusy}
+          >
+            Start fresh
+          </Button>
+          <Button
+            size="sm"
+            className={
+              isLight
+                ? "rounded-full bg-[#161514] text-white hover:bg-[#26231f]"
+                : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+            }
+            onClick={onResume}
+            disabled={isBusy}
+          >
+            Resume blueprint
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FieldBlock({
   surfaceTheme,
   label,
@@ -718,6 +781,24 @@ function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null
   ];
 
   if (!plan) {
+    return badges;
+  }
+
+  if (mode === "basic") {
+    if (plan.intake.confirmations.length > 0) {
+      badges.push({
+        id: "confirmations",
+        label: `${plan.intake.confirmations.length} decision${plan.intake.confirmations.length === 1 ? "" : "s"} needed`,
+        tone: plan.intake.confirmations.length > 1 ? "warning" : "muted"
+      });
+    } else if (plan.intake.started) {
+      badges.push({
+        id: "draft",
+        label: "Draft synced live",
+        tone: "muted"
+      });
+    }
+
     return badges;
   }
 
