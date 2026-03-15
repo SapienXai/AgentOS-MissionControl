@@ -32,9 +32,7 @@ import {
   runOpenClawJson,
   runOpenClawJsonStream
 } from "@/lib/openclaw/cli";
-import {
-  isOpenClawSystemReady
-} from "@/lib/openclaw/readiness";
+import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
 import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
@@ -100,6 +98,7 @@ type GatewayStatusPayload = {
 };
 
 type StatusPayload = {
+  runtimeVersion?: string;
   version?: string;
   updateChannel?: string;
   overview?: {
@@ -417,6 +416,7 @@ type TranscriptTurn = {
 };
 
 const SNAPSHOT_CACHE_TTL_MS = 10_000;
+const GATEWAY_STATUS_STALE_GRACE_MS = 60_000;
 
 type SnapshotPair = {
   visible: MissionControlSnapshot;
@@ -427,13 +427,51 @@ type SnapshotCacheEntry = SnapshotPair & {
   expiresAt: number;
 };
 
+type GatewayStatusCacheEntry = {
+  value: GatewayStatusPayload;
+  capturedAt: number;
+};
+
 let snapshotCache: SnapshotCacheEntry | null = null;
 let snapshotPromise: Promise<SnapshotPair> | null = null;
+let gatewayStatusCache: GatewayStatusCacheEntry | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 
 export function clearMissionControlCaches() {
   snapshotCache = null;
+  gatewayStatusCache = null;
   runtimeHistoryCache = new Map();
+}
+
+function resolveGatewayStatus(
+  result: PromiseSettledResult<GatewayStatusPayload>
+): {
+  value: GatewayStatusPayload | undefined;
+  reusedCachedValue: boolean;
+} {
+  if (result.status === "fulfilled") {
+    gatewayStatusCache = {
+      value: result.value,
+      capturedAt: Date.now()
+    };
+
+    return {
+      value: result.value,
+      reusedCachedValue: false
+    };
+  }
+
+  if (gatewayStatusCache && Date.now() - gatewayStatusCache.capturedAt <= GATEWAY_STATUS_STALE_GRACE_MS) {
+    return {
+      value: gatewayStatusCache.value,
+      reusedCachedValue: true
+    };
+  }
+
+  return {
+    value: undefined,
+    reusedCachedValue: false
+  };
 }
 
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
@@ -494,8 +532,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       runOpenClawJson<PresencePayload>(["gateway", "call", "system-presence", "--json"])
     ]);
 
-    const gatewayStatus =
-      gatewayStatusResult.status === "fulfilled" ? gatewayStatusResult.value : undefined;
+    const resolvedGatewayStatus = resolveGatewayStatus(gatewayStatusResult);
+    const gatewayStatus = resolvedGatewayStatus.value;
     const configuredGatewayUrl =
       gatewayRemoteUrlResult.status === "fulfilled"
         ? normalizeOptionalValue(gatewayRemoteUrlResult.value)
@@ -507,6 +545,14 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     const modelStatus = modelStatusResult.status === "fulfilled" ? modelStatusResult.value : undefined;
     const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions : [];
     const presence = presenceResult.status === "fulfilled" ? presenceResult.value : [];
+    const hasOpenClawSignal =
+      statusResult.status === "fulfilled" ||
+      agentsResult.status === "fulfilled" ||
+      agentConfigResult.status === "fulfilled" ||
+      modelsResult.status === "fulfilled" ||
+      modelStatusResult.status === "fulfilled" ||
+      sessionsResult.status === "fulfilled" ||
+      presenceResult.status === "fulfilled";
     const runtimeDiagnostics = await buildRuntimeDiagnostics(
       agentsList.map((agent) => agent.id),
       settings
@@ -539,9 +585,10 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
         sessions.map((session) => mapSessionToRuntimes(session, agentConfig, agentsList))
       )
     ).flat();
-    const baseRuntimes = mergeRuntimeHistory(liveSessionRuntimes);
+    const annotatedLiveSessionRuntimes = await annotateMissionDispatchMetadata(liveSessionRuntimes);
+    const baseRuntimes = mergeRuntimeHistory(annotatedLiveSessionRuntimes);
     const dispatchRuntimes = await buildMissionDispatchRuntimes(baseRuntimes);
-    const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...liveSessionRuntimes]);
+    const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...annotatedLiveSessionRuntimes]);
 
     for (const rawAgent of agentsList) {
       const configured = configByAgent.get(rawAgent.id);
@@ -746,7 +793,9 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       status?.securityAudit?.findings
         ?.filter((entry) => entry.severity === "warn")
         .map((entry) => entry.title || entry.detail || "Security warning") ?? [];
-    const currentVersion = normalizeOptionalValue(presence[0]?.version || status?.overview?.version || status?.version);
+    const currentVersion = normalizeOptionalValue(
+      presence[0]?.version || status?.runtimeVersion || status?.overview?.version || status?.version
+    );
     const latestVersion = normalizeOptionalValue(status?.update?.registry?.latestVersion ?? undefined);
     const updateError = normalizeUpdateError(status?.update?.registry?.error ?? undefined);
     const updateAvailable =
@@ -765,7 +814,8 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       health: resolveDiagnosticHealth({
         rpcOk: gatewayStatus?.rpc?.ok,
         warningCount: securityWarnings.length,
-        runtimeIssueCount: runtimeDiagnostics.issues.length
+        runtimeIssueCount: runtimeDiagnostics.issues.length,
+        hasOpenClawSignal
       }),
       version: currentVersion,
       latestVersion,
@@ -796,6 +846,9 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
           modelStatus: modelStatusResult,
           sessions: sessionsResult
         }),
+        ...(gatewayStatusResult.status === "rejected" && resolvedGatewayStatus.reusedCachedValue
+          ? ["gatewayStatus: Reusing the last successful gateway status after a transient OpenClaw check failure."]
+          : []),
         ...runtimeDiagnostics.issues
       ]
     } satisfies MissionControlSnapshot["diagnostics"];
@@ -939,7 +992,31 @@ function buildTaskRecord(
     tokenUsage,
     metadata: {
       mission,
-      primaryRuntimeSource: primaryRuntime?.source ?? null
+      primaryRuntimeSource: primaryRuntime?.source ?? null,
+      bootstrapStage:
+        typeof primaryRuntime?.metadata.bootstrapStage === "string"
+          ? primaryRuntime.metadata.bootstrapStage
+          : null,
+      dispatchStatus:
+        typeof primaryRuntime?.metadata.dispatchStatus === "string"
+          ? primaryRuntime.metadata.dispatchStatus
+          : null,
+      dispatchSubmittedAt:
+        typeof primaryRuntime?.metadata.dispatchSubmittedAt === "string"
+          ? primaryRuntime.metadata.dispatchSubmittedAt
+          : null,
+      dispatchRunnerStartedAt:
+        typeof primaryRuntime?.metadata.dispatchRunnerStartedAt === "string"
+          ? primaryRuntime.metadata.dispatchRunnerStartedAt
+          : null,
+      dispatchHeartbeatAt:
+        typeof primaryRuntime?.metadata.dispatchHeartbeatAt === "string"
+          ? primaryRuntime.metadata.dispatchHeartbeatAt
+          : null,
+      dispatchObservedAt:
+        typeof primaryRuntime?.metadata.dispatchObservedAt === "string"
+          ? primaryRuntime.metadata.dispatchObservedAt
+          : null
     }
   };
 }
@@ -1209,28 +1286,16 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
   }
 }
 
-async function assertMissionDispatchReady(snapshot: MissionControlSnapshot, agentId: string) {
+function resolveMissionDispatchReadinessError(snapshot: MissionControlSnapshot) {
   if (!isOpenClawSystemReady(snapshot)) {
-    throw new Error(
-      "OpenClaw system setup is incomplete. Verify the CLI, gateway, and runtime state before dispatching missions."
-    );
+    return "OpenClaw system setup is incomplete. Verify the CLI, gateway, and runtime state before dispatching missions.";
   }
 
   if (!snapshot.diagnostics.modelReadiness.ready) {
-    throw new Error(
-      "OpenClaw model setup is incomplete. Configure a usable default model before dispatching missions."
-    );
+    return "OpenClaw model setup is incomplete. Configure a usable default model before dispatching missions.";
   }
 
-  const smokeTest = await ensureOpenClawRuntimeSmokeTest({ agentId });
-
-  if (smokeTest.status !== "passed") {
-    throw new Error(
-      smokeTest.error
-        ? `OpenClaw runtime preflight failed. ${smokeTest.error}`
-        : "OpenClaw runtime preflight failed before the mission could be dispatched."
-    );
-  }
+  return null;
 }
 
 export async function submitMission(input: MissionSubmission): Promise<MissionResponse> {
@@ -1246,8 +1311,6 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
   if (!agentId) {
     throw new Error("No OpenClaw agent is available for mission dispatch.");
   }
-
-  await assertMissionDispatchReady(snapshot, agentId);
 
   const missionAgent = snapshot.agents.find((entry) => entry.id === agentId);
   const missionWorkspace =
@@ -1270,6 +1333,7 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
   const routedMission = outputPlan
     ? composeMissionWithOutputRouting(mission, outputPlan, missionAgent?.policy, setupAgentId)
     : mission;
+  const readinessError = resolveMissionDispatchReadinessError(snapshot);
 
   let dispatchRecord = createMissionDispatchRecord({
     agentId,
@@ -1284,6 +1348,31 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
   });
 
   await writeMissionDispatchRecord(dispatchRecord);
+
+  if (readinessError) {
+    dispatchRecord = {
+      ...dispatchRecord,
+      status: "stalled",
+      updatedAt: new Date().toISOString(),
+      error: readinessError
+    };
+    await writeMissionDispatchRecord(dispatchRecord);
+    snapshotCache = null;
+
+    return {
+      dispatchId: dispatchRecord.id,
+      runId: null,
+      agentId,
+      status: dispatchRecord.status,
+      summary: readinessError,
+      payloads: [],
+      meta: {
+        outputDir: outputPlan?.absoluteOutputDir,
+        outputDirRelative: outputPlan?.relativeOutputDir,
+        notesDirRelative: outputPlan?.notesDirRelative
+      }
+    };
+  }
 
   try {
     dispatchRecord = await launchMissionDispatchRunner(dispatchRecord);
@@ -1393,6 +1482,21 @@ async function buildMissionDispatchRuntimes(currentRuntimes: RuntimeRecord[]) {
     const matchedRuntime = matchMissionDispatchToRuntime(record, currentRuntimes);
 
     if (matchedRuntime) {
+      await persistMissionDispatchObservation(record, matchedRuntime);
+      await reconcileMissionDispatchRuntimeState(record, matchedRuntime);
+      continue;
+    }
+
+    const observedRuntime = await buildObservedMissionDispatchRuntime(record);
+
+    if (observedRuntime) {
+      await reconcileMissionDispatchRuntimeState(record, observedRuntime);
+      syntheticRuntimes.push(
+        buildMissionDispatchTranscriptRuntime(
+          (await readMissionDispatchRecordById(record.id)) ?? record,
+          observedRuntime.sessionId ?? extractMissionDispatchSessionId(record) ?? undefined
+        )
+      );
       continue;
     }
 
@@ -1404,6 +1508,147 @@ async function buildMissionDispatchRuntimes(currentRuntimes: RuntimeRecord[]) {
   }
 
   return syntheticRuntimes.sort(sortRuntimesByUpdatedAtDesc);
+}
+
+async function annotateMissionDispatchMetadata(runtimes: RuntimeRecord[]) {
+  if (runtimes.length === 0) {
+    return runtimes;
+  }
+
+  const records = await readMissionDispatchRecords();
+
+  if (records.length === 0) {
+    return runtimes;
+  }
+
+  const annotated = [...runtimes];
+  const runtimeIndexById = new Map(annotated.map((runtime, index) => [runtime.id, index]));
+
+  for (const record of records) {
+    const observedRuntimeId = record.observation.runtimeId?.trim();
+    const observedRuntime =
+      observedRuntimeId && runtimeIndexById.has(observedRuntimeId)
+        ? annotated[runtimeIndexById.get(observedRuntimeId)!]
+        : null;
+    const matchedRuntime = observedRuntime ?? matchMissionDispatchToRuntime(record, annotated);
+
+    if (!matchedRuntime) {
+      continue;
+    }
+
+    const runtimeIndex = runtimeIndexById.get(matchedRuntime.id);
+
+    if (typeof runtimeIndex !== "number") {
+      continue;
+    }
+
+    annotated[runtimeIndex] = annotateRuntimeWithMissionDispatch(matchedRuntime, record);
+  }
+
+  return annotated;
+}
+
+async function persistMissionDispatchObservation(record: MissionDispatchRecord, runtime: RuntimeRecord) {
+  const observedAt = timestampFromUnix(runtime.updatedAt);
+
+  if (record.observation.runtimeId === runtime.id && record.observation.observedAt === observedAt) {
+    return;
+  }
+
+  const latestRecord = (await readMissionDispatchRecordById(record.id)) ?? record;
+
+  if (latestRecord.observation.runtimeId === runtime.id && latestRecord.observation.observedAt === observedAt) {
+    return;
+  }
+
+  await writeMissionDispatchRecord({
+    ...latestRecord,
+    updatedAt: maxIsoTimestamp(latestRecord.updatedAt, observedAt),
+    observation: {
+      runtimeId: runtime.id,
+      observedAt
+    }
+  });
+}
+
+async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecord, runtime: RuntimeRecord) {
+  if (record.status === "completed" || record.status === "stalled") {
+    return;
+  }
+
+  if (!runtime.agentId || !runtime.sessionId) {
+    return;
+  }
+
+  const transcriptPath = await resolveRuntimeTranscriptPath(runtime.agentId, runtime.sessionId, record.workspacePath ?? undefined);
+
+  if (!transcriptPath) {
+    return;
+  }
+
+  let raw = "";
+  try {
+    raw = await readFile(transcriptPath, "utf8");
+  } catch {
+    return;
+  }
+
+  const output = parseRuntimeOutput(runtime, raw, record.workspacePath ?? undefined);
+  const finalizedFromTranscript = Boolean(output.finalTimestamp && output.stopReason && output.stopReason !== "toolUse");
+  const stalledFromTranscript =
+    Boolean(output.errorMessage) || output.stopReason === "error" || output.stopReason === "aborted";
+
+  if (!finalizedFromTranscript && !stalledFromTranscript) {
+    return;
+  }
+
+  const latestRecord = (await readMissionDispatchRecordById(record.id)) ?? record;
+
+  if (latestRecord.status === "completed" || latestRecord.status === "stalled") {
+    return;
+  }
+
+  const finishedAt = output.finalTimestamp ?? timestampFromUnix(runtime.updatedAt);
+  const nextStatus = stalledFromTranscript ? "stalled" : "completed";
+
+  await writeMissionDispatchRecord({
+    ...latestRecord,
+    status: nextStatus,
+    updatedAt: maxIsoTimestamp(latestRecord.updatedAt, finishedAt),
+    runner: {
+      ...latestRecord.runner,
+      finishedAt,
+      lastHeartbeatAt: finishedAt
+    },
+    result:
+      nextStatus === "completed"
+        ? latestRecord.result ?? createMissionDispatchResultFromRuntimeOutput(runtime, output)
+        : latestRecord.result,
+    error:
+      nextStatus === "stalled"
+        ? output.errorMessage || latestRecord.error || "OpenClaw runtime ended before the dispatch runner finalized."
+        : null
+  });
+}
+
+async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord) {
+  if (record.status === "completed" || record.status === "stalled") {
+    return null;
+  }
+
+  const sessionId = extractMissionDispatchSessionId(record);
+
+  if (!record.agentId || !sessionId) {
+    return null;
+  }
+
+  const transcriptPath = await resolveRuntimeTranscriptPath(record.agentId, sessionId, record.workspacePath ?? undefined);
+
+  if (!transcriptPath) {
+    return null;
+  }
+
+  return buildMissionDispatchTranscriptRuntime(record, sessionId);
 }
 
 async function readMissionDispatchRecords() {
@@ -1436,6 +1681,10 @@ async function readMissionDispatchRecords() {
   } catch {
     return [];
   }
+}
+
+async function readMissionDispatchRecordById(dispatchId: string) {
+  return readMissionDispatchRecord(missionDispatchRecordPath(dispatchId));
 }
 
 async function readMissionDispatchRecord(filePath: string) {
@@ -1490,6 +1739,21 @@ async function readMissionDispatchRecord(filePath: string) {
   }
 }
 
+function maxIsoTimestamp(left: string | null | undefined, right: string | null | undefined): string {
+  const leftMs = left ? Date.parse(left) : Number.NaN;
+  const rightMs = right ? Date.parse(right) : Number.NaN;
+
+  if (Number.isNaN(leftMs)) {
+    return right ?? new Date().toISOString();
+  }
+
+  if (Number.isNaN(rightMs)) {
+    return left ?? new Date().toISOString();
+  }
+
+  return leftMs >= rightMs ? (left ?? new Date().toISOString()) : right!;
+}
+
 function shouldPruneMissionDispatchRecord(record: MissionDispatchRecord, nowMs: number) {
   const updatedAt = Date.parse(record.updatedAt);
 
@@ -1524,9 +1788,72 @@ function isSyntheticDispatchRuntime(runtime: RuntimeRecord) {
   return runtime.id.startsWith("runtime:dispatch:");
 }
 
+function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, record: MissionDispatchRecord): RuntimeRecord {
+  const currentDispatchId =
+    typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+  const runtimeMission = resolveRuntimeMissionText(runtime);
+
+  if (
+    currentDispatchId === record.id &&
+    runtimeMission &&
+    typeof runtime.metadata.dispatchStatus === "string" &&
+    runtime.metadata.dispatchStatus === record.status
+  ) {
+    return runtime;
+  }
+
+  return {
+    ...runtime,
+    metadata: {
+      ...runtime.metadata,
+      dispatchId: record.id,
+      dispatchStatus: record.status,
+      dispatchSubmittedAt: record.submittedAt,
+      dispatchRunnerStartedAt: record.runner.startedAt,
+      dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
+      dispatchObservedAt: record.observation.observedAt,
+      mission: runtimeMission ? runtime.metadata.mission : record.mission
+    }
+  };
+}
+
+function buildMissionDispatchTranscriptRuntime(record: MissionDispatchRecord, sessionId?: string): RuntimeRecord {
+  const updatedAt = Date.parse(record.observation.observedAt ?? record.updatedAt ?? record.submittedAt);
+  const nowMs = Date.now();
+  const runtimeStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
+  const resolvedSessionId = sessionId ?? extractMissionDispatchSessionId(record) ?? hashValue(record.id);
+
+  return {
+    id: record.observation.runtimeId || `runtime:${resolvedSessionId}:${hashValue(record.id)}`,
+    source: "turn",
+    key: `dispatch:${record.id}`,
+    title: summarizeText(record.mission, 38) || "Recovered mission runtime",
+    subtitle:
+      record.status === "completed"
+        ? "Recovered the completed runtime from the saved transcript."
+        : record.status === "stalled"
+          ? "Recovered the stalled runtime from the saved transcript."
+          : "Recovering runtime state from the saved transcript.",
+    status: runtimeStatus,
+    updatedAt: Number.isNaN(updatedAt) ? null : updatedAt,
+    ageMs: Number.isNaN(updatedAt) ? null : Math.max(nowMs - updatedAt, 0),
+    agentId: record.agentId,
+    workspaceId: record.workspaceId ?? undefined,
+    modelId: extractMissionDispatchModelId(record) ?? undefined,
+    sessionId: resolvedSessionId,
+    tokenUsage: extractMissionDispatchTokenUsage(record),
+    metadata: {
+      mission: record.mission,
+      dispatchId: record.id,
+      recoveredFromObservation: true
+    }
+  };
+}
+
 function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: number): RuntimeRecord {
   const updatedAt = Date.parse(record.updatedAt);
   const runtimeStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
+  const bootstrapStage = resolveMissionDispatchBootstrapStage(record, runtimeStatus);
   const subtitle = resolveMissionDispatchSubtitle(record, runtimeStatus);
   const sessionId = extractMissionDispatchSessionId(record);
   const modelId = extractMissionDispatchModelId(record);
@@ -1556,9 +1883,42 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
       notesDirRelative: record.notesDirRelative,
       error: record.error,
       sessionId,
-      pendingCreation: runtimeStatus === "queued"
+      pendingCreation: runtimeStatus === "queued" || runtimeStatus === "running",
+      bootstrapStage,
+      dispatchStatus: record.status,
+      dispatchSubmittedAt: record.submittedAt,
+      dispatchRunnerStartedAt: record.runner.startedAt,
+      dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
+      dispatchObservedAt: record.observation.observedAt
     }
   };
+}
+
+function resolveMissionDispatchBootstrapStage(
+  record: MissionDispatchRecord,
+  status: RuntimeRecord["status"]
+) {
+  if (status === "completed") {
+    return "completed";
+  }
+
+  if (status === "stalled") {
+    return "stalled";
+  }
+
+  if (record.observation.runtimeId || record.observation.observedAt) {
+    return "runtime-observed";
+  }
+
+  if (record.runner.lastHeartbeatAt) {
+    return "waiting-for-runtime";
+  }
+
+  if (record.runner.startedAt || record.runner.pid) {
+    return "waiting-for-heartbeat";
+  }
+
+  return "accepted";
 }
 
 function resolveMissionDispatchRuntimeStatus(record: MissionDispatchRecord, nowMs: number): RuntimeRecord["status"] {
@@ -1594,18 +1954,32 @@ function resolveMissionDispatchSubtitle(
   }
 
   if (status === "stalled") {
-    return summarizeText(record.error || "Dispatch is no longer reporting progress.", 90);
+    if (record.error) {
+      return summarizeText(record.error, 90);
+    }
+
+    if (!record.runner.lastHeartbeatAt) {
+      return "Dispatch stalled before the first runner heartbeat.";
+    }
+
+    return "Dispatch stalled while waiting for the first OpenClaw runtime.";
   }
 
-  if (status === "running") {
-    return record.outputDirRelative
-      ? `Running in OpenClaw · ${record.outputDirRelative}`
-      : "Running in OpenClaw";
+  const bootstrapStage = resolveMissionDispatchBootstrapStage(record, status);
+
+  if (bootstrapStage === "runtime-observed") {
+    return "First runtime observed. Promoting the task to live updates.";
   }
 
-  return record.outputDirRelative
-    ? `Queued for OpenClaw · ${record.outputDirRelative}`
-    : "Queued for OpenClaw";
+  if (bootstrapStage === "waiting-for-runtime") {
+    return "Heartbeat received. Waiting for the first OpenClaw runtime.";
+  }
+
+  if (bootstrapStage === "waiting-for-heartbeat") {
+    return "Dispatch runner started. Waiting for the first heartbeat.";
+  }
+
+  return "Mission accepted. Starting the OpenClaw dispatch runner.";
 }
 
 function extractMissionDispatchAgentMeta(record: MissionDispatchRecord) {
@@ -1624,13 +1998,33 @@ function extractMissionDispatchString(record: Record<string, unknown> | null, ke
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function extractSessionIdFromRuntimeId(runtimeId: string | null | undefined) {
+  const trimmed = runtimeId?.trim();
+
+  if (!trimmed?.startsWith("runtime:")) {
+    return null;
+  }
+
+  const segments = trimmed.split(":");
+  const sessionId = segments[1];
+
+  if (!sessionId || sessionId === "dispatch") {
+    return null;
+  }
+
+  return sessionId;
+}
+
 function extractMissionDispatchNumber(record: Record<string, unknown> | null, key: string) {
   const value = record?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function extractMissionDispatchSessionId(record: MissionDispatchRecord) {
-  return extractMissionDispatchString(extractMissionDispatchAgentMeta(record), "sessionId");
+  return (
+    extractMissionDispatchString(extractMissionDispatchAgentMeta(record), "sessionId") ??
+    extractSessionIdFromRuntimeId(record.observation.runtimeId)
+  );
 }
 
 function extractMissionDispatchModelId(record: MissionDispatchRecord) {
@@ -1673,6 +2067,33 @@ function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
 
 function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
   return record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
+}
+
+function createMissionDispatchResultFromRuntimeOutput(
+  runtime: RuntimeRecord,
+  output: RuntimeOutputRecord
+): MissionCommandPayload | null {
+  if (!output.finalText && !runtime.runId) {
+    return null;
+  }
+
+  return {
+    runId: runtime.runId || `runtime:${runtime.id}`,
+    status: output.errorMessage ? "error" : "ok",
+    summary: output.errorMessage || "completed",
+    ...(output.finalText
+      ? {
+          result: {
+            payloads: [
+              {
+                text: output.finalText,
+                mediaUrl: null
+              }
+            ]
+          }
+        }
+      : {})
+  };
 }
 
 function normalizeMissionDispatchStatus(value: unknown): MissionDispatchStatus {
@@ -1790,12 +2211,15 @@ export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
       runs.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
     )
   );
+  const dispatchRecord = task.dispatchId ? await readMissionDispatchRecordById(task.dispatchId) : null;
+  const bootstrapFeed = buildMissionDispatchFeed(task, dispatchRecord, snapshot);
+  const runtimeFeed = buildTaskFeed(task, runs, outputByRuntimeId, snapshot);
 
   return {
     task,
     runs,
     outputs,
-    liveFeed: buildTaskFeed(task, runs, outputByRuntimeId, snapshot),
+    liveFeed: mergeTaskFeedEvents(bootstrapFeed, runtimeFeed),
     createdFiles,
     warnings
   };
@@ -4313,6 +4737,10 @@ function buildTaskFeed(
   const sortedRuns = [...runs].sort((left, right) => (left.updatedAt ?? 0) - (right.updatedAt ?? 0));
 
   for (const runtime of sortedRuns) {
+    if (task.dispatchId && isSyntheticDispatchRuntime(runtime)) {
+      continue;
+    }
+
     const output = outputsByRuntimeId.get(runtime.id);
     const agentName = runtime.agentId ? agentNameById.get(runtime.agentId) ?? null : null;
     const runtimeTimestamp = timestampFromRuntime(runtime, output?.finalTimestamp);
@@ -4387,7 +4815,7 @@ function buildTaskFeed(
     }
   }
 
-  if (events.length === 0 && task.mission) {
+  if (events.length === 0 && task.mission && !task.dispatchId) {
     events.push({
       id: `${task.id}:mission`,
       kind: "user",
@@ -4401,6 +4829,106 @@ function buildTaskFeed(
   return events
     .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
     .slice(-36);
+}
+
+function buildMissionDispatchFeed(
+  task: TaskRecord,
+  record: MissionDispatchRecord | null,
+  snapshot: MissionControlSnapshot
+) {
+  if (!record) {
+    return [] as TaskFeedEvent[];
+  }
+
+  const agentName = snapshot.agents.find((agent) => agent.id === task.primaryAgentId)?.name ?? "OpenClaw";
+  const events: TaskFeedEvent[] = [
+    {
+      id: `${record.id}:accepted`,
+      kind: "user",
+      timestamp: record.submittedAt,
+      title: "Mission accepted",
+      detail: summarizeText(task.mission || record.mission || "Mission queued for dispatch.", 220),
+      agentId: task.primaryAgentId
+    }
+  ];
+
+  if (record.runner.startedAt || record.runner.pid) {
+    events.push({
+      id: `${record.id}:runner-started`,
+      kind: "status",
+      timestamp: record.runner.startedAt ?? record.updatedAt,
+      title: "Dispatch runner started",
+      detail: record.outputDirRelative
+        ? `Preparing the first OpenClaw runtime in ${record.outputDirRelative}.`
+        : "Preparing the first OpenClaw runtime."
+    });
+  }
+
+  if (record.runner.lastHeartbeatAt) {
+    events.push({
+      id: `${record.id}:heartbeat`,
+      kind: "status",
+      timestamp: record.runner.lastHeartbeatAt,
+      title: "Heartbeat received",
+      detail: `${agentName} is online. Waiting for the first runtime session.`
+    });
+  }
+
+  if (record.observation.observedAt) {
+    events.push({
+      id: `${record.id}:runtime-observed`,
+      kind: "status",
+      timestamp: record.observation.observedAt,
+      title: "Runtime observed",
+      detail: "The task is now live. Runtime updates will continue below."
+    });
+  }
+
+  if (record.status === "completed") {
+    events.push({
+      id: `${record.id}:completed`,
+      kind: "status",
+      timestamp: record.runner.finishedAt ?? record.updatedAt,
+      title: "Dispatch completed",
+      detail: summarizeText(
+        resolveMissionDispatchSummary(record) ||
+          resolveMissionDispatchResultText(record) ||
+          "The dispatch completed and handed off to OpenClaw.",
+        220
+      )
+    });
+  }
+
+  if (record.status === "stalled" || record.error) {
+    events.push({
+      id: `${record.id}:stalled`,
+      kind: "warning",
+      timestamp: record.updatedAt,
+      title: record.error ? "Dispatch error" : "Dispatch stalled",
+      detail: summarizeText(
+        record.error ||
+          (record.runner.lastHeartbeatAt
+            ? "OpenClaw stopped reporting progress while waiting for the first runtime."
+            : "OpenClaw did not produce the first heartbeat in time."),
+        220
+      ),
+      isError: true
+    });
+  }
+
+  return events;
+}
+
+function mergeTaskFeedEvents(...feeds: TaskFeedEvent[][]) {
+  const deduped = new Map<string, TaskFeedEvent>();
+
+  for (const event of feeds.flat()) {
+    deduped.set(event.id, event);
+  }
+
+  return [...deduped.values()]
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+    .slice(-48);
 }
 
 function timestampFromRuntime(runtime: RuntimeRecord, preferred?: string | null) {
@@ -5847,12 +6375,13 @@ function resolveDiagnosticHealth(params: {
   rpcOk: boolean | undefined;
   warningCount: number;
   runtimeIssueCount: number;
+  hasOpenClawSignal: boolean;
 }) {
-  if (!params.rpcOk) {
+  if (!params.rpcOk && !params.hasOpenClawSignal) {
     return "offline";
   }
 
-  if (params.warningCount > 0 || params.runtimeIssueCount > 0) {
+  if (!params.rpcOk || params.warningCount > 0 || params.runtimeIssueCount > 0) {
     return "degraded";
   }
 

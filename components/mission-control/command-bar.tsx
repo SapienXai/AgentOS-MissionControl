@@ -38,6 +38,13 @@ type DraftRecord = {
   mission: string;
   thinking: ThinkingLevel;
 };
+type MissionDispatchStart = {
+  requestId: string;
+  mission: string;
+  agentId: string;
+  workspaceId: string | null;
+  submittedAt: number;
+};
 type RecentPrompt = {
   id: string;
   mission: string;
@@ -66,9 +73,9 @@ export function CommandBar({
   composeIntent,
   onRefresh,
   onOpenWorkspaceCreate,
-  onMissionResponse,
   onMissionDispatchStart,
-  onMissionDispatchComplete
+  onMissionDispatchFailure,
+  onMissionResponse
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
@@ -76,15 +83,9 @@ export function CommandBar({
   composeIntent: ComposeIntent | null;
   onRefresh: () => Promise<void>;
   onOpenWorkspaceCreate: () => void;
-  onMissionResponse: (result: MissionResponse) => void;
-  onMissionDispatchStart: (payload: {
-    id: string;
-    mission: string;
-    agentId: string;
-    workspaceId: string | null;
-    submittedAt: number;
-  }) => void;
-  onMissionDispatchComplete: (status: "success" | "error") => void;
+  onMissionDispatchStart: (event: MissionDispatchStart) => void;
+  onMissionDispatchFailure: (requestId: string, message: string) => void;
+  onMissionResponse: (result: MissionResponse, context: { requestId: string }) => void;
 }) {
   const [mission, setMission] = useState("");
   const [targetAgentId, setTargetAgentId] = useState<string>("");
@@ -274,15 +275,15 @@ export function CommandBar({
   const submitMission = async (payload: MissionSubmission) => {
     setIsSubmitting(true);
     const resolvedAgentId = payload.agentId || effectiveTargetAgentId;
-    const dispatchId = globalThis.crypto?.randomUUID?.() || `dispatch-${Date.now()}`;
     const submittedAt = Date.now();
+    const requestId = globalThis.crypto?.randomUUID?.() || `dispatch:${submittedAt}`;
 
     if (resolvedAgentId) {
       onMissionDispatchStart({
-        id: dispatchId,
-        mission: payload.mission,
+        requestId,
+        mission: payload.mission.trim(),
         agentId: resolvedAgentId,
-        workspaceId: payload.workspaceId ?? activeWorkspaceId,
+        workspaceId: targetWorkspace?.id ?? activeWorkspaceId ?? null,
         submittedAt
       });
     }
@@ -303,8 +304,7 @@ export function CommandBar({
         throw new Error(result.error || "OpenClaw rejected the mission.");
       }
 
-      onMissionResponse(result);
-      onMissionDispatchComplete("success");
+      onMissionResponse(result, { requestId });
       setMission("");
       setComposeSuggestion(null);
       setIsAdvancedOpen(false);
@@ -326,15 +326,26 @@ export function CommandBar({
         });
       }
 
-      toast.success("Mission queued in OpenClaw.", {
-        description:
-          typeof result.meta?.outputDirRelative === "string"
-            ? `${result.status} via ${result.agentId} · ${result.meta.outputDirRelative}`
-            : `${result.status} via ${result.agentId}`
-      });
-      await onRefresh();
+      const resultDescription =
+        typeof result.meta?.outputDirRelative === "string"
+          ? `${result.status} via ${result.agentId} · ${result.meta.outputDirRelative}`
+          : `${result.status} via ${result.agentId}`;
+
+      if (result.status === "stalled") {
+        toast.error("Mission could not start.", {
+          description: result.summary || resultDescription
+        });
+      } else {
+        toast.success("Mission queued in OpenClaw.", {
+          description: resultDescription
+        });
+      }
+      void onRefresh().catch(() => null);
     } catch (error) {
-      onMissionDispatchComplete("error");
+      onMissionDispatchFailure(
+        requestId,
+        error instanceof Error ? error.message : "Unknown mission error."
+      );
       toast.error("Mission dispatch failed.", {
         description: error instanceof Error ? error.message : "Unknown mission error."
       });

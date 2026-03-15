@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
+const STREAM_SNAPSHOT_INTERVAL_MS = 12_000;
 
 export async function GET(request: Request) {
   let interval: ReturnType<typeof setInterval> | undefined;
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
 
         snapshotTask = (async () => {
           try {
-            const snapshot = await getMissionControlSnapshot({ force: true });
+            const snapshot = await getMissionControlSnapshot();
             sendEvent("snapshot", snapshot);
           } catch (error) {
             sendEvent("error", {
@@ -85,7 +86,7 @@ export async function GET(request: Request) {
 
       interval = setInterval(() => {
         void sendSnapshot();
-      }, 8000);
+      }, STREAM_SNAPSHOT_INTERVAL_MS);
 
       sendEvent("ready", { ok: true });
     },

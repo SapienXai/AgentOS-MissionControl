@@ -10,7 +10,7 @@ import {
   Settings2,
   SunMedium
 } from "lucide-react";
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
 import { MissionCanvas } from "@/components/mission-control/canvas";
@@ -38,7 +38,6 @@ import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
   isOpenClawSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
-import { matchesMissionRuntime } from "@/lib/openclaw/runtime-matching";
 import type {
   AddModelsProviderId,
   DiscoveredModelCandidate,
@@ -51,18 +50,11 @@ import type {
   ResetPreview,
   ResetStreamEvent,
   ResetTarget,
+  TaskFeedEvent,
   OpenClawUpdateStreamEvent,
   TaskRecord
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
-
-type PendingMissionCard = {
-  id: string;
-  mission: string;
-  agentId: string;
-  workspaceId: string | null;
-  submittedAt: number;
-};
 
 type ComposeIntent = {
   id: string;
@@ -76,6 +68,18 @@ type AgentActionRequest = {
   requestId: string;
   kind: "edit" | "delete";
   agentId: string;
+};
+type OptimisticMissionTask = {
+  requestId: string;
+  dispatchId: string | null;
+  task: TaskRecord;
+};
+type MissionDispatchStart = {
+  requestId: string;
+  mission: string;
+  agentId: string;
+  workspaceId: string | null;
+  submittedAt: number;
 };
 
 type SurfaceTheme = "dark" | "light";
@@ -100,7 +104,8 @@ export function MissionControlShell({
     initialSnapshot.workspaces[0]?.id ?? null
   );
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
-  const [pendingMission, setPendingMission] = useState<PendingMissionCard | null>(null);
+  const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
+  const [optimisticMissionTasks, setOptimisticMissionTasks] = useState<OptimisticMissionTask[]>([]);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
   const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
@@ -147,6 +152,9 @@ export function MissionControlShell({
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
   const [isOnboardingForcedOpen, setIsOnboardingForcedOpen] = useState(false);
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
+  const [hasSeenMissionReady, setHasSeenMissionReady] = useState(() =>
+    resolveOpenClawMissionReady(initialSnapshot)
+  );
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
@@ -154,6 +162,10 @@ export function MissionControlShell({
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
+  const uiSnapshot = useMemo(
+    () => mergeSnapshotWithOptimisticTasks(snapshot, optimisticMissionTasks),
+    [snapshot, optimisticMissionTasks]
+  );
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
@@ -172,8 +184,14 @@ export function MissionControlShell({
   const updateDialogTitle = resolveUpdateDialogTitle(updateRunState);
   const updateDialogDescription = resolveUpdateDialogDescription(updateRunState);
   const onboardingAction = resolveOnboardingAction(snapshot);
+  const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
+  const shouldAutoShowOnboarding =
+    !isOnboardingDismissed &&
+    !isOpenClawReady &&
+    !hasActiveMissionWork &&
+    (!hasSeenMissionReady || snapshot.diagnostics.health === "offline");
   const shouldShowOnboarding =
-    (!isOpenClawReady && !isOnboardingDismissed) || showOnboardingReadyState || isOnboardingForcedOpen;
+    shouldAutoShowOnboarding || showOnboardingReadyState || isOnboardingForcedOpen;
 
   useEffect(() => {
     if (!activeWorkspaceId || snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
@@ -189,44 +207,26 @@ export function MissionControlShell({
     }
 
     const exists =
-      snapshot.workspaces.some((entry) => entry.id === selectedNodeId) ||
-      snapshot.agents.some((entry) => entry.id === selectedNodeId) ||
-      snapshot.tasks.some((entry) => entry.id === selectedNodeId) ||
-      snapshot.runtimes.some((entry) => entry.id === selectedNodeId) ||
-      snapshot.models.some((entry) => entry.id === selectedNodeId);
+      uiSnapshot.workspaces.some((entry) => entry.id === selectedNodeId) ||
+      uiSnapshot.agents.some((entry) => entry.id === selectedNodeId) ||
+      uiSnapshot.tasks.some((entry) => entry.id === selectedNodeId) ||
+      uiSnapshot.runtimes.some((entry) => entry.id === selectedNodeId) ||
+      uiSnapshot.models.some((entry) => entry.id === selectedNodeId);
 
     if (!exists) {
-      setSelectedNodeId(activeWorkspaceId || snapshot.workspaces[0]?.id || null);
+      setSelectedNodeId(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [snapshot, selectedNodeId, activeWorkspaceId]);
+  }, [uiSnapshot, selectedNodeId, activeWorkspaceId]);
 
   useEffect(() => {
-    const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
+    const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
     const taskHidden =
       selectedTask?.runtimeIds.length && selectedTask.runtimeIds.every((runtimeId) => hiddenRuntimeIds.includes(runtimeId));
 
     if (selectedNodeId && (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden)) {
-      setSelectedNodeId(activeWorkspaceId || snapshot.workspaces[0]?.id || null);
+      setSelectedNodeId(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [selectedNodeId, hiddenRuntimeIds, activeWorkspaceId, snapshot.workspaces, snapshot.tasks]);
-
-  useEffect(() => {
-    if (!pendingMission) {
-      return;
-    }
-
-    const syncedRuntime = snapshot.runtimes.some(
-      (runtime) =>
-        matchesMissionRuntime(runtime, pendingMission.mission, {
-          agentId: pendingMission.agentId,
-          submittedAt: pendingMission.submittedAt
-        })
-    );
-
-    if (syncedRuntime) {
-      setPendingMission(null);
-    }
-  }, [snapshot.runtimes, pendingMission]);
+  }, [selectedNodeId, hiddenRuntimeIds, activeWorkspaceId, uiSnapshot.workspaces, uiSnapshot.tasks]);
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
@@ -241,6 +241,29 @@ export function MissionControlShell({
   }, [surfaceTheme]);
 
   useEffect(() => {
+    if (!recentDispatchId) {
+      return;
+    }
+
+    const relatedTask = snapshot.tasks.find((task) => task.dispatchId === recentDispatchId);
+
+    if (relatedTask) {
+      setSelectedNodeId((current) => (current === relatedTask.id ? current : relatedTask.id));
+      setIsInspectorOpen(true);
+      setRecentDispatchId(null);
+    }
+  }, [recentDispatchId, snapshot.tasks]);
+
+  useEffect(() => {
+    setOptimisticMissionTasks((current) =>
+      current.filter(
+        (entry) =>
+          !entry.dispatchId || !snapshot.tasks.some((task) => task.dispatchId === entry.dispatchId)
+      )
+    );
+  }, [snapshot.tasks]);
+
+  useEffect(() => {
     if (isSettingsOpen || isSavingGateway || isSavingWorkspaceRoot) {
       return;
     }
@@ -252,6 +275,12 @@ export function MissionControlShell({
   useEffect(() => {
     if (isOpenClawReady) {
       setIsOnboardingDismissed(false);
+    }
+  }, [isOpenClawReady]);
+
+  useEffect(() => {
+    if (isOpenClawReady) {
+      setHasSeenMissionReady(true);
     }
   }, [isOpenClawReady]);
 
@@ -1244,10 +1273,10 @@ export function MissionControlShell({
         <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
         <div className="absolute inset-0 z-10">
           <MissionCanvas
-            snapshot={snapshot}
+            snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
-            pendingMission={pendingMission}
+            recentDispatchId={recentDispatchId}
             hiddenRuntimeIds={hiddenRuntimeIds}
             className="rounded-none"
             onEditAgent={(agentId) => {
@@ -1369,7 +1398,7 @@ export function MissionControlShell({
           )}
         >
           <MissionSidebar
-            snapshot={snapshot}
+            snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
             requestedAgentAction={agentActionRequest}
             connectionState={connectionState}
@@ -1408,7 +1437,7 @@ export function MissionControlShell({
           )}
         >
           <InspectorPanel
-            snapshot={snapshot}
+            snapshot={uiSnapshot}
             selectedNodeId={selectedNodeId}
             lastMission={lastMission}
             collapsed={!isInspectorOpen}
@@ -1418,7 +1447,7 @@ export function MissionControlShell({
 
         <div className="pointer-events-auto absolute bottom-[calc(env(safe-area-inset-bottom)+12px)] left-4 right-4 z-40 lg:bottom-6 lg:left-1/2 lg:right-auto lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
           <CommandBar
-            snapshot={snapshot}
+            snapshot={uiSnapshot}
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}
@@ -1427,11 +1456,78 @@ export function MissionControlShell({
               setWorkspaceWizardInitialMode("basic");
               setIsWorkspaceWizardOpen(true);
             }}
-            onMissionResponse={setLastMission}
-            onMissionDispatchStart={setPendingMission}
-            onMissionDispatchComplete={(status) => {
-              if (status === "error") {
-                setPendingMission(null);
+            onMissionDispatchStart={(event) => {
+              const optimisticTask = createOptimisticMissionTaskRecord(event, snapshot);
+
+              setOptimisticMissionTasks((current) => [
+                optimisticTask,
+                ...current.filter((entry) => entry.requestId !== event.requestId)
+              ]);
+
+              if (event.workspaceId) {
+                setActiveWorkspaceId(event.workspaceId);
+              }
+
+              setSelectedNodeId(optimisticTask.task.id);
+              setIsInspectorOpen(true);
+            }}
+            onMissionDispatchFailure={(requestId, message) => {
+              setOptimisticMissionTasks((current) =>
+                current.map((entry) =>
+                  entry.requestId === requestId
+                    ? {
+                        ...entry,
+                        task: updateOptimisticMissionTask(entry.task, {
+                          status: "stalled",
+                          subtitle: message,
+                          bootstrapStage: "stalled",
+                          feedEvent: {
+                            id: `${entry.task.id}:failed:${Date.now()}`,
+                            kind: "warning",
+                            timestamp: new Date().toISOString(),
+                            title: "Dispatch failed",
+                            detail: message,
+                            isError: true
+                          }
+                        })
+                      }
+                    : entry
+                )
+              );
+            }}
+            onMissionResponse={(result, context) => {
+              setLastMission(result);
+
+              setOptimisticMissionTasks((current) =>
+                current.map((entry) =>
+                  entry.requestId === context.requestId
+                    ? {
+                        ...entry,
+                        dispatchId: result.dispatchId ?? entry.dispatchId,
+                        task: updateOptimisticMissionTask(entry.task, {
+                          dispatchId: result.dispatchId,
+                          status: result.status === "stalled" ? "stalled" : "queued",
+                          subtitle: result.summary,
+                          bootstrapStage: result.status === "stalled" ? "stalled" : "accepted",
+                          feedEvent: {
+                            id: `${entry.task.id}:response:${Date.now()}`,
+                            kind: result.status === "stalled" ? "warning" : "status",
+                            timestamp: new Date().toISOString(),
+                            title:
+                              result.status === "stalled"
+                                ? "Dispatch blocked"
+                                : "Mission accepted",
+                            detail: result.summary || "Mission accepted and queued for OpenClaw execution.",
+                            isError: result.status === "stalled"
+                          }
+                        })
+                      }
+                    : entry
+                )
+              );
+
+              if (result.dispatchId) {
+                setRecentDispatchId(result.dispatchId);
               }
             }}
           />
@@ -2838,6 +2934,151 @@ function resolveTaskPrompt(task: TaskRecord) {
   }
 
   return task.subtitle.trim() || "Continue this task.";
+}
+
+function mergeSnapshotWithOptimisticTasks(
+  snapshot: MissionControlSnapshot,
+  optimisticMissionTasks: OptimisticMissionTask[]
+) {
+  if (optimisticMissionTasks.length === 0) {
+    return snapshot;
+  }
+
+  const visibleOptimisticTasks = optimisticMissionTasks
+    .filter(
+      (entry) =>
+        !entry.dispatchId || !snapshot.tasks.some((task) => task.dispatchId === entry.dispatchId)
+    )
+    .map((entry) => entry.task);
+
+  if (visibleOptimisticTasks.length === 0) {
+    return snapshot;
+  }
+
+  return {
+    ...snapshot,
+    tasks: [...visibleOptimisticTasks, ...snapshot.tasks]
+  };
+}
+
+function createOptimisticMissionTaskRecord(
+  event: MissionDispatchStart,
+  snapshot: MissionControlSnapshot
+): OptimisticMissionTask {
+  const submittedAtIso = new Date(event.submittedAt).toISOString();
+  const agent = snapshot.agents.find((entry) => entry.id === event.agentId);
+  const feedEvent: TaskFeedEvent = {
+    id: `optimistic:${event.requestId}:submitted`,
+    kind: "user",
+    timestamp: submittedAtIso,
+    title: "Mission submitted",
+    detail: summarizeTaskTitle(event.mission, 220),
+    agentId: event.agentId
+  };
+
+  return {
+    requestId: event.requestId,
+    dispatchId: null,
+    task: {
+      id: `optimistic-task:${event.requestId}`,
+      key: `optimistic:${event.requestId}`,
+      title: summarizeTaskTitle(event.mission, 86),
+      mission: event.mission,
+      subtitle: "Sending mission to AgentOS. Waiting for a dispatch id.",
+      status: "queued",
+      updatedAt: event.submittedAt,
+      ageMs: 0,
+      workspaceId: event.workspaceId ?? undefined,
+      primaryAgentId: event.agentId,
+      primaryAgentName: agent?.name ?? "OpenClaw",
+      runtimeIds: [],
+      agentIds: [event.agentId],
+      sessionIds: [],
+      runIds: [],
+      runtimeCount: 0,
+      updateCount: 0,
+      liveRunCount: 0,
+      artifactCount: 0,
+      warningCount: 0,
+      metadata: {
+        optimistic: true,
+        optimisticRequestId: event.requestId,
+        bootstrapStage: "submitting",
+        dispatchSubmittedAt: submittedAtIso,
+        optimisticEvents: [feedEvent]
+      }
+    }
+  };
+}
+
+function updateOptimisticMissionTask(
+  task: TaskRecord,
+  input: {
+    dispatchId?: string;
+    status: TaskRecord["status"];
+    subtitle: string;
+    bootstrapStage: string;
+    feedEvent: TaskFeedEvent;
+  }
+): TaskRecord {
+  const events = readOptimisticTaskEvents(task).concat(input.feedEvent);
+
+  return {
+    ...task,
+    dispatchId: input.dispatchId ?? task.dispatchId,
+    status: input.status,
+    subtitle: input.subtitle,
+    updatedAt: Date.now(),
+    liveRunCount: input.status === "stalled" ? 0 : 1,
+    warningCount: input.status === "stalled" ? 1 : task.warningCount,
+    metadata: {
+      ...task.metadata,
+      bootstrapStage: input.bootstrapStage,
+      optimisticEvents: dedupeOptimisticTaskEvents(events)
+    }
+  };
+}
+
+function readOptimisticTaskEvents(task: TaskRecord) {
+  const value = task.metadata.optimisticEvents;
+
+  if (!Array.isArray(value)) {
+    return [] as TaskFeedEvent[];
+  }
+
+  return value.filter(isTaskFeedEvent);
+}
+
+function dedupeOptimisticTaskEvents(events: TaskFeedEvent[]) {
+  const byId = new Map<string, TaskFeedEvent>();
+
+  for (const event of events) {
+    byId.set(event.id, event);
+  }
+
+  return [...byId.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+}
+
+function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as TaskFeedEvent).id === "string" &&
+    typeof (value as TaskFeedEvent).kind === "string" &&
+    typeof (value as TaskFeedEvent).timestamp === "string" &&
+    typeof (value as TaskFeedEvent).title === "string" &&
+    typeof (value as TaskFeedEvent).detail === "string"
+  );
+}
+
+function summarizeTaskTitle(value: string, maxLength: number) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
 }
 
 function formatGatewayDraft(gatewayUrl: string) {

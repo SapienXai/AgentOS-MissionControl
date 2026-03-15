@@ -58,16 +58,7 @@ async function main() {
   let settled = false;
 
   const heartbeat = setInterval(() => {
-    void mutateRecord((current) => ({
-      ...current,
-      updatedAt: new Date().toISOString(),
-      runner: {
-        ...(current.runner || {}),
-        pid: process.pid,
-        startedAt: current.runner?.startedAt || startedAt,
-        lastHeartbeatAt: new Date().toISOString()
-      }
-    }));
+    void tickHeartbeat();
   }, heartbeatIntervalMs);
 
   child.stdout.on("data", (chunk) => {
@@ -107,6 +98,37 @@ async function main() {
         `OpenClaw mission exited with code ${typeof code === "number" ? code : "unknown"}.`
     });
   });
+
+  async function tickHeartbeat() {
+    if (settled) {
+      return;
+    }
+
+    const current = await readRecord();
+
+    if (current && typeof current.status === "string" && current.status !== "running") {
+      settled = true;
+      clearInterval(heartbeat);
+
+      if (!child.killed) {
+        child.kill("SIGTERM");
+      }
+
+      process.exit(0);
+      return;
+    }
+
+    await mutateRecord((latest) => ({
+      ...latest,
+      updatedAt: new Date().toISOString(),
+      runner: {
+        ...(latest.runner || {}),
+        pid: process.pid,
+        startedAt: latest.runner?.startedAt || startedAt,
+        lastHeartbeatAt: new Date().toISOString()
+      }
+    }));
+  }
 
   async function finalize({ status, result, error }) {
     if (settled) {

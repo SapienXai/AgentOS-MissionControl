@@ -15,11 +15,20 @@ type TaskFlowNode = Node<TaskNodeData, "task">;
 
 export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
   const tone = toneForRuntimeStatus(data.task.status);
+  const bootstrapStage =
+    typeof data.task.metadata.bootstrapStage === "string" ? data.task.metadata.bootstrapStage : null;
+  const dispatchSubmittedAt =
+    typeof data.task.metadata.dispatchSubmittedAt === "string"
+      ? data.task.metadata.dispatchSubmittedAt
+      : null;
   const isPendingCreation = Boolean(data.pendingCreation);
   const isJustCreated = Boolean(data.justCreated);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const badgeVariant = isPendingCreation ? "warning" : badgeVariantForRuntimeStatus(data.task.status);
+  const badgeLabel = resolveTaskBadgeLabel(bootstrapStage, data.task.status, isPendingCreation);
+  const footerLabel = resolveTaskFooterLabel(bootstrapStage, data.task.liveRunCount);
+  const bootstrapElapsedLabel = isPendingCreation ? formatElapsedFromIso(dispatchSubmittedAt) : null;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -100,10 +109,10 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
                       ? "bg-emerald-300"
                       : data.task.status === "running"
                         ? "bg-cyan-300"
-                        : "bg-amber-200"
+                      : "bg-amber-200"
               }
             />
-            {isPendingCreation ? "Creating task" : "Task"}
+            {isPendingCreation ? "Task bootstrap" : "Task"}
           </div>
           <p className="mt-1.5 line-clamp-2 font-display text-[1rem] leading-5 text-white">{data.task.title}</p>
           <p className="mt-1 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
@@ -161,7 +170,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <Badge variant={badgeVariant}>{isPendingCreation ? "materializing" : data.task.status}</Badge>
+        <Badge variant={badgeVariant}>{badgeLabel}</Badge>
         {isJustCreated ? (
           <Badge variant="default" className="gap-1 border-cyan-100/20 bg-cyan-100/12 text-cyan-50">
             <Sparkles className="h-3 w-3" />
@@ -186,12 +195,83 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
       <div className="mt-3 border-t border-white/[0.08] pt-2.5">
         <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">
           {isPendingCreation
-            ? "Waiting for first OpenClaw update"
-            : `${data.task.liveRunCount} live run${data.task.liveRunCount === 1 ? "" : "s"} · inspect feed`}
+            ? [footerLabel, bootstrapElapsedLabel ? `${bootstrapElapsedLabel} elapsed` : null]
+                .filter(Boolean)
+                .join(" · ")
+            : footerLabel}
         </p>
       </div>
     </motion.div>
   );
+}
+
+function resolveTaskBadgeLabel(
+  bootstrapStage: string | null,
+  status: TaskFlowNode["data"]["task"]["status"],
+  isPendingCreation: boolean
+) {
+  if (!isPendingCreation || !bootstrapStage) {
+    return status;
+  }
+
+  switch (bootstrapStage) {
+    case "submitting":
+      return "submitting";
+    case "accepted":
+      return "accepted";
+    case "waiting-for-heartbeat":
+      return "starting runner";
+    case "waiting-for-runtime":
+      return "awaiting runtime";
+    case "runtime-observed":
+      return "going live";
+    case "stalled":
+      return "stalled";
+    default:
+      return "starting";
+  }
+}
+
+function resolveTaskFooterLabel(bootstrapStage: string | null, liveRunCount: number) {
+  switch (bootstrapStage) {
+    case "submitting":
+      return "contacting dispatcher";
+    case "accepted":
+      return "dispatch accepted";
+    case "waiting-for-heartbeat":
+      return "waiting for first heartbeat";
+    case "waiting-for-runtime":
+      return "waiting for first OpenClaw runtime";
+    case "runtime-observed":
+      return "runtime observed · inspect feed";
+    case "stalled":
+      return "dispatch stalled · inspect feed";
+    default:
+      return `${liveRunCount} live run${liveRunCount === 1 ? "" : "s"} · inspect feed`;
+  }
+}
+
+function formatElapsedFromIso(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+
+  const elapsedMs = Math.max(Date.now() - timestamp, 0);
+  const seconds = Math.floor(elapsedMs / 1000);
+
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds === 0 ? `${minutes}m` : `${minutes}m ${remainingSeconds}s`;
 }
 
 function TaskSectionStat({

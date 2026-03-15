@@ -40,6 +40,7 @@ import type {
   RuntimeCreatedFile,
   RuntimeOutputRecord,
   TaskDetailRecord,
+  TaskFeedEvent,
   TaskDetailStreamEvent
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -68,17 +69,39 @@ function InspectorPanelContent({
   const selectedTask = snapshot.tasks.find((task) => task.id === selectedNodeId);
   const selectedRuntime = snapshot.runtimes.find((runtime) => runtime.id === selectedNodeId);
   const selectedModel = snapshot.models.find((model) => model.id === selectedNodeId);
+  const isOptimisticTask = Boolean(selectedTask?.metadata.optimistic);
   const selectedEntity =
     selectedWorkspace || selectedAgent || selectedTask || selectedRuntime || selectedModel || null;
   const selectedRuntimeId = selectedRuntime?.id ?? null;
   const selectedTaskId = selectedTask?.id ?? null;
   const [activeTab, setActiveTab] = useState("overview");
   const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
-  const [runtimeOutputLoading, setRuntimeOutputLoading] = useState(Boolean(selectedRuntimeId));
-  const [runtimeOutputError, setRuntimeOutputError] = useState<string | null>(null);
+  const [runtimeOutputError, setRuntimeOutputError] = useState<{
+    runtimeId: string;
+    message: string;
+  } | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetailRecord | null>(null);
-  const [taskDetailLoading, setTaskDetailLoading] = useState(Boolean(selectedTaskId));
-  const [taskDetailError, setTaskDetailError] = useState<string | null>(null);
+  const [taskDetailError, setTaskDetailError] = useState<{
+    taskId: string;
+    message: string;
+  } | null>(null);
+  const optimisticTaskDetail = useMemo(
+    () => (isOptimisticTask && selectedTask ? createOptimisticTaskDetail(selectedTask) : null),
+    [isOptimisticTask, selectedTask]
+  );
+  const resolvedRuntimeOutput =
+    runtimeOutput && runtimeOutput.runtimeId === selectedRuntimeId ? runtimeOutput : null;
+  const resolvedRuntimeOutputError =
+    runtimeOutputError?.runtimeId === selectedRuntimeId ? runtimeOutputError.message : null;
+  const resolvedTaskDetail =
+    taskDetail && taskDetail.task.id === selectedTaskId ? taskDetail : null;
+  const resolvedTaskDetailError =
+    taskDetailError?.taskId === selectedTaskId ? taskDetailError.message : null;
+  const effectiveTaskDetail = optimisticTaskDetail ?? resolvedTaskDetail;
+  const taskDetailLoading =
+    Boolean(selectedTaskId) && !isOptimisticTask && !effectiveTaskDetail && !resolvedTaskDetailError;
+  const runtimeOutputLoading =
+    Boolean(selectedRuntimeId) && !resolvedRuntimeOutput && !resolvedRuntimeOutputError;
   const showOutputTab = Boolean(selectedRuntime || selectedTask);
   const visibleActiveTab = activeTab === "output" && !showOutputTab ? "overview" : activeTab;
   const outputTabLabel = selectedTask ? "Feed" : "Output";
@@ -126,6 +149,7 @@ function InspectorPanelContent({
         }
 
         setRuntimeOutput(payload);
+        setRuntimeOutputError(null);
       })
       .catch((error) => {
         if (controller.signal.aborted) {
@@ -133,19 +157,17 @@ function InspectorPanelContent({
         }
 
         setRuntimeOutput(null);
-        setRuntimeOutputError(error instanceof Error ? error.message : "Unable to load runtime output.");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setRuntimeOutputLoading(false);
-        }
+        setRuntimeOutputError({
+          runtimeId: selectedRuntimeId,
+          message: error instanceof Error ? error.message : "Unable to load runtime output."
+        });
       });
 
     return () => controller.abort();
   }, [selectedRuntimeId]);
 
   useEffect(() => {
-    if (!selectedTaskId) {
+    if (!selectedTaskId || isOptimisticTask) {
       return;
     }
 
@@ -161,10 +183,11 @@ function InspectorPanelContent({
 
         setTaskDetail(payload.detail);
         setTaskDetailError(null);
-        setTaskDetailLoading(false);
       } catch (error) {
-        setTaskDetailError(error instanceof Error ? error.message : "Unable to parse task feed.");
-        setTaskDetailLoading(false);
+        setTaskDetailError({
+          taskId: selectedTaskId,
+          message: error instanceof Error ? error.message : "Unable to parse task feed."
+        });
       }
     };
 
@@ -173,19 +196,30 @@ function InspectorPanelContent({
         const payload = JSON.parse(event.data) as TaskDetailStreamEvent;
 
         if (payload.type === "error") {
-          setTaskDetailError(payload.error);
-          setTaskDetailLoading(false);
+          setTaskDetailError({
+            taskId: selectedTaskId,
+            message: payload.error
+          });
         }
       } catch {
-        setTaskDetailError("Unable to load task detail.");
-        setTaskDetailLoading(false);
+        setTaskDetailError({
+          taskId: selectedTaskId,
+          message: "Unable to load task detail."
+        });
       }
     };
 
     source.addEventListener("task", handleTask as EventListener);
     source.addEventListener("task-error", handleTaskError as EventListener);
     source.onerror = () => {
-      setTaskDetailError((current) => current ?? "Task feed disconnected. Reconnecting…");
+      setTaskDetailError((current) =>
+        current?.taskId === selectedTaskId
+          ? current
+          : {
+              taskId: selectedTaskId,
+              message: "Task feed disconnected. Reconnecting…"
+            }
+      );
     };
 
     return () => {
@@ -193,7 +227,7 @@ function InspectorPanelContent({
       source.removeEventListener("task-error", handleTaskError as EventListener);
       source.close();
     };
-  }, [selectedTaskId]);
+  }, [selectedTaskId, isOptimisticTask]);
 
   return (
     <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
@@ -327,18 +361,18 @@ function InspectorPanelContent({
                         <TaskContent
                           snapshot={snapshot}
                           taskId={selectedTask.id}
-                          taskDetail={taskDetail}
+                          taskDetail={effectiveTaskDetail}
                           taskDetailLoading={taskDetailLoading}
-                          taskDetailError={taskDetailError}
+                          taskDetailError={resolvedTaskDetailError}
                         />
                       ) : null}
                       {selectedRuntime ? (
                         <RuntimeContent
                           snapshot={snapshot}
                           runtimeId={selectedRuntime.id}
-                          runtimeOutput={runtimeOutput}
+                          runtimeOutput={resolvedRuntimeOutput}
                           runtimeOutputLoading={runtimeOutputLoading}
-                          runtimeOutputError={runtimeOutputError}
+                          runtimeOutputError={resolvedRuntimeOutputError}
                         />
                       ) : null}
                       {selectedModel ? <ModelContent snapshot={snapshot} modelId={selectedModel.id} /> : null}
@@ -349,28 +383,28 @@ function InspectorPanelContent({
                   {visibleActiveTab === "output" && selectedTask ? (
                     <TaskFeedContent
                       task={selectedTask}
-                      taskDetail={taskDetail}
+                      taskDetail={effectiveTaskDetail}
                       taskDetailLoading={taskDetailLoading}
-                      taskDetailError={taskDetailError}
+                      taskDetailError={resolvedTaskDetailError}
                     />
                   ) : null}
 
                   {visibleActiveTab === "output" && selectedRuntime ? (
                     <RuntimeOutputContent
                       runtime={selectedRuntime}
-                      runtimeOutput={runtimeOutput}
+                      runtimeOutput={resolvedRuntimeOutput}
                       runtimeOutputLoading={runtimeOutputLoading}
-                      runtimeOutputError={runtimeOutputError}
+                      runtimeOutputError={resolvedRuntimeOutputError}
                     />
                   ) : null}
 
                   {visibleActiveTab === "raw" ? (
                     <pre className="overflow-x-auto rounded-[18px] border border-white/[0.08] bg-slate-950/[0.72] p-3 text-[11px] leading-5 text-slate-300">
                       {JSON.stringify(
-                        selectedTask && taskDetail
-                          ? taskDetail
-                          : selectedRuntime && runtimeOutput
-                            ? { runtime: selectedRuntime, output: runtimeOutput }
+                        selectedTask && effectiveTaskDetail
+                          ? effectiveTaskDetail
+                          : selectedRuntime && resolvedRuntimeOutput
+                            ? { runtime: selectedRuntime, output: resolvedRuntimeOutput }
                             : selectedEntity || snapshot,
                         null,
                         2
@@ -391,9 +425,9 @@ function InspectorPanelContent({
                     <p className="truncate font-display text-[15px] text-white">{selectedLabel}</p>
                     <p className="mt-1 text-[12px] text-slate-400">
                       {selectedTask
-                        ? `${taskDetail?.liveFeed.length ?? 0} live feed events`
+                        ? `${effectiveTaskDetail?.liveFeed.length ?? 0} live feed events`
                         : selectedRuntime
-                        ? `${runtimeOutput?.items.length ?? 0} transcript entries`
+                        ? `${resolvedRuntimeOutput?.items.length ?? 0} transcript entries`
                         : selectedAgent
                           ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
                           : selectedWorkspace
@@ -997,6 +1031,41 @@ function TaskFeedContent({
         ))}
       </div>
     </InfoCard>
+  );
+}
+
+function createOptimisticTaskDetail(task: MissionControlSnapshot["tasks"][number]): TaskDetailRecord {
+  return {
+    task,
+    runs: [],
+    outputs: [],
+    liveFeed: readOptimisticTaskFeed(task),
+    createdFiles: [],
+    warnings: task.status === "stalled" ? [task.subtitle] : []
+  };
+}
+
+function readOptimisticTaskFeed(task: MissionControlSnapshot["tasks"][number]) {
+  const value = task.metadata.optimisticEvents;
+
+  if (!Array.isArray(value)) {
+    return [] as TaskFeedEvent[];
+  }
+
+  return value
+    .filter(isTaskFeedEvent)
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+}
+
+function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as TaskFeedEvent).id === "string" &&
+    typeof (value as TaskFeedEvent).kind === "string" &&
+    typeof (value as TaskFeedEvent).timestamp === "string" &&
+    typeof (value as TaskFeedEvent).title === "string" &&
+    typeof (value as TaskFeedEvent).detail === "string"
   );
 }
 

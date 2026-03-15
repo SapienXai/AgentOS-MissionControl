@@ -26,17 +26,8 @@ import type {
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { TaskNode } from "@/components/mission-control/nodes/task-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
-import { matchesMissionTask } from "@/lib/openclaw/runtime-matching";
 import type { MissionControlSnapshot, TaskRecord } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
-
-type PendingMissionCard = {
-  id: string;
-  mission: string;
-  agentId: string;
-  workspaceId: string | null;
-  submittedAt: number;
-};
 
 type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;
 type AgentCanvasNode = Node<AgentNodeData, "agent">;
@@ -54,7 +45,7 @@ export function MissionCanvas({
   snapshot,
   activeWorkspaceId,
   selectedNodeId,
-  pendingMission,
+  recentDispatchId,
   hiddenRuntimeIds,
   onEditAgent,
   onDeleteAgent,
@@ -67,7 +58,7 @@ export function MissionCanvas({
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
-  pendingMission: PendingMissionCard | null;
+  recentDispatchId: string | null;
   hiddenRuntimeIds: string[];
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
@@ -79,15 +70,13 @@ export function MissionCanvas({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
-  const pendingMissionRef = useRef<PendingMissionCard | null>(null);
-  const handledPendingMissionIdsRef = useRef<Set<string>>(new Set());
+  const handledDispatchIdsRef = useRef<Set<string>>(new Set());
   const creationTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const [justCreatedTaskIds, setJustCreatedTaskIds] = useState<string[]>([]);
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
   const initialGraph = buildCanvasGraph(
     snapshot,
     activeWorkspaceId,
-    pendingMission,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     onEditAgent,
@@ -103,7 +92,6 @@ export function MissionCanvas({
     const nextGraph = buildCanvasGraph(
       snapshot,
       activeWorkspaceId,
-      pendingMission,
       justCreatedTaskIds,
       hiddenRuntimeIds,
       onEditAgent,
@@ -117,7 +105,6 @@ export function MissionCanvas({
   }, [
     snapshot,
     activeWorkspaceId,
-    pendingMission,
     justCreatedTaskIds,
     hiddenRuntimeIds,
     onEditAgent,
@@ -140,15 +127,7 @@ export function MissionCanvas({
   }, [selectedNodeId, setNodes]);
 
   useEffect(() => {
-    if (pendingMission) {
-      pendingMissionRef.current = pendingMission;
-    }
-  }, [pendingMission]);
-
-  useEffect(() => {
-    const candidatePendingMission = pendingMission ?? pendingMissionRef.current;
-
-    if (!candidatePendingMission || handledPendingMissionIdsRef.current.has(candidatePendingMission.id)) {
+    if (!recentDispatchId || handledDispatchIdsRef.current.has(recentDispatchId)) {
       return;
     }
 
@@ -156,10 +135,8 @@ export function MissionCanvas({
       .filter(
         (task) =>
           !isTaskHidden(task, hiddenRuntimeIds) &&
-          matchesMissionTask(task, candidatePendingMission.mission, {
-            agentId: candidatePendingMission.agentId,
-            submittedAt: candidatePendingMission.submittedAt
-          })
+          task.dispatchId === recentDispatchId &&
+          task.metadata.optimistic !== true
       )
       .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0))[0];
 
@@ -167,8 +144,7 @@ export function MissionCanvas({
       return;
     }
 
-    handledPendingMissionIdsRef.current.add(candidatePendingMission.id);
-    pendingMissionRef.current = null;
+    handledDispatchIdsRef.current.add(recentDispatchId);
     markTaskAsJustCreated(
       resolvedTask.id,
       setJustCreatedTaskIds,
@@ -176,7 +152,7 @@ export function MissionCanvas({
       setFocusTaskId
     );
     onSelectNode(resolvedTask.id);
-  }, [snapshot.tasks, pendingMission, hiddenRuntimeIds, onSelectNode]);
+  }, [snapshot.tasks, recentDispatchId, hiddenRuntimeIds, onSelectNode]);
 
   useEffect(() => {
     const creationTimeouts = creationTimeoutsRef.current;
@@ -261,13 +237,7 @@ export function MissionCanvas({
         elevateNodesOnSelect={false}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeClick={(_, node) => {
-          if (node.id.startsWith("pending-task:")) {
-            return;
-          }
-
-          onSelectNode(node.id);
-        }}
+        onNodeClick={(_, node) => onSelectNode(node.id)}
         fitView
         fitViewOptions={{ padding: 0.14, duration: 700, maxZoom: 0.9 }}
         minZoom={0.42}
@@ -289,7 +259,6 @@ export function MissionCanvas({
 function buildCanvasGraph(
   snapshot: MissionControlSnapshot,
   activeWorkspaceId: string | null,
-  pendingMission: PendingMissionCard | null,
   justCreatedTaskIds: string[],
   hiddenRuntimeIds: string[],
   onEditAgent: (agentId: string) => void,
@@ -323,13 +292,6 @@ function buildCanvasGraph(
       const agentTasks = workspaceTasks
         .filter((task) => resolveTaskOwnerId(task) === agent.id)
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
-      const pendingTask =
-        pendingMission &&
-        pendingMission.agentId === agent.id &&
-        (!pendingMission.workspaceId || pendingMission.workspaceId === workspace.id)
-          ? createPendingTask(pendingMission, workspace.id, agent.id, agent.name)
-          : null;
-      const visibleTasks = pendingTask ? [pendingTask, ...agentTasks] : agentTasks;
       const agentY = laneY + agentIndex * 4;
 
       contentNodes.push({
@@ -347,28 +309,24 @@ function buildCanvasGraph(
         }
       });
 
-      if (pendingTask) {
-        graphTasks.unshift(pendingTask);
-      }
-
       graphTasks.push(...agentTasks);
 
-      visibleTasks.forEach((task, taskIndex) => {
-        const isPendingTask = task.id.startsWith("pending-task:");
+      agentTasks.forEach((task, taskIndex) => {
+        const isBootstrapTask = typeof task.metadata.bootstrapStage === "string";
         const isJustCreatedTask = justCreatedTaskIds.includes(task.id);
 
         contentNodes.push({
           id: task.id,
           type: "task",
-          draggable: !isPendingTask,
-          selectable: !isPendingTask,
+          draggable: true,
+          selectable: true,
           position: { x: taskX, y: agentY + taskIndex * 152 + 10 },
-          zIndex: isPendingTask ? 40 : isJustCreatedTask ? 28 : 10,
+          zIndex: isBootstrapTask ? 40 : isJustCreatedTask ? 28 : 10,
           selected: false,
           data: {
             task,
             emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
-            pendingCreation: isPendingTask,
+            pendingCreation: isBootstrapTask,
             justCreated: isJustCreatedTask,
             onReply: onReplyTask,
             onCopyPrompt: onCopyTaskPrompt,
@@ -377,7 +335,7 @@ function buildCanvasGraph(
         });
       });
 
-      laneY += Math.max(152, visibleTasks.length * 152 + 44);
+      laneY += Math.max(152, agentTasks.length * 152 + 44);
     });
 
     workspaceNodes.push({
@@ -438,40 +396,6 @@ function buildEdgesForNodes(tasks: TaskRecord[], nodes: CanvasNode[]) {
   return edges;
 }
 
-function createPendingTask(
-  pendingMission: PendingMissionCard,
-  workspaceId: string,
-  agentId: string,
-  agentName?: string
-): TaskRecord {
-  return {
-    id: `pending-task:${pendingMission.id}`,
-    key: `pending:${pendingMission.id}`,
-    title: summarizeMission(pendingMission.mission, 86),
-    mission: pendingMission.mission,
-    subtitle: "Materializing on the OpenClaw task canvas…",
-    status: "queued",
-    updatedAt: pendingMission.submittedAt,
-    ageMs: 0,
-    workspaceId,
-    primaryAgentId: agentId,
-    primaryAgentName: agentName ?? null,
-    runtimeIds: [],
-    agentIds: [agentId],
-    sessionIds: [],
-    runIds: [],
-    runtimeCount: 0,
-    updateCount: 0,
-    liveRunCount: 1,
-    artifactCount: 0,
-    warningCount: 0,
-    tokenUsage: undefined,
-    metadata: {
-      pendingCreation: true
-    }
-  };
-}
-
 function isTaskHidden(task: TaskRecord, hiddenRuntimeIds: string[]) {
   if (task.runtimeIds.length === 0) {
     return false;
@@ -482,16 +406,6 @@ function isTaskHidden(task: TaskRecord, hiddenRuntimeIds: string[]) {
 
 function resolveTaskOwnerId(task: TaskRecord) {
   return task.primaryAgentId || task.agentIds[0] || null;
-}
-
-function summarizeMission(mission: string, maxLength: number) {
-  const normalized = mission.replace(/\s+/g, " ").trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
 }
 
 function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]) {
