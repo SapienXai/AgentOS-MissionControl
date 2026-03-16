@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Copy, CornerDownLeft, EyeOff, FolderOpenDot, MoreHorizontal, Rows3, Sparkles } from "lucide-react";
+import { Copy, CornerDownLeft, EyeOff, FolderOpenDot, Lock, LockOpen, MoreHorizontal, Rows3, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -161,6 +161,14 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
                 label="Hide"
                 onClick={() => {
                   data.onHide?.(data.task);
+                  setMenuOpen(false);
+                }}
+              />
+              <TaskMenuButton
+                icon={data.locked ? LockOpen : Lock}
+                label={data.locked ? "Unlock" : "Lock"}
+                onClick={() => {
+                  data.onToggleLock?.(data.task);
                   setMenuOpen(false);
                 }}
               />

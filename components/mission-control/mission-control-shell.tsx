@@ -92,6 +92,7 @@ type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "
 const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
+const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
 
 export function MissionControlShell({
   initialSnapshot
@@ -111,6 +112,7 @@ export function MissionControlShell({
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const [hiddenRuntimeIds, setHiddenRuntimeIds] = useState<string[]>([]);
   const [hiddenTaskKeys, setHiddenTaskKeys] = useState<string[]>([]);
+  const [lockedTaskKeys, setLockedTaskKeys] = useState<string[]>([]);
   const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
@@ -199,7 +201,7 @@ export function MissionControlShell({
     (task) => !activeWorkspaceId || task.workspaceId === activeWorkspaceId
   );
   const hiddenScopedTaskCount = scopedTasks.filter((task) =>
-    isTaskHiddenByPreferences(task, hiddenRuntimeIds, hiddenTaskKeys)
+    isTaskHiddenByPreferences(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
   ).length;
   const resolvedScopedTaskCount = scopedTasks.filter(
     (task) => task.status === "completed" || task.status === "stalled" || task.status === "idle"
@@ -233,17 +235,26 @@ export function MissionControlShell({
   useEffect(() => {
     const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
     const taskHidden =
-      selectedTask && isTaskHiddenByPreferences(selectedTask, hiddenRuntimeIds, hiddenTaskKeys);
+      selectedTask && isTaskHiddenByPreferences(selectedTask, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys);
 
     if (selectedNodeId && (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden)) {
       setSelectedNodeId(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [selectedNodeId, hiddenRuntimeIds, hiddenTaskKeys, activeWorkspaceId, uiSnapshot.workspaces, uiSnapshot.tasks]);
+  }, [
+    selectedNodeId,
+    hiddenRuntimeIds,
+    hiddenTaskKeys,
+    lockedTaskKeys,
+    activeWorkspaceId,
+    uiSnapshot.workspaces,
+    uiSnapshot.tasks
+  ]);
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
     const storedHiddenRuntimeIds = globalThis.localStorage?.getItem(hiddenRuntimeIdsStorageKey);
     const storedHiddenTaskKeys = globalThis.localStorage?.getItem(hiddenTaskKeysStorageKey);
+    const storedLockedTaskKeys = globalThis.localStorage?.getItem(lockedTaskKeysStorageKey);
 
     if (storedTheme === "dark" || storedTheme === "light") {
       setSurfaceTheme(storedTheme);
@@ -266,6 +277,15 @@ export function MissionControlShell({
         }
       } catch {}
     }
+
+    if (storedLockedTaskKeys) {
+      try {
+        const parsed = JSON.parse(storedLockedTaskKeys) as unknown;
+        if (Array.isArray(parsed)) {
+          setLockedTaskKeys(parsed.filter((entry): entry is string => typeof entry === "string"));
+        }
+      } catch {}
+    }
   }, []);
 
   useEffect(() => {
@@ -279,6 +299,10 @@ export function MissionControlShell({
   useEffect(() => {
     globalThis.localStorage?.setItem(hiddenTaskKeysStorageKey, JSON.stringify(hiddenTaskKeys));
   }, [hiddenTaskKeys]);
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(lockedTaskKeysStorageKey, JSON.stringify(lockedTaskKeys));
+  }, [lockedTaskKeys]);
 
   useEffect(() => {
     if (!recentDispatchId) {
@@ -1334,6 +1358,7 @@ export function MissionControlShell({
             recentDispatchId={recentDispatchId}
             hiddenRuntimeIds={hiddenRuntimeIds}
             hiddenTaskKeys={hiddenTaskKeys}
+            lockedTaskKeys={lockedTaskKeys}
             className="rounded-none"
             onEditAgent={(agentId) => {
               setSelectedNodeId(agentId);
@@ -1383,6 +1408,10 @@ export function MissionControlShell({
               }
             }}
             onHideTask={(task) => {
+              if (lockedTaskKeys.includes(task.key)) {
+                return;
+              }
+
               setHiddenTaskKeys((current) => {
                 if (current.includes(task.key)) {
                   return current;
@@ -1394,6 +1423,15 @@ export function MissionControlShell({
                 const next = new Set(current);
                 task.runtimeIds.forEach((runtimeId) => next.add(runtimeId));
                 return Array.from(next);
+              });
+            }}
+            onToggleTaskLock={(task) => {
+              setLockedTaskKeys((current) => {
+                if (current.includes(task.key)) {
+                  return current.filter((key) => key !== task.key);
+                }
+
+                return [...current, task.key];
               });
             }}
             onSelectNode={setSelectedNodeId}
@@ -1522,7 +1560,11 @@ export function MissionControlShell({
                 className="h-5 rounded-full border-white/[0.1] bg-white/[0.06] px-1.5 text-[8px] text-slate-200 hover:bg-white/[0.1]"
                 onClick={() => {
                   const resolvedKeys = scopedTasks
-                    .filter((task) => task.status === "completed" || task.status === "stalled" || task.status === "idle")
+                    .filter(
+                      (task) =>
+                        (task.status === "completed" || task.status === "stalled" || task.status === "idle") &&
+                        !lockedTaskKeys.includes(task.key)
+                    )
                     .map((task) => task.key);
                   if (resolvedKeys.length === 0) {
                     return;
@@ -3164,7 +3206,16 @@ function dedupeOptimisticTaskEvents(events: TaskFeedEvent[]) {
   return [...byId.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
 }
 
-function isTaskHiddenByPreferences(task: TaskRecord, hiddenRuntimeIds: string[], hiddenTaskKeys: string[]) {
+function isTaskHiddenByPreferences(
+  task: TaskRecord,
+  hiddenRuntimeIds: string[],
+  hiddenTaskKeys: string[],
+  lockedTaskKeys: string[]
+) {
+  if (lockedTaskKeys.includes(task.key)) {
+    return false;
+  }
+
   if (hiddenTaskKeys.includes(task.key)) {
     return true;
   }

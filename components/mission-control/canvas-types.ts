@@ -33,9 +33,11 @@ export type TaskNodeData = Record<string, unknown> & {
   emphasis: boolean;
   pendingCreation?: boolean;
   justCreated?: boolean;
+  locked?: boolean;
   onReply?: (task: TaskRecord) => void;
   onCopyPrompt?: (task: TaskRecord) => void;
   onHide?: (task: TaskRecord) => void;
+  onToggleLock?: (task: TaskRecord) => void;
 };
 
 export type ModelNodeData = Record<string, unknown> & {
