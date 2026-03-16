@@ -1,13 +1,15 @@
 "use client";
 
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
-import { Copy, CornerDownLeft, EyeOff, FolderOpenDot, Lock, LockOpen, MoreHorizontal, Rows3, Sparkles } from "lucide-react";
+import { Copy, CornerDownLeft, EyeOff, FolderOpenDot, Lock, LockOpen, MoreHorizontal, Rows3, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 
 import type { TaskNodeData } from "@/components/mission-control/canvas-types";
 import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTaskFeed } from "@/hooks/use-task-feed";
 import { badgeVariantForRuntimeStatus, formatTokens, toneForRuntimeStatus } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
@@ -28,7 +30,16 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
   const badgeVariant = isPendingCreation ? "warning" : badgeVariantForRuntimeStatus(data.task.status);
   const badgeLabel = resolveTaskBadgeLabel(bootstrapStage, data.task.status, isPendingCreation);
   const footerLabel = resolveTaskFooterLabel(bootstrapStage, data.task.liveRunCount);
+  
+  const optimisticEvents = Array.isArray(data.task.metadata.optimisticEvents) 
+    ? data.task.metadata.optimisticEvents 
+    : [];
+  const latestOptimisticEvent = optimisticEvents.length > 0 
+    ? (optimisticEvents[optimisticEvents.length - 1] as any) 
+    : null;
   const bootstrapElapsedLabel = isPendingCreation ? formatElapsedFromIso(dispatchSubmittedAt) : null;
+  const [expanded, setExpanded] = useState(false);
+  const { feed, loading } = useTaskFeed(data.task.id, expanded);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -200,14 +211,81 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         <TaskSectionStat icon={Sparkles} label="Files" value={String(data.task.artifactCount)} />
       </div>
 
-      <div className="mt-3 border-t border-white/[0.08] pt-2.5">
-        <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500">
-          {isPendingCreation
-            ? [footerLabel, bootstrapElapsedLabel ? `${bootstrapElapsedLabel} elapsed` : null]
-                .filter(Boolean)
-                .join(" · ")
-            : footerLabel}
-        </p>
+      <div
+        className={cn(
+          "mt-3 border-t border-white/[0.08] pt-2.5 transition-colors cursor-pointer group",
+          expanded && "pb-1"
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded((prev) => !prev);
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500 group-hover:text-slate-400 transition-colors">
+            {feed.length > 0
+              ? feed[feed.length - 1].title
+              : latestOptimisticEvent?.title
+              ? latestOptimisticEvent.title
+              : isPendingCreation
+                  ? [footerLabel, bootstrapElapsedLabel ? `${bootstrapElapsedLabel} elapsed` : null]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : footerLabel}
+          </p>
+          {expanded ? (
+            <ChevronUp className="h-3 w-3 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-3 w-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+          )}
+        </div>
+
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden nowheel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="pt-3">
+              <ScrollArea className="h-[180px] w-full pr-3">
+                {loading && feed.length === 0 ? (
+                  <div className="py-4 text-center text-[10px] text-slate-500">
+                    Connecting to feed...
+                  </div>
+                ) : feed.length === 0 ? (
+                  <div className="py-4 text-center text-[10px] text-slate-500">No events yet.</div>
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {feed.map((event) => (
+                      <div key={event.id} className="group/item relative pl-3">
+                        <div
+                          className={cn(
+                            "absolute left-0 top-1.5 h-1.5 w-1.5 rounded-full",
+                            resolveFeedEventColor(event.kind, event.isError)
+                          )}
+                        />
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-[10px] font-medium text-slate-300">
+                            {event.title}
+                          </span>
+                          <span className="shrink-0 text-[9px] text-slate-600">
+                            {formatTimeOnly(event.timestamp)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[10px] leading-relaxed text-slate-400 group-hover/item:text-slate-300">
+                          {event.detail}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
+          </motion.div>
+        )}
       </div>
     </motion.div>
   );
@@ -299,9 +377,43 @@ function TaskSectionStat({
         <Icon className="h-3 w-3" />
         {label}
       </div>
-      <p className="mt-1.5 text-[13px] text-white">{value}</p>
+      <div className="mt-1 font-mono text-[11px] text-slate-300">{value}</div>
     </div>
   );
+}
+
+function resolveFeedEventColor(kind: string, isError?: boolean) {
+  if (isError) return "bg-red-400";
+  switch (kind) {
+    case "status":
+      return "bg-slate-400";
+    case "assistant":
+      return "bg-cyan-400";
+    case "tool":
+      return "bg-indigo-400";
+    case "artifact":
+      return "bg-emerald-400";
+    case "warning":
+      return "bg-amber-400";
+    case "user":
+      return "bg-pink-400";
+    default:
+      return "bg-slate-500";
+  }
+}
+
+function formatTimeOnly(iso: string) {
+  try {
+    const date = new Date(iso);
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+  } catch {
+    return "";
+  }
 }
 
 function TaskMenuButton({

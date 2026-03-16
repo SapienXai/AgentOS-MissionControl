@@ -31,17 +31,7 @@ export async function runOpenClaw(
   args: string[],
   options: CommandOptions = {}
 ): Promise<CommandResult> {
-  const openClawBin = await resolveOpenClawBin();
-  const { stdout, stderr } = await execFileAsync(openClawBin, args, {
-    cwd: process.cwd(),
-    timeout: options.timeoutMs ?? 45000,
-    maxBuffer: 8 * 1024 * 1024
-  });
-
-  return {
-    stdout: stdout.toString(),
-    stderr: stderr.toString()
-  };
+  return runOpenClawStream(args, options);
 }
 
 export async function runOpenClawJson<T>(
