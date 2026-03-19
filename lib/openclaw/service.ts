@@ -418,6 +418,7 @@ type TranscriptTurn = {
   createdFiles: RuntimeCreatedFile[];
   warnings: string[];
   warningSummary: string | null;
+  toolNames: string[];
 };
 
 const SNAPSHOT_CACHE_TTL_MS = 10_000;
@@ -630,6 +631,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       const agentRuntimes = runtimes
         .filter((runtime) => runtime.agentId === rawAgent.id)
         .sort(sortRuntimesByUpdatedAtDesc);
+      const observedToolNames = uniqueStrings(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
       const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
       const latestRuntime = agentRuntimes[0];
       const lastActiveAt =
@@ -681,6 +683,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
         profile,
         skills: configuredSkills,
         tools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
+        observedTools: observedToolNames,
         policy
       };
 
@@ -2594,12 +2597,13 @@ async function mapSessionToRuntimes(
     const turns = extractTranscriptTurns(raw, runtime, agent?.workspace || config?.workspace).filter(
       (turn) => !isHeartbeatTurn(turn.prompt)
     );
+    const observedToolNames = collectTranscriptToolNames(turns);
 
     if (turns.length === 0) {
       return [runtime];
     }
 
-    return turns.slice(-6).reverse().map((turn) => createTurnRuntime(runtime, turn));
+    return turns.slice(-6).reverse().map((turn) => createTurnRuntime(runtime, turn, observedToolNames));
   } catch {
     return [runtime];
   }
@@ -2713,7 +2717,7 @@ async function buildTaskIntegrityRecord(input: {
   const finalResponseText = runtimeFinalText || dispatchResultText || null;
   const finalResponseSource = runtimeFinalText ? "runtime" : dispatchResultText ? "dispatch" : "none";
   const sessionMismatch = Boolean(dispatchRecord && transcriptTurns.length > 0 && matchingTranscriptTurns.length === 0);
-  const toolNames = collectMissionDispatchToolNames(matchingTranscriptTurns);
+  const toolNames = collectTranscriptToolNames(matchingTranscriptTurns);
   const emails = extractEmailsFromValues([
     finalResponseText,
     dispatchResultText,
@@ -2928,14 +2932,6 @@ async function readMissionDispatchTranscriptTurns(
   } catch {
     return [] as TranscriptTurn[];
   }
-}
-
-function collectMissionDispatchToolNames(turns: TranscriptTurn[]) {
-  return uniqueStrings(
-    turns.flatMap((turn) =>
-      turn.items.flatMap((item) => (item.role === "toolResult" && item.toolName ? [item.toolName] : []))
-    )
-  );
 }
 
 function extractEmailsFromValues(values: Array<string | null | undefined>) {
@@ -5984,6 +5980,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
     | (Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "errorMessage" | "warningSummary"> & {
         errorMessage: string | null;
         pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
+        pendingToolNames: Set<string>;
       })
     | null = null;
 
@@ -6018,7 +6015,12 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
       const warningMessage = resolveNonFatalToolWarning(role, entry.message, text, errorMessage);
 
       if (!text && !errorMessage) {
-        if (role !== "assistant" || !entry.message.content?.some((item) => item.type === "toolCall")) {
+        if (
+          !(
+            (role === "assistant" && entry.message.content?.some((item) => item.type === "toolCall")) ||
+            (role === "toolResult" && typeof entry.message.toolName === "string" && entry.message.toolName.trim())
+          )
+        ) {
           continue;
         }
       }
@@ -6030,7 +6032,7 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
         text: text || errorMessage || "",
         toolName:
           role === "toolResult"
-            ? entry.message.toolName || extractToolNameFromTranscriptText(text)
+            ? entry.message.toolName?.trim() || extractToolNameFromTranscriptText(text)
             : undefined,
         stopReason: role === "assistant" ? entry.message.stopReason ?? null : null,
         errorMessage,
@@ -6059,7 +6061,9 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
           errorMessage: null,
           createdFiles: [],
           warnings: [],
-          pendingCreatedFiles: new Map()
+          toolNames: [],
+          pendingCreatedFiles: new Map(),
+          pendingToolNames: new Set()
         };
         continue;
       }
@@ -6070,7 +6074,15 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
 
       if (role === "assistant" && Array.isArray(entry.message.content)) {
         for (const contentItem of entry.message.content) {
-          if (contentItem.type !== "toolCall" || contentItem.name !== "write") {
+          if (contentItem.type !== "toolCall") {
+            continue;
+          }
+
+          if (typeof contentItem.name === "string" && contentItem.name.trim()) {
+            currentTurn.pendingToolNames.add(contentItem.name.trim());
+          }
+
+          if (contentItem.name !== "write") {
             continue;
           }
 
@@ -6116,6 +6128,15 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
         }
       }
 
+      if (role === "toolResult") {
+        const toolName =
+          entry.message.toolName?.trim() || extractToolNameFromTranscriptText(item.text)?.trim() || null;
+
+        if (toolName) {
+          currentTurn.pendingToolNames.add(toolName);
+        }
+      }
+
       if (role === "assistant" && entry.message.usage) {
         const usage = entry.message.usage as {
           input?: number;
@@ -6152,10 +6173,12 @@ function finalizeTranscriptTurn(
   turn: Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "warningSummary"> & {
     errorMessage: string | null;
     pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
+    pendingToolNames: Set<string>;
   }
 ): TranscriptTurn {
-  const { pendingCreatedFiles, ...rest } = turn;
+  const { pendingCreatedFiles, pendingToolNames, ...rest } = turn;
   void pendingCreatedFiles;
+  void pendingToolNames;
   const finalAssistant = [...turn.items]
     .reverse()
     .find((item) => item.role === "assistant" && (item.text.trim().length > 0 || item.errorMessage));
@@ -6183,11 +6206,20 @@ function finalizeTranscriptTurn(
     errorMessage: turn.errorMessage || finalAssistant?.errorMessage || null,
     createdFiles: dedupeCreatedFiles(turn.createdFiles),
     warnings,
-    warningSummary: warnings[0] ?? null
+    warningSummary: warnings[0] ?? null,
+    toolNames: uniqueStrings([...turn.pendingToolNames])
   };
 }
 
-function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): RuntimeRecord {
+function collectTranscriptToolNames(turns: TranscriptTurn[]) {
+  return uniqueStrings(turns.flatMap((turn) => turn.toolNames));
+}
+
+function createTurnRuntime(
+  runtime: RuntimeRecord,
+  turn: TranscriptTurn,
+  toolNames: string[] = turn.toolNames
+): RuntimeRecord {
   const updatedAt = Date.parse(turn.updatedAt);
   const title = formatTurnTitle(turn.prompt, runtime.agentId);
   const subtitle =
@@ -6214,6 +6246,7 @@ function createTurnRuntime(runtime: RuntimeRecord, turn: TranscriptTurn): Runtim
     sessionId: runtime.sessionId,
     taskId: runtime.taskId,
     runId: turn.runId || turn.id,
+    toolNames,
     tokenUsage: turn.tokenUsage,
     metadata: {
       ...runtime.metadata,

@@ -3,20 +3,30 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
-import { MoreHorizontal } from "lucide-react";
+import { ChevronDown, ChevronUp, MoreHorizontal } from "lucide-react";
 import { motion } from "motion/react";
 
 import type { AgentNodeData } from "@/components/mission-control/canvas-types";
 import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
-import { formatModelLabel, toneForAgentStatus } from "@/lib/openclaw/presenters";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  formatAgentFileAccessLabel,
+  formatAgentInstallScopeLabel,
+  formatAgentMissingToolBehaviorLabel,
+  formatAgentNetworkAccessLabel,
+  formatAgentPresetLabel
+} from "@/lib/openclaw/agent-presets";
+import { formatModelLabel, formatRelativeTime, toneForAgentStatus } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type AgentFlowNode = FlowNode<AgentNodeData, "agent">;
 
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const detailsPanelId = `agent-details-${data.agent.id}`;
   const tone = toneForAgentStatus(data.agent.status);
   const dotTone =
     data.agent.status === "engaged"
@@ -28,6 +38,29 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           : data.agent.status === "offline"
             ? "bg-rose-300"
             : "bg-slate-500";
+  const skillCount = data.agent.skills.length;
+  const declaredTools = data.agent.tools;
+  const observedTools = data.agent.observedTools ?? [];
+  const declaredToolCount = declaredTools.length;
+  const observedToolCount = observedTools.length;
+  const skillLabel = `${skillCount} skill${skillCount === 1 ? "" : "s"}`;
+  const toolLabel =
+    observedToolCount > 0
+      ? `${observedToolCount} observed tool${observedToolCount === 1 ? "" : "s"}`
+      : declaredToolCount > 0
+        ? `${declaredToolCount} configured tool${declaredToolCount === 1 ? "" : "s"}`
+        : "No tools observed";
+  const heartbeatLabel = data.agent.heartbeat.enabled
+    ? data.agent.heartbeat.every ??
+      (typeof data.agent.heartbeat.everyMs === "number"
+        ? `${Math.round(data.agent.heartbeat.everyMs / 1000)}s`
+        : null)
+    : null;
+  const lastActiveLabel = data.agent.lastActiveAt ? formatRelativeTime(data.agent.lastActiveAt) : "No recent activity";
+  const roleSummary = `${formatAgentPresetLabel(data.agent.policy.preset)} · ${skillLabel} · ${toolLabel}`;
+  const postureSummary = data.agent.lastActiveAt
+    ? `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"} · Last active ${lastActiveLabel}`
+    : `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"} · ${lastActiveLabel}`;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -126,6 +159,129 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         <p className="text-[12px] leading-4 text-slate-100">{data.agent.currentAction}</p>
         <p className={cn("mt-1.5 text-[9px] uppercase tracking-[0.2em]", tone)}>{data.agent.id}</p>
       </div>
+
+      <div className={cn("mt-2.5 border-t border-white/[0.08] pt-2.5", expanded && "pb-1")}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={detailsPanelId}
+          className="group flex w-full items-start justify-between gap-3 rounded-[14px] border border-transparent px-1 py-1.5 text-left transition-colors hover:border-white/[0.06] hover:bg-white/[0.02]"
+          onClick={(event) => {
+            event.stopPropagation();
+            setExpanded((current) => !current);
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div className="min-w-0">
+            <p className="text-[9px] uppercase tracking-[0.2em] text-slate-500 transition-colors group-hover:text-slate-400">
+              Agent details
+            </p>
+            <p className="mt-1 truncate text-[10px] text-slate-300">{roleSummary}</p>
+            <p className="mt-1 truncate text-[10px] text-slate-500">{postureSummary}</p>
+          </div>
+          <div className="mt-0.5 shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] p-1 text-slate-400 transition-colors group-hover:border-white/[0.12] group-hover:text-slate-200">
+            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </div>
+        </button>
+
+        {expanded ? (
+          <motion.div
+            id={detailsPanelId}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden nowheel"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="pt-2.5">
+              <ScrollArea className="h-[160px] w-full pr-3">
+                <div className="space-y-2.5">
+                  <div>
+                    <p className="mb-2 text-[9px] uppercase tracking-[0.2em] text-slate-500">Capabilities</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {data.agent.skills.length > 0 ? (
+                        data.agent.skills.map((skill) => (
+                          <Badge key={skill} variant="muted" className="max-w-full truncate">
+                            {skill}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge variant="muted">No explicit skills</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[9px] uppercase tracking-[0.2em] text-slate-500">Declared tools</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {declaredTools.length > 0 ? (
+                        declaredTools.map((tool) => (
+                          <Badge key={tool} variant="warning" className="max-w-full truncate">
+                            {tool}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge variant="muted">No explicit tools configured</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[9px] uppercase tracking-[0.2em] text-slate-500">Observed tools</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {observedTools.length > 0 ? (
+                        observedTools.map((tool) => (
+                          <Badge key={tool} variant="default" className="max-w-full truncate">
+                            {tool}
+                          </Badge>
+                        ))
+                      ) : (
+                        <Badge variant="muted">No runtime tool calls recovered yet</Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[9px] uppercase tracking-[0.2em] text-slate-500">Permissions</p>
+                    <div className="grid gap-1.5">
+                      <AgentDetailRow
+                        label="File access"
+                        value={formatAgentFileAccessLabel(data.agent.policy.fileAccess)}
+                      />
+                      <AgentDetailRow
+                        label="Network"
+                        value={formatAgentNetworkAccessLabel(data.agent.policy.networkAccess)}
+                      />
+                      <AgentDetailRow
+                        label="Install scope"
+                        value={formatAgentInstallScopeLabel(data.agent.policy.installScope)}
+                      />
+                      <AgentDetailRow
+                        label="Missing tools"
+                        value={formatAgentMissingToolBehaviorLabel(data.agent.policy.missingToolBehavior)}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-2 text-[9px] uppercase tracking-[0.2em] text-slate-500">Runtime posture</p>
+                    <div className="grid gap-1.5">
+                      <AgentDetailRow label="Last active" value={lastActiveLabel} />
+                      <AgentDetailRow
+                        label="Heartbeat"
+                        value={data.agent.heartbeat.enabled ? (heartbeatLabel ? `On · ${heartbeatLabel}` : "On") : "Off"}
+                      />
+                      <AgentDetailRow label="Sessions" value={String(data.agent.sessionCount)} />
+                      <AgentDetailRow label="Active runs" value={String(data.agent.activeRuntimeIds.length)} />
+                    </div>
+                  </div>
+                </div>
+              </ScrollArea>
+            </div>
+          </motion.div>
+        ) : null}
+      </div>
     </motion.div>
   );
 }
@@ -152,5 +308,20 @@ function AgentMenuButton({
     >
       <span>{label}</span>
     </button>
+  );
+}
+
+function AgentDetailRow({
+  label,
+  value
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-[10px] bg-white/[0.02] px-2.5 py-1.5">
+      <span className="shrink-0 text-[9px] uppercase tracking-[0.18em] text-slate-500">{label}</span>
+      <span className="min-w-0 text-right text-[10px] leading-4 text-slate-100">{value}</span>
+    </div>
   );
 }

@@ -589,6 +589,7 @@ function WorkspaceContent({
           workspace.bootstrap.projectShell.some((item) => item.present)
         ? "partial"
         : "thin";
+  const observedTools = Array.from(new Set(agents.flatMap((agent) => agent.observedTools ?? [])));
   const workspaceOnlyMode =
     agents.length === 0
       ? "no agents"
@@ -681,12 +682,21 @@ function WorkspaceContent({
           />
         </div>
         <div>
-          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Declared tools</p>
           <InspectorTagGroup
-            emptyLabel="No explicit tools"
+            emptyLabel="No explicit tools configured"
             items={workspace.capabilities.tools}
             emptyVariant="muted"
             itemVariant="warning"
+          />
+        </div>
+        <div>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Observed tools</p>
+          <InspectorTagGroup
+            emptyLabel="No runtime tool calls recovered yet"
+            items={observedTools}
+            emptyVariant="muted"
+            itemVariant="default"
           />
         </div>
       </InfoCard>
@@ -757,6 +767,7 @@ function AgentContent({
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent?.workspaceId);
   const model = snapshot.models.find((entry) => entry.id === agent?.modelId);
+  const observedTools = agent?.observedTools ?? [];
   const activeRuntimes = snapshot.runtimes
     .filter((runtime) => agent?.activeRuntimeIds.includes(runtime.id))
     .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
@@ -901,12 +912,21 @@ function AgentContent({
           itemVariant="muted"
         />
         <div className="pt-1">
-          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Declared tools</p>
           <InspectorTagGroup
-            emptyLabel="No explicit tools"
+            emptyLabel="No explicit tools configured"
             items={agent.tools}
             emptyVariant="muted"
             itemVariant="warning"
+          />
+        </div>
+        <div className="pt-1">
+          <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Observed tools</p>
+          <InspectorTagGroup
+            emptyLabel="No runtime tool calls recovered yet"
+            items={observedTools}
+            emptyVariant="muted"
+            itemVariant="default"
           />
         </div>
       </InfoCard>

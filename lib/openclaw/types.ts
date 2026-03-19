@@ -200,6 +200,7 @@ export interface OpenClawAgent {
   };
   skills: string[];
   tools: string[];
+  observedTools?: string[];
   policy: AgentPolicy;
 }
 
@@ -231,6 +232,7 @@ export interface RuntimeRecord {
   sessionId?: string;
   taskId?: string;
   runId?: string;
+  toolNames?: string[];
   tokenUsage?: {
     input: number;
     output: number;
