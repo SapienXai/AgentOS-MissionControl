@@ -982,6 +982,7 @@ function buildTaskRecord(
   );
   const primaryAgentId = primaryRuntime?.agentId || agentIds[0];
   const primaryAgentName = primaryAgentId ? agentNameById.get(primaryAgentId) ?? null : null;
+  const latestRuntime = sortedRuntimes[0] ?? null;
 
   return {
     id: createTaskRecordId(groupKey),
@@ -989,9 +990,9 @@ function buildTaskRecord(
     title: mission || primaryRuntime?.title || "Untitled task",
     mission,
     subtitle,
-    status: resolveTaskStatus(signalRuntimes),
-    updatedAt: signalRuntimes[0]?.updatedAt ?? sortedRuntimes[0]?.updatedAt ?? null,
-    ageMs: signalRuntimes[0]?.ageMs ?? sortedRuntimes[0]?.ageMs ?? null,
+    status: resolveTaskStatus(sortedRuntimes),
+    updatedAt: latestRuntime?.updatedAt ?? null,
+    ageMs: latestRuntime?.ageMs ?? null,
     workspaceId: primaryRuntime?.workspaceId,
     primaryAgentId,
     primaryAgentName,
@@ -1003,7 +1004,7 @@ function buildTaskRecord(
     runIds,
     runtimeCount: sortedRuntimes.length,
     updateCount: signalRuntimes.filter((runtime) => runtime.source === "turn").length,
-    liveRunCount: signalRuntimes.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
+    liveRunCount: sortedRuntimes.filter((runtime) => runtime.status === "running" || runtime.status === "queued").length,
     artifactCount: createdFiles.length,
     warningCount: warnings.length,
     tokenUsage,
@@ -1073,17 +1074,15 @@ function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
     const sessionId = runtime.sessionId?.trim();
     const dispatchId =
       typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
-    const recoveredFromObservation = runtime.metadata.recoveredFromObservation === true;
-    const dispatchObservedAt = typeof runtime.metadata.dispatchObservedAt === "string";
 
-    if (
-      !sessionId ||
-      !dispatchId ||
-      (isSyntheticDispatchRuntime(runtime) && !recoveredFromObservation && !dispatchObservedAt)
-    ) {
+    if (!sessionId || !dispatchId) {
       continue;
     }
 
+    // Even when the dispatch runtime is synthetic, it still represents the
+    // authoritative dispatch/session pair for that mission. Keep the session
+    // pinned to the dispatch so the raw session placeholder does not become a
+    // separate task card.
     dispatchIdBySessionKey.set(`${runtime.agentId ?? "unknown"}:${sessionId}`, dispatchId);
   }
 
