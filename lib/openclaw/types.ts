@@ -2,9 +2,9 @@ export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 
 export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offline";
 
-export type RuntimeStatus = "running" | "queued" | "idle" | "completed" | "stalled";
+export type RuntimeStatus = "running" | "queued" | "idle" | "completed" | "stalled" | "cancelled";
 
-export type MissionDispatchStatus = "queued" | "running" | "completed" | "stalled";
+export type MissionDispatchStatus = "queued" | "running" | "completed" | "stalled" | "cancelled";
 
 export type AgentPreset = "worker" | "setup" | "browser" | "monitoring" | "custom";
 
@@ -312,10 +312,39 @@ export interface TaskFeedEvent {
   timestamp: string;
   title: string;
   detail: string;
+  url?: string;
+  filePath?: string;
+  displayPath?: string;
   runtimeId?: string;
   agentId?: string;
   toolName?: string;
   isError?: boolean;
+}
+
+export type TaskIntegritySeverity = "warning" | "error";
+
+export interface TaskIntegrityIssue {
+  id: string;
+  severity: TaskIntegritySeverity;
+  title: string;
+  detail: string;
+}
+
+export interface TaskIntegrityRecord {
+  status: "verified" | "warning" | "error";
+  outputDir: string | null;
+  outputDirRelative: string | null;
+  outputDirExists: boolean;
+  outputFileCount: number;
+  transcriptTurnCount: number;
+  matchingTranscriptTurnCount: number;
+  finalResponseText: string | null;
+  finalResponseSource: "runtime" | "dispatch" | "none";
+  dispatchSessionId: string | null;
+  sessionMismatch: boolean;
+  toolNames: string[];
+  emails: string[];
+  issues: TaskIntegrityIssue[];
 }
 
 export interface TaskDetailRecord {
@@ -325,6 +354,7 @@ export interface TaskDetailRecord {
   liveFeed: TaskFeedEvent[];
   createdFiles: RuntimeCreatedFile[];
   warnings: string[];
+  integrity: TaskIntegrityRecord;
 }
 
 export type RelationshipKind = "contains" | "uses-model" | "active-run";
@@ -369,6 +399,17 @@ export interface MissionResponse {
     mediaUrl: string | null;
   }>;
   meta?: Record<string, unknown>;
+}
+
+export interface MissionAbortResponse {
+  taskId: string;
+  dispatchId: string | null;
+  status: MissionDispatchStatus;
+  summary: string;
+  reason: string | null;
+  runnerPid: number | null;
+  childPid: number | null;
+  abortedAt: string;
 }
 
 export type OpenClawUpdateStreamEvent =

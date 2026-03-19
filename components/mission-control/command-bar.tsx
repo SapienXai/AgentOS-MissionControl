@@ -44,6 +44,7 @@ type MissionDispatchStart = {
   agentId: string;
   workspaceId: string | null;
   submittedAt: number;
+  abortController: AbortController;
 };
 type RecentPrompt = {
   id: string;
@@ -277,6 +278,7 @@ export function CommandBar({
     const resolvedAgentId = payload.agentId || effectiveTargetAgentId;
     const submittedAt = Date.now();
     const requestId = globalThis.crypto?.randomUUID?.() || `dispatch:${submittedAt}`;
+    const abortController = new AbortController();
 
     if (resolvedAgentId) {
       onMissionDispatchStart({
@@ -284,7 +286,8 @@ export function CommandBar({
         mission: payload.mission.trim(),
         agentId: resolvedAgentId,
         workspaceId: targetWorkspace?.id ?? activeWorkspaceId ?? null,
-        submittedAt
+        submittedAt,
+        abortController
       });
     }
 
@@ -295,6 +298,7 @@ export function CommandBar({
         headers: {
           "Content-Type": "application/json"
         },
+        signal: abortController.signal,
         body: JSON.stringify(payload)
       });
 
@@ -342,6 +346,10 @@ export function CommandBar({
       }
       void onRefresh().catch(() => null);
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
       onMissionDispatchFailure(
         requestId,
         error instanceof Error ? error.message : "Unknown mission error."

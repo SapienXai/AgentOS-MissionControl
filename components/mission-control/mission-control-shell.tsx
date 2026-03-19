@@ -10,7 +10,7 @@ import {
   Settings2,
   SunMedium
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
 import { MissionCanvas } from "@/components/mission-control/canvas";
@@ -80,14 +80,17 @@ type MissionDispatchStart = {
   agentId: string;
   workspaceId: string | null;
   submittedAt: number;
+  abortController: AbortController;
 };
 
 type SurfaceTheme = "dark" | "light";
 type UpdateRunState = "idle" | "running" | "success" | "error";
+type TaskAbortState = "idle" | "running" | "error";
 type ResetPreviewState = "idle" | "loading" | "ready" | "error";
 type OnboardingWizardStage = "system" | "models";
 type GatewayControlAction = "start" | "stop" | "restart";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
+type InspectorTabId = "overview" | "output" | "files" | "raw";
 
 const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
@@ -106,6 +109,7 @@ export function MissionControlShell({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     initialSnapshot.workspaces[0]?.id ?? null
   );
+  const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTabId>("overview");
   const [lastMission, setLastMission] = useState<MissionResponse | null>(null);
   const [recentDispatchId, setRecentDispatchId] = useState<string | null>(null);
   const [optimisticMissionTasks, setOptimisticMissionTasks] = useState<OptimisticMissionTask[]>([]);
@@ -114,6 +118,10 @@ export function MissionControlShell({
   const [hiddenTaskKeys, setHiddenTaskKeys] = useState<string[]>([]);
   const [lockedTaskKeys, setLockedTaskKeys] = useState<string[]>([]);
   const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
+  const [taskAbortRequest, setTaskAbortRequest] = useState<TaskRecord | null>(null);
+  const [taskAbortRunState, setTaskAbortRunState] = useState<TaskAbortState>("idle");
+  const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
+  const missionDispatchAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -171,6 +179,11 @@ export function MissionControlShell({
     () => mergeSnapshotWithOptimisticTasks(snapshot, optimisticMissionTasks),
     [snapshot, optimisticMissionTasks]
   );
+
+  const selectNode = useCallback((nodeId: string | null, tab: InspectorTabId = "overview") => {
+    setSelectedNodeId(nodeId);
+    setActiveInspectorTab(tab);
+  }, []);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
@@ -204,7 +217,12 @@ export function MissionControlShell({
     isTaskHiddenByPreferences(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
   ).length;
   const resolvedScopedTaskCount = scopedTasks.filter(
-    (task) => task.status === "completed" || task.status === "stalled" || task.status === "idle"
+    (task) =>
+      task.status === "completed" ||
+      task.status === "stalled" ||
+      task.status === "cancelled" ||
+      task.status === "idle" ||
+      isTaskAborted(task)
   ).length;
 
   useEffect(() => {
@@ -228,9 +246,9 @@ export function MissionControlShell({
       uiSnapshot.models.some((entry) => entry.id === selectedNodeId);
 
     if (!exists) {
-      setSelectedNodeId(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
+      selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [uiSnapshot, selectedNodeId, activeWorkspaceId]);
+  }, [uiSnapshot, selectedNodeId, activeWorkspaceId, selectNode]);
 
   useEffect(() => {
     const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
@@ -238,17 +256,9 @@ export function MissionControlShell({
       selectedTask && isTaskHiddenByPreferences(selectedTask, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys);
 
     if (selectedNodeId && (hiddenRuntimeIds.includes(selectedNodeId) || taskHidden)) {
-      setSelectedNodeId(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
+      selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
     }
-  }, [
-    selectedNodeId,
-    hiddenRuntimeIds,
-    hiddenTaskKeys,
-    lockedTaskKeys,
-    activeWorkspaceId,
-    uiSnapshot.workspaces,
-    uiSnapshot.tasks
-  ]);
+  }, [selectedNodeId, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys, activeWorkspaceId, uiSnapshot.workspaces, uiSnapshot.tasks, selectNode]);
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
@@ -312,7 +322,14 @@ export function MissionControlShell({
     const relatedTask = snapshot.tasks.find((task) => task.dispatchId === recentDispatchId);
 
     if (relatedTask) {
-      setSelectedNodeId((current) => (current === relatedTask.id ? current : relatedTask.id));
+      setSelectedNodeId((current) => {
+        if (current === relatedTask.id) {
+          return current;
+        }
+
+        setActiveInspectorTab("overview");
+        return relatedTask.id;
+      });
       setIsInspectorOpen(true);
       setRecentDispatchId(null);
     }
@@ -467,6 +484,103 @@ export function MissionControlShell({
       return next.length > 40000 ? next.slice(next.length - 40000) : next;
     });
   };
+
+  const confirmTaskAbort = useCallback(async () => {
+    if (!taskAbortRequest || taskAbortRunState === "running") {
+      return;
+    }
+
+    const optimisticRequestId =
+      typeof taskAbortRequest.metadata.optimisticRequestId === "string"
+        ? taskAbortRequest.metadata.optimisticRequestId
+        : null;
+    const optimisticTaskEntry = optimisticRequestId
+      ? optimisticMissionTasks.find((entry) => entry.requestId === optimisticRequestId)
+      : optimisticMissionTasks.find((entry) => entry.task.id === taskAbortRequest.id);
+    const resolvedDispatchId =
+      typeof taskAbortRequest.dispatchId === "string"
+        ? taskAbortRequest.dispatchId
+        : optimisticTaskEntry?.dispatchId ?? null;
+
+    if (optimisticRequestId && !resolvedDispatchId) {
+      missionDispatchAbortControllersRef.current.get(optimisticRequestId)?.abort();
+      missionDispatchAbortControllersRef.current.delete(optimisticRequestId);
+
+      setOptimisticMissionTasks((current) =>
+        current.map((entry) =>
+          entry.requestId === optimisticRequestId
+            ? {
+                ...entry,
+                task: updateOptimisticMissionTask(entry.task, {
+                  status: "cancelled",
+                  subtitle: "Mission submission cancelled before dispatch.",
+                  bootstrapStage: "cancelled",
+                  feedEvent: {
+                    id: `${entry.task.id}:cancelled:${Date.now()}`,
+                    kind: "warning",
+                    timestamp: new Date().toISOString(),
+                    title: "Dispatch cancelled",
+                    detail: "Mission submission cancelled before dispatch.",
+                    isError: false
+                  }
+                })
+              }
+            : entry
+        )
+      );
+
+      toast.success("Mission submission cancelled.", {
+        description: taskAbortRequest.title
+      });
+      setTaskAbortRequest(null);
+      setTaskAbortRunState("idle");
+      setTaskAbortMessage(null);
+      return;
+    }
+
+    setTaskAbortRunState("running");
+    setTaskAbortMessage(null);
+
+    try {
+      const response = await fetch(`/api/tasks/${encodeURIComponent(taskAbortRequest.id)}/abort`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          reason: "Aborted from Mission Control.",
+          dispatchId: resolvedDispatchId
+        })
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            error?: string;
+            message?: string;
+            summary?: string;
+          }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error || payload?.message || payload?.summary || "Unable to abort task."
+        );
+      }
+
+      toast.success("Task abort requested.", {
+        description: taskAbortRequest.title
+      });
+      setTaskAbortRequest(null);
+      setTaskAbortRunState("idle");
+      await refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown abort error.";
+      setTaskAbortRunState("error");
+      setTaskAbortMessage(message);
+      toast.error("Task abort failed.", {
+        description: message
+      });
+    }
+  }, [optimisticMissionTasks, refresh, taskAbortRequest, taskAbortRunState]);
 
   const applyDiscoveredModels = (nextDiscoveredModels: DiscoveredModelCandidate[] | undefined) => {
     if (!nextDiscoveredModels) {
@@ -1361,7 +1475,7 @@ export function MissionControlShell({
             lockedTaskKeys={lockedTaskKeys}
             className="rounded-none"
             onEditAgent={(agentId) => {
-              setSelectedNodeId(agentId);
+              selectNode(agentId);
               setAgentActionRequest({
                 requestId: `edit:${agentId}:${Date.now()}`,
                 kind: "edit",
@@ -1369,7 +1483,7 @@ export function MissionControlShell({
               });
             }}
             onDeleteAgent={(agentId) => {
-              setSelectedNodeId(agentId);
+              selectNode(agentId);
               setAgentActionRequest({
                 requestId: `delete:${agentId}:${Date.now()}`,
                 kind: "delete",
@@ -1434,7 +1548,22 @@ export function MissionControlShell({
                 return [...current, task.key];
               });
             }}
-            onSelectNode={setSelectedNodeId}
+            onAbortTask={(task) => {
+              if (!isTaskAbortable(task)) {
+                return;
+              }
+
+              setTaskAbortRequest(task);
+              setTaskAbortRunState("idle");
+              setTaskAbortMessage(null);
+            }}
+            onInspectTask={(task, target) => {
+              selectNode(task.id, target);
+              setIsInspectorOpen(true);
+            }}
+            onSelectNode={(nodeId) => {
+              selectNode(nodeId);
+            }}
           />
         </div>
       </div>
@@ -1517,7 +1646,7 @@ export function MissionControlShell({
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
               setActiveWorkspaceId(workspaceId);
-              setSelectedNodeId(workspaceId);
+              selectNode(workspaceId);
             }}
             onRefresh={refresh}
             onRunModelRefresh={runModelRefresh}
@@ -1543,6 +1672,17 @@ export function MissionControlShell({
             lastMission={lastMission}
             collapsed={!isInspectorOpen}
             onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
+            activeTab={activeInspectorTab}
+            onActiveTabChange={setActiveInspectorTab}
+            onAbortTask={(task) => {
+              if (!isTaskAbortable(task)) {
+                return;
+              }
+
+              setTaskAbortRequest(task);
+              setTaskAbortRunState("idle");
+              setTaskAbortMessage(null);
+            }}
           />
         </div>
 
@@ -1562,7 +1702,10 @@ export function MissionControlShell({
                   const resolvedKeys = scopedTasks
                     .filter(
                       (task) =>
-                        (task.status === "completed" || task.status === "stalled" || task.status === "idle") &&
+                        (task.status === "completed" ||
+                          task.status === "stalled" ||
+                          task.status === "idle" ||
+                          isTaskAborted(task)) &&
                         !lockedTaskKeys.includes(task.key)
                     )
                     .map((task) => task.key);
@@ -1604,6 +1747,8 @@ export function MissionControlShell({
               setIsWorkspaceWizardOpen(true);
             }}
             onMissionDispatchStart={(event) => {
+              missionDispatchAbortControllersRef.current.set(event.requestId, event.abortController);
+
               const optimisticTask = createOptimisticMissionTaskRecord(event, snapshot);
 
               setOptimisticMissionTasks((current) => [
@@ -1615,10 +1760,12 @@ export function MissionControlShell({
                 setActiveWorkspaceId(event.workspaceId);
               }
 
-              setSelectedNodeId(optimisticTask.task.id);
+              selectNode(optimisticTask.task.id);
               setIsInspectorOpen(true);
             }}
             onMissionDispatchFailure={(requestId, message) => {
+              missionDispatchAbortControllersRef.current.delete(requestId);
+
               setOptimisticMissionTasks((current) =>
                 current.map((entry) =>
                   entry.requestId === requestId
@@ -1643,6 +1790,7 @@ export function MissionControlShell({
               );
             }}
             onMissionResponse={(result, context) => {
+              missionDispatchAbortControllersRef.current.delete(context.requestId);
               setLastMission(result);
 
               setOptimisticMissionTasks((current) =>
@@ -1653,19 +1801,31 @@ export function MissionControlShell({
                         dispatchId: result.dispatchId ?? entry.dispatchId,
                         task: updateOptimisticMissionTask(entry.task, {
                           dispatchId: result.dispatchId,
-                          status: result.status === "stalled" ? "stalled" : "queued",
+                          status:
+                            result.status === "stalled"
+                              ? "stalled"
+                              : result.status === "cancelled"
+                                ? "cancelled"
+                                : "queued",
                           subtitle: result.summary,
-                          bootstrapStage: result.status === "stalled" ? "stalled" : "accepted",
+                          bootstrapStage:
+                            result.status === "stalled"
+                              ? "stalled"
+                              : result.status === "cancelled"
+                                ? "cancelled"
+                                : "accepted",
                           feedEvent: {
                             id: `${entry.task.id}:response:${Date.now()}`,
-                            kind: result.status === "stalled" ? "warning" : "status",
+                            kind: result.status === "stalled" || result.status === "cancelled" ? "warning" : "status",
                             timestamp: new Date().toISOString(),
                             title:
                               result.status === "stalled"
                                 ? "Dispatch blocked"
+                                : result.status === "cancelled"
+                                  ? "Dispatch cancelled"
                                 : "Mission accepted",
                             detail: result.summary || "Mission accepted and queued for OpenClaw execution.",
-                            isError: result.status === "stalled"
+                            isError: result.status === "stalled" || result.status === "cancelled"
                           }
                         })
                       }
@@ -1733,7 +1893,7 @@ export function MissionControlShell({
           onRefresh={refresh}
           onWorkspaceCreated={(workspaceId) => {
             setActiveWorkspaceId(workspaceId);
-            setSelectedNodeId(workspaceId);
+            selectNode(workspaceId);
           }}
         />
 
@@ -1771,6 +1931,100 @@ export function MissionControlShell({
           }}
           onOpenChange={handleResetDialogOpenChange}
         />
+
+        <Dialog
+          open={taskAbortRequest !== null}
+          onOpenChange={(open) => {
+            if (taskAbortRunState === "running") {
+              return;
+            }
+
+            if (!open) {
+              setTaskAbortRequest(null);
+              setTaskAbortRunState("idle");
+              setTaskAbortMessage(null);
+            }
+          }}
+        >
+          <DialogContent
+            className={cn(
+              "max-w-[480px] gap-5 p-5 sm:p-6",
+              surfaceTheme === "light"
+                ? "border-[#d7c5b7] bg-[rgba(252,247,241,0.98)] text-[#4a382c] shadow-[0_30px_80px_rgba(161,125,101,0.2)]"
+                : "border-white/10 bg-slate-950/94 text-slate-100"
+            )}
+          >
+            <DialogHeader>
+              <DialogTitle className={surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"}>
+                Abort task?
+              </DialogTitle>
+              <DialogDescription className={surfaceTheme === "light" ? "text-[#7e6555]" : "text-slate-400"}>
+                This stops the current OpenClaw dispatch for the selected task. It does not delete captured evidence or files.
+              </DialogDescription>
+            </DialogHeader>
+
+            {taskAbortRequest ? (
+              <div
+                className={cn(
+                  "rounded-[20px] border px-4 py-4",
+                  surfaceTheme === "light"
+                    ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4f3d31]"
+                    : "border-rose-400/20 bg-rose-400/10 text-rose-50"
+                )}
+              >
+                <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Selected task</p>
+                <p className="mt-2 font-display text-[1.02rem] leading-6 text-inherit">
+                  {taskAbortRequest.title}
+                </p>
+                <p className={cn("mt-1 text-sm leading-6", surfaceTheme === "light" ? "text-[#8b7262]" : "text-rose-100/80")}>
+                  {taskAbortRequest.subtitle}
+                </p>
+                {taskAbortMessage ? (
+                  <p className="mt-3 rounded-[16px] border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-50">
+                    {taskAbortMessage}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={taskAbortRunState === "running"}
+                className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
+                onClick={() => {
+                  if (taskAbortRunState === "running") {
+                    return;
+                  }
+
+                  setTaskAbortRequest(null);
+                  setTaskAbortRunState("idle");
+                  setTaskAbortMessage(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={!taskAbortRequest || taskAbortRunState === "running"}
+                onClick={() => {
+                  void confirmTaskAbort();
+                }}
+              >
+                {taskAbortRunState === "running" ? (
+                  <>
+                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                    Aborting...
+                  </>
+                ) : (
+                  "Abort task"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <div
           className={cn(
@@ -3083,6 +3337,25 @@ function resolveTaskPrompt(task: TaskRecord) {
   return task.subtitle.trim() || "Continue this task.";
 }
 
+function resolveTaskDispatchStatus(task: TaskRecord) {
+  return typeof task.metadata.dispatchStatus === "string" ? task.metadata.dispatchStatus : null;
+}
+
+function isTaskAborted(task: TaskRecord) {
+  const dispatchStatus = resolveTaskDispatchStatus(task);
+  const runtimeStatus = task.status as string;
+  return dispatchStatus === "cancelled" || dispatchStatus === "aborted" || runtimeStatus === "cancelled" || runtimeStatus === "aborted";
+}
+
+function isTaskAbortable(task: TaskRecord) {
+  if (isTaskAborted(task)) {
+    return false;
+  }
+
+  const runtimeStatus = task.status as string;
+  return runtimeStatus === "running" || runtimeStatus === "queued";
+}
+
 function mergeSnapshotWithOptimisticTasks(
   snapshot: MissionControlSnapshot,
   optimisticMissionTasks: OptimisticMissionTask[]
@@ -3176,8 +3449,8 @@ function updateOptimisticMissionTask(
     status: input.status,
     subtitle: input.subtitle,
     updatedAt: Date.now(),
-    liveRunCount: input.status === "stalled" ? 0 : 1,
-    warningCount: input.status === "stalled" ? 1 : task.warningCount,
+    liveRunCount: input.status === "stalled" || input.status === "cancelled" ? 0 : 1,
+    warningCount: input.status === "stalled" || input.status === "cancelled" ? 1 : task.warningCount,
     metadata: {
       ...task.metadata,
       bootstrapStage: input.bootstrapStage,

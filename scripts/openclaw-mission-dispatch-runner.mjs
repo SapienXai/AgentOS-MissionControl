@@ -20,6 +20,7 @@ async function main() {
 
   const openClawBin = process.env.OPENCLAW_BIN || "openclaw";
   const startedAt = new Date().toISOString();
+  const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId.trim() : null;
 
   await mutateRecord((current) => ({
     ...current,
@@ -40,6 +41,7 @@ async function main() {
       "agent",
       "--agent",
       record.agentId,
+      ...(sessionId ? ["--session-id", sessionId] : []),
       "--message",
       record.routedMission,
       "--thinking",
@@ -56,8 +58,33 @@ async function main() {
   let stdout = "";
   let stderr = "";
   let settled = false;
+  let heartbeat = null;
 
-  const heartbeat = setInterval(() => {
+  await mutateRecord((latest) => ({
+    ...latest,
+    runner: {
+      ...(latest.runner || {}),
+      pid: process.pid,
+      childPid: child.pid ?? latest.runner?.childPid ?? null,
+      startedAt: latest.runner?.startedAt || startedAt,
+      lastHeartbeatAt: startedAt
+    }
+  }));
+
+  const currentAfterSpawn = await readRecord();
+  if (currentAfterSpawn && typeof currentAfterSpawn.status === "string" && currentAfterSpawn.status !== "running") {
+    settled = true;
+    clearInterval(heartbeat);
+
+    if (!child.killed) {
+      child.kill("SIGTERM");
+    }
+
+    process.exit(0);
+    return;
+  }
+
+  heartbeat = setInterval(() => {
     void tickHeartbeat();
   }, heartbeatIntervalMs);
 
@@ -78,25 +105,36 @@ async function main() {
   });
 
   child.on("close", (code) => {
-    const payload = tryParseMissionPayload(stdout || stderr);
+    void (async () => {
+      const current = await readRecord();
 
-    if (code === 0 && payload && !isFailurePayload(payload)) {
+      if (current && typeof current.status === "string" && current.status !== "running") {
+        settled = true;
+        clearInterval(heartbeat);
+        process.exit(0);
+        return;
+      }
+
+      const payload = tryParseMissionPayload(stdout || stderr);
+
+      if (code === 0 && payload && !isFailurePayload(payload)) {
+        void finalize({
+          status: "completed",
+          result: payload,
+          error: null
+        });
+        return;
+      }
+
       void finalize({
-        status: "completed",
+        status: "stalled",
         result: payload,
-        error: null
+        error:
+          payload?.summary ||
+          extractFailureMessage(stderr, stdout) ||
+          `OpenClaw mission exited with code ${typeof code === "number" ? code : "unknown"}.`
       });
-      return;
-    }
-
-    void finalize({
-      status: "stalled",
-      result: payload,
-      error:
-        payload?.summary ||
-        extractFailureMessage(stderr, stdout) ||
-        `OpenClaw mission exited with code ${typeof code === "number" ? code : "unknown"}.`
-    });
+    })();
   });
 
   async function tickHeartbeat() {

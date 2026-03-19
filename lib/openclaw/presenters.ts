@@ -71,6 +71,8 @@ export function toneForRuntimeStatus(status: RuntimeStatus) {
       return "text-cyan-300";
     case "completed":
       return "text-emerald-300";
+    case "cancelled":
+      return "text-rose-300";
     case "stalled":
       return "text-amber-200";
     case "queued":
@@ -86,6 +88,8 @@ export function badgeVariantForRuntimeStatus(status: RuntimeStatus) {
       return "default";
     case "completed":
       return "success";
+    case "cancelled":
+      return "danger";
     case "stalled":
       return "warning";
     default:

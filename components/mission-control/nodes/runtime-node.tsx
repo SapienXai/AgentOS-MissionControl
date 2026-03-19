@@ -71,6 +71,8 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
         isPendingCreation && "border-cyan-300/30 bg-[linear-gradient(180deg,rgba(17,31,52,0.98),rgba(8,16,30,0.98))] shadow-[0_24px_54px_rgba(34,211,238,0.22)]",
         isJustCreated &&
           "border-cyan-200/40 bg-[linear-gradient(180deg,rgba(20,28,43,0.98),rgba(10,15,28,0.98))] shadow-[0_22px_52px_rgba(125,211,252,0.18)]",
+        data.runtime.status === "cancelled" &&
+          "border-rose-300/30 bg-[linear-gradient(180deg,rgba(43,14,19,0.96),rgba(19,8,12,0.96))] shadow-[0_22px_52px_rgba(244,63,94,0.14)]",
         data.runtime.status === "completed" &&
           !isPendingCreation &&
           !isJustCreated &&
@@ -118,6 +120,8 @@ export function RuntimeNode({ data, selected }: NodeProps<RuntimeFlowNode>) {
               tone={
                 isPendingCreation
                   ? "bg-cyan-300"
+                  : data.runtime.status === "cancelled"
+                    ? "bg-rose-300"
                   : data.runtime.status === "stalled"
                     ? "bg-amber-200"
                   : data.runtime.status === "completed"

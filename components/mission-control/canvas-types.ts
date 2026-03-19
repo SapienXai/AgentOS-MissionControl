@@ -34,10 +34,12 @@ export type TaskNodeData = Record<string, unknown> & {
   pendingCreation?: boolean;
   justCreated?: boolean;
   locked?: boolean;
+  onInspect?: (task: TaskRecord, target: "overview" | "output" | "files") => void;
   onReply?: (task: TaskRecord) => void;
   onCopyPrompt?: (task: TaskRecord) => void;
   onHide?: (task: TaskRecord) => void;
   onToggleLock?: (task: TaskRecord) => void;
+  onAbortTask?: (task: TaskRecord) => void;
 };
 
 export type ModelNodeData = Record<string, unknown> & {

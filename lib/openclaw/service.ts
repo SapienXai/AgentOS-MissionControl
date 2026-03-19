@@ -53,6 +53,7 @@ import type {
   AgentUpdateInput,
   ModelReadiness,
   MissionControlSnapshot,
+  MissionAbortResponse,
   MissionDispatchStatus,
   MissionResponse,
   MissionSubmission,
@@ -62,6 +63,7 @@ import type {
   PresenceRecord,
   RelationshipRecord,
   TaskDetailRecord,
+  TaskIntegrityRecord,
   TaskFeedEvent,
   TaskRecord,
   RuntimeRecord,
@@ -191,6 +193,7 @@ const runtimeSmokeTestMessage = "Mission Control runtime smoke test. Reply with 
 const missionDispatchQueuedStallMs = 30_000;
 const missionDispatchHeartbeatStallMs = 90_000;
 const missionDispatchRetentionMs = 3 * 24 * 60 * 60 * 1000;
+const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 type MutableAgentConfigEntry = AgentConfigPayload[number] & Record<string, unknown>;
 type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
@@ -224,6 +227,7 @@ type MissionDispatchRecord = {
   id: string;
   status: MissionDispatchStatus;
   agentId: string;
+  sessionId: string | null;
   mission: string;
   routedMission: string;
   thinking: NonNullable<MissionSubmission["thinking"]>;
@@ -236,6 +240,7 @@ type MissionDispatchRecord = {
   notesDirRelative: string | null;
   runner: {
     pid: number | null;
+    childPid: number | null;
     startedAt: string | null;
     finishedAt: string | null;
     lastHeartbeatAt: string | null;
@@ -955,7 +960,9 @@ function buildTaskRecord(
       .find((value): value is string => Boolean(value)) ||
     "Awaiting OpenClaw updates.";
   const createdFiles = dedupeCreatedFiles(
-    sortedRuntimes.flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
+    sortedRuntimes
+      .flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
+      .concat(sortedRuntimes.flatMap((runtime) => inferCreatedFilesFromText(runtime.subtitle)))
   );
   const warnings = uniqueStrings(
     sortedRuntimes.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
@@ -1023,6 +1030,12 @@ function buildTaskRecord(
       dispatchObservedAt:
         typeof primaryRuntime?.metadata.dispatchObservedAt === "string"
           ? primaryRuntime.metadata.dispatchObservedAt
+          : null,
+      outputDir:
+        typeof primaryRuntime?.metadata.outputDir === "string" ? primaryRuntime.metadata.outputDir : null,
+      outputDirRelative:
+        typeof primaryRuntime?.metadata.outputDirRelative === "string"
+          ? primaryRuntime.metadata.outputDirRelative
           : null
     }
   };
@@ -1057,8 +1070,14 @@ function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
     const sessionId = runtime.sessionId?.trim();
     const dispatchId =
       typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+    const recoveredFromObservation = runtime.metadata.recoveredFromObservation === true;
+    const dispatchObservedAt = typeof runtime.metadata.dispatchObservedAt === "string";
 
-    if (!sessionId || !dispatchId) {
+    if (
+      !sessionId ||
+      !dispatchId ||
+      (isSyntheticDispatchRuntime(runtime) && !recoveredFromObservation && !dispatchObservedAt)
+    ) {
       continue;
     }
 
@@ -1126,6 +1145,8 @@ function scoreTaskRuntime(runtime: RuntimeRecord) {
       ? 3
       : runtime.status === "queued"
         ? 2
+        : runtime.status === "cancelled"
+          ? 3
         : runtime.status === "stalled"
           ? 3
           : runtime.status === "idle"
@@ -1138,6 +1159,10 @@ function scoreTaskRuntime(runtime: RuntimeRecord) {
 function resolveTaskStatus(runtimes: RuntimeRecord[]): RuntimeRecord["status"] {
   if (runtimes.some((runtime) => runtime.status === "running")) {
     return "running";
+  }
+
+  if (runtimes.some((runtime) => runtime.status === "cancelled")) {
+    return "cancelled";
   }
 
   if (runtimes.some((runtime) => runtime.status === "queued")) {
@@ -1215,6 +1240,33 @@ function extractCreatedFilesFromRuntimeMetadata(runtime: RuntimeRecord) {
       } satisfies RuntimeCreatedFile
     ];
   });
+}
+
+function inferCreatedFilesFromText(value: string | null | undefined) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return [];
+  }
+
+  const matches = [
+    ...value.matchAll(/(?:^|[\s(])((?:\.{1,2}\/)?deliverables\/[^\s`),;]+)/g),
+    ...value.matchAll(/`((?:\/|\.{1,2}\/|deliverables\/)[^`\n]+)`/g)
+  ];
+  const createdFiles: RuntimeCreatedFile[] = [];
+
+  for (const match of matches) {
+    const pathValue = (match[1] || "").trim();
+
+    if (!pathValue) {
+      continue;
+    }
+
+    createdFiles.push({
+      path: pathValue,
+      displayPath: pathValue
+    });
+  }
+
+  return dedupeCreatedFiles(createdFiles);
 }
 
 function extractWarningsFromRuntimeMetadata(runtime: RuntimeRecord) {
@@ -1460,6 +1512,71 @@ export async function submitMission(input: MissionSubmission): Promise<MissionRe
   };
 }
 
+export async function abortMissionTask(
+  taskId: string,
+  reason?: string | null,
+  dispatchId?: string | null
+): Promise<MissionAbortResponse> {
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  const task = snapshot.tasks.find((entry) => entry.id === taskId);
+  const dispatchRecord = task
+    ? await findMissionDispatchRecordForTask(task)
+    : dispatchId
+      ? await readMissionDispatchRecordById(dispatchId)
+      : null;
+
+  if (!task && !dispatchRecord) {
+    throw new Error("Task was not found in the current OpenClaw snapshot.");
+  }
+
+  if (!dispatchRecord) {
+    throw new Error("Mission dispatch record was not found for this task.");
+  }
+
+  if (isMissionDispatchTerminalStatus(dispatchRecord.status)) {
+    return {
+      taskId,
+      dispatchId: dispatchRecord.id,
+      status: dispatchRecord.status,
+      summary: resolveMissionDispatchCompletionDetail(dispatchRecord),
+      reason: dispatchRecord.error,
+      runnerPid: dispatchRecord.runner.pid,
+      childPid: dispatchRecord.runner.childPid,
+      abortedAt: dispatchRecord.runner.finishedAt ?? dispatchRecord.updatedAt
+    };
+  }
+
+  const abortedAt = new Date().toISOString();
+  const abortReason = normalizeMissionAbortReason(reason);
+  const nextRecord: MissionDispatchRecord = {
+    ...dispatchRecord,
+    status: "cancelled",
+    updatedAt: abortedAt,
+    error: abortReason,
+    runner: {
+      ...dispatchRecord.runner,
+      finishedAt: abortedAt,
+      lastHeartbeatAt: abortedAt
+    }
+  };
+
+  await writeMissionDispatchRecord(nextRecord);
+  snapshotCache = null;
+
+  const killedChildPid = await stopMissionDispatchChildProcess(nextRecord);
+
+  return {
+    taskId,
+    dispatchId: nextRecord.id,
+    status: nextRecord.status,
+    summary: abortReason,
+    reason: abortReason,
+    runnerPid: nextRecord.runner.pid,
+    childPid: killedChildPid ?? nextRecord.runner.childPid,
+    abortedAt
+  };
+}
+
 function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDispatchRecord {
   const now = new Date().toISOString();
 
@@ -1467,6 +1584,7 @@ function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDi
     id: `dispatch-${randomUUID()}`,
     status: "queued",
     agentId: payload.agentId,
+    sessionId: randomUUID(),
     mission: payload.mission,
     routedMission: payload.routedMission,
     thinking: payload.thinking,
@@ -1479,6 +1597,7 @@ function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDi
     notesDirRelative: payload.notesDirRelative,
     runner: {
       pid: null,
+      childPid: null,
       startedAt: null,
       finishedAt: null,
       lastHeartbeatAt: null
@@ -1528,6 +1647,78 @@ async function launchMissionDispatchRunner(record: MissionDispatchRecord) {
   } satisfies MissionDispatchRecord;
 }
 
+async function findMissionDispatchRecordForTask(task: TaskRecord) {
+  if (task.dispatchId) {
+    const dispatchRecord = await readMissionDispatchRecordById(task.dispatchId);
+
+    if (dispatchRecord) {
+      return dispatchRecord;
+    }
+  }
+
+  const records = await readMissionDispatchRecords();
+  const taskRuntimeIds = new Set(task.runtimeIds);
+  const taskSessionIds = new Set(task.sessionIds);
+
+  for (const record of records) {
+    if (record.agentId !== task.primaryAgentId && !task.agentIds.includes(record.agentId)) {
+      continue;
+    }
+
+    if (task.mission && record.mission && matchesMissionText(record.mission, task.mission)) {
+      return record;
+    }
+
+    if (record.observation.runtimeId && taskRuntimeIds.has(record.observation.runtimeId)) {
+      return record;
+    }
+
+    const sessionId = extractMissionDispatchSessionId(record);
+    if (sessionId && taskSessionIds.has(sessionId)) {
+      return record;
+    }
+  }
+
+  return null;
+}
+
+function normalizeMissionAbortReason(reason?: string | null) {
+  const trimmed = typeof reason === "string" ? reason.trim() : "";
+  return trimmed.length > 0 ? trimmed : "Mission aborted by operator.";
+}
+
+async function stopMissionDispatchChildProcess(record: MissionDispatchRecord) {
+  const childPids = new Set<number>();
+
+  if (typeof record.runner.childPid === "number" && Number.isFinite(record.runner.childPid)) {
+    childPids.add(record.runner.childPid);
+  }
+
+  if (childPids.size === 0 && typeof record.runner.pid === "number" && Number.isFinite(record.runner.pid)) {
+    try {
+      const { stdout } = await execFileAsync("pgrep", ["-P", String(record.runner.pid)]);
+      for (const line of stdout.split(/\r?\n/)) {
+        const pid = Number.parseInt(line.trim(), 10);
+        if (Number.isFinite(pid) && pid > 0) {
+          childPids.add(pid);
+        }
+      }
+    } catch {
+      // The runner heartbeat still terminates the child once the record is cancelled.
+    }
+  }
+
+  for (const pid of childPids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // The process may already be gone.
+    }
+  }
+
+  return childPids.values().next().value ?? null;
+}
+
 async function buildMissionDispatchRuntimes(currentRuntimes: RuntimeRecord[]) {
   const records = await readMissionDispatchRecords();
   const syntheticRuntimes: RuntimeRecord[] = [];
@@ -1545,7 +1736,7 @@ async function buildMissionDispatchRuntimes(currentRuntimes: RuntimeRecord[]) {
     const observedRuntime = await buildObservedMissionDispatchRuntime(record);
 
     if (observedRuntime) {
-      if (record.status !== "completed" && record.status !== "stalled") {
+      if (!isMissionDispatchTerminalStatus(record.status)) {
         await reconcileMissionDispatchRuntimeState(record, observedRuntime);
       }
 
@@ -1626,7 +1817,7 @@ async function persistMissionDispatchObservation(record: MissionDispatchRecord, 
 }
 
 async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecord, runtime: RuntimeRecord) {
-  if (record.status === "completed" || record.status === "stalled") {
+  if (isMissionDispatchTerminalStatus(record.status)) {
     return;
   }
 
@@ -1658,7 +1849,7 @@ async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecor
 
   const latestRecord = (await readMissionDispatchRecordById(record.id)) ?? record;
 
-  if (latestRecord.status === "completed" || latestRecord.status === "stalled") {
+  if (isMissionDispatchTerminalStatus(latestRecord.status)) {
     return;
   }
 
@@ -1698,7 +1889,23 @@ async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord
     return null;
   }
 
-  return buildMissionDispatchTranscriptRuntime(record, sessionId);
+  try {
+    const raw = await readFile(transcriptPath, "utf8");
+    const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
+    const turns = extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? undefined);
+
+    if (turns.length === 0) {
+      return null;
+    }
+
+    if (record.mission && !turns.some((turn) => matchesMissionText(turn.prompt, record.mission))) {
+      return null;
+    }
+
+    return transcriptRuntime;
+  } catch {
+    return null;
+  }
 }
 
 async function readMissionDispatchRecords() {
@@ -1761,6 +1968,7 @@ async function readMissionDispatchRecord(filePath: string) {
       id: parsed.id,
       status,
       agentId: parsed.agentId,
+      sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : null,
       mission: parsed.mission,
       routedMission: parsed.routedMission,
       thinking: normalizeMissionThinking(parsed.thinking),
@@ -1773,6 +1981,7 @@ async function readMissionDispatchRecord(filePath: string) {
       notesDirRelative: typeof parsed.notesDirRelative === "string" ? parsed.notesDirRelative : null,
       runner: {
         pid: typeof parsed.runner?.pid === "number" ? parsed.runner.pid : null,
+        childPid: typeof parsed.runner?.childPid === "number" ? parsed.runner.childPid : null,
         startedAt: typeof parsed.runner?.startedAt === "string" ? parsed.runner.startedAt : null,
         finishedAt: typeof parsed.runner?.finishedAt === "string" ? parsed.runner.finishedAt : null,
         lastHeartbeatAt: typeof parsed.runner?.lastHeartbeatAt === "string" ? parsed.runner.lastHeartbeatAt : null
@@ -1814,6 +2023,10 @@ function shouldPruneMissionDispatchRecord(record: MissionDispatchRecord, nowMs: 
   return nowMs - updatedAt > missionDispatchRetentionMs;
 }
 
+function isMissionDispatchTerminalStatus(status: MissionDispatchStatus) {
+  return status === "completed" || status === "stalled" || status === "cancelled";
+}
+
 function matchMissionDispatchToRuntime(record: MissionDispatchRecord, runtimes: RuntimeRecord[]) {
   const submittedAt = Date.parse(record.submittedAt);
   const nowMs = Date.now();
@@ -1845,7 +2058,7 @@ function shouldPreferSyntheticMissionDispatchRuntime(
   runtimes: RuntimeRecord[],
   status: RuntimeRecord["status"]
 ) {
-  if ((status !== "completed" && status !== "stalled") || !observedRuntimeId) {
+  if ((status !== "completed" && status !== "stalled" && status !== "cancelled") || !observedRuntimeId) {
     return false;
   }
 
@@ -1877,7 +2090,11 @@ function scoreMissionDispatchRuntimeMatch(
     return null;
   }
 
-  if (options.effectiveStatus === "completed" || options.effectiveStatus === "stalled") {
+  if (
+    options.effectiveStatus === "completed" ||
+    options.effectiveStatus === "stalled" ||
+    options.effectiveStatus === "cancelled"
+  ) {
     return runtimeDispatchId === record.id ? 500 : null;
   }
 
@@ -1915,9 +2132,9 @@ function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, record: Miss
   const currentDispatchId =
     typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
   const runtimeMission = resolveRuntimeMissionText(runtime);
-  const nextStatus = 
-    (record.status === "completed" || record.status === "stalled") 
-      ? record.status 
+  const nextStatus =
+    isMissionDispatchTerminalStatus(record.status)
+      ? record.status
       : runtime.status;
 
   if (
@@ -1951,14 +2168,16 @@ function buildMissionDispatchTranscriptRuntime(record: MissionDispatchRecord, se
   const nowMs = Date.now();
   const runtimeStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
   const resolvedSessionId = sessionId ?? extractMissionDispatchSessionId(record) ?? hashValue(record.id);
+  const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
 
   return {
     id: record.observation.runtimeId || `runtime:${resolvedSessionId}:${hashValue(record.id)}`,
     source: "turn",
     key: `dispatch:${record.id}`,
     title: summarizeText(record.mission, 38) || "Recovered mission runtime",
-    subtitle:
-      record.status === "completed"
+    subtitle: integrityWarning
+      ? summarizeText(integrityWarning, 90)
+      : record.status === "completed" || record.status === "cancelled"
         ? summarizeText(resolveMissionDispatchCompletionDetail(record), 90)
         : record.status === "stalled"
           ? "Recovered the stalled runtime from the saved transcript."
@@ -1974,7 +2193,21 @@ function buildMissionDispatchTranscriptRuntime(record: MissionDispatchRecord, se
     metadata: {
       mission: record.mission,
       dispatchId: record.id,
-      recoveredFromObservation: true
+      routedMission: record.routedMission,
+      outputDir: record.outputDir,
+      outputDirRelative: record.outputDirRelative,
+      notesDirRelative: record.notesDirRelative,
+      error: record.error,
+      sessionId: resolvedSessionId,
+      pendingCreation: runtimeStatus === "queued" || runtimeStatus === "running",
+      bootstrapStage: resolveMissionDispatchBootstrapStage(record, runtimeStatus),
+      dispatchStatus: record.status,
+      dispatchSubmittedAt: record.submittedAt,
+      dispatchRunnerStartedAt: record.runner.startedAt,
+      dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
+      dispatchObservedAt: record.observation.observedAt,
+      recoveredFromObservation: true,
+      ...(integrityWarning ? { warnings: [integrityWarning], warningSummary: integrityWarning } : {})
     }
   };
 }
@@ -1987,13 +2220,14 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
   const sessionId = extractMissionDispatchSessionId(record);
   const modelId = extractMissionDispatchModelId(record);
   const tokenUsage = extractMissionDispatchTokenUsage(record);
+  const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
 
   return {
     id: `runtime:dispatch:${record.id}`,
     source: "turn",
     key: `dispatch:${record.id}`,
     title: summarizeText(record.mission, 38) || "Queued mission",
-    subtitle,
+    subtitle: integrityWarning ? summarizeText(integrityWarning, 90) : subtitle,
     status: runtimeStatus,
     updatedAt: Number.isNaN(updatedAt) ? Date.parse(record.submittedAt) || null : updatedAt,
     ageMs: Number.isNaN(updatedAt) ? null : Math.max(nowMs - updatedAt, 0),
@@ -2018,7 +2252,8 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
       dispatchSubmittedAt: record.submittedAt,
       dispatchRunnerStartedAt: record.runner.startedAt,
       dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
-      dispatchObservedAt: record.observation.observedAt
+      dispatchObservedAt: record.observation.observedAt,
+      ...(integrityWarning ? { warnings: [integrityWarning], warningSummary: integrityWarning } : {})
     }
   };
 }
@@ -2029,6 +2264,10 @@ function resolveMissionDispatchBootstrapStage(
 ) {
   if (status === "completed") {
     return "completed";
+  }
+
+  if (status === "cancelled") {
+    return "cancelled";
   }
 
   if (status === "stalled") {
@@ -2055,6 +2294,10 @@ function resolveMissionDispatchRuntimeStatus(record: MissionDispatchRecord, nowM
     return "completed";
   }
 
+  if (record.status === "cancelled") {
+    return "cancelled";
+  }
+
   if (record.status === "stalled") {
     return "stalled";
   }
@@ -2075,6 +2318,10 @@ function resolveMissionDispatchSubtitle(
   status: RuntimeRecord["status"]
 ) {
   if (status === "completed") {
+    return summarizeText(resolveMissionDispatchCompletionDetail(record), 90);
+  }
+
+  if (status === "cancelled") {
     return summarizeText(resolveMissionDispatchCompletionDetail(record), 90);
   }
 
@@ -2108,7 +2355,7 @@ function resolveMissionDispatchSubtitle(
 }
 
 function extractMissionDispatchAgentMeta(record: MissionDispatchRecord) {
-  const meta = record.result?.result?.meta ?? record.result?.meta;
+  const meta = record.result?.result?.meta;
 
   if (!meta || typeof meta !== "object") {
     return null;
@@ -2147,6 +2394,7 @@ function extractMissionDispatchNumber(record: Record<string, unknown> | null, ke
 
 function extractMissionDispatchSessionId(record: MissionDispatchRecord) {
   return (
+    (record.sessionId?.trim() || null) ??
     extractMissionDispatchString(extractMissionDispatchAgentMeta(record), "sessionId") ??
     extractSessionIdFromRuntimeId(record.observation.runtimeId)
   );
@@ -2196,14 +2444,64 @@ function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
   }
 
   const normalized = summary.toLowerCase();
-  return normalized === "completed" || normalized === "ok" || normalized === "success" ? null : summary;
+  return normalized === "completed" ||
+    normalized === "ok" ||
+    normalized === "success" ||
+    isPlaceholderMissionResponseText(summary)
+    ? null
+    : summary;
 }
 
 function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
-  return record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
+  const text =
+    record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
+  return isPlaceholderMissionResponseText(text) ? null : text;
+}
+
+function isPlaceholderMissionReply(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === "ready" ||
+    normalized === "[[reply_to_current]] ready" ||
+    normalized === "mission accepted" ||
+    normalized === "mission queued"
+  );
+}
+
+function resolveMissionDispatchIntegrityWarning(record: MissionDispatchRecord) {
+  const resultText = resolveMissionDispatchResultText(record);
+
+  if (record.status !== "completed" || !isPlaceholderMissionReply(resultText)) {
+    return null;
+  }
+
+  if (!record.observation.observedAt) {
+    return "Dispatch finished, but the only saved result was READY and no mission transcript was linked.";
+  }
+
+  return "Dispatch finished, but the saved reply still looks like a placeholder READY response.";
 }
 
 function resolveMissionDispatchCompletionDetail(record: MissionDispatchRecord) {
+  const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
+
+  if (integrityWarning) {
+    return integrityWarning;
+  }
+
+  if (record.status === "cancelled") {
+    return summarizeText(record.error || "Mission aborted by operator.", 90);
+  }
+
   const completedSummary = resolveMissionDispatchSummary(record) || resolveMissionDispatchResultText(record);
 
   if (completedSummary) {
@@ -2249,7 +2547,9 @@ function createMissionDispatchResultFromRuntimeOutput(
 }
 
 function normalizeMissionDispatchStatus(value: unknown): MissionDispatchStatus {
-  return value === "running" || value === "completed" || value === "stalled" ? value : "queued";
+  return value === "running" || value === "completed" || value === "stalled" || value === "cancelled"
+    ? value
+    : "queued";
 }
 
 function normalizeMissionThinking(value: unknown): NonNullable<MissionSubmission["thinking"]> {
@@ -2366,6 +2666,14 @@ export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
   const dispatchRecord = task.dispatchId ? await readMissionDispatchRecordById(task.dispatchId) : null;
   const bootstrapFeed = buildMissionDispatchFeed(task, dispatchRecord, snapshot);
   const runtimeFeed = buildTaskFeed(task, runs, outputByRuntimeId, snapshot);
+  const integrity = await buildTaskIntegrityRecord({
+    task,
+    runs,
+    outputs,
+    createdFiles,
+    dispatchRecord,
+    snapshot
+  });
 
   return {
     task,
@@ -2373,8 +2681,325 @@ export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
     outputs,
     liveFeed: mergeTaskFeedEvents(bootstrapFeed, runtimeFeed),
     createdFiles,
-    warnings
+    warnings,
+    integrity
   };
+}
+
+async function buildTaskIntegrityRecord(input: {
+  task: TaskRecord;
+  runs: RuntimeRecord[];
+  outputs: RuntimeOutputRecord[];
+  createdFiles: RuntimeCreatedFile[];
+  dispatchRecord: MissionDispatchRecord | null;
+  snapshot: MissionControlSnapshot;
+}): Promise<TaskIntegrityRecord> {
+  const { task, dispatchRecord, createdFiles, snapshot } = input;
+  const outputDirInspection = await inspectMissionDispatchOutputDir(dispatchRecord?.outputDir ?? null);
+  const transcriptTurns = dispatchRecord
+    ? await readMissionDispatchTranscriptTurns(dispatchRecord, snapshot)
+    : ([] as TranscriptTurn[]);
+  const missionText = task.mission || dispatchRecord?.mission || null;
+  const matchingTranscriptTurns =
+    missionText && transcriptTurns.length > 0
+      ? transcriptTurns.filter((turn) => matchesMissionText(turn.prompt, missionText))
+      : transcriptTurns;
+  const latestMatchingTurn =
+    [...matchingTranscriptTurns].sort(
+      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+    )[0] ?? null;
+  const runtimeFinalText = latestMatchingTurn?.finalText?.trim() || null;
+  const dispatchResultText = dispatchRecord ? resolveMissionDispatchResultText(dispatchRecord) : null;
+  const finalResponseText = runtimeFinalText || dispatchResultText || null;
+  const finalResponseSource = runtimeFinalText ? "runtime" : dispatchResultText ? "dispatch" : "none";
+  const sessionMismatch = Boolean(dispatchRecord && transcriptTurns.length > 0 && matchingTranscriptTurns.length === 0);
+  const toolNames = collectMissionDispatchToolNames(matchingTranscriptTurns);
+  const emails = extractEmailsFromValues([
+    finalResponseText,
+    dispatchResultText,
+    ...matchingTranscriptTurns.flatMap((turn) => turn.items.map((item) => item.text))
+  ]);
+  const issues: TaskIntegrityRecord["issues"] = [];
+  const placeholderResponse = isPlaceholderMissionResponseText(finalResponseText);
+  const expectsFileArtifact = missionRequestsFileArtifact(missionText);
+  const expectsEmailAddress = missionRequestsEmailAddress(missionText);
+  const expectsExternalLookup = missionNeedsExternalLookup(missionText);
+
+  if (dispatchRecord?.outputDir && !outputDirInspection.exists) {
+    issues.push({
+      id: "missing-output-dir",
+      severity: "warning",
+      title: "Output folder is missing",
+      detail: `The dispatch points at ${dispatchRecord.outputDirRelative || dispatchRecord.outputDir}, but that folder is not accessible now.`
+    });
+  }
+
+  if (
+    task.status === "completed" &&
+    dispatchRecord?.outputDir &&
+    outputDirInspection.exists &&
+    outputDirInspection.fileCount === 0 &&
+    createdFiles.length === 0
+  ) {
+    issues.push({
+      id: "empty-output-dir",
+      severity: expectsFileArtifact ? "error" : "warning",
+      title: "Deliverables folder is empty",
+      detail: expectsFileArtifact
+        ? "The task asked for a file deliverable, but the assigned deliverables folder does not contain any files."
+        : "The task is marked completed, but the assigned deliverables folder does not contain any files."
+    });
+  }
+
+  if (task.status === "completed" && transcriptTurns.length === 0) {
+    issues.push({
+      id: "missing-transcript",
+      severity: "warning",
+      title: "No runtime transcript was captured",
+      detail: "Mission Control could not verify what the agent actually did because no transcript was recovered for this dispatch."
+    });
+  }
+
+  if (task.status === "cancelled") {
+    issues.push({
+      id: "task-cancelled",
+      severity: "warning",
+      title: "Task was cancelled by the operator",
+      detail:
+        dispatchRecord?.error ||
+        "The mission dispatch was stopped before completion, so the captured evidence is intentionally incomplete."
+    });
+  }
+
+  if (sessionMismatch && dispatchRecord?.agentId) {
+    issues.push({
+      id: "session-mismatch",
+      severity: "error",
+      title: "Recovered session does not match the mission",
+      detail: "The linked transcript session exists, but none of its user turns match this task mission. The dispatch likely reused or attached the wrong session."
+    });
+  }
+
+  if (task.status === "completed" && !finalResponseText) {
+    issues.push({
+      id: "missing-final-response",
+      severity: "warning",
+      title: "No final answer was captured",
+      detail: "The task completed without a final assistant response in either the runtime transcript or the dispatch payload."
+    });
+  } else if (task.status === "stalled" && finalResponseText) {
+    issues.push({
+      id: "partial-final-response",
+      severity: "warning",
+      title: "Final response came from an incomplete runtime",
+      detail:
+        "The assistant produced output, but the runtime stalled before the task completed. Treat this as the last captured response, not a verified completion."
+    });
+  } else if (task.status === "completed" && placeholderResponse && finalResponseText) {
+    issues.push({
+      id: "placeholder-final-response",
+      severity:
+        outputDirInspection.fileCount === 0 && createdFiles.length === 0 && matchingTranscriptTurns.length === 0
+          ? "error"
+          : "warning",
+      title: "Completion response looks like a placeholder",
+      detail: `The captured final response was "${finalResponseText}", which is not enough evidence that the requested work actually finished.`
+    });
+  }
+
+  if (task.status === "completed" && expectsExternalLookup && matchingTranscriptTurns.length > 0 && toolNames.length === 0) {
+    issues.push({
+      id: "missing-tool-evidence",
+      severity: "warning",
+      title: "No tool usage was recovered",
+      detail: "This mission looks like it needed external lookup or browsing, but the matching transcript turn does not show any recovered tool calls."
+    });
+  }
+
+  if (task.status === "completed" && expectsEmailAddress && emails.length === 0) {
+    issues.push({
+      id: "missing-email",
+      severity: "warning",
+      title: "Requested email address was not captured",
+      detail: "The task appears to ask for an email address, but none was detected in the final response or the matching transcript."
+    });
+  }
+
+  return {
+    status: issues.some((issue) => issue.severity === "error")
+      ? "error"
+      : issues.length > 0
+        ? "warning"
+        : "verified",
+    outputDir: dispatchRecord?.outputDir ?? null,
+    outputDirRelative: dispatchRecord?.outputDirRelative ?? null,
+    outputDirExists: outputDirInspection.exists,
+    outputFileCount: outputDirInspection.fileCount,
+    transcriptTurnCount: transcriptTurns.length,
+    matchingTranscriptTurnCount: matchingTranscriptTurns.length,
+    finalResponseText,
+    finalResponseSource,
+    dispatchSessionId: dispatchRecord ? extractMissionDispatchSessionId(dispatchRecord) : null,
+    sessionMismatch,
+    toolNames,
+    emails,
+    issues
+  };
+}
+
+async function inspectMissionDispatchOutputDir(outputDir: string | null) {
+  if (!outputDir) {
+    return {
+      exists: false,
+      fileCount: 0
+    };
+  }
+
+  try {
+    const outputStat = await stat(outputDir);
+
+    if (!outputStat.isDirectory()) {
+      return {
+        exists: true,
+        fileCount: 1
+      };
+    }
+
+    return {
+      exists: true,
+      fileCount: await countFilesInDirectory(outputDir)
+    };
+  } catch {
+    return {
+      exists: false,
+      fileCount: 0
+    };
+  }
+}
+
+async function countFilesInDirectory(directoryPath: string): Promise<number> {
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+  let count = 0;
+
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry.name);
+
+    if (entry.isDirectory()) {
+      count += await countFilesInDirectory(entryPath);
+      continue;
+    }
+
+    if (entry.isFile()) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+async function readMissionDispatchTranscriptTurns(
+  record: MissionDispatchRecord,
+  snapshot: MissionControlSnapshot
+) {
+  const sessionId = extractMissionDispatchSessionId(record);
+
+  if (!sessionId) {
+    return [] as TranscriptTurn[];
+  }
+
+  const agent = snapshot.agents.find((entry) => entry.id === record.agentId);
+  const transcriptPath = await resolveRuntimeTranscriptPath(
+    record.agentId,
+    sessionId,
+    record.workspacePath ?? agent?.workspacePath
+  );
+
+  if (!transcriptPath) {
+    return [] as TranscriptTurn[];
+  }
+
+  try {
+    const raw = await readFile(transcriptPath, "utf8");
+    return extractTranscriptTurns(
+      raw,
+      buildMissionDispatchTranscriptRuntime(record, sessionId),
+      record.workspacePath ?? agent?.workspacePath
+    );
+  } catch {
+    return [] as TranscriptTurn[];
+  }
+}
+
+function collectMissionDispatchToolNames(turns: TranscriptTurn[]) {
+  return uniqueStrings(
+    turns.flatMap((turn) =>
+      turn.items.flatMap((item) => (item.role === "toolResult" && item.toolName ? [item.toolName] : []))
+    )
+  );
+}
+
+function extractEmailsFromValues(values: Array<string | null | undefined>) {
+  const emails = new Set<string>();
+
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+
+    for (const match of value.match(EMAIL_PATTERN) ?? []) {
+      emails.add(match.toLowerCase());
+    }
+  }
+
+  return [...emails];
+}
+
+function isPlaceholderMissionResponseText(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  return (
+    normalized === "ready" ||
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "ok" ||
+    normalized === "success"
+  );
+}
+
+function missionRequestsFileArtifact(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return (
+    /\.(txt|md|json|csv|html|pdf|docx?)\b/i.test(value) ||
+    /\b(file|files|artifact|artifacts|report|document|save|export|attachment)\b/i.test(value) ||
+    /\b(dosya|dosyasi|kaydet|kaydi|cikti)\b/i.test(value)
+  );
+}
+
+function missionRequestsEmailAddress(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return /\b(email|e-mail|mail|mail address|mail adres|eposta|e-posta)\b/i.test(value);
+}
+
+function missionNeedsExternalLookup(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return (
+    /https?:\/\//i.test(value) ||
+    /\b[a-z0-9-]+\.(com|net|org|io|ai|co|tr|app|dev|me|info|biz|edu|gov)\b/i.test(value) ||
+    /\b(site|website|web|browser|browse|fetch|sitesine|siteye|siteyi)\b/i.test(value)
+  );
 }
 
 async function getRuntimeOutputForResolvedRuntime(
@@ -4899,83 +5524,118 @@ function buildTaskFeed(
 
     if (output?.items.length) {
       for (const item of output.items) {
-        events.push({
-          id: `${runtime.id}:${item.id}`,
-          kind:
-            item.role === "assistant"
-              ? "assistant"
-              : item.role === "toolResult"
-                ? "tool"
-                : "user",
-          timestamp: item.timestamp,
-          title:
-            item.role === "assistant"
-              ? agentName || "Agent update"
-              : item.role === "toolResult"
-                ? item.toolName
-                  ? `Tool · ${item.toolName}`
-                  : "Tool update"
-                : "Mission",
-          detail: summarizeText(item.text.trim() || output.errorMessage || runtime.subtitle, 220),
-          runtimeId: runtime.id,
-          agentId: runtime.agentId,
-          toolName: item.toolName,
-          isError: item.isError
-        });
+        events.push(
+          enrichTaskFeedEvent(
+            {
+              id: `${runtime.id}:${item.id}`,
+              kind:
+                item.role === "assistant"
+                  ? "assistant"
+                  : item.role === "toolResult"
+                    ? "tool"
+                    : "user",
+              timestamp: item.timestamp,
+              title:
+                item.role === "assistant"
+                  ? agentName || "Agent update"
+                  : item.role === "toolResult"
+                    ? item.toolName
+                      ? `Tool · ${item.toolName}`
+                      : "Tool update"
+                    : "Mission",
+              detail: summarizeText(item.text.trim() || output.errorMessage || runtime.subtitle, 220),
+              runtimeId: runtime.id,
+              agentId: runtime.agentId,
+              toolName: item.toolName,
+              isError: item.isError
+            },
+            {
+              urlSources: [item.text, output?.finalText, output?.errorMessage, runtime.subtitle]
+            }
+          )
+        );
       }
     } else {
-      events.push({
-        id: `${runtime.id}:status`,
-        kind: "status",
-        timestamp: runtimeTimestamp,
-        title: agentName ? `${agentName} · ${runtime.status}` : `Run · ${runtime.status}`,
-        detail: summarizeText(output?.errorMessage || runtime.subtitle, 220),
-        runtimeId: runtime.id,
-        agentId: runtime.agentId,
-        isError: runtime.status === "stalled"
-      });
+      events.push(
+        enrichTaskFeedEvent(
+          {
+            id: `${runtime.id}:status`,
+            kind: "status",
+            timestamp: runtimeTimestamp,
+            title: agentName ? `${agentName} · ${runtime.status}` : `Run · ${runtime.status}`,
+            detail: summarizeText(output?.errorMessage || runtime.subtitle, 220),
+            runtimeId: runtime.id,
+            agentId: runtime.agentId,
+            isError: runtime.status === "stalled"
+          },
+          {
+            urlSources: [output?.errorMessage, runtime.subtitle]
+          }
+        )
+      );
     }
 
     const warningValues = uniqueStrings(
       (output?.warnings ?? []).concat(extractWarningsFromRuntimeMetadata(runtime))
     );
     for (const warning of warningValues) {
-      events.push({
-        id: `${runtime.id}:warning:${hashTaskKey(warning)}`,
-        kind: "warning",
-        timestamp: runtimeTimestamp,
-        title: "Fallback",
-        detail: summarizeText(warning, 220),
-        runtimeId: runtime.id,
-        agentId: runtime.agentId
-      });
+      events.push(
+        enrichTaskFeedEvent(
+          {
+            id: `${runtime.id}:warning:${hashTaskKey(warning)}`,
+            kind: "warning",
+            timestamp: runtimeTimestamp,
+            title: "Fallback",
+            detail: summarizeText(warning, 220),
+            runtimeId: runtime.id,
+            agentId: runtime.agentId
+          },
+          {
+            urlSources: [warning]
+          }
+        )
+      );
     }
 
     const createdFiles = dedupeCreatedFiles(
       (output?.createdFiles ?? []).concat(extractCreatedFilesFromRuntimeMetadata(runtime))
     );
     for (const file of createdFiles) {
-      events.push({
-        id: `${runtime.id}:artifact:${hashTaskKey(file.path)}`,
-        kind: "artifact",
-        timestamp: runtimeTimestamp,
-        title: "Created file",
-        detail: file.displayPath,
-        runtimeId: runtime.id,
-        agentId: runtime.agentId
-      });
+      events.push(
+        enrichTaskFeedEvent(
+          {
+            id: `${runtime.id}:artifact:${hashTaskKey(file.path)}`,
+            kind: "artifact",
+            timestamp: runtimeTimestamp,
+            title: "Created file",
+            detail: file.displayPath,
+            runtimeId: runtime.id,
+            agentId: runtime.agentId
+          },
+          {
+            file
+          }
+        )
+      );
     }
   }
 
   if (events.length === 0 && task.mission && !task.dispatchId) {
-    events.push({
-      id: `${task.id}:mission`,
-      kind: "user",
-      timestamp: timestampFromUnix(task.updatedAt),
-      title: "Mission",
-      detail: summarizeText(task.mission, 220),
-      agentId: task.primaryAgentId
-    });
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${task.id}:mission`,
+          kind: "user",
+          timestamp: timestampFromUnix(task.updatedAt),
+          title: "Mission",
+          detail: summarizeText(task.mission, 220),
+          agentId: task.primaryAgentId
+        },
+        {
+          urlSources: [task.mission]
+        }
+      )
+    );
   }
 
   return events
@@ -4994,74 +5654,179 @@ function buildMissionDispatchFeed(
 
   const agentName = snapshot.agents.find((agent) => agent.id === task.primaryAgentId)?.name ?? "OpenClaw";
   const events: TaskFeedEvent[] = [
-    {
-      id: `${record.id}:accepted`,
-      kind: "user",
-      timestamp: record.submittedAt,
-      title: "Mission accepted",
-      detail: summarizeText(task.mission || record.mission || "Mission queued for dispatch.", 220),
-      agentId: task.primaryAgentId
-    }
+    enrichTaskFeedEvent(
+      {
+        id: `${record.id}:accepted`,
+        kind: "user",
+        timestamp: record.submittedAt,
+        title: "Mission accepted",
+        detail: summarizeText(task.mission || record.mission || "Mission queued for dispatch.", 220),
+        agentId: task.primaryAgentId
+      },
+      {
+        urlSources: [task.mission, record.mission, record.routedMission]
+      }
+    )
   ];
 
   if (record.runner.startedAt || record.runner.pid) {
-    events.push({
-      id: `${record.id}:runner-started`,
-      kind: "status",
-      timestamp: record.runner.startedAt ?? record.updatedAt,
-      title: "Dispatch runner started",
-      detail: record.outputDirRelative
-        ? `Preparing the first OpenClaw runtime in ${record.outputDirRelative}.`
-        : "Preparing the first OpenClaw runtime."
-    });
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:runner-started`,
+          kind: "status",
+          timestamp: record.runner.startedAt ?? record.updatedAt,
+          title: "Dispatch runner started",
+          detail: record.outputDirRelative
+            ? `Preparing the first OpenClaw runtime in ${record.outputDirRelative}.`
+            : "Preparing the first OpenClaw runtime."
+        },
+        {
+          file:
+            record.outputDir && record.outputDirRelative
+              ? {
+                  path: record.outputDir,
+                  displayPath: record.outputDirRelative
+                }
+              : null
+        }
+      )
+    );
   }
 
   if (record.runner.lastHeartbeatAt) {
-    events.push({
-      id: `${record.id}:heartbeat`,
-      kind: "status",
-      timestamp: record.runner.lastHeartbeatAt,
-      title: "Heartbeat received",
-      detail: `${agentName} is online. Waiting for the first runtime session.`
-    });
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:heartbeat`,
+          kind: "status",
+          timestamp: record.runner.lastHeartbeatAt,
+          title: "Heartbeat received",
+          detail: `${agentName} is online. Waiting for the first runtime session.`
+        },
+        {
+          urlSources: [agentName, record.outputDirRelative]
+        }
+      )
+    );
   }
 
   if (record.observation.observedAt) {
-    events.push({
-      id: `${record.id}:runtime-observed`,
-      kind: "status",
-      timestamp: record.observation.observedAt,
-      title: "Runtime observed",
-      detail: "The task is now live. Runtime updates will continue below."
-    });
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:runtime-observed`,
+          kind: "status",
+          timestamp: record.observation.observedAt,
+          title: "Runtime observed",
+          detail: "The task is now live. Runtime updates will continue below."
+        },
+        {
+          urlSources: [record.outputDirRelative]
+        }
+      )
+    );
   }
 
   if (record.status === "completed") {
     const completionSummary = resolveMissionDispatchSummary(record) || resolveMissionDispatchResultText(record);
-    events.push({
-      id: `${record.id}:completed`,
-      kind: "status",
-      timestamp: record.runner.finishedAt ?? record.updatedAt,
-      title: completionSummary ? "Mission finished" : "Dispatch runner finished",
-      detail: summarizeText(completionSummary || resolveMissionDispatchCompletionDetail(record), 220)
-    });
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:completed`,
+          kind: "status",
+          timestamp: record.runner.finishedAt ?? record.updatedAt,
+          title: completionSummary ? "Mission finished" : "Dispatch runner finished",
+          detail: summarizeText(completionSummary || resolveMissionDispatchCompletionDetail(record), 220)
+        },
+        {
+          urlSources: [completionSummary, resolveMissionDispatchCompletionDetail(record), record.outputDirRelative],
+          file:
+            record.outputDir && record.outputDirRelative
+              ? {
+                  path: record.outputDir,
+                  displayPath: record.outputDirRelative
+                }
+              : null
+        }
+      )
+    );
   }
 
-  if (record.status === "stalled" || record.error) {
-    events.push({
-      id: `${record.id}:stalled`,
-      kind: "warning",
-      timestamp: record.updatedAt,
-      title: record.error ? "Dispatch error" : "Dispatch stalled",
-      detail: summarizeText(
-        record.error ||
-          (record.runner.lastHeartbeatAt
-            ? "OpenClaw stopped reporting progress while waiting for the first runtime."
-            : "OpenClaw did not produce the first heartbeat in time."),
-        220
-      ),
-      isError: true
-    });
+  if (record.status === "cancelled") {
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:cancelled`,
+          kind: "warning",
+          timestamp: record.runner.finishedAt ?? record.updatedAt,
+          title: "Mission cancelled",
+          detail: summarizeText(resolveMissionDispatchCompletionDetail(record), 220),
+          isError: false
+        },
+        {
+          urlSources: [record.error, record.outputDirRelative],
+          file:
+            record.outputDir && record.outputDirRelative
+              ? {
+                  path: record.outputDir,
+                  displayPath: record.outputDirRelative
+                }
+              : null
+        }
+      )
+    );
+  }
+
+  const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
+
+  if (integrityWarning) {
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:integrity-warning`,
+          kind: "warning",
+          timestamp: record.runner.finishedAt ?? record.updatedAt,
+          title: "Result needs review",
+          detail: summarizeText(integrityWarning, 220),
+          isError: true
+        },
+        {
+          urlSources: [record.outputDirRelative],
+          file:
+            record.outputDir && record.outputDirRelative
+              ? {
+                  path: record.outputDir,
+                  displayPath: record.outputDirRelative
+                }
+              : null
+        }
+      )
+    );
+  }
+
+  if (record.status === "stalled") {
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: `${record.id}:stalled`,
+          kind: "warning",
+          timestamp: record.updatedAt,
+          title: record.error ? "Dispatch error" : "Dispatch stalled",
+          detail: summarizeText(
+            record.error ||
+              (record.runner.lastHeartbeatAt
+                ? "OpenClaw stopped reporting progress while waiting for the first runtime."
+                : "OpenClaw did not produce the first heartbeat in time."),
+            220
+          ),
+          isError: true
+        },
+        {
+          urlSources: [record.error, record.outputDirRelative]
+        }
+      )
+    );
   }
 
   return events;
@@ -5077,6 +5842,48 @@ function mergeTaskFeedEvents(...feeds: TaskFeedEvent[][]) {
   return [...deduped.values()]
     .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
     .slice(-48);
+}
+
+function enrichTaskFeedEvent(
+  event: TaskFeedEvent,
+  options?: {
+    urlSources?: Array<string | null | undefined>;
+    file?: RuntimeCreatedFile | null;
+  }
+): TaskFeedEvent {
+  const url = extractFirstUrlFromSources(options?.urlSources ?? []);
+
+  return {
+    ...event,
+    ...(url ? { url } : {}),
+    ...(options?.file ? { filePath: options.file.path, displayPath: options.file.displayPath } : {})
+  };
+}
+
+function extractFirstUrlFromSources(sources: Array<string | null | undefined>) {
+  for (const source of sources) {
+    if (typeof source !== "string") {
+      continue;
+    }
+
+    const match = source.match(/https?:\/\/[^\s<>"'`]+/i);
+
+    if (!match) {
+      continue;
+    }
+
+    const normalized = stripTrailingUrlPunctuation(match[0]);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+function stripTrailingUrlPunctuation(value: string) {
+  return value.replace(/[)\].,;:!?]+$/g, "");
 }
 
 function timestampFromRuntime(runtime: RuntimeRecord, preferred?: string | null) {
@@ -5310,7 +6117,15 @@ function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePa
       }
 
       if (role === "assistant" && entry.message.usage) {
-        const usage = entry.message.usage as any;
+        const usage = entry.message.usage as {
+          input?: number;
+          output?: number;
+          totalTokens?: number;
+          cacheRead?: number;
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          total_tokens?: number;
+        };
         currentTurn.tokenUsage = {
           input: usage.input ?? usage.prompt_tokens ?? 0,
           output: usage.output ?? usage.completion_tokens ?? 0,
@@ -6212,7 +7027,12 @@ function mergeRuntimeHistory(currentRuntimes: RuntimeRecord[]) {
 
     const historicalRuntime = {
       ...runtime,
-      status: runtime.status === "stalled" ? "stalled" : "completed",
+      status:
+        runtime.status === "stalled"
+          ? "stalled"
+          : runtime.status === "cancelled"
+            ? "cancelled"
+            : "completed",
       metadata: {
         ...runtime.metadata,
         historical: true
@@ -6322,6 +7142,10 @@ function resolveAgentAction(params: {
 
       if (params.runtime.status === "completed") {
         return `Recent task ${params.runtime.taskId.slice(0, 8)} completed`;
+      }
+
+      if (params.runtime.status === "cancelled") {
+        return `Recent task ${params.runtime.taskId.slice(0, 8)} cancelled`;
       }
 
       if (params.runtime.status === "stalled") {

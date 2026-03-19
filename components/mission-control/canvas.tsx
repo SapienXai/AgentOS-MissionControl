@@ -62,6 +62,8 @@ export function MissionCanvas({
   onCopyTaskPrompt,
   onHideTask,
   onToggleTaskLock,
+  onAbortTask,
+  onInspectTask,
   onSelectNode,
   className
 }: {
@@ -78,6 +80,8 @@ export function MissionCanvas({
   onCopyTaskPrompt: (task: TaskRecord) => void;
   onHideTask: (task: TaskRecord) => void;
   onToggleTaskLock: (task: TaskRecord) => void;
+  onAbortTask: (task: TaskRecord) => void;
+  onInspectTask: (task: TaskRecord, target: "overview" | "output" | "files") => void;
   onSelectNode: (nodeId: string) => void;
   className?: string;
 }) {
@@ -104,6 +108,8 @@ export function MissionCanvas({
     onCopyTaskPrompt,
     onHideTask,
     onToggleTaskLock,
+    onAbortTask,
+    onInspectTask,
     emptyPersistedNodePositions
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initialGraph.nodes);
@@ -167,6 +173,8 @@ export function MissionCanvas({
       onCopyTaskPrompt,
       onHideTask,
       onToggleTaskLock,
+      onAbortTask,
+      onInspectTask,
       persistedNodePositionsRef.current
     );
     setNodes((previousNodes) => {
@@ -191,6 +199,8 @@ export function MissionCanvas({
     onCopyTaskPrompt,
     onHideTask,
     onToggleTaskLock,
+    onAbortTask,
+    onInspectTask,
     setEdges,
     setNodes
   ]);
@@ -369,6 +379,8 @@ function buildCanvasGraph(
   onCopyTaskPrompt: (task: TaskRecord) => void,
   onHideTask: (task: TaskRecord) => void,
   onToggleTaskLock: (task: TaskRecord) => void,
+  onAbortTask: (task: TaskRecord) => void,
+  onInspectTask: (task: TaskRecord, target: "overview" | "output" | "files") => void,
   persistedNodePositions: PersistedNodePositionMap
 ) {
   const visibleWorkspaces = activeWorkspaceId
@@ -453,7 +465,9 @@ function buildCanvasGraph(
             onReply: onReplyTask,
             onCopyPrompt: onCopyTaskPrompt,
             onHide: onHideTask,
-            onToggleLock: onToggleTaskLock
+            onToggleLock: onToggleTaskLock,
+            onAbortTask,
+            onInspect: onInspectTask
           }
         });
       });

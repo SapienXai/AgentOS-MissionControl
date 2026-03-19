@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { LucideIcon } from "lucide-react";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Cpu,
@@ -17,6 +18,8 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 
+import { InteractiveContent } from "@/components/mission-control/interactive-content";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   formatAgentFileAccessLabel,
@@ -41,7 +44,8 @@ import type {
   RuntimeOutputRecord,
   TaskDetailRecord,
   TaskFeedEvent,
-  TaskDetailStreamEvent
+  TaskDetailStreamEvent,
+  TaskRecord
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -49,9 +53,14 @@ type InspectorPanelProps = {
   snapshot: MissionControlSnapshot;
   selectedNodeId: string | null;
   lastMission: MissionResponse | null;
+  onAbortTask?: (task: TaskRecord) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  activeTab: "overview" | "output" | "files" | "raw";
+  onActiveTabChange: (tab: "overview" | "output" | "files" | "raw") => void;
 };
+
+type InspectorPanelTab = InspectorPanelProps["activeTab"];
 
 export function InspectorPanel(props: InspectorPanelProps) {
   return <InspectorPanelContent key={props.selectedNodeId ?? "overview"} {...props} />;
@@ -61,8 +70,11 @@ function InspectorPanelContent({
   snapshot,
   selectedNodeId,
   lastMission,
+  onAbortTask,
   collapsed,
-  onToggleCollapsed
+  onToggleCollapsed,
+  activeTab,
+  onActiveTabChange
 }: InspectorPanelProps) {
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === selectedNodeId);
   const selectedAgent = snapshot.agents.find((agent) => agent.id === selectedNodeId);
@@ -74,7 +86,6 @@ function InspectorPanelContent({
     selectedWorkspace || selectedAgent || selectedTask || selectedRuntime || selectedModel || null;
   const selectedRuntimeId = selectedRuntime?.id ?? null;
   const selectedTaskId = selectedTask?.id ?? null;
-  const [activeTab, setActiveTab] = useState("overview");
   const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
   const [runtimeOutputError, setRuntimeOutputError] = useState<{
     runtimeId: string;
@@ -103,7 +114,13 @@ function InspectorPanelContent({
   const runtimeOutputLoading =
     Boolean(selectedRuntimeId) && !resolvedRuntimeOutput && !resolvedRuntimeOutputError;
   const showOutputTab = Boolean(selectedRuntime || selectedTask);
-  const visibleActiveTab = activeTab === "output" && !showOutputTab ? "overview" : activeTab;
+  const showFilesTab = Boolean(selectedRuntime || selectedTask);
+  const visibleActiveTab =
+    activeTab === "output" && !showOutputTab
+      ? "overview"
+      : activeTab === "files" && !showFilesTab
+        ? "overview"
+        : activeTab;
   const outputTabLabel = selectedTask ? "Feed" : "Output";
   const selectedLabel =
     selectedWorkspace?.name ||
@@ -128,9 +145,10 @@ function InspectorPanelContent({
       [
         { id: "overview", label: "Overview", icon: Eye, enabled: true },
         { id: "output", label: outputTabLabel, icon: TerminalSquare, enabled: showOutputTab },
+        { id: "files", label: "Files", icon: FolderGit2, enabled: showFilesTab },
         { id: "raw", label: "Raw", icon: FileJson, enabled: true }
-      ] satisfies Array<{ id: string; label: string; icon: LucideIcon; enabled: boolean }>,
-    [outputTabLabel, showOutputTab]
+      ] satisfies Array<{ id: InspectorPanelTab; label: string; icon: LucideIcon; enabled: boolean }>,
+    [outputTabLabel, showFilesTab, showOutputTab]
   );
 
   useEffect(() => {
@@ -268,7 +286,7 @@ function InspectorPanelContent({
                   return;
                 }
 
-                setActiveTab(item.id);
+                onActiveTabChange(item.id);
 
                 if (collapsed) {
                   onToggleCollapsed();
@@ -338,7 +356,7 @@ function InspectorPanelContent({
                       key={item.id}
                       label={item.label}
                       active={visibleActiveTab === item.id}
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => onActiveTabChange(item.id)}
                     />
                   ))}
               </div>
@@ -360,10 +378,12 @@ function InspectorPanelContent({
                       {selectedTask ? (
                         <TaskContent
                           snapshot={snapshot}
+                          task={selectedTask}
                           taskId={selectedTask.id}
                           taskDetail={effectiveTaskDetail}
                           taskDetailLoading={taskDetailLoading}
                           taskDetailError={resolvedTaskDetailError}
+                          onAbortTask={onAbortTask}
                         />
                       ) : null}
                       {selectedRuntime ? (
@@ -396,6 +416,18 @@ function InspectorPanelContent({
                       runtimeOutputLoading={runtimeOutputLoading}
                       runtimeOutputError={resolvedRuntimeOutputError}
                     />
+                  ) : null}
+
+                  {visibleActiveTab === "files" && selectedTask ? (
+                    <TaskFilesContent
+                      snapshot={snapshot}
+                      task={selectedTask}
+                      taskDetail={effectiveTaskDetail}
+                    />
+                  ) : null}
+
+                  {visibleActiveTab === "files" && selectedRuntime ? (
+                    <RuntimeFilesContent runtime={selectedRuntime} runtimeOutput={resolvedRuntimeOutput} />
                   ) : null}
 
                   {visibleActiveTab === "raw" ? (
@@ -884,18 +916,24 @@ function AgentContent({
 
 function TaskContent({
   snapshot,
+  task,
   taskId,
   taskDetail,
   taskDetailLoading,
-  taskDetailError
+  taskDetailError,
+  onAbortTask
 }: {
   snapshot: MissionControlSnapshot;
+  task: MissionControlSnapshot["tasks"][number];
   taskId: string;
   taskDetail: TaskDetailRecord | null;
   taskDetailLoading: boolean;
   taskDetailError: string | null;
+  onAbortTask?: (task: MissionControlSnapshot["tasks"][number]) => void;
 }) {
-  const task = snapshot.tasks.find((entry) => entry.id === taskId);
+  const selectedTask = snapshot.tasks.find((entry) => entry.id === taskId) ?? task;
+  const isAborted = isTaskAborted(selectedTask);
+  const canAbortTask = Boolean(onAbortTask) && isTaskAbortable(selectedTask);
   const workspace = snapshot.workspaces.find((entry) => entry.id === task?.workspaceId);
   const primaryAgent = snapshot.agents.find((entry) => entry.id === task?.primaryAgentId);
   const runs =
@@ -912,23 +950,47 @@ function TaskContent({
     return null;
   }
 
+  const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
+
   return (
     <>
-      <InfoCard icon={FolderGit2} title="Task overview" value={task.status}>
-        <p className="text-sm text-white">{task.mission || task.title}</p>
-        <p>{task.subtitle}</p>
+      <InfoCard icon={FolderGit2} title="Task overview" value={isAborted ? "aborted" : selectedTask.status}>
+        <p className="text-sm text-white">{selectedTask.mission || selectedTask.title}</p>
+        <p>{selectedTask.subtitle}</p>
         <InspectorMetricGrid
           items={[
-            { label: "Runs", value: String(task.runtimeCount) },
-            { label: "Feed", value: String(task.updateCount) },
-            { label: "Files", value: String(task.artifactCount) },
-            { label: "Live", value: String(task.liveRunCount) }
+            { label: "Runs", value: String(selectedTask.runtimeCount) },
+            { label: "Feed", value: String(selectedTask.updateCount) },
+            { label: "Files", value: String(selectedTask.artifactCount) },
+            { label: "Live", value: String(selectedTask.liveRunCount) }
           ]}
         />
+        {onAbortTask && (canAbortTask || isAborted) ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={isAborted ? "secondary" : "destructive"}
+              size="sm"
+              disabled={!canAbortTask}
+              className="gap-2"
+              onClick={() => {
+                if (!canAbortTask) {
+                  return;
+                }
+
+                onAbortTask(selectedTask);
+              }}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {isAborted ? "Aborted" : "Abort task"}
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {workspace ? <Badge variant="muted">{workspace.name}</Badge> : null}
           {primaryAgent ? <Badge variant="default">{primaryAgent.name}</Badge> : null}
-          {task.dispatchId ? <Badge variant="muted">dispatch {shortId(task.dispatchId, 8)}</Badge> : null}
+          {selectedTask.dispatchId ? <Badge variant="muted">dispatch {shortId(selectedTask.dispatchId, 8)}</Badge> : null}
+          {isAborted ? <Badge variant="danger">aborted</Badge> : null}
         </div>
         {taskDetailLoading && !taskDetail ? <p>Connecting live task feed…</p> : null}
         {taskDetailError ? (
@@ -937,6 +999,8 @@ function TaskContent({
           </p>
         ) : null}
       </InfoCard>
+
+      <TaskIntegrityCard task={selectedTask} integrity={integrity} />
 
       <InfoCard icon={TerminalSquare} title="Runs" value={String(runs.length)}>
         {runs.length === 0 ? <p>No OpenClaw runs have been grouped into this task yet.</p> : null}
@@ -974,6 +1038,137 @@ function TaskContent({
   );
 }
 
+function TaskIntegrityCard({
+  task,
+  integrity
+}: {
+  task: MissionControlSnapshot["tasks"][number];
+  integrity: TaskDetailRecord["integrity"];
+}) {
+  const isAborted = isTaskAborted(task);
+  const partialFinalResponseIssue = integrity.issues.find((issue) => issue.id === "partial-final-response");
+  const summary =
+    isAborted
+      ? "This task was aborted by an operator. Captured evidence may be incomplete."
+      : integrity.status === "verified"
+      ? "Mission Control found a matching transcript and the captured result looks internally consistent."
+      : integrity.sessionMismatch
+        ? "The linked transcript belongs to a different mission or stale session, so this completion cannot be trusted yet."
+        : integrity.issues.some((issue) => issue.id === "empty-output-dir")
+          ? "The task is marked completed, but the expected deliverables are missing from the output folder."
+      : integrity.status === "error"
+        ? "The captured evidence does not line up with the requested mission."
+        : "Mission Control recovered partial evidence, but this result still needs operator review.";
+
+  return (
+    <InfoCard
+      icon={Radar}
+      title="Result integrity"
+      value={isAborted ? "aborted" : task.status === "stalled" ? "stalled" : integrity.status}
+    >
+      <p>{summary}</p>
+      <InspectorMetricGrid
+        items={[
+          { label: "Output files", value: String(integrity.outputFileCount) },
+          { label: "Transcript turns", value: String(integrity.transcriptTurnCount) },
+          { label: "Matched turns", value: String(integrity.matchingTranscriptTurnCount) },
+          { label: "Tools", value: String(integrity.toolNames.length) },
+          { label: "Emails", value: String(integrity.emails.length) }
+        ]}
+      />
+
+      {integrity.outputDir || integrity.outputDirRelative ? (
+        <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Output folder</p>
+          <div className="mt-2">
+            <InteractiveContent
+              text={integrity.outputDirRelative || integrity.outputDir || "Output folder"}
+              className="text-[12.5px] leading-5 text-slate-100"
+              filePath={integrity.outputDir}
+              displayPath={integrity.outputDirRelative || integrity.outputDir}
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            {integrity.outputDirExists
+              ? `${integrity.outputFileCount} file${integrity.outputFileCount === 1 ? "" : "s"} detected in the folder.`
+              : "The output folder is not currently accessible."}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+          Final response {integrity.finalResponseSource !== "none" ? `(${integrity.finalResponseSource})` : ""}
+        </p>
+        {partialFinalResponseIssue ? (
+          <p className="mt-2 rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+            {partialFinalResponseIssue.detail}
+          </p>
+        ) : null}
+        <div className="mt-2">
+          {integrity.finalResponseText ? (
+            <InteractiveContent
+              text={integrity.finalResponseText}
+              className="text-[12.5px] leading-5 text-slate-100"
+            />
+          ) : (
+            <p className="text-[12.5px] leading-5 text-slate-400">No final response was captured.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Recovered tools</p>
+        {integrity.toolNames.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {integrity.toolNames.map((toolName) => (
+              <Badge key={toolName} variant="muted">
+                {toolName}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <p>No tool calls were recovered from a matching transcript turn.</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Detected emails</p>
+        {integrity.emails.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {integrity.emails.map((email) => (
+              <Badge key={email} variant="muted">
+                {email}
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <p>No email addresses were detected in the captured result.</p>
+        )}
+      </div>
+
+      {integrity.dispatchSessionId ? (
+        <p className="font-mono text-xs text-slate-400">
+          session {shortId(integrity.dispatchSessionId, 12)}
+          {integrity.sessionMismatch ? " · mismatch detected" : ""}
+        </p>
+      ) : null}
+
+      {integrity.issues.length > 0 ? (
+        <div className="rounded-[14px] border border-amber-400/16 bg-amber-400/[0.06] px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-amber-100/80">Review issues</p>
+          <div className="mt-2">
+            <InspectorBulletList
+              items={integrity.issues.map((issue) => `${issue.title}: ${issue.detail}`)}
+              emptyLabel="No integrity issues detected."
+            />
+          </div>
+        </div>
+      ) : null}
+    </InfoCard>
+  );
+}
+
 function TaskFeedContent({
   task,
   taskDetail,
@@ -1002,12 +1197,18 @@ function TaskFeedContent({
   }
 
   const liveFeed = taskDetail?.liveFeed ?? [];
+  const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
 
   return (
     <InfoCard icon={TerminalSquare} title="Live feed" value={String(liveFeed.length)}>
       {taskDetailError ? (
         <p className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
           {taskDetailError}
+        </p>
+      ) : null}
+      {integrity.issues.length > 0 ? (
+        <p className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+          {integrity.issues[0]?.detail}
         </p>
       ) : null}
       {liveFeed.length === 0 ? <p>No streamed task events have arrived yet.</p> : null}
@@ -1026,10 +1227,66 @@ function TaskFeedContent({
                 {formatRelativeTime(new Date(event.timestamp).getTime())}
               </span>
             </div>
-            <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-5 text-slate-100">{event.detail}</p>
+            <div className="mt-2">
+              <InteractiveContent
+                text={event.detail}
+                className="text-[12.5px] leading-5 text-slate-100"
+                url={event.url}
+                filePath={event.filePath}
+                displayPath={event.displayPath}
+              />
+            </div>
           </div>
         ))}
       </div>
+    </InfoCard>
+  );
+}
+
+function TaskFilesContent({
+  snapshot,
+  task,
+  taskDetail
+}: {
+  snapshot: MissionControlSnapshot;
+  task: MissionControlSnapshot["tasks"][number];
+  taskDetail: TaskDetailRecord | null;
+}) {
+  const runs =
+    taskDetail?.runs ??
+    snapshot.runtimes
+      .filter((runtime) => task.runtimeIds.includes(runtime.id))
+      .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const createdFiles =
+    taskDetail?.createdFiles ??
+    dedupeCreatedFiles(runs.flatMap((runtime) => extractCreatedFilesFromRuntime(runtime)));
+  const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
+
+  return (
+    <InfoCard icon={FileJson} title="Files" value={String(createdFiles.length)}>
+      <p>{runs.length} run{runs.length === 1 ? "" : "s"} contributed to this task.</p>
+      {integrity.outputDir || integrity.outputDirRelative ? (
+        <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Output folder</p>
+          <div className="mt-2">
+            <InteractiveContent
+              text={integrity.outputDirRelative || integrity.outputDir || "Output folder"}
+              className="text-[12.5px] leading-5 text-slate-100"
+              filePath={integrity.outputDir}
+              displayPath={integrity.outputDirRelative || integrity.outputDir}
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-slate-400">
+            {integrity.outputDirExists
+              ? `${integrity.outputFileCount} file${integrity.outputFileCount === 1 ? "" : "s"} detected in the folder.`
+              : "The output folder is not currently accessible."}
+          </p>
+        </div>
+      ) : null}
+      <InspectorCreatedFileList
+        files={createdFiles}
+        emptyLabel="This task has not produced a detectable file artifact yet."
+      />
     </InfoCard>
   );
 }
@@ -1041,7 +1298,70 @@ function createOptimisticTaskDetail(task: MissionControlSnapshot["tasks"][number
     outputs: [],
     liveFeed: readOptimisticTaskFeed(task),
     createdFiles: [],
-    warnings: task.status === "stalled" ? [task.subtitle] : []
+    warnings: task.status === "stalled" || isTaskAborted(task) ? [task.subtitle] : [],
+    integrity: createOptimisticTaskIntegrity(task)
+  };
+}
+
+function createOptimisticTaskIntegrity(
+  task: MissionControlSnapshot["tasks"][number]
+): TaskDetailRecord["integrity"] {
+  const issues: TaskDetailRecord["integrity"]["issues"] =
+    isTaskAborted(task)
+      ? [
+          {
+            id: "task-cancelled",
+            severity: "warning" as const,
+            title: "Task was cancelled by the operator",
+            detail: "The mission dispatch was stopped before completion, so the captured evidence is intentionally incomplete."
+          }
+        ]
+      : task.status === "stalled"
+      ? [
+          {
+            id: "stalled-dispatch",
+            severity: "warning" as const,
+            title: "Dispatch stalled before evidence was captured",
+            detail: task.subtitle
+          }
+        ]
+      : task.metadata.optimistic
+        ? [
+            {
+              id: "pending-evidence",
+              severity: "warning" as const,
+              title: "Waiting for runtime evidence",
+              detail: "Mission Control will attach transcript, tool, and file evidence after the first runtime is observed."
+            }
+          ]
+        : [];
+
+  return {
+    status:
+      issues.some((issue) => issue.severity === "error")
+        ? "error"
+        : issues.length > 0
+          ? "warning"
+          : "verified",
+    outputDir:
+      typeof task.metadata.outputDir === "string" && task.metadata.outputDir.trim().length > 0
+        ? task.metadata.outputDir
+        : null,
+    outputDirRelative:
+      typeof task.metadata.outputDirRelative === "string" && task.metadata.outputDirRelative.trim().length > 0
+        ? task.metadata.outputDirRelative
+        : null,
+    outputDirExists: false,
+    outputFileCount: 0,
+    transcriptTurnCount: 0,
+    matchingTranscriptTurnCount: 0,
+    finalResponseText: null,
+    finalResponseSource: "none",
+    dispatchSessionId: null,
+    sessionMismatch: false,
+    toolNames: [],
+    emails: [],
+    issues
   };
 }
 
@@ -1067,6 +1387,25 @@ function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
     typeof (value as TaskFeedEvent).title === "string" &&
     typeof (value as TaskFeedEvent).detail === "string"
   );
+}
+
+function resolveTaskDispatchStatus(task: MissionControlSnapshot["tasks"][number]) {
+  return typeof task.metadata.dispatchStatus === "string" ? task.metadata.dispatchStatus : null;
+}
+
+function isTaskAborted(task: MissionControlSnapshot["tasks"][number]) {
+  const dispatchStatus = resolveTaskDispatchStatus(task);
+  const runtimeStatus = task.status as string;
+  return dispatchStatus === "cancelled" || dispatchStatus === "aborted" || runtimeStatus === "cancelled" || runtimeStatus === "aborted";
+}
+
+function isTaskAbortable(task: MissionControlSnapshot["tasks"][number]) {
+  if (isTaskAborted(task)) {
+    return false;
+  }
+
+  const runtimeStatus = task.status as string;
+  return runtimeStatus === "running" || runtimeStatus === "queued";
 }
 
 function RuntimeContent({
@@ -1111,9 +1450,10 @@ function RuntimeContent({
         {runtimeOutputLoading ? <p>Loading transcript output…</p> : null}
         {runtimeOutputError ? <p>{runtimeOutputError}</p> : null}
         {!runtimeOutputLoading && !runtimeOutputError ? (
-          <p className="whitespace-pre-wrap text-[13px] leading-5 text-slate-100">
-            {runtimeOutput?.finalText || runtimeOutput?.errorMessage || "No assistant output has been recorded for this runtime yet."}
-          </p>
+          <InteractiveContent
+            text={runtimeOutput?.finalText || runtimeOutput?.errorMessage || "No assistant output has been recorded for this runtime yet."}
+            className="text-[13px] leading-5 text-slate-100"
+          />
         ) : null}
         {runtimeWarningSummary ? (
           <p className="mt-3 rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
@@ -1133,6 +1473,26 @@ function RuntimeContent({
         />
       </InfoCard>
     </>
+  );
+}
+
+function RuntimeFilesContent({
+  runtime,
+  runtimeOutput
+}: {
+  runtime: MissionControlSnapshot["runtimes"][number];
+  runtimeOutput: RuntimeOutputRecord | null;
+}) {
+  const createdFiles = dedupeCreatedFiles(runtimeOutput?.createdFiles ?? extractCreatedFilesFromRuntime(runtime));
+
+  return (
+    <InfoCard icon={FileJson} title="Files" value={String(createdFiles.length)}>
+      <p>{runtime.title}</p>
+      <InspectorCreatedFileList
+        files={createdFiles}
+        emptyLabel="This runtime has not produced a detectable file artifact."
+      />
+    </InfoCard>
   );
 }
 
@@ -1186,10 +1546,29 @@ function RuntimeOutputContent({
         />
       </InfoCard>
 
-      <InfoCard icon={TerminalSquare} title="Final response" value={runtimeOutput.stopReason || runtimeOutput.status}>
-        <p className="whitespace-pre-wrap text-[13px] leading-5 text-slate-100">
-          {runtimeOutput.finalText || runtimeOutput.errorMessage || "No assistant output has been recorded for this runtime yet."}
-        </p>
+      <InfoCard
+        icon={TerminalSquare}
+        title="Final response"
+        value={
+          runtime.status === "stalled" || runtime.status === "cancelled"
+            ? runtime.status
+            : runtimeOutput.stopReason || runtimeOutput.status
+        }
+      >
+        {runtime.status === "stalled" || runtime.status === "cancelled" ? (
+          <p className="mb-2 rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
+            This runtime did not complete cleanly. The text below is the last captured assistant output, not a verified completion.
+          </p>
+        ) : null}
+        {runtimeOutput.errorMessage ? (
+          <p className="mb-2 rounded-[12px] border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-[12px] leading-5 text-rose-100">
+            {runtimeOutput.errorMessage}
+          </p>
+        ) : null}
+        <InteractiveContent
+          text={runtimeOutput.finalText || runtimeOutput.errorMessage || "No assistant output has been recorded for this runtime yet."}
+          className="text-[13px] leading-5 text-slate-100"
+        />
         {runtimeOutput.finalTimestamp ? (
           <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
             {new Date(runtimeOutput.finalTimestamp).toLocaleString()}
@@ -1222,16 +1601,18 @@ function RuntimeOutputContent({
                   </Badge>
                   {item.toolName ? <Badge variant="muted">{item.toolName}</Badge> : null}
                 </div>
-                <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                  {formatRelativeTime(new Date(item.timestamp).getTime())}
-                </span>
+                  <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                    {formatRelativeTime(new Date(item.timestamp).getTime())}
+                  </span>
+                </div>
+                <div className="mt-2">
+                  <InteractiveContent text={item.text} className="text-[12.5px] leading-5 text-slate-100" />
+                </div>
               </div>
-              <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-5 text-slate-100">{item.text}</p>
-            </div>
-          ))}
-        </div>
-      </InfoCard>
-    </div>
+            ))}
+          </div>
+        </InfoCard>
+      </div>
   );
 }
 
