@@ -99,41 +99,6 @@ export function useWorkspaceWizardDraft({
     [isSending, plan?.intake.started, sendProgressStep]
   );
 
-  useEffect(() => {
-    if (!isSending) {
-      setSendProgressStep(0);
-      return;
-    }
-
-    setSendProgressStep(0);
-    const firstTimer = globalThis.setTimeout(() => setSendProgressStep(1), 1800);
-    const secondTimer = globalThis.setTimeout(() => setSendProgressStep(2), 6200);
-
-    return () => {
-      globalThis.clearTimeout(firstTimer);
-      globalThis.clearTimeout(secondTimer);
-    };
-  }, [isSending]);
-
-  const updatePlan = useCallback((updater: (current: WorkspacePlan) => WorkspacePlan) => {
-    setPlan((current) => {
-      if (!current) {
-        return current;
-      }
-
-      return enrichWorkspacePlan(updater(structuredClone(current)));
-    });
-  }, []);
-
-  const getStoredPlanId = useCallback(() => {
-    return globalThis.localStorage?.getItem(plannerStorageKey) ?? null;
-  }, []);
-
-  const clearStoredPlan = useCallback(() => {
-    globalThis.localStorage?.removeItem(plannerStorageKey);
-    setHasStoredDraft(false);
-  }, []);
-
   const commitPlan = useCallback(
     (nextPlan: WorkspacePlan | null) => {
       setPlan(nextPlan);
@@ -153,6 +118,44 @@ export function useWorkspaceWizardDraft({
     },
     []
   );
+
+  useEffect(() => {
+    if (!isSending) {
+      setSendProgressStep(0);
+      return;
+    }
+
+    setSendProgressStep(0);
+    const firstTimer = globalThis.setTimeout(() => setSendProgressStep(1), 1800);
+    const secondTimer = globalThis.setTimeout(() => setSendProgressStep(2), 6200);
+
+    return () => {
+      globalThis.clearTimeout(firstTimer);
+      globalThis.clearTimeout(secondTimer);
+    };
+  }, [isSending]);
+
+  const updatePlan = useCallback(
+    (updater: (current: WorkspacePlan) => WorkspacePlan) => {
+      if (!plan) {
+        return null;
+      }
+
+      const nextPlan = enrichWorkspacePlan(updater(structuredClone(plan)));
+      commitPlan(nextPlan);
+      return nextPlan;
+    },
+    [commitPlan, plan]
+  );
+
+  const getStoredPlanId = useCallback(() => {
+    return globalThis.localStorage?.getItem(plannerStorageKey) ?? null;
+  }, []);
+
+  const clearStoredPlan = useCallback(() => {
+    globalThis.localStorage?.removeItem(plannerStorageKey);
+    setHasStoredDraft(false);
+  }, []);
 
   const requestPlanner = useCallback(
     async ({ resumeStored }: { resumeStored: boolean }) => {
@@ -267,44 +270,51 @@ export function useWorkspaceWizardDraft({
     setNotice(null);
   }, [clearStoredPlan]);
 
-  const savePlan = useCallback(async () => {
-    if (!plan || !planId) {
-      return false;
-    }
+  const savePlan = useCallback(
+    async (planOverride?: WorkspacePlan) => {
+      const activePlan = planOverride ?? plan;
 
-    setIsSaving(true);
-
-    try {
-      const response = await fetch(`/api/planner/${planId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          plan
-        })
-      });
-      const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };
-
-      if (!response.ok || !result.plan) {
-        throw new Error(result.error || "Unable to save planner workspace.");
+      if (!activePlan || !planId) {
+        return false;
       }
 
-      commitPlan(result.plan);
-      toast.success("Planner draft saved.");
-      return true;
-    } catch (error) {
-      toast.error("Planner draft could not be saved.", {
-        description: error instanceof Error ? error.message : "Unknown planner save error."
-      });
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [commitPlan, plan, planId]);
+      setIsSaving(true);
 
-  const simulatePlan = useCallback(async () => {
-    if (!plan || !planId) {
+      try {
+        const response = await fetch(`/api/planner/${planId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            plan: activePlan
+          })
+        });
+        const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };
+
+        if (!response.ok || !result.plan) {
+          throw new Error(result.error || "Unable to save planner workspace.");
+        }
+
+        commitPlan(result.plan);
+        toast.success("Planner draft saved.");
+        return true;
+      } catch (error) {
+        toast.error("Planner draft could not be saved.", {
+          description: error instanceof Error ? error.message : "Unknown planner save error."
+        });
+        return false;
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [commitPlan, plan, planId]
+  );
+
+  const simulatePlan = useCallback(async (planOverride?: WorkspacePlan) => {
+    const activePlan = planOverride ?? plan;
+
+    if (!activePlan || !planId) {
       return false;
     }
 
@@ -317,7 +327,7 @@ export function useWorkspaceWizardDraft({
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          plan
+          plan: activePlan
         })
       });
       const result = (await response.json()) as { plan?: WorkspacePlan; error?: string };

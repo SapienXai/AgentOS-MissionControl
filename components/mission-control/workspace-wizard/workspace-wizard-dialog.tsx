@@ -4,6 +4,10 @@ import { Bot, Columns2, LoaderCircle, Sparkles, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { OperationProgress } from "@/components/mission-control/operation-progress";
+import {
+  WorkspaceWizardBlueprintEditor,
+  type WorkspaceBlueprintEditorFocus
+} from "@/components/mission-control/workspace-wizard/workspace-wizard-blueprint-editor";
 import { WorkspaceWizardDraftPane } from "@/components/mission-control/workspace-wizard/workspace-wizard-draft-pane";
 import { WorkspaceWizardHeader } from "@/components/mission-control/workspace-wizard/workspace-wizard-header";
 import { WizardComposer } from "@/components/mission-control/workspace-wizard/wizard-composer";
@@ -23,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useWorkspaceWizardDraft, type WorkspaceWizardMode } from "@/hooks/use-workspace-wizard-draft";
+import { createPlannerMessage } from "@/lib/openclaw/planner-core";
 import {
   getPlannerStageLabel
 } from "@/lib/openclaw/planner-presenters";
@@ -35,6 +40,7 @@ import {
   inferWorkspaceWizardTemplate,
   resolveWorkspaceWizardName
 } from "@/lib/openclaw/workspace-wizard-inference";
+import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
 
@@ -95,12 +101,16 @@ export function WorkspaceWizardDialog({
 
   const [composerValue, setComposerValue] = useState("");
   const [isMobileBlueprintOpen, setIsMobileBlueprintOpen] = useState(false);
+  const [isBlueprintEditorOpen, setIsBlueprintEditorOpen] = useState(false);
+  const [blueprintEditorFocus, setBlueprintEditorFocus] = useState<WorkspaceBlueprintEditorFocus>("workspace");
   const isLight = surfaceTheme === "light";
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       setComposerValue("");
       setIsMobileBlueprintOpen(false);
+      setIsBlueprintEditorOpen(false);
+      setBlueprintEditorFocus("workspace");
     }
 
     onOpenChange(nextOpen);
@@ -146,6 +156,16 @@ export function WorkspaceWizardDialog({
   const hasDraftToCreate = Boolean(
     wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim()
   );
+  const basicQuickSetup =
+    wizard.mode === "basic" ? (
+      <BasicQuickStartCard
+        surfaceTheme={surfaceTheme}
+        name={wizard.basicDraft.name}
+        source={wizard.basicDraft.source}
+        onNameChange={wizard.setBasicName}
+        onSourceChange={wizard.setBasicSource}
+      />
+    ) : null;
 
   const submitComposerIntent = async (override?: string) => {
     const nextMessage = (override ?? composerValue).trim();
@@ -194,6 +214,26 @@ export function WorkspaceWizardDialog({
     }
   };
 
+  const handleBlueprintEditorSave = async (nextPlan: WorkspacePlan, summary: string) => {
+    const planWithNote = summary.trim()
+      ? {
+          ...nextPlan,
+          conversation: [
+            ...nextPlan.conversation,
+            createPlannerMessage("system", "Workspace Wizard", summary)
+          ]
+        }
+      : nextPlan;
+
+    return wizard.savePlan(planWithNote);
+  };
+
+  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace") => {
+    setBlueprintEditorFocus(focus);
+    setIsMobileBlueprintOpen(false);
+    setIsBlueprintEditorOpen(true);
+  };
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
@@ -224,6 +264,7 @@ export function WorkspaceWizardDialog({
             onNewDraft={() => {
               setComposerValue("");
               setIsMobileBlueprintOpen(false);
+              setIsBlueprintEditorOpen(false);
               void wizard.startFreshDraft();
             }}
             badges={headerBadges}
@@ -239,12 +280,12 @@ export function WorkspaceWizardDialog({
             >
               <div className="flex min-h-0 flex-1 flex-col">
                 {wizard.architectBusyStatus ? (
-                  <div className={isLight ? "border-b border-[#ece5db] px-4 py-3 md:px-5" : "border-b border-white/10 px-4 py-3 md:px-5"}>
-                    <div className={isLight ? "rounded-[18px] border border-[#e6dfd5] bg-white px-4 py-3" : "rounded-[18px] border border-white/10 bg-white/[0.04] px-4 py-3"}>
-                      <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
+                  <div className={isLight ? "border-b border-[#ece5db] px-4 py-2.5 md:px-5" : "border-b border-white/10 px-4 py-2.5 md:px-5"}>
+                    <div className={isLight ? "rounded-2xl border border-[#e6dfd5] bg-white px-3 py-2" : "rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-2"}>
+                      <p className={isLight ? "text-[10px] uppercase tracking-[0.2em] text-[#8b7262]" : "text-[10px] uppercase tracking-[0.2em] text-slate-500"}>
                         {wizard.architectBusyStatus.title}
                       </p>
-                      <p className={isLight ? "mt-1 text-[13px] leading-6 text-[#6d665e]" : "mt-1 text-[13px] leading-6 text-slate-300"}>
+                      <p className={isLight ? "mt-1 text-[12px] leading-5 text-[#6d665e]" : "mt-1 text-[12px] leading-5 text-slate-300"}>
                         {wizard.architectBusyStatus.description}
                       </p>
                     </div>
@@ -286,14 +327,6 @@ export function WorkspaceWizardDialog({
                               className={isLight ? "border-[#e6dfd5] bg-white" : "border-white/10 bg-slate-950/50"}
                             />
                           </div>
-                        ) : wizard.mode === "basic" && !wizard.plan?.intake.started && !wizard.pendingUserMessage ? (
-                          <BasicQuickStartCard
-                            surfaceTheme={surfaceTheme}
-                            name={wizard.basicDraft.name}
-                            source={wizard.basicDraft.source}
-                            onNameChange={wizard.setBasicName}
-                            onSourceChange={wizard.setBasicSource}
-                          />
                         ) : null}
                       </>
                     }
@@ -308,7 +341,7 @@ export function WorkspaceWizardDialog({
                     : "border-t border-white/10 bg-[linear-gradient(180deg,rgba(5,9,18,0.68),rgba(4,8,15,0.94))] px-4 py-4 md:px-5"
                 }
               >
-                <div className="mx-auto w-full max-w-4xl">
+                <div className="mx-auto w-full max-w-3xl">
                   <WizardSuggestionChips
                     surfaceTheme={surfaceTheme}
                     chips={activeSuggestions.map((chip) => ({
@@ -324,7 +357,7 @@ export function WorkspaceWizardDialog({
 
                       void submitComposerIntent(selected.prompt);
                     }}
-                    className="mb-3"
+                    className="mb-2.5"
                   />
 
                   <WizardComposer
@@ -336,15 +369,15 @@ export function WorkspaceWizardDialog({
                     }}
                     placeholder={
                       wizard.mode === "basic"
-                        ? "Tell Architect what this workspace should do first..."
-                        : "Keep shaping the workspace with Architect..."
+                        ? "Describe what this workspace should do..."
+                        : "Refine the blueprint with Architect..."
                     }
                     disabled={isArchitectBusy}
                     isBusy={wizard.isSending}
                     helperText={
                       wizard.mode === "basic"
-                        ? "Architect keeps the fast-path draft synced while you stay in one lightweight flow."
-                        : "Architect updates the same structured draft with every turn."
+                        ? "Architect keeps the fast-path draft synced as you chat."
+                        : "Architect updates the shared blueprint on every turn."
                     }
                     toolbar={
                       wizard.mode === "basic" && !wizard.plan ? (
@@ -355,7 +388,7 @@ export function WorkspaceWizardDialog({
                               : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-slate-300"
                           }
                         >
-                          Architect live
+                          Live draft
                         </span>
                       ) : wizard.plan ? (
                         <span
@@ -379,6 +412,7 @@ export function WorkspaceWizardDialog({
               surfaceTheme={surfaceTheme}
               mode={wizard.mode}
               snapshot={snapshot}
+              basicQuickSetup={basicQuickSetup}
               plan={wizard.plan}
               resolvedName={resolvedName}
               resolvedTemplate={resolvedTemplate}
@@ -387,6 +421,7 @@ export function WorkspaceWizardDialog({
               notice={wizard.notice}
               basicRules={wizard.basicRules}
               basicPreset={wizard.basicPreset}
+              onOpenBlueprintEditor={openBlueprintEditor}
               onBasicPresetChange={wizard.setBasicPreset}
               onBasicRuleToggle={wizard.toggleBasicRule}
               progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
@@ -411,17 +446,35 @@ export function WorkspaceWizardDialog({
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsMobileBlueprintOpen(false)}
-                  className={
-                    isLight
-                      ? "inline-flex size-9 items-center justify-center rounded-full border border-[#e4ddd3] bg-white text-[#4f4943] transition-colors hover:bg-[#f4efe7]"
-                      : "inline-flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-200 transition-colors hover:bg-white/[0.08]"
-                  }
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {wizard.plan ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openBlueprintEditor()}
+                      className={
+                        isLight
+                          ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      }
+                    >
+                      Edit details
+                    </Button>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsMobileBlueprintOpen(false)}
+                    className={
+                      isLight
+                        ? "inline-flex size-9 items-center justify-center rounded-full border border-[#e4ddd3] bg-white text-[#4f4943] transition-colors hover:bg-[#f4efe7]"
+                        : "inline-flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-200 transition-colors hover:bg-white/[0.08]"
+                    }
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               <WorkspaceWizardDraftPane
@@ -429,6 +482,7 @@ export function WorkspaceWizardDialog({
                 surfaceTheme={surfaceTheme}
                 mode={wizard.mode}
                 snapshot={snapshot}
+                basicQuickSetup={basicQuickSetup}
                 plan={wizard.plan}
                 resolvedName={resolvedName}
                 resolvedTemplate={resolvedTemplate}
@@ -437,11 +491,25 @@ export function WorkspaceWizardDialog({
                 notice={wizard.notice}
                 basicRules={wizard.basicRules}
                 basicPreset={wizard.basicPreset}
+                onOpenBlueprintEditor={openBlueprintEditor}
                 onBasicPresetChange={wizard.setBasicPreset}
                 onBasicRuleToggle={wizard.toggleBasicRule}
                 progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
               />
             </div>
+          ) : null}
+
+          {isBlueprintEditorOpen && wizard.plan ? (
+            <WorkspaceWizardBlueprintEditor
+              key={`${wizard.plan.id}:${blueprintEditorFocus}`}
+              open={isBlueprintEditorOpen}
+              surfaceTheme={surfaceTheme}
+              plan={wizard.plan}
+              busy={wizard.isSaving}
+              focus={blueprintEditorFocus}
+              onClose={() => setIsBlueprintEditorOpen(false)}
+              onSave={handleBlueprintEditorSave}
+            />
           ) : null}
 
           <div
@@ -454,8 +522,8 @@ export function WorkspaceWizardDialog({
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <p className={isLight ? "text-[13px] text-[#776f65]" : "text-[13px] text-slate-300"}>
                 {wizard.mode === "basic"
-                  ? "One prompt is enough to start. Create now or open the richer blueprint."
-                  : "Advanced keeps the conversation and blueprint aligned through launch review."}
+                  ? "Chat stays fast. Open the blueprint for details."
+                  : "Chat and blueprint stay synced as you refine the plan."}
               </p>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -568,12 +636,15 @@ function BasicGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   const isLight = surfaceTheme === "light";
 
   return (
-    <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
-      <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
-        One message is enough to start.
+    <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col gap-3 px-4 md:mt-12 md:px-6">
+      <p className={cn("text-[10px] uppercase tracking-[0.22em]", isLight ? "text-[#8b7262]" : "text-slate-500")}>
+        Fast path
       </p>
-      <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
-        Describe the outcome, paste a source, and let Architect shape the workspace without pushing you into full planning too early.
+      <p className={isLight ? "text-[24px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[24px] font-semibold tracking-[-0.03em] text-white"}>
+        Start with one prompt.
+      </p>
+      <p className={isLight ? "text-[15px] leading-7 text-[#7f756b]" : "text-[15px] leading-7 text-slate-400"}>
+        Tell Architect what this workspace should do. Name, source, and defaults stay optional.
       </p>
     </div>
   );
@@ -583,12 +654,15 @@ function AdvancedGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   const isLight = surfaceTheme === "light";
 
   return (
-    <div className="mx-auto mt-4 flex w-full max-w-3xl flex-col justify-center px-4 md:mt-16 md:px-8">
-      <p className={isLight ? "text-[28px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[28px] font-semibold tracking-[-0.03em] text-white"}>
-        Design the workspace with Architect.
+    <div className="mx-auto mt-4 flex w-full max-w-2xl flex-col gap-3 px-4 md:mt-12 md:px-6">
+      <p className={cn("text-[10px] uppercase tracking-[0.22em]", isLight ? "text-[#8b7262]" : "text-slate-500")}>
+        Blueprint mode
       </p>
-      <p className={isLight ? "mt-2 text-[28px] tracking-[-0.03em] text-[#7f756b]" : "mt-2 text-[28px] tracking-[-0.03em] text-slate-400"}>
-        Describe the operating model, and the blueprint will update alongside the conversation.
+      <p className={isLight ? "text-[24px] font-semibold tracking-[-0.03em] text-[#181612]" : "text-[24px] font-semibold tracking-[-0.03em] text-white"}>
+        Shape the workspace with Architect.
+      </p>
+      <p className={isLight ? "text-[15px] leading-7 text-[#7f756b]" : "text-[15px] leading-7 text-slate-400"}>
+        Describe the operating model, and the structured draft updates as you chat.
       </p>
     </div>
   );
@@ -601,8 +675,8 @@ function LoadingGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
     <div
       className={
         isLight
-          ? "mx-auto mt-10 flex w-full max-w-3xl items-center gap-3 rounded-[22px] border border-[#e6dfd5] bg-white px-5 py-4 text-[14px] text-[#6d665e]"
-          : "mx-auto mt-10 flex w-full max-w-3xl items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.04] px-5 py-4 text-[14px] text-slate-300"
+          ? "mx-auto mt-10 flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-[#e6dfd5] bg-white px-4 py-3 text-[13px] text-[#6d665e]"
+          : "mx-auto mt-10 flex w-full max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-[13px] text-slate-300"
       }
     >
       <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -630,30 +704,30 @@ function BasicQuickStartCard({
     <div
       className={
         isLight
-          ? "mx-auto w-full max-w-3xl rounded-[24px] border border-[#e4ddd3] bg-white p-4 shadow-[0_24px_80px_rgba(56,47,38,0.06)]"
-          : "mx-auto w-full max-w-3xl rounded-[24px] border border-white/10 bg-white/[0.04] p-4 shadow-[0_24px_80px_rgba(0,0,0,0.28)]"
+          ? "mx-auto w-full max-w-3xl rounded-2xl border border-[#e4ddd3] bg-white p-3.5 shadow-[0_18px_56px_rgba(56,47,38,0.06)]"
+          : "mx-auto w-full max-w-3xl rounded-2xl border border-white/10 bg-white/[0.04] p-3.5 shadow-[0_18px_56px_rgba(0,0,0,0.24)]"
       }
     >
       <div className="flex items-start gap-3">
         <span
           className={
             isLight
-              ? "inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-[#e4ddd3] bg-[#faf6f1] text-[#5e5750]"
-              : "inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-300"
+              ? "inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-[#e4ddd3] bg-[#faf6f1] text-[#5e5750]"
+              : "inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.05] text-slate-300"
           }
         >
-          <Sparkles className="h-4 w-4" />
+          <Sparkles className="h-3.5 w-3.5" />
         </span>
 
         <div className="min-w-0 flex-1">
-          <p className={isLight ? "text-[11px] uppercase tracking-[0.18em] text-[#8b7262]" : "text-[11px] uppercase tracking-[0.18em] text-slate-500"}>
-            Quick setup
+          <p className={isLight ? "text-[10px] uppercase tracking-[0.2em] text-[#8b7262]" : "text-[10px] uppercase tracking-[0.2em] text-slate-500"}>
+            Quick details
           </p>
-          <p className={isLight ? "mt-1 text-[13px] leading-6 text-[#70685f]" : "mt-1 text-[13px] leading-6 text-slate-300"}>
-            Keep the fast path lightweight. Optional name and source live here; the main goal still comes through the composer.
+          <p className={isLight ? "mt-1 text-[12px] leading-5 text-[#70685f]" : "mt-1 text-[12px] leading-5 text-slate-300"}>
+            Optional name and source live here. Architect can still infer both from the prompt.
           </p>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-2.5 md:grid-cols-2">
             <FieldBlock surfaceTheme={surfaceTheme} label="Workspace name">
               <Input
                 value={name}

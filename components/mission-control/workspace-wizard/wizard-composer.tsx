@@ -76,10 +76,10 @@ export function WizardComposer({
     <form
       onSubmit={handleSubmit}
       className={cn(
-        "rounded-[24px] border p-3",
+        "rounded-[20px] border p-2.5 transition-all duration-200 focus-within:shadow-[0_0_0_1px_rgba(0,0,0,0.02)]",
         isLight
-          ? "border-[#dfd9d1] bg-white shadow-[0_24px_80px_rgba(56,47,38,0.08)]"
-          : "border-white/10 bg-[rgba(7,12,22,0.92)] shadow-[0_24px_80px_rgba(0,0,0,0.38)]",
+          ? "border-[#ddd6cb] bg-white shadow-[0_18px_56px_rgba(56,47,38,0.08)] focus-within:border-[#cfc6ba]"
+          : "border-white/10 bg-[rgba(7,12,22,0.92)] shadow-[0_18px_56px_rgba(0,0,0,0.34)] focus-within:border-cyan-300/30",
         className
       )}
     >
@@ -90,12 +90,12 @@ export function WizardComposer({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className={cn(
-          "min-h-[44px] max-h-[200px] w-full resize-none overflow-y-auto border-0 bg-transparent px-2 py-1 text-[15px] leading-6 outline-none",
+          "min-h-[44px] max-h-[200px] w-full resize-none overflow-y-auto border-0 bg-transparent px-1.5 py-1.5 text-[15px] leading-6 outline-none",
           isLight ? "text-[#191714] placeholder:text-[#9b948c]" : "text-slate-100 placeholder:text-slate-500"
         )}
       />
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-h-8 items-center gap-2">
           {toolbar}
           {helperText ? (

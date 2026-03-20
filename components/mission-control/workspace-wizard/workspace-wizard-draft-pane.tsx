@@ -10,12 +10,15 @@ import {
   GitBranch,
   Globe,
   LockKeyhole,
+  Pencil,
   Rocket,
   Sparkles,
   Zap
 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { OperationProgress } from "@/components/mission-control/operation-progress";
+import type { WorkspaceBlueprintEditorFocus } from "@/components/mission-control/workspace-wizard/workspace-wizard-blueprint-editor";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WorkspaceWizardMode } from "@/hooks/use-workspace-wizard-draft";
 import {
@@ -65,6 +68,7 @@ type WorkspaceWizardDraftPaneProps = {
   surfaceTheme: SurfaceTheme;
   mode: WorkspaceWizardMode;
   snapshot: MissionControlSnapshot;
+  basicQuickSetup?: ReactNode;
   plan: WorkspacePlan | null;
   resolvedName: string;
   resolvedTemplate: WorkspaceTemplate;
@@ -73,6 +77,7 @@ type WorkspaceWizardDraftPaneProps = {
   notice: WorkspaceWizardNotice | null;
   basicRules: WorkspaceCreateRules;
   basicPreset: WorkspaceWizardQuickSetupPreset;
+  onOpenBlueprintEditor?: (focus?: WorkspaceBlueprintEditorFocus) => void;
   onBasicPresetChange: (preset: WorkspaceWizardQuickSetupPreset) => void;
   onBasicRuleToggle: (
     rule: keyof Pick<WorkspaceCreateRules, "generateStarterDocs" | "generateMemory" | "kickoffMission">
@@ -85,6 +90,7 @@ export function WorkspaceWizardDraftPane({
   surfaceTheme,
   mode,
   snapshot,
+  basicQuickSetup,
   plan,
   resolvedName,
   resolvedTemplate,
@@ -93,6 +99,7 @@ export function WorkspaceWizardDraftPane({
   notice,
   basicRules,
   basicPreset,
+  onOpenBlueprintEditor,
   onBasicPresetChange,
   onBasicRuleToggle,
   progress
@@ -101,6 +108,9 @@ export function WorkspaceWizardDraftPane({
   const sectionRefs = useRef<Partial<Record<DraftSectionKey, HTMLDivElement | null>>>({});
   const previousSnapshotRef = useRef<TrackedDraftSnapshot | null>(null);
   const [activeSection, setActiveSection] = useState<DraftSectionKey | null>(null);
+  const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace") => {
+    onOpenBlueprintEditor?.(focus);
+  };
   const trackedSnapshot = useMemo(
     () =>
       buildTrackedDraftSnapshot({
@@ -175,8 +185,26 @@ export function WorkspaceWizardDraftPane({
             title={mode === "basic" ? "Workspace draft" : "Workspace blueprint"}
             subtitle={
               mode === "basic"
-                ? "Architect is filling this live while the fast create path stays available."
-                : "Live structured view of what Architect is shaping through conversation."
+                ? "Live draft view. The fast path stays available while Architect fills in the details."
+                : "Structured blueprint synced with the conversation."
+            }
+            action={
+              plan && onOpenBlueprintEditor ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => openBlueprintEditor("workspace")}
+                  className={
+                    isLight
+                      ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                      : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                  }
+                >
+                  <Pencil className="mr-2 h-3.5 w-3.5" />
+                  Edit details
+                </Button>
+              ) : null
             }
           />
 
@@ -193,8 +221,11 @@ export function WorkspaceWizardDraftPane({
               mode={mode}
               preset={basicPreset}
               onPresetChange={onBasicPresetChange}
+              onOpenBlueprintEditor={openBlueprintEditor}
             />
           </TrackedSection>
+
+          {basicQuickSetup ? <div className="space-y-3">{basicQuickSetup}</div> : null}
 
           {notice ? (
             <TrackedSection
@@ -256,10 +287,14 @@ export function WorkspaceWizardDraftPane({
                     sectionRefs.current["architect-readout"] = node;
                   }}
                 >
-                  <div
+                  <button
+                    type="button"
+                    onClick={() => openBlueprintEditor("company")}
                     className={cn(
-                      "rounded-[22px] border p-4",
-                      isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]"
+                      "w-full rounded-[22px] border p-4 text-left transition-colors",
+                      isLight
+                        ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
+                        : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
                     )}
                   >
                     <div className="flex items-start gap-3">
@@ -301,7 +336,7 @@ export function WorkspaceWizardDraftPane({
                         ) : null}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 </TrackedSection>
               ) : null}
 
@@ -318,6 +353,7 @@ export function WorkspaceWizardDraftPane({
                   summaryLabel={
                     plan ? "Updated from Architect's latest read of the conversation." : "Resolved from your quick setup."
                   }
+                  onOpenBlueprintEditor={openBlueprintEditor}
                 />
               </TrackedSection>
 
@@ -339,6 +375,7 @@ export function WorkspaceWizardDraftPane({
                     rules={basicRules}
                     preset={basicPreset}
                     onRuleToggle={onBasicRuleToggle}
+                    onOpenBlueprintEditor={openBlueprintEditor}
                   />
                 </div>
               </TrackedSection>
@@ -348,7 +385,16 @@ export function WorkspaceWizardDraftPane({
               <TrackedSection sectionKey="readiness" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
                 sectionRefs.current.readiness = node;
               }}>
-                <div className={cn("rounded-[22px] border p-4", isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]")}>
+                <button
+                  type="button"
+                  onClick={() => openBlueprintEditor("deploy")}
+                  className={cn(
+                    "w-full rounded-[22px] border p-4 text-left transition-colors",
+                    isLight
+                      ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
+                      : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
+                  )}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>Readiness</p>
@@ -364,11 +410,11 @@ export function WorkspaceWizardDraftPane({
                           ? "border-[#e5ddd2] bg-[#f5f0e8] text-[#6a635b]"
                           : "border-white/10 bg-white/[0.05] text-slate-300"
                       )}
-                    >
-                      <Bot className="h-4 w-4" />
-                    </span>
-                  </div>
-                </div>
+                      >
+                        <Bot className="h-4 w-4" />
+                      </span>
+                    </div>
+                </button>
               </TrackedSection>
 
               {plannerSectionMeta.map((section) => {
@@ -386,7 +432,16 @@ export function WorkspaceWizardDraftPane({
                       sectionRefs.current[sectionKey] = node;
                     }}
                   >
-                    <div className={cn("rounded-[22px] border p-4", isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]")}>
+                    <button
+                      type="button"
+                      onClick={() => openBlueprintEditor(section.id as WorkspaceBlueprintEditorFocus)}
+                      className={cn(
+                        "w-full rounded-[22px] border p-4 text-left transition-colors",
+                        isLight
+                          ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
+                          : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
+                      )}
+                    >
                       <div className="flex items-start gap-3">
                         <span
                           className={cn(
@@ -409,7 +464,7 @@ export function WorkspaceWizardDraftPane({
                           </p>
                         </div>
                       </div>
-                    </div>
+                    </button>
                   </TrackedSection>
                 );
               })}
@@ -417,7 +472,16 @@ export function WorkspaceWizardDraftPane({
               <TrackedSection sectionKey="deploy-review" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
                 sectionRefs.current["deploy-review"] = node;
               }}>
-                <div className={cn("rounded-[22px] border p-4", isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]")}>
+                <button
+                  type="button"
+                  onClick={() => openBlueprintEditor("deploy")}
+                  className={cn(
+                    "w-full rounded-[22px] border p-4 text-left transition-colors",
+                    isLight
+                      ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
+                      : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
+                  )}
+                >
                   <div className="flex items-center gap-2">
                     <Rocket className={cn("h-4 w-4", isLight ? "text-[#5f5952]" : "text-slate-300")} />
                     <p className={cn("text-[14px] font-semibold", isLight ? "text-[#171410]" : "text-white")}>Deploy review</p>
@@ -446,7 +510,7 @@ export function WorkspaceWizardDraftPane({
                       Architect has not surfaced blockers or warnings yet. Request review when the blueprint feels directionally right.
                     </p>
                   ) : null}
-                </div>
+                </button>
               </TrackedSection>
             </div>
           ) : (
@@ -646,18 +710,23 @@ function TrackedSection({
 function PaneHeader({
   surfaceTheme,
   title,
-  subtitle
+  subtitle,
+  action
 }: {
   surfaceTheme: SurfaceTheme;
   title: string;
   subtitle: string;
+  action?: ReactNode;
 }) {
   const isLight = surfaceTheme === "light";
 
   return (
-    <div>
-      <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#8b7262]" : "text-slate-500")}>{title}</p>
-      <p className={cn("mt-1 text-[13px] leading-6", isLight ? "text-[#705b4d]" : "text-slate-300")}>{subtitle}</p>
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#8b7262]" : "text-slate-500")}>{title}</p>
+        <p className={cn("mt-1 text-[13px] leading-6", isLight ? "text-[#705b4d]" : "text-slate-300")}>{subtitle}</p>
+      </div>
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -669,7 +738,8 @@ function BasicSummaryCard({
   sourceAnalysis,
   workspacePath,
   workspaceRoot,
-  summaryLabel
+  summaryLabel,
+  onOpenBlueprintEditor
 }: {
   surfaceTheme: SurfaceTheme;
   resolvedName: string;
@@ -678,6 +748,7 @@ function BasicSummaryCard({
   workspacePath: string;
   workspaceRoot: string;
   summaryLabel: string;
+  onOpenBlueprintEditor?: (focus?: WorkspaceBlueprintEditorFocus) => void;
 }) {
   const isLight = surfaceTheme === "light";
 
@@ -700,27 +771,36 @@ function BasicSummaryCard({
             {summaryLabel}
           </p>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <SummaryMetric surfaceTheme={surfaceTheme} label="Name" value={resolvedName} icon={Sparkles} />
+          <div className="mt-4 space-y-2">
+            <SummaryMetric
+              surfaceTheme={surfaceTheme}
+              label="Name"
+              value={resolvedName}
+              icon={Sparkles}
+              onClick={() => onOpenBlueprintEditor?.("workspace")}
+            />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
               label="Template"
               value={templateLabels[resolvedTemplate]}
               icon={Zap}
+              onClick={() => onOpenBlueprintEditor?.("workspace")}
             />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
               label="Source"
               value={sourceAnalysis.label}
               icon={sourceAnalysis.kind === "clone" ? GitBranch : sourceAnalysis.kind === "website" ? Globe : FolderOpen}
+              onClick={() => onOpenBlueprintEditor?.("workspace")}
             />
             <SummaryMetric
               surfaceTheme={surfaceTheme}
               label="Path"
               value={workspacePath}
-              detail={`Root: ${workspaceRoot}`}
               icon={FolderOpen}
               mono
+              title={`Root: ${workspaceRoot}`}
+              onClick={() => onOpenBlueprintEditor?.("workspace")}
             />
           </div>
         </div>
@@ -735,7 +815,9 @@ function SummaryMetric({
   value,
   icon: Icon,
   detail,
-  mono = false
+  mono = false,
+  title,
+  onClick
 }: {
   surfaceTheme: SurfaceTheme;
   label: string;
@@ -743,44 +825,58 @@ function SummaryMetric({
   icon: typeof Sparkles;
   detail?: string;
   mono?: boolean;
+  title?: string;
+  onClick?: () => void;
 }) {
   const isLight = surfaceTheme === "light";
+  const isInteractive = Boolean(onClick);
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
       className={cn(
-        "rounded-[18px] border px-3 py-3",
-        isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]"
+        "w-full rounded-[14px] border px-3 py-2.5 text-left transition-colors",
+        isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]",
+        isInteractive &&
+          (isLight
+            ? "cursor-pointer hover:border-[#d9b78b] hover:bg-[#f7efe3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d9b78b]/60"
+            : "cursor-pointer hover:border-cyan-300/30 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/30")
       )}
+      title={title}
     >
-      <div className="flex items-start gap-2.5">
+      <div className="flex items-center gap-2.5">
         <span
           className={cn(
-            "mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-full border",
+            "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
             isLight ? "border-[#e0d7cc] bg-white text-[#615a52]" : "border-white/10 bg-white/[0.05] text-slate-300"
           )}
         >
-          <Icon className="h-3.5 w-3.5" />
+          <Icon className="h-3 w-3" />
         </span>
+
         <div className="min-w-0 flex-1">
-          <p className={cn("text-[11px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
+          <p className={cn("text-[10px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
             {label}
           </p>
           <p
             className={cn(
-              "mt-1 break-words text-[13px] font-medium leading-5",
+              "truncate text-[12px] font-medium leading-4",
               isLight ? "text-[#171410]" : "text-white",
               mono && "font-mono text-[12px]"
             )}
+            title={value}
           >
             {value}
           </p>
-          {detail ? (
-            <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#776f65]" : "text-slate-400")}>{detail}</p>
-          ) : null}
         </div>
+
+        {isInteractive ? <Pencil className={cn("h-3.5 w-3.5 shrink-0", isLight ? "text-[#8f8377]" : "text-slate-400")} /> : null}
+        {detail ? (
+          <span className={cn("shrink-0 text-[10px] leading-4", isLight ? "text-[#776f65]" : "text-slate-400")}>{detail}</span>
+        ) : null}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -820,13 +916,15 @@ function BasicSetupCard({
   template,
   rules,
   preset,
-  onRuleToggle
+  onRuleToggle,
+  onOpenBlueprintEditor
 }: {
   surfaceTheme: SurfaceTheme;
   template: WorkspaceTemplate;
   rules: WorkspaceCreateRules;
   preset: WorkspaceWizardQuickSetupPreset;
   onRuleToggle: (rule: BasicRuleToggleKey) => void;
+  onOpenBlueprintEditor?: (focus?: WorkspaceBlueprintEditorFocus) => void;
 }) {
   const isLight = surfaceTheme === "light";
   const toggleItems = buildBasicSetupToggleItems(template, rules);
@@ -840,9 +938,25 @@ function BasicSetupCard({
 
   return (
     <div className="mt-3 space-y-4">
-      {preset === "custom" ? (
-        <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom mix" />
-      ) : null}
+      <div className="flex items-center justify-between gap-2">
+        {preset === "custom" ? <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom mix" /> : <span />}
+        {onOpenBlueprintEditor ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => onOpenBlueprintEditor("workspace")}
+            className={
+              isLight
+                ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+            }
+          >
+            <Pencil className="mr-2 h-3.5 w-3.5" />
+            Edit section
+          </Button>
+        ) : null}
+      </div>
 
       <div className="space-y-2">
         {toggleItems.map((item) => (
@@ -942,37 +1056,57 @@ function SetupSpeedCard({
   surfaceTheme,
   mode,
   preset,
-  onPresetChange
+  onPresetChange,
+  onOpenBlueprintEditor
 }: {
   surfaceTheme: SurfaceTheme;
   mode: WorkspaceWizardMode;
   preset: WorkspaceWizardQuickSetupPreset;
   onPresetChange: (preset: WorkspaceWizardQuickSetupPreset) => void;
+  onOpenBlueprintEditor?: (focus?: WorkspaceBlueprintEditorFocus) => void;
 }) {
   const isLight = surfaceTheme === "light";
 
   return (
     <div
       className={cn(
-        "rounded-[22px] border p-4",
+        "rounded-xl border p-3",
         isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn("text-[10px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
             Setup speed
           </p>
-          <p className={cn("mt-1 text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
+          <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#70685f]" : "text-slate-300")}>
             {mode === "basic"
               ? "Choose how much scaffold the fast create path should write before the workspace opens."
               : "These presets also work in Advanced and update the workspace bootstrap rules."}
           </p>
         </div>
-        {preset === "custom" ? <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom mix" /> : null}
+        <div className="flex shrink-0 items-center gap-2">
+          {preset === "custom" ? <StatusPill surfaceTheme={surfaceTheme} tone="muted" label="Custom" /> : null}
+          {onOpenBlueprintEditor ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onOpenBlueprintEditor("workspace")}
+              className={
+                isLight
+                  ? "rounded-full border-[#ddd6cb] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                  : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+              }
+            >
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+              Edit
+            </Button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3 space-y-2">
         <PresetButton
           surfaceTheme={surfaceTheme}
           active={preset === "standard"}
@@ -1012,7 +1146,7 @@ function PresetButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-[18px] border px-3 py-3 text-left transition-colors",
+        "w-full rounded-[14px] border px-3 py-2 text-left transition-colors",
         active
           ? isLight
             ? "border-[#1f1b17] bg-[#1f1b17] text-white"
@@ -1022,18 +1156,20 @@ function PresetButton({
             : "border-white/10 bg-white/[0.03] text-white hover:border-white/15 hover:bg-white/[0.05]"
       )}
     >
-      <div className="flex items-center gap-2">
-        <Zap className="h-4 w-4" />
-        <p className="text-[13px] font-medium">{title}</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Zap className="h-3.5 w-3.5 shrink-0" />
+          <p className="truncate text-[12px] font-medium">{title}</p>
+        </div>
+        <p
+          className={cn(
+            "truncate text-right text-[11px] leading-4",
+            active ? "opacity-80" : isLight ? "text-[#776f65]" : "text-slate-400"
+          )}
+        >
+          {description}
+        </p>
       </div>
-      <p
-        className={cn(
-          "mt-1 text-[12px] leading-5",
-          active ? "opacity-80" : isLight ? "text-[#776f65]" : "text-slate-400"
-        )}
-      >
-        {description}
-      </p>
     </button>
   );
 }

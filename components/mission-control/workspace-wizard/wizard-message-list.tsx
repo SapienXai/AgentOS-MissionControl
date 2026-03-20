@@ -45,7 +45,7 @@ export function WizardMessageList({
 
   return (
     <ScrollArea className={cn("h-full", className)}>
-      <div className="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-5 px-2 py-4 md:gap-6 md:px-4">
+      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-4 px-2 py-4 md:gap-5 md:px-4">
         {emptyState}
         {auxiliary}
 
@@ -74,7 +74,7 @@ function MessageBubble({
     return (
       <div
         className={cn(
-          "mx-auto w-full max-w-3xl rounded-[18px] border px-4 py-3 text-[13px] leading-6",
+          "mx-auto w-full max-w-2xl rounded-2xl border px-4 py-3 text-[13px] leading-6",
           isLight
             ? "border-[#e3ddd4] bg-[#f5f0e8] text-[#5b544d]"
             : "border-white/10 bg-white/[0.05] text-slate-300"
@@ -94,7 +94,7 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        "flex w-full items-start gap-3",
+        "flex w-full items-start gap-2.5",
         isUser ? "justify-end" : "justify-start"
       )}
     >
@@ -113,23 +113,21 @@ function MessageBubble({
 
       <div
         className={cn(
-          "max-w-[min(100%,720px)]",
+          "max-w-[min(100%,680px)]",
           isUser
             ? isLight
-              ? "rounded-[22px] bg-[#191714] px-4 py-2.5 text-white"
-              : "rounded-[22px] bg-cyan-300 px-4 py-2.5 text-slate-950"
-            : isLight
-              ? "px-0 py-0 text-[#1b1815]"
-              : "px-0 py-0 text-slate-100",
+              ? "rounded-2xl border border-[#ddd6cb] bg-[#1a1715] px-3 py-2 text-white"
+              : "rounded-2xl border border-cyan-200/40 bg-cyan-300 px-3 py-2 text-slate-950"
+            : "space-y-1 px-0 py-0",
           isPending && "opacity-75"
         )}
       >
         {!isUser && message.author ? (
-          <p className={cn("mb-1 text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#8f857a]" : "text-slate-500")}>
+          <p className={cn("text-[10px] uppercase tracking-[0.2em]", isLight ? "text-[#8f857a]" : "text-slate-500")}>
             {message.author}
           </p>
         ) : null}
-        <p className={cn("whitespace-pre-wrap text-[15px] leading-7", isUser && "leading-6")}>{message.text}</p>
+        <p className={cn("whitespace-pre-wrap text-[14px] leading-7", isUser && "leading-6")}>{message.text}</p>
       </div>
     </div>
   );
@@ -145,7 +143,7 @@ function TypingBubble({
   const isLight = surfaceTheme === "light";
 
   return (
-    <div className="flex w-full items-start gap-3">
+    <div className="flex w-full items-start gap-2.5">
       <div
         className={cn(
           "mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full border",
@@ -157,14 +155,14 @@ function TypingBubble({
         <Bot className="h-3.5 w-3.5" />
       </div>
 
-      <div className="max-w-[min(100%,720px)]">
-        <p className={cn("mb-1 text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#8f857a]" : "text-slate-500")}>
+      <div className="max-w-[min(100%,680px)]">
+        <p className={cn("text-[10px] uppercase tracking-[0.2em]", isLight ? "text-[#8f857a]" : "text-slate-500")}>
           Architect
         </p>
-        <div className="flex items-center gap-3">
+        <div className="mt-1 flex items-center gap-2.5">
           <div
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-3 py-2",
+              "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5",
               isLight ? "border-[#e6dfd5] bg-white text-[#5a534c]" : "border-white/10 bg-white/[0.05] text-slate-300"
             )}
           >
@@ -172,7 +170,7 @@ function TypingBubble({
             <span className={cn("inline-flex size-1.5 animate-pulse rounded-full [animation-delay:120ms]", isLight ? "bg-[#5a534c]" : "bg-slate-300")} />
             <span className={cn("inline-flex size-1.5 animate-pulse rounded-full [animation-delay:240ms]", isLight ? "bg-[#5a534c]" : "bg-slate-300")} />
           </div>
-          <p className={cn("text-[13px] leading-6", isLight ? "text-[#6f685f]" : "text-slate-400")}>{label}</p>
+          <p className={cn("text-[12px] leading-5", isLight ? "text-[#6f685f]" : "text-slate-400")}>{label}</p>
         </div>
       </div>
     </div>
