@@ -43,6 +43,10 @@ import {
   buildDefaultWorkspaceAgents,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
+import {
+  buildWorkspaceScaffoldDocuments
+} from "@/lib/openclaw/workspace-docs";
+import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import type {
   AgentCreateInput,
   AgentDeleteInput,
@@ -73,6 +77,7 @@ import type {
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateResult,
   WorkspaceCreateRules,
+  WorkspaceDocOverride,
   WorkspaceDeleteInput,
   WorkspaceCreateInput,
   WorkspaceModelProfile,
@@ -3324,6 +3329,7 @@ export async function createWorkspaceProject(
     teamPreset: normalized.teamPreset,
     modelProfile: normalized.modelProfile,
     rules: normalized.rules,
+    docOverrides: normalized.docOverrides,
     sourceMode: normalized.sourceMode,
     agents: enabledAgents
   });
@@ -3962,6 +3968,7 @@ type ResolvedWorkspaceBootstrapInput = {
   teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
   modelProfile: WorkspaceModelProfile;
   rules: WorkspaceCreateRules;
+  docOverrides: WorkspaceDocOverride[];
   agents: WorkspaceAgentBlueprintInput[];
 };
 
@@ -4002,6 +4009,7 @@ async function scaffoldWorkspaceContents(
     modelProfile: WorkspaceModelProfile;
     rules: WorkspaceCreateRules;
     sourceMode: WorkspaceSourceMode;
+    docOverrides: WorkspaceDocOverride[];
     agents: WorkspaceAgentBlueprintInput[];
   }
 ) {
@@ -4051,93 +4059,19 @@ async function scaffoldWorkspaceContents(
     )}\n`
   );
 
-  await writeTextFileIfMissing(
-    path.join(workspacePath, "AGENTS.md"),
-    renderAgentsMarkdown({
-      name: options.name,
-      brief: options.brief,
-      template: options.template,
-      sourceMode: options.sourceMode,
-      agents: options.agents,
-      rules: options.rules
-    })
-  );
-  await writeTextFileIfMissing(
-    path.join(workspacePath, "SOUL.md"),
-    renderSoulMarkdown(options.template, options.brief)
-  );
-  await writeTextFileIfMissing(
-    path.join(workspacePath, "IDENTITY.md"),
-    renderIdentityMarkdown(options.template)
-  );
-  await writeTextFileIfMissing(
-    path.join(workspacePath, "TOOLS.md"),
-    renderToolsMarkdown(options.template, toolExamples)
-  );
-  await writeTextFileIfMissing(
-    path.join(workspacePath, "HEARTBEAT.md"),
-    renderHeartbeatMarkdown(options.template)
-  );
+  const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
+    name: options.name,
+    brief: options.brief,
+    template: options.template,
+    sourceMode: options.sourceMode,
+    rules: options.rules,
+    agents: options.agents,
+    toolExamples,
+    docOverrides: options.docOverrides
+  });
 
-  if (options.rules.generateMemory) {
-    await mkdir(path.join(workspacePath, "memory"), { recursive: true });
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "MEMORY.md"),
-      renderMemoryMarkdown(options.name, options.template, options.brief)
-    );
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "memory", "blueprint.md"),
-      renderBlueprintMarkdown(options.name, options.template, options.brief)
-    );
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "memory", "decisions.md"),
-      renderDecisionsMarkdown()
-    );
-  }
-
-  if (options.rules.generateStarterDocs) {
-    await mkdir(path.join(workspacePath, "docs"), { recursive: true });
-    await mkdir(path.join(workspacePath, "deliverables"), { recursive: true });
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "docs", "brief.md"),
-      renderBriefMarkdown(options.name, options.template, options.brief, options.sourceMode)
-    );
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "docs", "architecture.md"),
-      renderArchitectureMarkdown(options.template)
-    );
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "deliverables", "README.md"),
-      renderDeliverablesMarkdown()
-    );
-
-    if (options.template === "frontend") {
-      await writeTextFileIfMissing(
-        path.join(workspacePath, "docs", "ux-notes.md"),
-        renderTemplateSpecificDoc("ux")
-      );
-    }
-
-    if (options.template === "backend") {
-      await writeTextFileIfMissing(
-        path.join(workspacePath, "docs", "service-map.md"),
-        renderTemplateSpecificDoc("backend")
-      );
-    }
-
-    if (options.template === "research") {
-      await writeTextFileIfMissing(
-        path.join(workspacePath, "docs", "research-plan.md"),
-        renderTemplateSpecificDoc("research")
-      );
-    }
-
-    if (options.template === "content") {
-      await writeTextFileIfMissing(
-        path.join(workspacePath, "docs", "content-brief.md"),
-        renderTemplateSpecificDoc("content")
-      );
-    }
+  for (const document of scaffoldDocuments) {
+    await writeTextFileIfMissing(path.join(workspacePath, document.path), document.content);
   }
 
   for (const agent of options.agents) {
@@ -4477,6 +4411,7 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
     teamPreset,
     modelProfile,
     rules,
+    docOverrides: normalizeWorkspaceDocOverrides(input.docOverrides),
     agents: normalizedAgents
   };
 }
@@ -4944,7 +4879,7 @@ async function ensureAgentPolicySkill(params: {
   return skillId;
 }
 
-function renderAgentsMarkdown(params: {
+export function renderAgentsMarkdown(params: {
   name: string;
   brief?: string;
   template: WorkspaceTemplate;
@@ -4995,7 +4930,7 @@ ${params.brief || "Clarify the project goal, definition of done, constraints, an
 `;
 }
 
-function renderSoulMarkdown(template: WorkspaceTemplate, brief?: string) {
+export function renderSoulMarkdown(template: WorkspaceTemplate, brief?: string) {
   const templateMeta = getWorkspaceTemplateMeta(template);
 
   return `# SOUL
@@ -5017,7 +4952,7 @@ Help this ${templateMeta.label.toLowerCase()} workspace turn intent into real ou
 ${brief ? `## Active Focus\n${brief}\n` : ""}`;
 }
 
-function renderIdentityMarkdown(template: WorkspaceTemplate) {
+export function renderIdentityMarkdown(template: WorkspaceTemplate) {
   const templateMeta = getWorkspaceTemplateMeta(template);
 
   return `# IDENTITY
@@ -5029,7 +4964,7 @@ This workspace hosts a ${templateMeta.label.toLowerCase()} team coordinated thro
 `;
 }
 
-function renderToolsMarkdown(template: WorkspaceTemplate, toolExamples: string[]) {
+export function renderToolsMarkdown(template: WorkspaceTemplate, toolExamples: string[]) {
   const templateMeta = getWorkspaceTemplateMeta(template);
 
   return `# TOOLS
@@ -5045,7 +4980,7 @@ ${toolExamples.map((line) => `- ${line}`).join("\n")}
 `;
 }
 
-function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
+export function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
   const templateMeta = getWorkspaceTemplateMeta(template);
 
   return `# HEARTBEAT
@@ -5056,7 +4991,7 @@ function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
 `;
 }
 
-function renderMemoryMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
+export function renderMemoryMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
   return `# ${name} Memory
 
 Durable project facts for this ${getWorkspaceTemplateMeta(template).label.toLowerCase()} workspace.
@@ -5070,7 +5005,7 @@ ${brief || "No brief captured yet. Fill this in as soon as the project goal is c
 `;
 }
 
-function renderBlueprintMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
+export function renderBlueprintMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
   return `# ${name} Blueprint
 
 ## Workspace type
@@ -5087,7 +5022,7 @@ ${brief || "Define the target outcome, user impact, and quality bar for this wor
 `;
 }
 
-function renderDecisionsMarkdown() {
+export function renderDecisionsMarkdown() {
   return `# Decisions
 
 Use this file for durable decisions that should survive across sessions.
@@ -5100,7 +5035,7 @@ Use this file for durable decisions that should survive across sessions.
 `;
 }
 
-function renderBriefMarkdown(
+export function renderBriefMarkdown(
   name: string,
   template: WorkspaceTemplate,
   brief: string | undefined,
@@ -5125,7 +5060,7 @@ ${brief || "Clarify the main goal, target user, and success definition for this 
 `;
 }
 
-function renderArchitectureMarkdown(template: WorkspaceTemplate) {
+export function renderArchitectureMarkdown(template: WorkspaceTemplate) {
   return `# Architecture
 
 ## Current shape
@@ -5139,7 +5074,7 @@ function renderArchitectureMarkdown(template: WorkspaceTemplate) {
 `;
 }
 
-function renderDeliverablesMarkdown() {
+export function renderDeliverablesMarkdown() {
   return `# Deliverables
 
 Use this folder for substantial output artifacts that should be easy to hand off or review.
@@ -5150,7 +5085,7 @@ Use this folder for substantial output artifacts that should be easy to hand off
 `;
 }
 
-function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | "content") {
+export function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | "content") {
   if (kind === "ux") {
     return `# UX Notes
 

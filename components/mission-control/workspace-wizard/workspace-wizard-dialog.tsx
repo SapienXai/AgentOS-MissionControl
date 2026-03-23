@@ -8,6 +8,9 @@ import {
   WorkspaceWizardBlueprintEditor,
   type WorkspaceBlueprintEditorFocus
 } from "@/components/mission-control/workspace-wizard/workspace-wizard-blueprint-editor";
+import {
+  WorkspaceWizardDocumentEditor
+} from "@/components/mission-control/workspace-wizard/workspace-wizard-document-editor";
 import { WorkspaceWizardDraftPane } from "@/components/mission-control/workspace-wizard/workspace-wizard-draft-pane";
 import { WorkspaceWizardHeader } from "@/components/mission-control/workspace-wizard/workspace-wizard-header";
 import { WizardComposer } from "@/components/mission-control/workspace-wizard/wizard-composer";
@@ -102,7 +105,9 @@ export function WorkspaceWizardDialog({
   const [composerValue, setComposerValue] = useState("");
   const [isMobileBlueprintOpen, setIsMobileBlueprintOpen] = useState(false);
   const [isBlueprintEditorOpen, setIsBlueprintEditorOpen] = useState(false);
+  const [isDocumentEditorOpen, setIsDocumentEditorOpen] = useState(false);
   const [blueprintEditorFocus, setBlueprintEditorFocus] = useState<WorkspaceBlueprintEditorFocus>("workspace.name");
+  const [documentEditorPath, setDocumentEditorPath] = useState("AGENTS.md");
   const isLight = surfaceTheme === "light";
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -110,7 +115,9 @@ export function WorkspaceWizardDialog({
       setComposerValue("");
       setIsMobileBlueprintOpen(false);
       setIsBlueprintEditorOpen(false);
+      setIsDocumentEditorOpen(false);
       setBlueprintEditorFocus("workspace.name");
+      setDocumentEditorPath("AGENTS.md");
     }
 
     onOpenChange(nextOpen);
@@ -228,10 +235,32 @@ export function WorkspaceWizardDialog({
     return wizard.savePlan(planWithNote);
   };
 
+  const handleDocumentEditorSave = async (nextPlan: WorkspacePlan, summary: string) => {
+    const planWithNote = summary.trim()
+      ? {
+          ...nextPlan,
+          conversation: [
+            ...nextPlan.conversation,
+            createPlannerMessage("system", "Workspace Wizard", summary)
+          ]
+        }
+      : nextPlan;
+
+    return wizard.savePlan(planWithNote);
+  };
+
   const openBlueprintEditor = (focus: WorkspaceBlueprintEditorFocus = "workspace.name") => {
     setBlueprintEditorFocus(focus);
     setIsMobileBlueprintOpen(false);
     setIsBlueprintEditorOpen(true);
+    setIsDocumentEditorOpen(false);
+  };
+
+  const openDocumentEditor = (path: string) => {
+    setDocumentEditorPath(path);
+    setIsMobileBlueprintOpen(false);
+    setIsBlueprintEditorOpen(false);
+    setIsDocumentEditorOpen(true);
   };
 
   return (
@@ -265,6 +294,7 @@ export function WorkspaceWizardDialog({
               setComposerValue("");
               setIsMobileBlueprintOpen(false);
               setIsBlueprintEditorOpen(false);
+              setIsDocumentEditorOpen(false);
               void wizard.startFreshDraft();
             }}
             badges={headerBadges}
@@ -422,6 +452,7 @@ export function WorkspaceWizardDialog({
               basicRules={wizard.basicRules}
               basicPreset={wizard.basicPreset}
               onOpenBlueprintEditor={openBlueprintEditor}
+              onOpenDocumentEditor={openDocumentEditor}
               onBasicPresetChange={wizard.setBasicPreset}
               onBasicRuleToggle={wizard.toggleBasicRule}
               progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
@@ -487,15 +518,16 @@ export function WorkspaceWizardDialog({
                 resolvedName={resolvedName}
                 resolvedTemplate={resolvedTemplate}
                 sourceAnalysis={wizard.sourceAnalysis}
-                workspacePath={workspacePath}
-                notice={wizard.notice}
-                basicRules={wizard.basicRules}
-                basicPreset={wizard.basicPreset}
-                onOpenBlueprintEditor={openBlueprintEditor}
-                onBasicPresetChange={wizard.setBasicPreset}
-                onBasicRuleToggle={wizard.toggleBasicRule}
-                progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
-              />
+              workspacePath={workspacePath}
+              notice={wizard.notice}
+              basicRules={wizard.basicRules}
+              basicPreset={wizard.basicPreset}
+              onOpenBlueprintEditor={openBlueprintEditor}
+              onOpenDocumentEditor={openDocumentEditor}
+              onBasicPresetChange={wizard.setBasicPreset}
+              onBasicRuleToggle={wizard.toggleBasicRule}
+              progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
+            />
             </div>
           ) : null}
 
@@ -509,6 +541,19 @@ export function WorkspaceWizardDialog({
               focus={blueprintEditorFocus}
               onClose={() => setIsBlueprintEditorOpen(false)}
               onSave={handleBlueprintEditorSave}
+            />
+          ) : null}
+
+          {isDocumentEditorOpen && wizard.plan ? (
+            <WorkspaceWizardDocumentEditor
+              key={`${wizard.plan.id}:${documentEditorPath}`}
+              open={isDocumentEditorOpen}
+              surfaceTheme={surfaceTheme}
+              plan={wizard.plan}
+              path={documentEditorPath}
+              busy={wizard.isSaving}
+              onClose={() => setIsDocumentEditorOpen(false)}
+              onSave={handleDocumentEditorSave}
             />
           ) : null}
 
@@ -644,7 +689,7 @@ function BasicGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
         Start with one prompt.
       </p>
       <p className={isLight ? "text-[15px] leading-7 text-[#7f756b]" : "text-[15px] leading-7 text-slate-400"}>
-        Tell Architect what this workspace should do. Name, source, and defaults stay optional.
+        Tell Architect what this workspace should do. It will reflect the intent back and ask the next critical question.
       </p>
     </div>
   );
@@ -680,7 +725,7 @@ function LoadingGreeting({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
       }
     >
       <LoaderCircle className="h-4 w-4 animate-spin" />
-      Architect is opening the planning session and loading the latest blueprint.
+      Architect is opening the planning session and extracting intent from the latest brief.
     </div>
   );
 }

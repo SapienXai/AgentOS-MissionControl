@@ -183,12 +183,17 @@ type PlannerAgentPatch = {
   product?: Partial<WorkspacePlan["product"]>;
   workspace?: Partial<WorkspacePlan["workspace"]>;
   team?: {
+    removeAgentIds?: string[];
     persistentAgents?: Array<Partial<PlannerPersistentAgentSpec> & { id: string }>;
     allowEphemeralSubagents?: boolean;
     maxParallelRuns?: number;
     escalationRules?: string[];
   };
   operations?: {
+    removeWorkflowIds?: string[];
+    removeChannelIds?: string[];
+    removeAutomationIds?: string[];
+    removeHookIds?: string[];
     workflows?: Array<Partial<PlannerWorkflowSpec> & { id: string }>;
     channels?: Array<Partial<PlannerChannelSpec> & { id: string; type?: PlannerChannelSpec["type"] }>;
     automations?: Array<Partial<PlannerAutomationSpec> & { id: string }>;
@@ -593,8 +598,8 @@ You are the primary planning agent for Mission Control.
 
 ## Mission
 - Understand the operator's intent through conversation.
-- Draft the workspace, team, workflows, channels, and automations proactively.
-- Ask only high-value questions when uncertainty would materially change the design.
+- Draft a complete, revisable workspace plan proactively.
+- Ask questions only when no safe default exists and the workspace cannot stay coherent without one.
 
 ## Output Contract
 - Always return valid JSON only.
@@ -603,7 +608,7 @@ You are the primary planning agent for Mission Control.
 {
   "reply": "short natural language response to the operator",
   "mode": "guided | advanced | null",
-  "reviewRequested": true,
+  "reviewRequested": boolean,
   "assumptions": ["assumption you took proactively"],
   "suggestions": ["recommended next move or stronger default"],
   "questions": ["only if a decision would materially change the design"],
@@ -611,17 +616,23 @@ You are the primary planning agent for Mission Control.
 }
 
 ## Rules
-- Keep momentum. Prefer a concrete draft over hesitation.
+- Keep momentum. Prefer a complete draft over hesitation.
 - Keep the reply concise and specific, but make the patch rich and complete.
 - Treat natural language as enough. Do not wait for rigid field-by-field phrasing.
-- Ask at most one high-value question unless multiple missing decisions would materially change the architecture.
-- When the operator names the company or workspace, apply it immediately.
+- Treat the latest user message as either a fresh brief or a revision instruction against the current draft.
+- Rewrite any section the operator wants changed and refresh dependent sections in the same patch.
+- Prefer website title and domain evidence over raw action phrases when inferring names.
+- Never derive a company or workspace name from generic intent text like "workspace kurmak istiyorum" or similar action phrasing.
+- If the message includes a proper noun tied to the project, workspace, or brand, treat it as a valid name candidate unless contradicted.
+- When the operator names the company or workspace explicitly, apply it immediately.
 - If the operator asks for a role in plain language, create or adapt a persistent agent for that role.
 - Example: if the operator says "şahsi asistan ekleyelim" or "add a personal assistant", add a persistent agent like { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant", ... }.
 - Infer likely defaults and say what you assumed instead of bouncing the decision back by default.
 - Give proactive suggestions when you see a stronger workspace shape, cleaner V1, or better agent split.
-- Use patch as the source of truth. The planner layer should not need to infer intent for you.
+- Use patch as the source of truth. The planner layer should validate the draft, not force the operator to restate it.
 - When a domain or website implies a likely brand name, use it unless contradicted.
+- If a section must be removed in a revision, use the relevant removeIds list for agents, workflows, channels, automations, or hooks.
+- When changing source mode, clear stale repo and folder fields in the same patch.
 - Treat Mission Control as the source of truth. Patch only the fields that should change.
 `,
   "planner-founder": `# Founder Advisor
@@ -989,26 +1000,35 @@ function buildPlannerArchitectPrompt(
   return [
     "You are Workspace Architect, the primary planning agent inside Mission Control.",
     "Return valid JSON only. Do not wrap the JSON in markdown fences.",
-    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":true,"assumptions":["..."],"suggestions":["..."],"questions":["..."],"patch":{}}',
+    'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":boolean,"assumptions":["..."],"suggestions":["..."],"questions":["..."],"patch":{}}',
     "Rules:",
-    "- Prefer drafting likely decisions instead of asking for every missing field.",
+    "- Treat the latest user message as a fresh brief or a revision instruction against the current draft.",
+    "- Produce a complete draft, not a sparse diff. Fill the sections you can infer now and rewrite the section the operator wants changed.",
+    "- Prefer extracting intent and only filling fields that are strongly supported by the latest message or linked context.",
     "- Treat yourself as the primary intelligence layer. The planner should persist and validate state, not interpret the operator for you.",
-    "- If the operator asks you to infer, extract, or fill missing details from linked context, fill every plausible field before asking follow-up questions.",
-    "- Ask at most one high-value question when harvested context already includes a website or repo.",
+    "- If the operator asks you to infer, extract, or revise missing details from linked context, fill the supported fields and refresh dependent sections.",
+    "- Ask questions only when a safe default would be materially harmful. Most turns should not ask any question.",
     "- Do not ask about non-goals, polish, or V1 exclusions until mission, audience, and offer are already grounded.",
+    "- Prefer website title and domain evidence over raw action phrases when inferring company or workspace names.",
+    "- Never derive a company or workspace name from generic intent text like \"workspace kurmak istiyorum\" or similar action phrasing.",
+    "- If the message includes a proper noun tied to the project, workspace, or brand, treat it as a valid name candidate unless contradicted.",
+    "- If the site title or domain is ambiguous or generic, make the best assumption and keep it in the assumptions list instead of stopping the draft.",
+    "- Do not invent workflows, automations, channels, or a large agent roster without evidence, but draft the smallest coherent set that supports the brief.",
     "- Keep reply concise, concrete, and operator-facing.",
     "- Reply in the same language as the operator's latest message.",
     "- If the operator switches languages, follow the latest message only. Do not stick to an older language from earlier turns.",
     "- Treat colloquial Turkish and informal phrasing as first-class input. Infer names, roles, and intent from natural speech instead of waiting for rigid formatting.",
     "- When the operator gives a company or workspace name, apply it immediately.",
-    "- Take initiative. If the intent is clear but some details are ambiguous, choose the likeliest workable default, apply it, and tell the operator what you assumed.",
+    "- Take initiative. If the intent is clear but some details are ambiguous, choose the likeliest workable default and tell the operator what you assumed.",
     "- If the operator asks for a role or agent in plain language, add or adapt a persistent agent for that role instead of asking them to restate it formally.",
     '- Example: "şahsi asistan ekleyelim" should produce a persistent agent patch such as { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant" } with a sensible purpose and outputs.',
-    "- Give recommendations proactively when you see a stronger default, clearer role split, or cleaner V1 path.",
+    "- Give recommendations proactively when you see a stronger default, clearer role split, or cleaner V1 path, but prefer a complete draft over a sparse one.",
     "- When a domain implies a likely brand name, use it unless contradicted.",
     "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
-    "- Respect the selected workspace size. Keep the operator-facing chat as lean as the selected size, but still complete the underlying project context and blueprint.",
-    "- Use patch aggressively. Update company, product, workspace, agents, workflows, automations, and channels whenever the operator intent is clear enough.",
+    "- Respect the selected workspace size. Keep the operator-facing chat concise, but still complete the underlying project context and blueprint.",
+    "- Use patch precisely. Update company, product, workspace, agents, workflows, automations, and channels only when the operator intent clearly supports them.",
+    "- When removing an agent, workflow, channel, automation, or hook during a revision, use the relevant removeIds field and regenerate dependent items as needed.",
+    "- When changing source mode, clear stale repo and folder fields in the same patch.",
     "- When adding a new agent, generate a stable slug id and include role, name, purpose, responsibilities, and outputs.",
     "- Patch only fields that should change.",
     "",
@@ -1112,6 +1132,10 @@ function resolveArchitectThinking(plan: WorkspacePlan) {
     return "high";
   }
 
+  if (plan.intake.turnCount <= 1) {
+    return "medium";
+  }
+
   return plan.intake.turnCount <= 2 ? "low" : "medium";
 }
 
@@ -1184,7 +1208,7 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
   }
 
   if (patch.workspace) {
-    nextPlan.workspace = {
+    const nextWorkspace = {
       ...nextPlan.workspace,
       ...patch.workspace,
       rules: {
@@ -1192,9 +1216,34 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
         ...(patch.workspace.rules ?? {})
       }
     };
+
+    if (patch.workspace.sourceMode === "empty") {
+      nextWorkspace.repoUrl = undefined;
+      nextWorkspace.existingPath = undefined;
+    } else if (patch.workspace.sourceMode === "clone") {
+      nextWorkspace.existingPath = undefined;
+    } else if (patch.workspace.sourceMode === "existing") {
+      nextWorkspace.repoUrl = undefined;
+    }
+
+    if (patch.workspace.repoUrl !== undefined) {
+      nextWorkspace.sourceMode = "clone";
+      nextWorkspace.existingPath = undefined;
+    }
+
+    if (patch.workspace.existingPath !== undefined) {
+      nextWorkspace.sourceMode = "existing";
+      nextWorkspace.repoUrl = undefined;
+    }
+
+    nextPlan.workspace = nextWorkspace;
   }
 
   if (patch.team) {
+    const baseAgents = patch.team.removeAgentIds?.length
+      ? removePlannerEntries(nextPlan.team.persistentAgents, patch.team.removeAgentIds)
+      : nextPlan.team.persistentAgents;
+
     nextPlan.team = {
       ...nextPlan.team,
       allowEphemeralSubagents:
@@ -1202,26 +1251,39 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
       maxParallelRuns: patch.team.maxParallelRuns ?? nextPlan.team.maxParallelRuns,
       escalationRules: patch.team.escalationRules ?? nextPlan.team.escalationRules,
       persistentAgents: patch.team.persistentAgents
-        ? mergePlannerAgents(nextPlan.team.persistentAgents, patch.team.persistentAgents)
-        : nextPlan.team.persistentAgents
+        ? mergePlannerAgents(baseAgents, patch.team.persistentAgents)
+        : baseAgents
     };
   }
 
   if (patch.operations) {
+    const workflows = patch.operations.removeWorkflowIds?.length
+      ? removePlannerEntries(nextPlan.operations.workflows, patch.operations.removeWorkflowIds)
+      : nextPlan.operations.workflows;
+    const channels = patch.operations.removeChannelIds?.length
+      ? removePlannerEntries(nextPlan.operations.channels, patch.operations.removeChannelIds)
+      : nextPlan.operations.channels;
+    const automations = patch.operations.removeAutomationIds?.length
+      ? removePlannerEntries(nextPlan.operations.automations, patch.operations.removeAutomationIds)
+      : nextPlan.operations.automations;
+    const hooks = patch.operations.removeHookIds?.length
+      ? removePlannerEntries(nextPlan.operations.hooks, patch.operations.removeHookIds)
+      : nextPlan.operations.hooks;
+
     nextPlan.operations = {
       ...nextPlan.operations,
       workflows: patch.operations.workflows
-        ? mergePlannerWorkflows(nextPlan.operations.workflows, patch.operations.workflows)
-        : nextPlan.operations.workflows,
+        ? mergePlannerWorkflows(workflows, patch.operations.workflows)
+        : workflows,
       channels: patch.operations.channels
-        ? mergePlannerChannels(nextPlan.operations.channels, patch.operations.channels)
-        : nextPlan.operations.channels,
+        ? mergePlannerChannels(channels, patch.operations.channels)
+        : channels,
       automations: patch.operations.automations
-        ? mergePlannerAutomations(nextPlan.operations.automations, patch.operations.automations)
-        : nextPlan.operations.automations,
+        ? mergePlannerAutomations(automations, patch.operations.automations)
+        : automations,
       hooks: patch.operations.hooks
-        ? mergePlannerHooks(nextPlan.operations.hooks, patch.operations.hooks)
-        : nextPlan.operations.hooks,
+        ? mergePlannerHooks(hooks, patch.operations.hooks)
+        : hooks,
       sandbox: patch.operations.sandbox
         ? createPlannerSandboxSpec({
             ...nextPlan.operations.sandbox,
@@ -1232,6 +1294,15 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
   }
 
   return enrichWorkspacePlan(nextPlan);
+}
+
+function removePlannerEntries<T extends { id: string }>(current: T[], removeIds: string[]) {
+  const ids = new Set(removeIds.map((id) => slugify(id)).filter(Boolean));
+  if (ids.size === 0) {
+    return current;
+  }
+
+  return current.filter((entry) => !ids.has(entry.id));
 }
 
 function mergePlannerAgents(
@@ -1446,6 +1517,7 @@ function buildWorkspaceCreateInput(plan: WorkspacePlan): WorkspaceCreateInput {
     template: plan.workspace.template,
     teamPreset: "custom",
     modelProfile: plan.workspace.modelProfile,
+    docOverrides: plan.workspace.docOverrides,
     rules: {
       ...plan.workspace.rules,
       workspaceOnly: plan.operations.sandbox.workspaceOnly
@@ -1902,6 +1974,7 @@ type PlannerHarvestResult = {
   confirmations: string[];
   inferenceText: string;
   companyName?: string;
+  companyNameConfidence?: number;
   mission?: string;
   offer?: string;
   targetCustomer?: string;
@@ -1916,6 +1989,7 @@ async function harvestPlannerContext(message: string): Promise<PlannerHarvestRes
   const sources: PlannerContextSource[] = [];
   const inferenceChunks: string[] = [];
   let companyName: string | undefined;
+  let companyNameConfidence: number | undefined;
   let mission: string | undefined;
   let offer: string | undefined;
   let targetCustomer: string | undefined;
@@ -1950,8 +2024,12 @@ async function harvestPlannerContext(message: string): Promise<PlannerHarvestRes
       inferenceChunks.push(inspected.inferenceText);
     }
 
-    if (!companyName && inspected.companyName) {
+    if (
+      inspected.companyName &&
+      (companyNameConfidence === undefined || (inspected.companyNameConfidence ?? 0) >= companyNameConfidence)
+    ) {
       companyName = inspected.companyName;
+      companyNameConfidence = inspected.companyNameConfidence;
     }
 
     if (!mission && inspected.mission) {
@@ -1984,6 +2062,7 @@ async function harvestPlannerContext(message: string): Promise<PlannerHarvestRes
     confirmations: uniqueStrings(confirmations),
     inferenceText: [message.trim(), ...inferenceChunks].filter(Boolean).join("\n"),
     companyName,
+    companyNameConfidence,
     mission,
     offer,
     targetCustomer,
@@ -1998,6 +2077,7 @@ async function inspectWebsiteContext(url: string): Promise<{
   confirmations: string[];
   inferenceText: string;
   companyName?: string;
+  companyNameConfidence?: number;
   mission?: string;
   offer?: string;
   targetCustomer?: string;
@@ -2024,7 +2104,10 @@ async function inspectWebsiteContext(url: string): Promise<{
       Boolean
     );
     const harvestText = [title ?? "", description ?? "", ...snippets].filter(Boolean).join(" ");
-    const inferredCompanyName = cleanBrandName(title);
+    const titleCompanyName = cleanBrandName(title);
+    const domainCompanyName = inferCompanyNameFromUrl(url);
+    const inferredCompanyName = titleCompanyName ?? domainCompanyName;
+    const companyNameConfidence = titleCompanyName ? 96 : domainCompanyName ? domainCompanyName.length <= 3 ? 78 : 86 : undefined;
     const inferredMission = description || heading;
     const inferredOffer = description || heading;
     const templateHint = detectTemplateFromHarvest(`${title ?? ""} ${description ?? ""} ${heading ?? ""}`);
@@ -2034,11 +2117,15 @@ async function inspectWebsiteContext(url: string): Promise<{
     const confirmations: string[] = [];
 
     if (!description) {
-      confirmations.push(`I read ${label} but still need a concise mission sentence.`);
+      confirmations.push(`I read ${label}, but the mission sentence is still sparse.`);
     }
 
     if (!heading && !inferredTargetCustomer) {
       confirmations.push(`I inspected ${label}, but the target customer is still not obvious from the page alone.`);
+    }
+
+    if (inferredCompanyName && companyNameConfidence && companyNameConfidence < 80) {
+      confirmations.push(`I found a likely company name, ${inferredCompanyName}, and treated it as a draft assumption.`);
     }
 
     return {
@@ -2047,11 +2134,14 @@ async function inspectWebsiteContext(url: string): Promise<{
         label: inferredCompanyName || label,
         url,
         summary: description || heading || "Website context captured from the linked page.",
-        details: snippets
+        details: snippets,
+        confidence: companyNameConfidence
       }),
       confirmations,
       inferenceText: [
-        inferredCompanyName ? `Company name: ${inferredCompanyName}` : "",
+        inferredCompanyName
+          ? `Company name${companyNameConfidence ? ` (${companyNameConfidence}%)` : ""}: ${inferredCompanyName}`
+          : "",
         inferredMission ? `Mission: ${inferredMission}` : "",
         inferredOffer ? `Offer: ${inferredOffer}` : "",
         inferredTargetCustomer ? `Target customer: ${inferredTargetCustomer}` : "",
@@ -2062,6 +2152,7 @@ async function inspectWebsiteContext(url: string): Promise<{
         .filter(Boolean)
         .join("\n"),
       companyName: inferredCompanyName,
+      companyNameConfidence,
       mission: inferredMission,
       offer: inferredOffer,
       targetCustomer: inferredTargetCustomer,
@@ -2127,12 +2218,8 @@ function applyHarvestedDefaults(plan: WorkspacePlan, harvest: PlannerHarvestResu
     nextPlan = applyPlannerTemplate(nextPlan, harvest.template);
   }
 
-  if (!nextPlan.company.name && harvest.companyName) {
+  if (!nextPlan.company.name && harvest.companyName && (harvest.companyNameConfidence ?? 0) >= 80) {
     nextPlan.company.name = harvest.companyName;
-  }
-
-  if ((!nextPlan.workspace.name || looksLikeGeneratedWorkspaceName(nextPlan.workspace.name)) && harvest.companyName) {
-    nextPlan.workspace.name = harvest.companyName;
   }
 
   if (!nextPlan.company.mission && harvest.mission) {
@@ -2355,11 +2442,6 @@ function sanitizeHarvestedSegment(value: string) {
     .trim();
 }
 
-function looksLikeGeneratedWorkspaceName(value: string) {
-  const lower = value.toLowerCase();
-  return /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m)\b/.test(lower);
-}
-
 function detectTemplateFromHarvest(value: string): WorkspaceTemplate | undefined {
   const lower = value.toLowerCase();
 
@@ -2432,8 +2514,69 @@ function cleanBrandName(value?: string) {
     return undefined;
   }
 
-  const trimmed = value.split(/[|:-]/)[0]?.trim();
-  return trimmed && trimmed.length >= 2 ? trimmed : undefined;
+  const parts = value
+    .split(/[|:-]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  for (const part of parts) {
+    if (!isGenericBrandFragment(part)) {
+      const trimmed = part.trim();
+      if (trimmed.length >= 2) {
+        return trimmed;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function inferCompanyNameFromUrl(url: string) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+    const labels = hostname.split(".").filter(Boolean);
+
+    for (const label of labels) {
+      if (isGenericBrandFragment(label)) {
+        continue;
+      }
+
+      const candidate = label
+        .split(/[-_]+/g)
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" ")
+        .trim();
+
+      if (candidate.length >= 2) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isGenericBrandFragment(value: string) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (normalized.split(/\s+/).length > 5) {
+    return true;
+  }
+
+  return /^(home|home page|homepage|welcome|index|dashboard|login|sign in|register|contact|about|blog|news|pricing|services?|support|help|docs?|portal|app|platform|product|products|solutions?|site|website|page|start|overview|landing|demo|example|test|dev|staging|beta|production|prod|localhost|auth)$/.test(
+    normalized
+  );
 }
 
 function cleanHtmlText(value: string) {

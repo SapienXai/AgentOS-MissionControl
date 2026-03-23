@@ -67,7 +67,9 @@ export function useWorkspaceWizardDraft({
   const [planId, setPlanId] = useState<string | null>(null);
   const [hasStoredDraft, setHasStoredDraft] = useState(false);
   const [basicDraft, setBasicDraft] = useState<WorkspaceWizardBasicDraft>(createInitialWorkspaceWizardBasicDraft);
-  const [basicRules, setBasicRules] = useState<WorkspaceCreateRules>(createWorkspaceWizardQuickCreateRules);
+  const [basicRules, setBasicRules] = useState<WorkspaceCreateRules>(() =>
+    createWorkspaceWizardQuickCreateRules("fastest")
+  );
   const [notice, setNotice] = useState<WorkspaceWizardNotice | null>(null);
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -248,7 +250,7 @@ export function useWorkspaceWizardDraft({
       setPlan(null);
       setPlanId(null);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
-      setBasicRules(createWorkspaceWizardQuickCreateRules());
+      setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
       return;
     }
 
@@ -257,7 +259,7 @@ export function useWorkspaceWizardDraft({
     setPlanId(null);
     const blankDraft = createInitialWorkspaceWizardBasicDraft();
     setBasicDraft(blankDraft);
-    setBasicRules(createWorkspaceWizardQuickCreateRules());
+    setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
     const nextPlan = await ensurePlan({ resumeStored: false, draftOverride: blankDraft });
 
     if (nextPlan) {
@@ -784,7 +786,7 @@ export function useWorkspaceWizardDraft({
       setPlanId(null);
       setHasStoredDraft(false);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
-      setBasicRules(createWorkspaceWizardQuickCreateRules());
+      setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
       setNotice(null);
       setCreateProgress(null);
       setDeployProgress(null);
@@ -798,7 +800,7 @@ export function useWorkspaceWizardDraft({
     setMode(initialMode);
     setHasStoredDraft(Boolean(storedPlanId));
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
-    setBasicRules(createWorkspaceWizardQuickCreateRules());
+      setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
@@ -899,7 +901,7 @@ function getPlannerBusyStatus({
       return {
         title: "Still working",
         description:
-          "The first turn is the slowest. The planner is usually inspecting links and provisioning the hidden architect runtime."
+          "The first turn is the slowest. The planner is usually inspecting links, extracting intent, and narrowing the plan."
       };
     }
 
@@ -907,13 +909,13 @@ function getPlannerBusyStatus({
       return {
         title: "Collecting context",
         description:
-          "The architect is reading the prompt, inspecting websites or repos, and drafting the first workspace blueprint."
+          "The architect is reading the prompt, extracting intent, and drafting the next clarifying question."
       };
     }
 
     return {
       title: "Starting planner",
-      description: "The architect is opening the planning session and preparing the first draft."
+      description: "The architect is opening the planning session and preparing the first intent pass."
     };
   }
 

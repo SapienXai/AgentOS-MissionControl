@@ -156,6 +156,7 @@ export function buildWorkspaceCreateInputFromPlan(plan: WorkspacePlan): Workspac
     template: plan.workspace.template,
     teamPreset: "solo",
     modelProfile: plan.workspace.modelProfile || "balanced",
+    docOverrides: plan.workspace.docOverrides,
     rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules)
   };
 }

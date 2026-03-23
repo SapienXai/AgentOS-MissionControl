@@ -25,6 +25,11 @@ const heartbeatSchema = z.object({
   every: z.string().optional()
 });
 
+const docOverrideSchema = z.object({
+  path: z.string().min(1),
+  content: z.string()
+});
+
 const workspaceSchema = z.object({
   name: z.string().min(1),
   brief: z.string().optional(),
@@ -44,6 +49,7 @@ const workspaceSchema = z.object({
       kickoffMission: z.boolean().optional()
     })
     .optional(),
+  docOverrides: z.array(docOverrideSchema).optional(),
   agents: z
     .array(
       z.object({

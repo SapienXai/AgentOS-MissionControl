@@ -644,6 +644,11 @@ export interface WorkspaceCreateRules {
   kickoffMission: boolean;
 }
 
+export interface WorkspaceDocOverride {
+  path: string;
+  content: string;
+}
+
 export interface WorkspaceAgentBlueprintInput {
   id: string;
   role: string;
@@ -670,6 +675,7 @@ export interface WorkspaceCreateInput {
   teamPreset?: WorkspaceTeamPreset;
   modelProfile?: WorkspaceModelProfile;
   rules?: Partial<WorkspaceCreateRules>;
+  docOverrides?: WorkspaceDocOverride[];
   agents?: WorkspaceAgentBlueprintInput[];
 }
 
@@ -795,6 +801,7 @@ export interface PlannerContextSource {
   details: string[];
   status: PlannerContextSourceStatus;
   createdAt: string;
+  confidence?: number;
   url?: string;
   error?: string;
 }
@@ -953,6 +960,7 @@ export interface WorkspacePlan {
     modelId?: string;
     stackDecisions: string[];
     docs: string[];
+    docOverrides: WorkspaceDocOverride[];
     rules: WorkspaceCreateRules;
   };
   team: {

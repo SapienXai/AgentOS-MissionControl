@@ -1,4 +1,5 @@
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
+import { buildWorkspaceScaffoldDocumentPaths } from "@/lib/openclaw/workspace-docs";
 import type {
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateRules,
@@ -379,33 +380,7 @@ export function buildWorkspaceScaffoldPreview(
   template: WorkspaceTemplate,
   rules: WorkspaceCreateRules
 ) {
-  const fileSet = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"];
-
-  if (rules.generateMemory) {
-    fileSet.push("MEMORY.md", "memory/blueprint.md", "memory/decisions.md");
-  }
-
-  if (rules.generateStarterDocs) {
-    fileSet.push("docs/brief.md", "docs/architecture.md", "deliverables/README.md");
-  }
-
-  if (template === "frontend") {
-    fileSet.push("docs/ux-notes.md");
-  }
-
-  if (template === "backend") {
-    fileSet.push("docs/service-map.md");
-  }
-
-  if (template === "research") {
-    fileSet.push("docs/research-plan.md");
-  }
-
-  if (template === "content") {
-    fileSet.push("docs/content-brief.md");
-  }
-
-  return fileSet;
+  return buildWorkspaceScaffoldDocumentPaths(template, rules);
 }
 
 export function buildWorkspaceFolderPreview(rules: WorkspaceCreateRules) {

@@ -1,8 +1,8 @@
 import {
-  DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
   buildWorkspaceScaffoldPreview
 } from "@/lib/openclaw/workspace-presets";
+import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type {
   PlannerAdvisorId,
@@ -22,6 +22,7 @@ import type {
   PlannerSandboxSpec,
   PlannerWorkspaceSize,
   PlannerWorkflowSpec,
+  WorkspaceCreateRules,
   WorkspacePlan,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
@@ -75,6 +76,13 @@ const plannerWorkspaceSizeProfiles: Record<PlannerWorkspaceSize, PlannerWorkspac
     confirmationLimit: 3,
     suggestedReplyLimit: 4
   }
+};
+
+const initialWorkspaceRules: WorkspaceCreateRules = {
+  workspaceOnly: true,
+  generateStarterDocs: false,
+  generateMemory: false,
+  kickoffMission: false
 };
 
 export function getPlannerWorkspaceSizeProfile(size: PlannerWorkspaceSize): PlannerWorkspaceSizeProfile {
@@ -182,6 +190,8 @@ export function createPlannerContextSource(
     details: normalizeList(seed.details),
     status: seed.status ?? "ready",
     createdAt: seed.createdAt ?? new Date().toISOString(),
+    confidence:
+      typeof seed.confidence === "number" ? Math.max(0, Math.min(100, Math.round(seed.confidence))) : undefined,
     url: normalizeOptional(seed.url),
     error: normalizeOptional(seed.error)
   };
@@ -859,8 +869,9 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
       template,
       modelProfile: "balanced",
       stackDecisions: [],
-      docs: buildWorkspaceScaffoldPreview(template, DEFAULT_WORKSPACE_RULES),
-      rules: { ...DEFAULT_WORKSPACE_RULES }
+      docs: buildWorkspaceScaffoldPreview(template, initialWorkspaceRules),
+      docOverrides: [],
+      rules: { ...initialWorkspaceRules }
     },
     team: {
       persistentAgents: agents,
@@ -896,7 +907,7 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
       createPlannerMessage(
         "assistant",
         "Workspace Architect",
-        "Tell me what you want to make autonomous first. You can paste a website, repo, or folder path, and I will draft the workspace and only ask for the decisions that really need you."
+        "Tell me the project in one prompt. I will infer the workspace shape, draft a full first pass, and you can revise anything as many times as you want."
       )
     ],
     advisorNotes: []
@@ -958,6 +969,7 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
       buildWorkspaceScaffoldPreview(nextPlan.workspace.template, nextPlan.workspace.rules)
     )
   );
+  nextPlan.workspace.docOverrides = normalizeWorkspaceDocOverrides(nextPlan.workspace.docOverrides);
 
   nextPlan.team.persistentAgents = nextPlan.team.persistentAgents
     .map((agent) =>
@@ -1027,11 +1039,14 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
   nextPlan.operations.sandbox = createPlannerSandboxSpec(nextPlan.operations.sandbox);
   nextPlan.deploy.firstMissions = buildRecommendedFirstMissions(nextPlan);
 
-  if (!nextPlan.company.name && nextPlan.workspace.name) {
+  const companyNameLooksGenerated = looksLikeGeneratedName(nextPlan.company.name);
+  const workspaceNameLooksGenerated = looksLikeGeneratedName(nextPlan.workspace.name);
+
+  if ((!nextPlan.company.name || companyNameLooksGenerated) && nextPlan.workspace.name && !workspaceNameLooksGenerated) {
     nextPlan.company.name = nextPlan.workspace.name;
   }
 
-  if (!nextPlan.workspace.name && nextPlan.company.name) {
+  if ((!nextPlan.workspace.name || workspaceNameLooksGenerated) && nextPlan.company.name && !companyNameLooksGenerated) {
     nextPlan.workspace.name = nextPlan.company.name;
   }
 
@@ -1132,14 +1147,12 @@ export function applyPlannerInput(plan: WorkspacePlan, message: string) {
     }
   }
 
-  const explicitWorkspaceName =
-    extractNamedField(normalized, "workspace") ?? extractAssignedName(normalized, "workspace");
+  const explicitWorkspaceName = extractNamedField(normalized, "workspace");
   if (explicitWorkspaceName) {
     nextPlan.workspace.name = explicitWorkspaceName;
   }
 
-  const explicitCompanyName =
-    extractNamedField(normalized, "company") ?? extractAssignedName(normalized, "company");
+  const explicitCompanyName = extractNamedField(normalized, "company");
   if (explicitCompanyName) {
     nextPlan.company.name = explicitCompanyName;
     if (!nextPlan.workspace.name) {
@@ -1353,18 +1366,19 @@ export function createArchitectReply(
       "assistant",
       "Workspace Architect",
       language === "tr"
-        ? "Projeyi tek mesajda anlat. Bir website URL'si, repo URL'si ya da mevcut klasör yolu yapıştır; ben de buradan workspace taslağını çıkarayım."
-        : "Describe the project in one prompt. You can paste a website URL, repo URL, or an existing folder path and I will draft the workspace from there."
+        ? "Projeyi tek mesajda anlat. Bir website URL'si, repo URL'si ya da mevcut klasör yolu yapıştır; workspace taslağını çıkarırım ve istediğin kadar revize edebiliriz."
+        : "Describe the project in one prompt. You can paste a website URL, repo URL, or an existing folder path and I will draft the workspace, then we can revise it as many times as needed."
     );
   }
 
   const reviewMode = isPlannerReviewMode(plan);
   const blockers = reviewMode ? plan.deploy.blockers : [];
+  const isDialogueFirstTurn = isPlannerDialogueFirstTurn(plan);
   const confirmations = plan.intake.confirmations
     .slice(0, 2)
     .map((entry) => localizePlannerPrompt(entry, language));
   const topInferences = plan.intake.inferences
-    .slice(0, 4)
+    .slice(0, isDialogueFirstTurn ? 3 : 4)
     .map((entry) => `${entry.label}: ${entry.value}`);
   const sourceReadout = plan.intake.sources
     .slice(Math.max(0, plan.intake.sources.length - 2))
@@ -1372,6 +1386,8 @@ export function createArchitectReply(
   const topRecommendations = advisorNotes
     .flatMap((note) => note.recommendations.slice(0, 1))
     .slice(0, reviewMode ? 2 : 1);
+  const compactRecommendations = isDialogueFirstTurn ? [] : topRecommendations;
+  const lowConfidenceWebsiteSource = getPlannerLowConfidenceWebsiteSource(plan);
   const appliedChanges = summarizePlannerChanges(previousPlan, plan);
   const normalizedLastMessage = (lastUserMessage || "").toLowerCase();
   const wantsGapList = /\b(eksik|eksikleri|missing|what'?s missing|neler eksik)\b/.test(normalizedLastMessage);
@@ -1380,14 +1396,19 @@ export function createArchitectReply(
   );
 
   const lines = [
+    isDialogueFirstTurn && lowConfidenceWebsiteSource && !plan.company.name && !plan.workspace.name
+      ? language === "tr"
+        ? `Site adını ${lowConfidenceWebsiteSource.label} olarak geçici varsayım kabul ettim.`
+        : `I treated the site name as ${lowConfidenceWebsiteSource.label} for now.`
+      : "",
     appliedChanges.length > 0
       ? language === "tr"
         ? "Son yönlendirmene göre taslağı güncelledim."
         : `Applied: ${appliedChanges.join(" ")}`
-      : plan.intake.turnCount <= 1
+      : isDialogueFirstTurn
         ? language === "tr"
-          ? "İlk taslağı verdiğin brief üzerinden çıkardım."
-          : "I drafted the first pass from your brief."
+          ? "İlk mesajdan niyeti çıkardım; tam bir ilk taslak oluşturdum ve onu istediğin kadar revize edebiliriz."
+          : "I pulled the intent from your first message, drafted a full first pass, and we can revise it as many times as you want."
         : language === "tr"
           ? "Taslağı son yönlendirmene göre güncelledim."
           : "I updated the draft with your latest direction.",
@@ -1401,10 +1422,10 @@ export function createArchitectReply(
         ? `Şu anki taslak: ${topInferences.join(" | ")}.`
         : `Current draft: ${topInferences.join(" | ")}.`
       : "",
-    topRecommendations.length > 0 && !reviewMode
+    compactRecommendations.length > 0 && !reviewMode
       ? language === "tr"
-        ? `Arka plan taslağı: ${topRecommendations.join(" ")}`
-        : `Background draft: ${topRecommendations.join(" ")}`
+        ? `Arka plan taslağı: ${compactRecommendations.join(" ")}`
+        : `Background draft: ${compactRecommendations.join(" ")}`
       : "",
     wantsSourceInference && confirmations.length > 0
       ? language === "tr"
@@ -1417,27 +1438,27 @@ export function createArchitectReply(
         : !reviewMode && confirmations.length > 0
       ? confirmations.length === 1
         ? language === "tr"
-          ? `Senden sıradaki tek karar şu: ${confirmations[0]}`
-          : `Next I need one decision: ${confirmations[0]}`
+          ? `Sıradaki tek not şu: ${confirmations[0]}`
+          : `I still have one unresolved note: ${confirmations[0]}`
         : language === "tr"
-          ? `Senden sıradaki iki karar şu: ${confirmations[0]} Sonra ${lowercaseFirst(confirmations[1])}`
-          : `Next I need two decisions: ${confirmations[0]} Then ${lowercaseFirst(confirmations[1])}`
+          ? `Sıradaki iki not şu: ${confirmations[0]} Sonra ${lowercaseFirst(confirmations[1])}`
+          : `I still have two unresolved notes: ${confirmations[0]} Then ${lowercaseFirst(confirmations[1])}`
       : reviewMode && confirmations.length > 0
         ? language === "tr"
-          ? `Deploy öncesi şunları netleştirelim: ${confirmations.join("; ")}.`
-          : `Before deploy, confirm: ${confirmations.join("; ")}.`
+          ? `Deploy öncesi şu notları ele alalım: ${confirmations.join("; ")}.`
+          : `Before deploy, address: ${confirmations.join("; ")}.`
         : blockers.length > 0
           ? language === "tr"
             ? `DEPLOY öncesi hâlâ şunlara ihtiyacım var: ${blockers.join("; ")}.`
             : `Before DEPLOY I still need: ${blockers.join("; ")}.`
-          : reviewMode
-            ? language === "tr"
-              ? "Blueprint yapısal olarak DEPLOY için hazır. Uyarıları bir kez gözden geçirip ardından launch edebiliriz."
-              : "Blueprint is structurally ready for DEPLOY. Review warnings once, then launch."
-            : language === "tr"
-              ? "Taslak tutarlı görünüyor. İstersen şimdi gelişmiş editörü açayım ya da deploy review aşamasına geçeyim."
-              : "The draft is coherent. If you want, I can open the advanced editor or move into deploy review next.",
-    lastUserMessage && appliedChanges.length === 0
+            : reviewMode
+              ? language === "tr"
+                ? "Blueprint yapısal olarak DEPLOY için hazır. Uyarıları bir kez gözden geçirip ardından launch edebiliriz."
+                : "Blueprint is structurally ready for DEPLOY. Review warnings once, then launch."
+              : language === "tr"
+                ? "Taslak hazır ve revize edilmeye açık. İstersen şimdi gelişmiş editörü açayım ya da devam eden değişiklikleri birlikte yapalım."
+                : "The draft is ready and open for revision. If you want, I can open the advanced editor or keep iterating with you.",
+    lastUserMessage && appliedChanges.length === 0 && !isDialogueFirstTurn
       ? language === "tr"
         ? `Son yönlendirmeyi kaydettim: "${lastUserMessage.trim()}".`
         : `Latest direction captured: "${lastUserMessage.trim()}".`
@@ -1473,11 +1494,45 @@ function buildArchitectSummary(
 ) {
   const language = resolvePlannerReplyLanguage(plan);
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
+  const isDialogueFirstTurn = isPlannerDialogueFirstTurn(plan);
+  const lowConfidenceWebsiteSource = getPlannerLowConfidenceWebsiteSource(plan);
 
   if (!plan.intake.started) {
     return language === "tr"
-      ? `Tek bir mesajla başla. ${sizeProfile.label} modunda sohbet yalın kalır; Architect ise arka planda proje bağlamını toplar, ekibi taslaklar ve workspace blueprint'ini hazırlar.`
-      : `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests full project context, drafts the team, and prepares the workspace blueprint.`;
+      ? `Tek bir mesajla başla. ${sizeProfile.label} modunda sohbet yalın kalır; Architect ise arka planda proje bağlamını toplar, full bir workspace taslağı çıkarır ve revizyonları kabul eder.`
+      : `Start with one prompt. ${sizeProfile.label} mode keeps the chat lean while the architect still harvests project context, drafts a full workspace, and accepts revisions.`;
+  }
+
+  if (!reviewMode && isDialogueFirstTurn) {
+    const focus = plan.company.mission || plan.product.offer || plan.company.name || plan.workspace.name;
+    const sourceDescription =
+      plan.workspace.sourceMode === "clone"
+        ? language === "tr"
+          ? "klonlanacak bir repo"
+          : "a cloned repository"
+        : plan.workspace.sourceMode === "existing"
+          ? language === "tr"
+            ? "mevcut bir klasör"
+            : "an existing folder"
+          : language === "tr"
+            ? "sıfırdan"
+            : "scratch";
+    const nameNote =
+      lowConfidenceWebsiteSource && !plan.company.name && !plan.workspace.name
+        ? language === "tr"
+          ? `Site adını ${lowConfidenceWebsiteSource.label} olarak geçici varsayım kabul ettim.`
+          : `I treated the site name as ${lowConfidenceWebsiteSource.label} for now.`
+        : "";
+
+    return language === "tr"
+      ? [nameNote, focus
+          ? `İlk mesajı ${focus} etrafında ve ${sourceDescription} başlangıcıyla okudum. Tam bir ilk taslak oluşturdum ve istediğin kadar revize edebiliriz.`
+          : `İlk mesajı ${sourceDescription} başlangıcıyla okudum. Tam bir ilk taslak oluşturdum ve istediğin kadar revize edebiliriz.`]
+          .filter(Boolean)
+          .join(" ")
+      : [nameNote, `I read the first message as a ${prettify(plan.workspace.template).toLowerCase()} workspace${focus ? ` around ${focus}` : ""}, starting from ${sourceDescription}. I drafted a full first pass and we can revise it as many times as you want.`]
+          .filter(Boolean)
+          .join(" ");
   }
 
   const enabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled).length;
@@ -1495,14 +1550,14 @@ function buildArchitectSummary(
               : "Bu workspace için ilk somut çıktıyı hâlâ netleştiriyorum.",
           plan.company.targetCustomer
             ? `İlk hedef kitle: ${plan.company.targetCustomer}.`
-            : "İlk kullanıcı ya da hedef segmenti hâlâ netleştirmem gerekiyor.",
+            : "İlk hedef kitleyi de gerektiğinde revize edebiliriz.",
           plan.intake.sources.length > 0
             ? `${plan.intake.sources.length} bağlam kaynağını zaten topladım.`
             : "Bir website, repo ya da kısa bir brief ver; ilk taslağı çıkarayım.",
           `${sizeProfile.label.toLowerCase()} mod için ${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation taslağı hazır.`,
           confirmations > 0
-            ? `Senden sadece ${confirmations} kritik karar daha gerekiyor.`
-            : "Taslak tutarlı görünüyor. İstersen full blueprint'i açabilir ya da deploy review'a geçebilirim."
+            ? `Senden sadece ${confirmations} kritik revizyon daha gerekiyor.`
+            : "İlk taslak hazır; istediğin alanı revize edebiliriz."
         ].join(" ")
       : [
           plan.company.mission
@@ -1512,49 +1567,49 @@ function buildArchitectSummary(
               : "I am still shaping the first concrete outcome for this workspace.",
           plan.company.targetCustomer
             ? `First audience: ${plan.company.targetCustomer}.`
-            : "I still need the first audience or user segment.",
+            : "We can still revise the first audience or user segment.",
           plan.intake.sources.length > 0
             ? `I already harvested ${plan.intake.sources.length} context source${plan.intake.sources.length === 1 ? "" : "s"}.`
             : "Give me a website, repo, or short brief and I will infer the first draft.",
           `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are drafted for ${sizeProfile.label.toLowerCase()} mode.`,
           confirmations > 0
-            ? `Only ${confirmations} high-value decision${confirmations === 1 ? "" : "s"} still need your input.`
-            : "The draft is coherent. I can open the full blueprint or move into deploy review."
+            ? `Only ${confirmations} high-value revision${confirmations === 1 ? "" : "s"} still need your input.`
+            : "The first draft is ready and open for revision."
         ].join(" ");
   }
 
   return language === "tr"
     ? [
-        plan.company.mission
-          ? `${plan.company.name || plan.workspace.name || "Bu şirket"} ${plan.company.mission} hedefi etrafında konumlandı.`
-          : "Şirket misyonu için hâlâ kısa ve net bir cümle gerekiyor.",
-        plan.company.targetCustomer
-          ? `Birincil hedef kitle: ${plan.company.targetCustomer}.`
-          : "Hedef müşteri hâlâ eksik.",
-        `${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation yapılandırıldı.`,
-        confirmations > 0
-          ? `Senden ${confirmations} doğrulama daha gerekiyor.`
-          : blockers.length > 0
-            ? `Deploy öncesi ${blockers.length} blocker kaldı.`
-            : warnings.length > 0
-              ? `Gözden geçirilmesi gereken ${warnings.length} warning var.`
-              : "Kritik blocker kalmadı."
+      plan.company.mission
+        ? `${plan.company.name || plan.workspace.name || "Bu şirket"} ${plan.company.mission} hedefi etrafında konumlandı.`
+        : "Şirket misyonu için hâlâ kısa ve net bir cümle gerekiyor.",
+      plan.company.targetCustomer
+        ? `Birincil hedef kitle: ${plan.company.targetCustomer}.`
+        : "Hedef müşteri gerektiğinde revize edilebilir.",
+      `${enabledAgents} agent, ${enabledWorkflows} görev ve ${enabledAutomations} automation yapılandırıldı.`,
+      confirmations > 0
+        ? `Senden ${confirmations} revizyon daha gerekiyor.`
+        : blockers.length > 0
+          ? `Deploy öncesi ${blockers.length} blocker kaldı.`
+          : warnings.length > 0
+            ? `Gözden geçirilmesi gereken ${warnings.length} warning var.`
+            : "Kritik blocker kalmadı."
       ].join(" ")
     : [
-        plan.company.mission
-          ? `${plan.company.name || plan.workspace.name || "This company"} is pointed at ${plan.company.mission}.`
-          : "The company mission still needs a concise sentence.",
-        plan.company.targetCustomer
-          ? `Primary audience: ${plan.company.targetCustomer}.`
-          : "Target customer is still missing.",
-        `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
-        confirmations > 0
-          ? `${confirmations} confirmation item${confirmations === 1 ? "" : "s"} still need your input.`
-          : blockers.length > 0
-            ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain before deploy.`
-            : warnings.length > 0
-              ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain to review.`
-              : "No hard blockers remain."
+      plan.company.mission
+        ? `${plan.company.name || plan.workspace.name || "This company"} is pointed at ${plan.company.mission}.`
+        : "The company mission still needs a concise sentence.",
+      plan.company.targetCustomer
+        ? `Primary audience: ${plan.company.targetCustomer}.`
+        : "The target customer can still be revised.",
+      `${enabledAgents} agents, ${enabledWorkflows} tasks, and ${enabledAutomations} automations are configured.`,
+      confirmations > 0
+        ? `${confirmations} revision item${confirmations === 1 ? "" : "s"} still need your input.`
+        : blockers.length > 0
+          ? `${blockers.length} blocker${blockers.length === 1 ? "" : "s"} remain before deploy.`
+          : warnings.length > 0
+            ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"} remain to review.`
+            : "No hard blockers remain."
       ].join(" ");
 }
 
@@ -1567,6 +1622,10 @@ function resolvePlanStage(
 ) {
   if (!plan.intake.started) {
     return "intake";
+  }
+
+  if (!reviewMode && isPlannerDialogueFirstTurn(plan)) {
+    return plan.intake.sources.length > 0 ? "context-harvest" : "intake";
   }
 
   if (plan.status === "deploying") {
@@ -1615,6 +1674,10 @@ function resolvePlanStatus(
   }
 
   if (!reviewMode) {
+    if (isPlannerDialogueFirstTurn(plan)) {
+      return "draft";
+    }
+
     return confirmations.length > 0 ? "draft" : "review";
   }
 
@@ -1787,95 +1850,34 @@ function collectPlanWarnings(plan: WorkspacePlan) {
   return uniqueStrings(warnings);
 }
 
+function isPlannerDialogueFirstTurn(plan: WorkspacePlan) {
+  return plan.intake.turnCount <= 1 && !plan.intake.reviewRequested;
+}
+
+function getPlannerLowConfidenceWebsiteSource(plan: WorkspacePlan) {
+  return plan.intake.sources.find(
+    (source) =>
+      source.kind === "website" &&
+      source.status === "ready" &&
+      typeof source.confidence === "number" &&
+      source.confidence < 80 &&
+      Boolean(source.label)
+  );
+}
+
 function buildPlannerConfirmations(plan: WorkspacePlan) {
-  const language = resolvePlannerReplyLanguage(plan);
   const confirmations: string[] = [];
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
-  const hasReadyWebsiteSource = plan.intake.sources.some(
-    (entry) => entry.kind === "website" && entry.status === "ready"
-  );
-  const readySourceText = getPlannerReadySourceText(plan);
-  const canAskBoundaryQuestions = Boolean(
-    plan.company.mission &&
-      plan.company.targetCustomer &&
-      (plan.product.offer || plan.product.scopeV1.length > 0)
-  );
-
-  if (!plan.company.name) {
-    confirmations.push(
-      language === "tr" ? "Şirkete ya da workspace'e ne ad verelim?" : "What should I call the company or workspace?"
-    );
-  }
-
-  if (!plan.company.mission) {
-    confirmations.push(
-      language === "tr"
-        ? "Bu workspace önce tam olarak hangi çıktıyı optimize etmeli?"
-        : "What exact outcome should this workspace optimize for first?"
-    );
-  }
-
-  if (!plan.company.targetCustomer) {
-    confirmations.push(buildTargetCustomerPrompt(plan));
-  }
-
-  if (
-    !plan.workspace.repoUrl &&
-    !plan.workspace.existingPath &&
-    plan.intake.turnCount <= 1 &&
-    !mentionsSourceMode(plan.intake.latestPrompt || plan.intake.initialPrompt)
-  ) {
-    confirmations.push(
-      language === "tr"
-        ? "Buna sıfırdan mı başlayalım, bir repo mu klonlayalım, yoksa mevcut bir klasörü mü bağlayalım?"
-        : "Should this start from scratch, clone a repo, or attach an existing folder?"
-    );
-  }
-
-  if (plan.company.mission && plan.company.targetCustomer && plan.product.scopeV1.length === 0) {
-    confirmations.push(
-      language === "tr"
-        ? "İlk çıkaracağımız en küçük V1 sonucu ne olmalı?"
-        : "What is the smallest V1 outcome we should launch first?"
-    );
-  } else if (
-    plan.product.nonGoals.length === 0 &&
-    canAskBoundaryQuestions &&
-    plan.product.scopeV1.length > 0 &&
-    (plan.intake.mode === "advanced" || plan.intake.reviewRequested || plan.intake.turnCount >= 4)
-  ) {
-    confirmations.push(
-      language === "tr"
-        ? "V1 için neleri özellikle kapsam dışında bırakalım?"
-        : "What should stay explicitly out of scope for V1?"
-    );
-  }
-
-  if (
-    plan.company.mission &&
-    (plan.product.scopeV1.length > 0 || hasReadyWebsiteSource || readySourceText.length > 0) &&
-    plan.company.successSignals.length === 0 &&
-    (plan.intake.mode === "advanced" || plan.intake.reviewRequested || plan.intake.turnCount >= 3)
-  ) {
-    confirmations.push(
-      language === "tr"
-        ? "Bu workspace'in işe yaradığını bize hangi sinyal göstermeli?"
-        : "What signal should tell us this workspace is working?"
-    );
-  }
 
   for (const source of plan.intake.sources.filter((entry) => entry.status === "error")) {
     confirmations.push(
-      language === "tr"
+      resolvePlannerReplyLanguage(plan) === "tr"
         ? `${source.label} kaynağını inceleyemedim. Bu kaynak önemliyse şirket bağlamını manuel olarak doğrula.`
         : `I could not inspect ${source.label}. Confirm the company context manually if this source matters.`
     );
   }
 
-  return uniqueStrings(confirmations).slice(
-    0,
-    Math.min(hasReadyWebsiteSource ? 2 : 3, sizeProfile.confirmationLimit)
-  );
+  return uniqueStrings(confirmations).slice(0, sizeProfile.confirmationLimit);
 }
 
 function buildPlannerInferences(plan: WorkspacePlan) {
@@ -2023,6 +2025,7 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
   const suggestions: string[] = [];
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
   const sourceAudience = inferAudienceFromPlannerSources(plan);
+  const isDialogueFirstTurn = isPlannerDialogueFirstTurn(plan);
 
   if (!plan.company.targetCustomer) {
     if (sourceAudience) {
@@ -2074,11 +2077,15 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
     !plan.workspace.existingPath &&
     !mentionsSourceMode(plan.intake.latestPrompt || plan.intake.initialPrompt)
   ) {
-    suggestions.push(language === "tr" ? "Şimdilik sıfırdan başlayalım." : "Start from scratch for now.");
     suggestions.push(
       language === "tr"
-        ? "İyi bir temel bulursak mevcut bir repository klonlayabiliriz."
-        : "Clone an existing repository if you find a good base."
+        ? "Şimdilik varsayılan bir başlangıçla ilerleyelim; kaynak türünü daha sonra istediğin gibi revize edebiliriz."
+        : "We can proceed with a default starting point and revise the source later if you want."
+    );
+    suggestions.push(
+      language === "tr"
+        ? "Eğer bir repo ya da mevcut klasör istiyorsan sonraki mesajda sadece onu söylemen yeterli."
+        : "If you want a repo or existing folder, just say so in the next edit."
     );
   }
 
@@ -2090,43 +2097,16 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
     );
   }
 
-  if (confirmations.length === 0) {
+  if (confirmations.length === 0 && !isDialogueFirstTurn) {
+    suggestions.push(
+      language === "tr"
+        ? "İstersen bu taslağı şimdi daha keskin hale getirebiliriz."
+        : "If you want, we can tighten this draft right now."
+    );
     suggestions.push(language === "tr" ? "Gelişmiş editörü aç." : "Open the advanced editor.");
-    suggestions.push(language === "tr" ? "Deploy review aşamasına geç." : "Move into deploy review.");
   }
 
   return uniqueStrings(suggestions).slice(0, sizeProfile.suggestedReplyLimit);
-}
-
-function buildTargetCustomerPrompt(plan: WorkspacePlan) {
-  const language = resolvePlannerReplyLanguage(plan);
-  const sourceAudience = inferAudienceFromPlannerSources(plan);
-
-  if (sourceAudience) {
-    return language === "tr"
-      ? `İlk hedef kitleyi ${sourceAudience} olarak okuyorum. Bunu koruyalım mı, yoksa daha doğru segmenti sen mi göstereceksin?`
-      : `I can read the first audience as ${sourceAudience}. Keep that, or point me to the better segment?`;
-  }
-
-  if (plan.workspace.template === "content") {
-    if (plan.operations.channels.some((channel) => channel.type === "telegram" && channel.enabled)) {
-      return language === "tr"
-        ? "İlk kullanıcı topluluk yöneticileri, moderatörler ya da Telegram üyeleri mi olmalı?"
-        : "Should the first user be community managers, moderators, or Telegram members?";
-    }
-
-    return language === "tr"
-      ? "Bu içerik ya da topluluk workspace'i önce kime hizmet etmeli?"
-      : "Who should this content or community workspace serve first?";
-  }
-
-  if (plan.workspace.template === "research") {
-    return language === "tr"
-      ? "Bu araştırma workspace'i için ilk karar verici ya da hedef kitle kim?"
-      : "Who is the first decision-maker or audience for this research workspace?";
-  }
-
-  return language === "tr" ? "İlk kullanıcı ya da müşteri segmenti kim?" : "Who is the first user or customer segment?";
 }
 
 export function resolvePlannerReplyLanguage(plan: WorkspacePlan, lastUserMessage?: string): "en" | "tr" {
@@ -2334,7 +2314,7 @@ function detectTemplateFromText(lower: string): WorkspaceTemplate | null {
     return "content";
   }
 
-  if (/\bsoftware\b|\bapp\b|\bplatform\b|\bproduct\b/.test(lower)) {
+  if (/\bsoftware\b|\bapp\b|\bweb app\b|\bmobile app\b/.test(lower)) {
     return "software";
   }
 
@@ -2362,7 +2342,7 @@ function detectCompanyTypeFromText(lower: string): WorkspacePlan["company"]["typ
     return "internal-ops";
   }
 
-  if (/\bsaas\b|\bapp\b|\bproduct\b|\bplatform\b/.test(lower)) {
+  if (/\bsaas\b|\bapp\b|\bweb app\b|\bmobile app\b/.test(lower)) {
     return "saas";
   }
 
@@ -2381,42 +2361,17 @@ function extractNamedField(text: string, kind: "workspace" | "company") {
       : ["company", "company name", "firma", "firma adı", "şirket", "şirket adı", "company name"];
   const patterns = [
     new RegExp(
-      `\\b(?:${kindTerms.join("|")})\\b\\s*(?:name|adı|ismi)?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      `\\b(?:${kindTerms.join("|")})\\b\\s+(?:name|adı|ismi)\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
       "iu"
     ),
     new RegExp(
-      `\\b(?:adı|ismi|name)\\b\\s*(?:${kindTerms.join("|")})?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      `\\b(?:adı|ismi|name)\\b\\s*(?:of\\s+)?(?:${kindTerms.join("|")})?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
       "iu"
     )
   ];
 
   for (const pattern of patterns) {
     const value = sanitizeExtractedName(text.match(pattern)?.[1]?.trim() ?? "");
-    if (value) {
-      return value;
-    }
-  }
-
-  return undefined;
-}
-
-function extractAssignedName(text: string, kind: "workspace" | "company") {
-  const patterns =
-    kind === "company"
-      ? [
-          /\b(?:company|company name|firma|firmaya|şirket|şirkete|project|proje)\b\s+([A-Za-z0-9][A-Za-z0-9 ._-]{1,40}?)\s+(?:diyelim|olsun|olacak|koyalım|verelim)/i,
-          /\b(?:company|firma|şirket)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i,
-          /\b([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})\s+diye\b/iu
-        ]
-      : [
-          /\b(?:workspace|workspace name|project|project name|proje|projeye)\b\s+([A-Za-z0-9][A-Za-z0-9 ._-]{1,40}?)\s+(?:diyelim|olsun|olacak|koyalım|verelim)/i,
-          /\b(?:workspace|project|proje)\b(?:\s+adı|\s+ismi|\s+name)?\s*(?:is|olsun|=|:)?\s*([A-Za-z0-9][A-Za-z0-9 ._-]{1,40})/i,
-          /\b([\p{L}\p{N}][\p{L}\p{N}._-]{1,40}(?:\s+[\p{L}\p{N}][\p{L}\p{N}._-]{1,40}){0,2})\s+diye\b/iu
-        ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    const value = sanitizeExtractedName(match?.[1]?.trim() ?? "");
     if (value) {
       return value;
     }
@@ -2586,13 +2541,29 @@ function sanitizeExtractedText(value: string) {
 }
 
 function sanitizeExtractedName(value: string) {
-  return sanitizeExtractedText(value)
+  const cleaned = sanitizeExtractedText(value)
     .replace(/\b(projesi|projesini|workspace|project|company|firma|şirket)\b/gi, " ")
-    .replace(/\b(yapal[ıi]m|ekleyelim|kural[ıi]m|başlatal[ıi]m|olsun|diyelim|verelim|koyal[ıi]m)\b/gi, " ")
+    .replace(
+      /\b(yapal[ıi]m|ekleyelim|kural[ıi]m|başlatal[ıi]m|olsun|diyelim|verelim|koyal[ıi]m|kurmak|kurulum|oluşturmak|oluşturma|başlatmak|başlama|yapmak|yapma|istiyorum|istiyoruz|istemek|want|build|create|make|start|launch|setup|set up)\b/gi,
+      " "
+    )
     .replace(/\b(yeni|bir)\b/gi, " ")
     .replace(/\b(diye|olarak|benim|bide|bir de|için)\b.*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  if (!cleaned || looksLikeGeneratedName(cleaned)) {
+    return "";
+  }
+
+  return cleaned;
+}
+
+function looksLikeGeneratedName(value: string) {
+  const lower = value.toLowerCase();
+  return /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m|kurmak|kurulum|oluşturmak|oluşturma|başlatmak|başlama|yapmak|yapma|istiyorum|istiyoruz|istemek|want|build|create|make|start|launch|setup|set up)\b/.test(
+    lower
+  );
 }
 
 function normalizeUrlCandidate(value: string) {
