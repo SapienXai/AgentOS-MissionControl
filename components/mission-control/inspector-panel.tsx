@@ -32,6 +32,7 @@ import {
 import {
   badgeVariantForRuntimeStatus,
   compactPath,
+  compactMissionText,
   formatContextWindow,
   formatRelativeTime,
   formatTokens,
@@ -125,21 +126,21 @@ function InspectorPanelContent({
   const selectedLabel =
     selectedWorkspace?.name ||
     selectedAgent?.name ||
-    selectedTask?.title ||
-    selectedRuntime?.title ||
+    (selectedTask ? compactMissionText(selectedTask.title || selectedTask.mission || "Task", 48) || "Task" : null) ||
+    (selectedRuntime ? compactMissionText(selectedRuntime.title || "Run", 48) || "Run" : null) ||
     selectedModel?.name ||
     "Gateway overview";
   const selectedDetail = selectedWorkspace
-    ? "workspace focus"
+    ? "workspace"
     : selectedAgent
-      ? "agent focus"
+      ? "agent"
       : selectedTask
-        ? "task focus"
+        ? "task"
       : selectedRuntime
-        ? "run focus"
+        ? "run"
         : selectedModel
-          ? "model focus"
-          : "live selection";
+          ? "model"
+          : "selection";
   const navItems = useMemo(
     () =>
       [
@@ -313,11 +314,11 @@ function InspectorPanelContent({
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Inspector</p>
-                  <h2 className="mt-2 font-display text-[1.38rem] leading-tight text-white">{selectedLabel}</h2>
+                  <h2 className="mt-2 line-clamp-1 font-display text-[1.24rem] leading-tight text-white">
+                    {selectedLabel}
+                  </h2>
                   <p className="mt-2 text-[12px] leading-5 text-slate-400">
-                    {selectedEntity
-                      ? "Live OpenClaw-backed details for the selected entity."
-                      : "Local gateway health, recent presence, and last mission response."}
+                    {selectedEntity ? "Live selection details." : "Gateway status and activity."}
                   </p>
                 </div>
 
@@ -326,26 +327,21 @@ function InspectorPanelContent({
                 </div>
               </div>
 
-              <div className="mt-4 rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(13,20,34,0.98),rgba(6,10,18,0.96))] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Selected entity</p>
-                    <p className="mt-1.5 text-[14px] text-white">{selectedLabel}</p>
-                  </div>
-                  <Badge variant="muted">{selectedDetail}</Badge>
-                </div>
-
-                {selectedTask ? (
-                  <p className="mt-3 text-[12px] leading-5 text-slate-400">
-                    {selectedTask.runtimeCount} runs · {selectedTask.liveRunCount} live · {formatRelativeTime(selectedTask.updatedAt)}
-                  </p>
-                ) : null}
-
-                {selectedRuntime ? (
-                  <p className="mt-3 text-[12px] leading-5 text-slate-400">
-                    Run {shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · {selectedRuntime.status} · {formatRelativeTime(selectedRuntime.updatedAt)}
-                  </p>
-                ) : null}
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <Badge variant="muted">{selectedDetail}</Badge>
+                <p className="text-[12px] leading-5 text-slate-400">
+                  {selectedTask
+                    ? `${selectedTask.runtimeCount} runs · ${selectedTask.liveRunCount} live · ${formatRelativeTime(selectedTask.updatedAt)}`
+                    : selectedRuntime
+                      ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · ${selectedRuntime.status} · ${formatRelativeTime(selectedRuntime.updatedAt)}`
+                      : selectedAgent
+                        ? `${selectedAgent.activeRuntimeIds.length} active runs`
+                        : selectedWorkspace
+                          ? `${selectedWorkspace.agentIds.length} agents attached`
+                          : selectedModel
+                            ? `${selectedModel.provider} model`
+                            : "Live gateway context"}
+                </p>
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -454,17 +450,30 @@ function InspectorPanelContent({
                     <Radar className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate font-display text-[15px] text-white">{selectedLabel}</p>
+                    <p className="truncate font-display text-[15px] text-white">
+                      {selectedTask
+                        ? `${selectedTask.runtimeCount} runs`
+                        : selectedRuntime
+                          ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)}`
+                          : selectedAgent
+                            ? `${selectedAgent.activeRuntimeIds.length} active runs`
+                            : selectedWorkspace
+                              ? `${selectedWorkspace.agentIds.length} agents`
+                              : selectedModel
+                                ? selectedModel.provider
+                                : "Gateway overview"}
+                    </p>
                     <p className="mt-1 text-[12px] text-slate-400">
+                      {selectedDetail} ·{" "}
                       {selectedTask
                         ? `${effectiveTaskDetail?.liveFeed.length ?? 0} live feed events`
                         : selectedRuntime
-                        ? `${resolvedRuntimeOutput?.items.length ?? 0} transcript entries`
-                        : selectedAgent
-                          ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
-                          : selectedWorkspace
-                            ? `${selectedWorkspace.agentIds.length} agents attached`
-                            : `${snapshot.presence.length} live beacons`}
+                          ? `${resolvedRuntimeOutput?.items.length ?? 0} transcript entries`
+                          : selectedAgent
+                            ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
+                            : selectedWorkspace
+                              ? `${selectedWorkspace.agentIds.length} attached`
+                              : `${snapshot.presence.length} live beacons`}
                     </p>
                   </div>
                 </div>
@@ -974,9 +983,13 @@ function TaskContent({
 
   return (
     <>
-      <InfoCard icon={FolderGit2} title="Task overview" value={isAborted ? "aborted" : selectedTask.status}>
-        <p className="text-sm text-white">{selectedTask.mission || selectedTask.title}</p>
-        <p>{selectedTask.subtitle}</p>
+      <InfoCard icon={FolderGit2} title="Mission" value={isAborted ? "aborted" : selectedTask.status}>
+        <p className="line-clamp-1 text-sm text-white">
+          {compactMissionText(selectedTask.mission || selectedTask.title, 80) || selectedTask.title}
+        </p>
+        <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-400">
+          {compactMissionText(selectedTask.subtitle, 110) || selectedTask.subtitle}
+        </p>
         <InspectorMetricGrid
           items={[
             { label: "Runs", value: String(selectedTask.runtimeCount) },
@@ -1203,7 +1216,7 @@ function TaskFeedContent({
   if (taskDetailLoading && !taskDetail) {
     return (
       <InfoCard icon={TerminalSquare} title="Live feed" value="connecting">
-        <p>Connecting to the task feed for {task.title}…</p>
+        <p>Connecting to the task feed…</p>
       </InfoCard>
     );
   }

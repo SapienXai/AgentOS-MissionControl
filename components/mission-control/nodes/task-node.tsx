@@ -25,7 +25,12 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTaskFeed } from "@/hooks/use-task-feed";
 import type { TaskFeedEvent } from "@/lib/openclaw/types";
-import { badgeVariantForRuntimeStatus, formatTokens, toneForRuntimeStatus } from "@/lib/openclaw/presenters";
+import {
+  badgeVariantForRuntimeStatus,
+  compactMissionText,
+  formatTokens,
+  toneForRuntimeStatus
+} from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type TaskFlowNode = Node<TaskNodeData, "task">;
@@ -65,10 +70,10 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
   const latestFeedEvent = feed[feed.length - 1] ?? latestOptimisticEvent ?? null;
   const activityLabel = latestFeedEvent?.title || footerLabel;
   const activitySummary =
-    latestFeedEvent?.detail ||
+    compactMissionText(latestFeedEvent?.detail, 88) ||
     (isPendingCreation
       ? [footerLabel, bootstrapElapsedLabel ? `${bootstrapElapsedLabel} elapsed` : null].filter(Boolean).join(" · ")
-      : data.task.subtitle || footerLabel);
+      : compactMissionText(data.task.subtitle, 72) || footerLabel);
   const feedButtonCount = feed.length > 0 ? String(feed.length) : undefined;
   const feedPanelId = `task-feed-${data.task.id}`;
 
@@ -160,7 +165,9 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             />
             {isPendingCreation ? "Task bootstrap" : "Task"}
           </div>
-          <p className="mt-1.5 line-clamp-2 font-display text-[1rem] leading-5 text-white">{data.task.title}</p>
+          <p className="mt-1.5 line-clamp-1 font-display text-[0.98rem] leading-5 text-white">
+            {compactMissionText(data.task.title || data.task.mission, 44) || data.task.title}
+          </p>
           <p className="mt-1 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
             {data.task.primaryAgentName || "OpenClaw"}
           </p>
@@ -258,7 +265,9 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
       </div>
 
       <div className="mt-3 rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
-        <p className="line-clamp-2 text-[12.5px] leading-5 text-slate-100">{data.task.subtitle}</p>
+        <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-100">
+          {compactMissionText(data.task.subtitle, 72) || data.task.subtitle}
+        </p>
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-1.5">

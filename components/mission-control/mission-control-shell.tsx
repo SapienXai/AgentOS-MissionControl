@@ -175,6 +175,7 @@ export function MissionControlShell({
   const [workspaceWizardInitialMode, setWorkspaceWizardInitialMode] = useState<"basic" | "advanced">("basic");
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
+  const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
   const uiSnapshot = useMemo(
     () => mergeSnapshotWithOptimisticTasks(snapshot, optimisticMissionTasks),
     [snapshot, optimisticMissionTasks]
@@ -226,12 +227,26 @@ export function MissionControlShell({
   ).length;
 
   useEffect(() => {
-    if (!activeWorkspaceId || snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId)) {
+    if (!activeWorkspaceId) {
+      return;
+    }
+
+    const workspaceExists = snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId);
+
+    if (workspaceExists) {
+      if (pendingWorkspaceOpenId === activeWorkspaceId) {
+        setPendingWorkspaceOpenId(null);
+      }
+
+      return;
+    }
+
+    if (pendingWorkspaceOpenId === activeWorkspaceId) {
       return;
     }
 
     setActiveWorkspaceId(snapshot.workspaces[0]?.id ?? null);
-  }, [snapshot.workspaces, activeWorkspaceId]);
+  }, [snapshot.workspaces, activeWorkspaceId, pendingWorkspaceOpenId]);
 
   useEffect(() => {
     if (!selectedNodeId) {
@@ -245,10 +260,20 @@ export function MissionControlShell({
       uiSnapshot.runtimes.some((entry) => entry.id === selectedNodeId) ||
       uiSnapshot.models.some((entry) => entry.id === selectedNodeId);
 
-    if (!exists) {
-      selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
+    if (exists) {
+      if (pendingWorkspaceOpenId === selectedNodeId) {
+        setPendingWorkspaceOpenId(null);
+      }
+
+      return;
     }
-  }, [uiSnapshot, selectedNodeId, activeWorkspaceId, selectNode]);
+
+    if (pendingWorkspaceOpenId === selectedNodeId) {
+      return;
+    }
+
+    selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
+  }, [uiSnapshot, selectedNodeId, activeWorkspaceId, pendingWorkspaceOpenId, selectNode]);
 
   useEffect(() => {
     const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
@@ -1892,6 +1917,7 @@ export function MissionControlShell({
           snapshot={snapshot}
           onRefresh={refresh}
           onWorkspaceCreated={(workspaceId) => {
+            setPendingWorkspaceOpenId(workspaceId);
             setActiveWorkspaceId(workspaceId);
             selectNode(workspaceId);
           }}

@@ -39,13 +39,16 @@ import {
 } from "@/lib/openclaw/operation-progress";
 import { matchesMissionRuntime, matchesMissionText } from "@/lib/openclaw/runtime-matching";
 import {
+  compactMissionText,
+  stripMissionRouting
+} from "@/lib/openclaw/presenters";
+import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
+  buildWorkspaceAgentName,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
-import {
-  buildWorkspaceScaffoldDocuments
-} from "@/lib/openclaw/workspace-docs";
+import { buildWorkspaceScaffoldDocuments } from "@/lib/openclaw/workspace-docs";
 import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import type {
   AgentCreateInput,
@@ -992,7 +995,7 @@ function buildTaskRecord(
   return {
     id: createTaskRecordId(groupKey),
     key: groupKey,
-    title: mission || primaryRuntime?.title || "Untitled task",
+    title: compactMissionText(mission || primaryRuntime?.title || "Untitled task", 52) || "Untitled task",
     mission,
     subtitle,
     status: resolveTaskStatus(sortedRuntimes),
@@ -1139,7 +1142,7 @@ function resolveRuntimeMissionText(runtime: RuntimeRecord) {
     return null;
   }
 
-  const normalized = mission.replace(/\s+/g, " ").trim();
+  const normalized = stripMissionRouting(mission);
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -2181,7 +2184,7 @@ function buildMissionDispatchTranscriptRuntime(record: MissionDispatchRecord, se
     id: record.observation.runtimeId || `runtime:${resolvedSessionId}:${hashValue(record.id)}`,
     source: "turn",
     key: `dispatch:${record.id}`,
-    title: summarizeText(record.mission, 38) || "Recovered mission runtime",
+    title: compactMissionText(record.mission, 38) || "Recovered mission runtime",
     subtitle: integrityWarning
       ? summarizeText(integrityWarning, 90)
       : record.status === "completed" || record.status === "cancelled"
@@ -2233,7 +2236,7 @@ function createMissionDispatchRuntime(record: MissionDispatchRecord, nowMs: numb
     id: `runtime:dispatch:${record.id}`,
     source: "turn",
     key: `dispatch:${record.id}`,
-    title: summarizeText(record.mission, 38) || "Queued mission",
+    title: compactMissionText(record.mission, 38) || "Queued mission",
     subtitle: integrityWarning ? summarizeText(integrityWarning, 90) : subtitle,
     status: runtimeStatus,
     updatedAt: Number.isNaN(updatedAt) ? Date.parse(record.submittedAt) || null : updatedAt,
@@ -4347,11 +4350,15 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
   };
   const normalizedAgents = (input.agents?.length
     ? input.agents
-    : buildDefaultWorkspaceAgents(template, teamPreset)
+    : buildDefaultWorkspaceAgents(template, teamPreset, name)
   ).map((agent) => ({
     id: slugify(agent.id) || "agent",
     role: agent.role.trim() || prettifyAgentName(agent.id),
-    name: normalizeOptionalValue(agent.name) ?? prettifyAgentName(agent.id),
+    name:
+      normalizeOptionalValue(agent.name) ??
+      (agent.isPrimary
+        ? buildWorkspaceAgentName(name, agent.role, prettifyAgentName(agent.id))
+        : prettifyAgentName(agent.id)),
     enabled: agent.enabled !== false,
     emoji: normalizeOptionalValue(agent.emoji),
     theme: normalizeOptionalValue(agent.theme),
@@ -6254,7 +6261,7 @@ function formatTurnTitle(prompt: string, agentId?: string) {
     return `${prettifyAgentName(agentId)} run`;
   }
 
-  return summarizeText(normalized, 38);
+  return compactMissionText(normalized, 38) || `${prettifyAgentName(agentId)} run`;
 }
 
 function summarizeText(value: string, maxLength: number) {

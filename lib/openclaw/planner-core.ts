@@ -1,5 +1,6 @@
 import {
   buildDefaultWorkspaceAgents,
+  buildWorkspaceAgentName,
   buildWorkspaceScaffoldPreview
 } from "@/lib/openclaw/workspace-presets";
 import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
@@ -373,8 +374,8 @@ export function createPlannerRuntimeState(
   };
 }
 
-export function buildRecommendedPlannerAgents(template: WorkspaceTemplate) {
-  return buildDefaultWorkspaceAgents(template, "core").map((agent) =>
+export function buildRecommendedPlannerAgents(template: WorkspaceTemplate, workspaceName?: string) {
+  return buildDefaultWorkspaceAgents(template, "core", workspaceName).map((agent) =>
     createPlannerAgentSpec({
       id: agent.id,
       role: agent.role,
@@ -918,7 +919,7 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
 
 export function applyPlannerTemplate(plan: WorkspacePlan, template: WorkspaceTemplate) {
   const nextPlan = clonePlan(plan);
-  const recommendedAgents = buildRecommendedPlannerAgents(template);
+  const recommendedAgents = buildRecommendedPlannerAgents(template, nextPlan.workspace.name);
   const recommendedChannels = nextPlan.operations.channels.length
     ? nextPlan.operations.channels
     : buildRecommendedPlannerChannels();
@@ -994,7 +995,10 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
     .filter((agent, index, agents) => agents.findIndex((entry) => entry.id === agent.id) === index);
 
   if (nextPlan.team.persistentAgents.length === 0) {
-    nextPlan.team.persistentAgents = buildRecommendedPlannerAgents(nextPlan.workspace.template);
+    nextPlan.team.persistentAgents = buildRecommendedPlannerAgents(
+      nextPlan.workspace.template,
+      nextPlan.workspace.name
+    );
   }
 
   if (!nextPlan.team.persistentAgents.some((agent) => agent.enabled && agent.isPrimary)) {
@@ -1002,6 +1006,11 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
     if (firstEnabledAgent) {
       firstEnabledAgent.isPrimary = true;
     }
+  }
+
+  const primaryAgent = nextPlan.team.persistentAgents.find((agent) => agent.enabled && agent.isPrimary);
+  if (primaryAgent && nextPlan.workspace.name && shouldRetitlePrimaryAgent(primaryAgent.name, primaryAgent.role)) {
+    primaryAgent.name = buildWorkspaceAgentName(nextPlan.workspace.name, primaryAgent.role, primaryAgent.name);
   }
 
   nextPlan.operations.channels = nextPlan.operations.channels
@@ -2555,6 +2564,22 @@ function looksLikeGeneratedName(value: string) {
   const lower = value.toLowerCase();
   return /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m|kurmak|kurulum|oluşturmak|oluşturma|başlatmak|başlama|yapmak|yapma|istiyorum|istiyoruz|istemek|want|build|create|make|start|launch|setup|set up)\b/.test(
     lower
+  );
+}
+
+function shouldRetitlePrimaryAgent(agentName: string, role: string) {
+  const normalizedName = agentName.trim().toLowerCase();
+  const normalizedRole = role.trim().toLowerCase();
+
+  if (!normalizedName) {
+    return true;
+  }
+
+  return (
+    normalizedName === "default agent" ||
+    normalizedName === normalizedRole ||
+    normalizedName === "primary agent" ||
+    normalizedName === "workspace agent"
   );
 }
 

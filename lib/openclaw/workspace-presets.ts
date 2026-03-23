@@ -346,7 +346,8 @@ export function getWorkspaceTemplateMeta(template: WorkspaceTemplate) {
 
 export function buildDefaultWorkspaceAgents(
   template: WorkspaceTemplate,
-  teamPreset: WorkspaceTeamPreset
+  teamPreset: WorkspaceTeamPreset,
+  workspaceName?: string
 ): WorkspaceAgentBlueprintInput[] {
   const seeds = TEMPLATE_AGENT_SEEDS[template];
 
@@ -355,7 +356,11 @@ export function buildDefaultWorkspaceAgents(
     return [
       {
         ...primary,
-        name: primary.role === "Builder" ? "Default Agent" : primary.name,
+        name: buildWorkspaceAgentName(
+          workspaceName,
+          primary.role,
+          primary.role === "Builder" ? "Default Agent" : primary.name
+        ),
         policy: resolveAgentPolicy(primary.id === "browser" ? "browser" : "worker"),
         enabled: true
       }
@@ -365,7 +370,9 @@ export function buildDefaultWorkspaceAgents(
   return seeds.map((entry) => ({
     id: entry.id,
     role: entry.role,
-    name: entry.name,
+    name: entry.isPrimary
+      ? buildWorkspaceAgentName(workspaceName, entry.role, entry.name)
+      : entry.name,
       emoji: entry.emoji,
       theme: entry.theme,
       skillId: entry.skillId,
@@ -373,7 +380,43 @@ export function buildDefaultWorkspaceAgents(
       isPrimary: Boolean(entry.isPrimary),
       policy: resolveAgentPolicy(entry.id === "browser" ? "browser" : "worker"),
       enabled: true
-    }));
+  }));
+}
+
+export function buildWorkspaceAgentName(
+  workspaceName: string | undefined,
+  role: string,
+  fallbackName: string
+) {
+  const workspaceLabel = deriveWorkspaceAgentPrefix(workspaceName);
+
+  if (!workspaceLabel) {
+    return fallbackName;
+  }
+
+  const trimmedRole = role.trim();
+  return trimmedRole ? `${workspaceLabel} ${trimmedRole}` : workspaceLabel;
+}
+
+function deriveWorkspaceAgentPrefix(workspaceName: string | undefined) {
+  const trimmed = workspaceName?.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const firstLabel = !/\s/.test(trimmed) && trimmed.includes(".") ? trimmed.split(".")[0] : trimmed;
+  const cleaned = firstLabel.replace(/[^A-Za-z0-9\u00C0-\u024F]+/g, " ").trim();
+
+  if (!cleaned) {
+    return "";
+  }
+
+  return cleaned
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export function buildWorkspaceScaffoldPreview(

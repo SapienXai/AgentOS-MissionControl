@@ -119,3 +119,45 @@ export function shortId(value: string | undefined, length = 8) {
 export function compactPath(value: string) {
   return value.replace(/^\/Users\/[^/]+/, "~");
 }
+
+const missionRoutingMarkers = [/^Task output routing:/i, /^Agent operating policy:/i];
+
+export function stripMissionRouting(value: string) {
+  const normalized = value.replace(/\r\n/g, "\n").trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const keptLines: string[] = [];
+
+  for (const line of normalized.split("\n")) {
+    const trimmedLine = line.trim();
+
+    if (missionRoutingMarkers.some((pattern) => pattern.test(trimmedLine))) {
+      break;
+    }
+
+    keptLines.push(line);
+  }
+
+  return keptLines.join(" ").replace(/\s+/g, " ").trim();
+}
+
+export function compactMissionText(value: string | null | undefined, maxLength = 64) {
+  if (!value) {
+    return "";
+  }
+
+  const stripped = stripMissionRouting(value);
+
+  if (!stripped) {
+    return "";
+  }
+
+  if (stripped.length <= maxLength) {
+    return stripped;
+  }
+
+  return `${stripped.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
+}
