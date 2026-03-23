@@ -30,7 +30,7 @@ import {
   synthesizePlannerAdvisors
 } from "@/lib/openclaw/planner-core";
 import {
-  buildWorkspaceScaffoldDocuments,
+  buildWorkspaceEditableDocuments,
   normalizeWorkspaceDocOverrides,
   type WorkspaceScaffoldDocument
 } from "@/lib/openclaw/workspace-docs";
@@ -1019,7 +1019,7 @@ async function runWorkspaceDocumentRewriteTurn(
   const targetDocument = resolveWorkspaceScaffoldDocumentForRewrite(plan, targetPath, currentContent);
 
   if (!targetDocument) {
-    throw new Error(`Document ${targetPath} is not available in this workspace scaffold.`);
+    throw new Error(`Document ${targetPath} is not available in this workspace.`);
   }
 
   const result = await runPlannerRuntimeAgent<PlannerArchitectAgentResponse>({
@@ -1149,6 +1149,8 @@ function buildPlannerArchitectPrompt(
     '- Example: "şahsi asistan ekleyelim" should produce a persistent agent patch such as { id: "personal-assistant", role: "Personal Assistant", name: "Personal Assistant" } with a sensible purpose and outputs.',
     "- If the operator explicitly asks to revise a generated document, put the full revised text in workspace.docOverrides for that document path and keep unrelated plan sections unchanged.",
     "- Give recommendations proactively when you see a stronger default, clearer role split, or cleaner V1 path, but prefer a complete draft over a sparse one.",
+    "- If currentPlan includes the workspace-edit-source, treat this as an existing workspace revision: preserve the current agent roster, workflows, channels, automations, and hooks unless the latest message explicitly asks to change them.",
+    "- For narrow edits like a rename or copy tweak, patch only the directly requested fields and leave the rest of the workspace shape alone.",
     "- When a domain implies a likely brand name, use it unless contradicted.",
     "- When you still need confirmation after reading a source, state what you inferred first and ask only for the remaining ambiguity.",
     "- Respect the selected workspace size. Keep the operator-facing chat concise, but still complete the underlying project context and blueprint.",
@@ -1528,7 +1530,7 @@ function resolveWorkspaceScaffoldDocumentForRewrite(
   targetPath: string,
   currentContent?: string
 ) {
-  const documents = buildWorkspaceScaffoldDocuments({
+  const documents = buildWorkspaceEditableDocuments({
     name: plan.workspace.name || "Workspace",
     brief: plan.company.mission || plan.product.offer || undefined,
     template: plan.workspace.template,

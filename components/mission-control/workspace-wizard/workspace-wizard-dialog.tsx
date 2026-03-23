@@ -51,10 +51,12 @@ type WorkspaceWizardDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialMode?: WorkspaceWizardMode;
+  workspaceEditId?: string | null;
   surfaceTheme: SurfaceTheme;
   snapshot: MissionControlSnapshot;
   onRefresh: () => Promise<void>;
   onWorkspaceCreated: (workspaceId: string) => void;
+  onWorkspaceUpdated?: (workspaceId: string) => void;
 };
 
 type SuggestionChip = {
@@ -90,16 +92,21 @@ export function WorkspaceWizardDialog({
   open,
   onOpenChange,
   initialMode = "basic",
+  workspaceEditId = null,
   surfaceTheme,
   snapshot,
   onRefresh,
-  onWorkspaceCreated
+  onWorkspaceCreated,
+  onWorkspaceUpdated
 }: WorkspaceWizardDialogProps) {
+  const isEditingWorkspace = Boolean(workspaceEditId);
   const wizard = useWorkspaceWizardDraft({
     open,
     initialMode,
+    workspaceEditId,
     onRefresh,
-    onWorkspaceCreated
+    onWorkspaceCreated,
+    onWorkspaceUpdated
   });
 
   const [composerValue, setComposerValue] = useState("");
@@ -109,6 +116,9 @@ export function WorkspaceWizardDialog({
   const [blueprintEditorFocus, setBlueprintEditorFocus] = useState<WorkspaceBlueprintEditorFocus>("workspace.name");
   const [documentEditorPath, setDocumentEditorPath] = useState("AGENTS.md");
   const isLight = surfaceTheme === "light";
+  const editingWorkspace = isEditingWorkspace
+    ? snapshot.workspaces.find((workspace) => workspace.id === workspaceEditId) ?? null
+    : null;
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -123,17 +133,26 @@ export function WorkspaceWizardDialog({
     onOpenChange(nextOpen);
   };
 
-  const resolvedName = resolveWorkspaceWizardName(wizard.basicDraft);
-  const resolvedTemplate = inferWorkspaceWizardTemplate(
-    `${wizard.basicDraft.goal}\n${wizard.basicDraft.source}`
-  );
-  const workspacePath = buildWorkspaceWizardPathPreview(
-    snapshot.diagnostics.workspaceRoot,
-    wizard.basicDraft,
-    wizard.sourceAnalysis
-  );
+  const resolvedName = isEditingWorkspace
+    ? wizard.plan?.workspace.name ?? editingWorkspace?.name ?? resolveWorkspaceWizardName(wizard.basicDraft)
+    : resolveWorkspaceWizardName(wizard.basicDraft);
+  const resolvedTemplate = isEditingWorkspace
+    ? wizard.plan?.workspace.template ?? editingWorkspace?.bootstrap.template ?? inferWorkspaceWizardTemplate(`${wizard.basicDraft.goal}\n${wizard.basicDraft.source}`)
+    : inferWorkspaceWizardTemplate(
+        `${wizard.basicDraft.goal}\n${wizard.basicDraft.source}`
+      );
+  const workspacePath = isEditingWorkspace
+    ? wizard.plan?.workspace.directory ?? editingWorkspace?.path ?? snapshot.diagnostics.workspaceRoot
+    : buildWorkspaceWizardPathPreview(
+        snapshot.diagnostics.workspaceRoot,
+        wizard.basicDraft,
+        wizard.sourceAnalysis
+      );
 
-  const headerBadges = useMemo(() => buildHeaderBadges(wizard.mode, wizard.plan), [wizard.mode, wizard.plan]);
+  const headerBadges = useMemo(
+    () => buildHeaderBadges(wizard.mode, wizard.plan, isEditingWorkspace),
+    [isEditingWorkspace, wizard.mode, wizard.plan]
+  );
 
   const activeMessages = useMemo<WizardMessageRecord[]>(
     () => buildConversationMessages(wizard.plan, wizard.pendingUserMessage),
@@ -163,13 +182,21 @@ export function WorkspaceWizardDialog({
     wizard.isPlanLoading ||
     wizard.isDeploying ||
     wizard.isCreating ||
-    wizard.isDocumentRewriting;
+    wizard.isDocumentRewriting ||
+    wizard.isApplyingWorkspaceChanges;
   const showResumeBanner = wizard.mode === "basic" && wizard.hasStoredDraft && !wizard.plan && !wizard.isPlanLoading;
+  const hasPrimaryActionDraft = isEditingWorkspace
+    ? Boolean(wizard.plan || composerValue.trim())
+    : Boolean(wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim());
   const hasDraftToCreate = Boolean(
-    wizard.plan?.intake.started || wizard.basicDraft.goal.trim() || composerValue.trim()
+    wizard.plan?.intake.started ||
+      wizard.basicDraft.name.trim() ||
+      wizard.basicDraft.goal.trim() ||
+      wizard.basicDraft.source.trim() ||
+      composerValue.trim()
   );
   const basicQuickSetup =
-    wizard.mode === "basic" ? (
+    !isEditingWorkspace && wizard.mode === "basic" ? (
       <BasicQuickStartCard
         surfaceTheme={surfaceTheme}
         name={wizard.basicDraft.name}
@@ -203,6 +230,22 @@ export function WorkspaceWizardDialog({
   };
 
   const handleCreateWorkspace = async () => {
+    if (isEditingWorkspace) {
+      const success = composerValue.trim() ? await submitComposerIntent() : true;
+
+      if (!success) {
+        return;
+      }
+
+      const result = await wizard.applyWorkspaceChanges();
+
+      if (result) {
+        handleOpenChange(false);
+      }
+
+      return;
+    }
+
     if (composerValue.trim()) {
       const success = await submitComposerIntent();
 
@@ -219,6 +262,10 @@ export function WorkspaceWizardDialog({
   };
 
   const handleDeployWorkspace = async () => {
+    if (isEditingWorkspace) {
+      return;
+    }
+
     const result = await wizard.deployPlan();
 
     if (result) {
@@ -277,9 +324,11 @@ export function WorkspaceWizardDialog({
             : "h-[92vh] max-w-[min(1380px,96vw)] gap-0 overflow-hidden border-white/10 bg-[rgba(4,8,15,0.96)] p-0 text-white shadow-[0_40px_140px_rgba(0,0,0,0.58)]"
         }
       >
-        <DialogTitle className="sr-only">Create workspace</DialogTitle>
+        <DialogTitle className="sr-only">{isEditingWorkspace ? "Edit workspace" : "Create workspace"}</DialogTitle>
         <DialogDescription className="sr-only">
-          Create a workspace in Basic or Advanced mode using the Architect wizard.
+          {isEditingWorkspace
+            ? "Edit the existing workspace blueprint, documents, and agents using Architect."
+            : "Create a workspace in Basic or Advanced mode using the Architect wizard."}
         </DialogDescription>
         <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
           <div
@@ -295,13 +344,20 @@ export function WorkspaceWizardDialog({
             onModeChange={(mode) => {
               void wizard.switchMode(mode);
             }}
-            onNewDraft={() => {
-              setComposerValue("");
-              setIsMobileBlueprintOpen(false);
-              setIsBlueprintEditorOpen(false);
-              setIsDocumentEditorOpen(false);
-              void wizard.startFreshDraft();
-            }}
+            onNewDraft={
+              isEditingWorkspace
+                ? undefined
+                : () => {
+                    setComposerValue("");
+                    setIsMobileBlueprintOpen(false);
+                    setIsBlueprintEditorOpen(false);
+                    setIsDocumentEditorOpen(false);
+                    void wizard.startFreshDraft();
+                  }
+            }
+            title={isEditingWorkspace ? "Edit workspace" : "Create workspace"}
+            showModeToggle={!isEditingWorkspace}
+            showNewDraft={!isEditingWorkspace}
             badges={headerBadges}
           />
 
@@ -403,19 +459,33 @@ export function WorkspaceWizardDialog({
                       await submitComposerIntent();
                     }}
                     placeholder={
-                      wizard.mode === "basic"
+                      isEditingWorkspace
+                        ? "Tell Architect what to change in this workspace..."
+                        : wizard.mode === "basic"
                         ? "Describe what this workspace should do..."
                         : "Refine the blueprint with Architect..."
                     }
                     disabled={isArchitectBusy}
                     isBusy={wizard.isSending}
                     helperText={
-                      wizard.mode === "basic"
+                      isEditingWorkspace
+                        ? "Architect updates the existing workspace draft as you chat."
+                        : wizard.mode === "basic"
                         ? "Architect keeps the fast-path draft synced as you chat."
                         : "Architect updates the shared blueprint on every turn."
                     }
                     toolbar={
-                      wizard.mode === "basic" && !wizard.plan ? (
+                      isEditingWorkspace ? (
+                        <span
+                          className={
+                            isLight
+                              ? "inline-flex items-center rounded-full border border-[#e3ddd4] bg-[#f6f1ea] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-[#6c645b]"
+                              : "inline-flex items-center rounded-full border border-white/10 bg-white/[0.05] px-3 py-1 text-[11px] uppercase tracking-[0.16em] text-slate-300"
+                          }
+                        >
+                          Editing draft
+                        </span>
+                      ) : wizard.mode === "basic" && !wizard.plan ? (
                         <span
                           className={
                             isLight
@@ -445,6 +515,7 @@ export function WorkspaceWizardDialog({
             <WorkspaceWizardDraftPane
               className="hidden lg:block"
               surfaceTheme={surfaceTheme}
+              workspaceMode={isEditingWorkspace ? "edit" : "create"}
               mode={wizard.mode}
               snapshot={snapshot}
               basicQuickSetup={basicQuickSetup}
@@ -460,7 +531,15 @@ export function WorkspaceWizardDialog({
               onOpenDocumentEditor={openDocumentEditor}
               onBasicPresetChange={wizard.setBasicPreset}
               onBasicRuleToggle={wizard.toggleBasicRule}
-              progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
+              progress={
+                isEditingWorkspace
+                  ? null
+                  : wizard.mode === "basic"
+                    ? wizard.createProgress
+                    : wizard.isDeploying
+                      ? wizard.deployProgress
+                      : null
+              }
             />
           </div>
 
@@ -516,6 +595,7 @@ export function WorkspaceWizardDialog({
               <WorkspaceWizardDraftPane
                 className="min-h-0 flex-1 border-t-0 lg:hidden"
                 surfaceTheme={surfaceTheme}
+                workspaceMode={isEditingWorkspace ? "edit" : "create"}
                 mode={wizard.mode}
                 snapshot={snapshot}
                 basicQuickSetup={basicQuickSetup}
@@ -523,15 +603,23 @@ export function WorkspaceWizardDialog({
                 resolvedName={resolvedName}
                 resolvedTemplate={resolvedTemplate}
                 sourceAnalysis={wizard.sourceAnalysis}
-              workspacePath={workspacePath}
-              notice={wizard.notice}
-              basicRules={wizard.basicRules}
-              basicPreset={wizard.basicPreset}
-              onOpenBlueprintEditor={openBlueprintEditor}
-              onOpenDocumentEditor={openDocumentEditor}
-              onBasicPresetChange={wizard.setBasicPreset}
-              onBasicRuleToggle={wizard.toggleBasicRule}
-              progress={wizard.mode === "basic" ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null}
+                workspacePath={workspacePath}
+                notice={wizard.notice}
+                basicRules={wizard.basicRules}
+                basicPreset={wizard.basicPreset}
+                onOpenBlueprintEditor={openBlueprintEditor}
+                onOpenDocumentEditor={openDocumentEditor}
+                onBasicPresetChange={wizard.setBasicPreset}
+                onBasicRuleToggle={wizard.toggleBasicRule}
+                progress={
+                  isEditingWorkspace
+                    ? null
+                    : wizard.mode === "basic"
+                      ? wizard.createProgress
+                      : wizard.isDeploying
+                        ? wizard.deployProgress
+                        : null
+                }
             />
             </div>
           ) : null}
@@ -593,7 +681,41 @@ export function WorkspaceWizardDialog({
                   View blueprint
                 </Button>
 
-                {wizard.mode === "basic" ? (
+                {isEditingWorkspace ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full border-[#dfd8ce] bg-[#f7f2eb] text-[#403934] hover:bg-[#f1ebe3]"
+                          : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+                      }
+                      onClick={() => void wizard.savePlan()}
+                      disabled={!wizard.plan || wizard.isSaving || wizard.isPlanLoading}
+                    >
+                      {wizard.isSaving ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save draft
+                    </Button>
+                    <Button
+                      size="sm"
+                      className={
+                        isLight
+                          ? "rounded-full bg-[#161514] text-white hover:bg-[#26231f]"
+                          : "rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                      }
+                      onClick={() => void handleCreateWorkspace()}
+                      disabled={!hasPrimaryActionDraft || wizard.isPlanLoading || wizard.isSending || wizard.isSaving || wizard.isApplyingWorkspaceChanges}
+                    >
+                      {wizard.isApplyingWorkspaceChanges ? (
+                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="mr-2 h-4 w-4" />
+                      )}
+                      Apply changes
+                    </Button>
+                  </>
+                ) : wizard.mode === "basic" ? (
                   <>
                     <Button
                       variant="secondary"
@@ -893,7 +1015,7 @@ function FieldBlock({
   );
 }
 
-function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null) {
+function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null, isEditingWorkspace: boolean) {
   const badges: Array<{
     id: string;
     label: string;
@@ -901,7 +1023,11 @@ function buildHeaderBadges(mode: WorkspaceWizardMode, plan: WorkspacePlan | null
   }> = [
     {
       id: "surface",
-      label: mode === "basic" ? "Architect-assisted fast path" : "Architect co-design",
+      label: isEditingWorkspace
+        ? "Editing workspace"
+        : mode === "basic"
+          ? "Architect-assisted fast path"
+          : "Architect co-design",
       tone: "muted"
     }
   ];

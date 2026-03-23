@@ -86,6 +86,8 @@ const initialWorkspaceRules: WorkspaceCreateRules = {
   kickoffMission: false
 };
 
+const workspaceEditSourceId = "workspace-edit-source";
+
 export function getPlannerWorkspaceSizeProfile(size: PlannerWorkspaceSize): PlannerWorkspaceSizeProfile {
   return plannerWorkspaceSizeProfiles[size] ?? plannerWorkspaceSizeProfiles.medium;
 }
@@ -939,6 +941,7 @@ export function applyPlannerTemplate(plan: WorkspacePlan, template: WorkspaceTem
 
 export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
   let nextPlan = clonePlan(plan);
+  const isWorkspaceEditDraft = nextPlan.intake.sources.some((source) => source.id === workspaceEditSourceId);
   nextPlan.runtime = createPlannerRuntimeState(nextPlan.id, nextPlan.runtime);
 
   nextPlan.intake = createPlannerIntakeState({
@@ -994,30 +997,37 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
     )
     .filter((agent, index, agents) => agents.findIndex((entry) => entry.id === agent.id) === index);
 
-  if (nextPlan.team.persistentAgents.length === 0) {
-    nextPlan.team.persistentAgents = buildRecommendedPlannerAgents(
-      nextPlan.workspace.template,
-      nextPlan.workspace.name
-    );
-  }
+  if (!isWorkspaceEditDraft) {
+    if (nextPlan.team.persistentAgents.length === 0) {
+      nextPlan.team.persistentAgents = buildRecommendedPlannerAgents(
+        nextPlan.workspace.template,
+        nextPlan.workspace.name
+      );
+    }
 
-  if (!nextPlan.team.persistentAgents.some((agent) => agent.enabled && agent.isPrimary)) {
+    if (!nextPlan.team.persistentAgents.some((agent) => agent.enabled && agent.isPrimary)) {
+      const firstEnabledAgent = nextPlan.team.persistentAgents.find((agent) => agent.enabled);
+      if (firstEnabledAgent) {
+        firstEnabledAgent.isPrimary = true;
+      }
+    }
+
+    const primaryAgent = nextPlan.team.persistentAgents.find((agent) => agent.enabled && agent.isPrimary);
+    if (primaryAgent && nextPlan.workspace.name && shouldRetitlePrimaryAgent(primaryAgent.name, primaryAgent.role)) {
+      primaryAgent.name = buildWorkspaceAgentName(nextPlan.workspace.name, primaryAgent.role, primaryAgent.name);
+    }
+  } else if (!nextPlan.team.persistentAgents.some((agent) => agent.enabled && agent.isPrimary)) {
     const firstEnabledAgent = nextPlan.team.persistentAgents.find((agent) => agent.enabled);
     if (firstEnabledAgent) {
       firstEnabledAgent.isPrimary = true;
     }
   }
 
-  const primaryAgent = nextPlan.team.persistentAgents.find((agent) => agent.enabled && agent.isPrimary);
-  if (primaryAgent && nextPlan.workspace.name && shouldRetitlePrimaryAgent(primaryAgent.name, primaryAgent.role)) {
-    primaryAgent.name = buildWorkspaceAgentName(nextPlan.workspace.name, primaryAgent.role, primaryAgent.name);
-  }
-
   nextPlan.operations.channels = nextPlan.operations.channels
     .map((channel) => createPlannerChannelSpec(channel.type, channel))
     .filter((channel, index, channels) => channels.findIndex((entry) => entry.id === channel.id) === index);
 
-  if (nextPlan.operations.channels.length === 0) {
+  if (!isWorkspaceEditDraft && nextPlan.operations.channels.length === 0) {
     nextPlan.operations.channels = buildRecommendedPlannerChannels();
   }
 
@@ -1025,7 +1035,7 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
     .map((workflow) => createPlannerWorkflowSpec(workflow))
     .filter((workflow, index, workflows) => workflows.findIndex((entry) => entry.id === workflow.id) === index);
 
-  if (nextPlan.operations.workflows.length === 0) {
+  if (!isWorkspaceEditDraft && nextPlan.operations.workflows.length === 0) {
     nextPlan.operations.workflows = buildRecommendedPlannerWorkflows(
       nextPlan.workspace.template,
       nextPlan.team.persistentAgents
@@ -1039,14 +1049,18 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
         automations.findIndex((entry) => entry.id === automation.id) === index
     );
 
-  nextPlan = applyPlannerWorkspaceSizeProfile(nextPlan);
+  if (!isWorkspaceEditDraft) {
+    nextPlan = applyPlannerWorkspaceSizeProfile(nextPlan);
+  }
 
   nextPlan.operations.hooks = nextPlan.operations.hooks
     .map((hook) => createPlannerHookSpec(hook))
     .filter((hook, index, hooks) => hooks.findIndex((entry) => entry.id === hook.id) === index);
 
   nextPlan.operations.sandbox = createPlannerSandboxSpec(nextPlan.operations.sandbox);
-  nextPlan.deploy.firstMissions = buildRecommendedFirstMissions(nextPlan);
+  if (!isWorkspaceEditDraft) {
+    nextPlan.deploy.firstMissions = buildRecommendedFirstMissions(nextPlan);
+  }
 
   const companyNameLooksGenerated = looksLikeGeneratedName(nextPlan.company.name);
   const workspaceNameLooksGenerated = looksLikeGeneratedName(nextPlan.workspace.name);
@@ -2360,13 +2374,19 @@ function extractNamedField(text: string, kind: "workspace" | "company") {
     kind === "workspace"
       ? ["workspace", "workspace name", "project", "project name", "proje", "proje adı", "proje ismi"]
       : ["company", "company name", "firma", "firma adı", "şirket", "şirket adı", "company name"];
+  const nameTerms = ["name", "adı", "adını", "ismi", "ismini"];
+  const assignmentTerms = ["is", "should be", "=", ":", "olsun", "diyelim", "verelim", "koyalım", "yap", "yapalım", "değiştir", "değiştirelim", "olarak ayarla"];
   const patterns = [
     new RegExp(
-      `\\b(?:${kindTerms.join("|")})\\b\\s+(?:name|adı|ismi)\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      `\\b(?:${kindTerms.join("|")})\\b\\s+(?:${nameTerms.join("|")})\\s*(?:${assignmentTerms.join("|")})?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:${assignmentTerms.join("|")}|olarak|için)\\b|[.!?,]|$)`,
       "iu"
     ),
     new RegExp(
-      `\\b(?:adı|ismi|name)\\b\\s*(?:of\\s+)?(?:${kindTerms.join("|")})?\\s*(?:is|should be|=|:|olsun|diyelim|verelim|koyalım)?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olsun|diyelim|verelim|koyalım|olarak|için)\\b|[.!?,]|$)`,
+      `\\b(?:${nameTerms.join("|")})\\b\\s*(?:of\\s+)?(?:${kindTerms.join("|")})?\\s*(?:${assignmentTerms.join("|")})?\\s*([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:${assignmentTerms.join("|")}|olarak|için)\\b|[.!?,]|$)`,
+      "iu"
+    ),
+    new RegExp(
+      `\\b(?:${kindTerms.join("|")})\\b\\s+(?:${nameTerms.join("|")})\\s+(?:${assignmentTerms.join("|")})\\s+([\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}(?:\\s+[\\p{L}\\p{N}][\\p{L}\\p{N}._ -]{1,40}){0,2})(?=\\s+(?:olarak|için)\\b|[.!?,]|$)`,
       "iu"
     )
   ];

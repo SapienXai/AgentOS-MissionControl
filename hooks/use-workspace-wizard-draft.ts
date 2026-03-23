@@ -15,6 +15,7 @@ import {
 } from "@/lib/openclaw/operation-progress";
 import type {
   OperationProgressSnapshot,
+  WorkspaceEditSeed,
   WorkspaceCreateResult,
   WorkspaceCreateRules,
   WorkspaceCreateStreamEvent,
@@ -53,15 +54,19 @@ type WorkspaceWizardNotice = {
 type UseWorkspaceWizardDraftOptions = {
   open: boolean;
   initialMode: WorkspaceWizardMode;
+  workspaceEditId?: string | null;
   onRefresh: () => Promise<void>;
   onWorkspaceCreated: (workspaceId: string) => void;
+  onWorkspaceUpdated?: (workspaceId: string) => void;
 };
 
 export function useWorkspaceWizardDraft({
   open,
   initialMode,
+  workspaceEditId,
   onRefresh,
-  onWorkspaceCreated
+  onWorkspaceCreated,
+  onWorkspaceUpdated
 }: UseWorkspaceWizardDraftOptions) {
   const [mode, setMode] = useState<WorkspaceWizardMode>(initialMode);
   const [plan, setPlan] = useState<WorkspacePlan | null>(null);
@@ -79,11 +84,19 @@ export function useWorkspaceWizardDraft({
   const [isDeploying, setIsDeploying] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isDocumentRewriting, setIsDocumentRewriting] = useState(false);
+  const [isApplyingWorkspaceChanges, setIsApplyingWorkspaceChanges] = useState(false);
+  const [, setWorkspaceEditSeed] = useState<WorkspaceEditSeed | null>(null);
   const [deployProgress, setDeployProgress] = useState<OperationProgressSnapshot | null>(null);
   const [createProgress, setCreateProgress] = useState<OperationProgressSnapshot | null>(null);
   const [sendProgressStep, setSendProgressStep] = useState(0);
   const [pendingUserMessage, setPendingUserMessage] = useState<string | null>(null);
   const planRequestRef = useRef<Promise<WorkspacePlan | null> | null>(null);
+  const planRef = useRef<WorkspacePlan | null>(null);
+  const workspaceEditSeedRef = useRef<WorkspaceEditSeed | null>(null);
+  const storageKey = useMemo(
+    () => (workspaceEditId ? `${plannerStorageKey}:${workspaceEditId}` : plannerStorageKey),
+    [workspaceEditId]
+  );
 
   const sourceAnalysis = useMemo(
     () => analyzeWorkspaceWizardSourceInput(basicDraft.source),
@@ -98,13 +111,14 @@ export function useWorkspaceWizardDraft({
     () => getPlannerBusyStatus({
       initialTurn: !plan?.intake.started,
       step: isSending ? sendProgressStep : 0,
-      active: isSending || isDocumentRewriting
+      active: isSending || isDocumentRewriting || isApplyingWorkspaceChanges
     }),
-    [isDocumentRewriting, isSending, plan?.intake.started, sendProgressStep]
+    [isApplyingWorkspaceChanges, isDocumentRewriting, isSending, plan?.intake.started, sendProgressStep]
   );
 
   const commitPlan = useCallback(
     (nextPlan: WorkspacePlan | null) => {
+      planRef.current = nextPlan;
       setPlan(nextPlan);
       setHasStoredDraft(Boolean(nextPlan));
 
@@ -116,11 +130,11 @@ export function useWorkspaceWizardDraft({
       setPlanId(nextPlan.id);
       setBasicDraft(extractBasicDraftFromWorkspacePlan(nextPlan));
       setBasicRules(extractBasicRulesFromWorkspacePlan(nextPlan));
-      globalThis.localStorage?.setItem(plannerStorageKey, nextPlan.id);
+      globalThis.localStorage?.setItem(storageKey, nextPlan.id);
 
       return nextPlan;
     },
-    []
+    [storageKey]
   );
 
   useEffect(() => {
@@ -153,17 +167,52 @@ export function useWorkspaceWizardDraft({
   );
 
   const getStoredPlanId = useCallback(() => {
-    return globalThis.localStorage?.getItem(plannerStorageKey) ?? null;
-  }, []);
+    return globalThis.localStorage?.getItem(storageKey) ?? null;
+  }, [storageKey]);
 
   const clearStoredPlan = useCallback(() => {
-    globalThis.localStorage?.removeItem(plannerStorageKey);
+    globalThis.localStorage?.removeItem(storageKey);
     setHasStoredDraft(false);
-  }, []);
+  }, [storageKey]);
 
   const requestPlanner = useCallback(
     async ({ resumeStored }: { resumeStored: boolean }) => {
-      const storedPlanId = resumeStored ? globalThis.localStorage?.getItem(plannerStorageKey) : null;
+      if (workspaceEditId) {
+        const storedPlanId = resumeStored ? globalThis.localStorage?.getItem(storageKey) : null;
+
+        if (storedPlanId) {
+          const response = await fetch(`/api/planner/${storedPlanId}`, {
+            cache: "no-store"
+          });
+
+          if (response.ok) {
+            const result = (await response.json()) as { plan: WorkspacePlan };
+            return result.plan;
+          }
+        }
+
+        const response = await fetch(`/api/workspaces/${workspaceEditId}/edit-draft`, {
+          method: "POST"
+        });
+        const result = (await response.json()) as {
+          plan?: WorkspacePlan;
+          seed?: WorkspaceEditSeed;
+          error?: string;
+        };
+
+        if (!response.ok || !result.plan) {
+          throw new Error(result.error || "Unable to create workspace edit draft.");
+        }
+
+        if (result.seed) {
+          workspaceEditSeedRef.current = result.seed;
+          setWorkspaceEditSeed(result.seed);
+        }
+
+        return result.plan;
+      }
+
+      const storedPlanId = resumeStored ? globalThis.localStorage?.getItem(storageKey) : null;
 
       if (storedPlanId) {
         const response = await fetch(`/api/planner/${storedPlanId}`, {
@@ -187,7 +236,7 @@ export function useWorkspaceWizardDraft({
 
       return result.plan;
     },
-    []
+    [storageKey, workspaceEditId]
   );
 
   const ensurePlan = useCallback(
@@ -248,9 +297,24 @@ export function useWorkspaceWizardDraft({
     setPendingUserMessage(null);
     planRequestRef.current = null;
 
+    if (workspaceEditId) {
+      clearStoredPlan();
+      setPlan(null);
+      planRef.current = null;
+      setPlanId(null);
+      const nextPlan = await ensurePlan({ resumeStored: false, draftOverride: undefined });
+
+      if (nextPlan) {
+        setMode("advanced");
+      }
+
+      return;
+    }
+
     if (mode === "basic") {
       clearStoredPlan();
       setPlan(null);
+      planRef.current = null;
       setPlanId(null);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
       setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
@@ -259,6 +323,7 @@ export function useWorkspaceWizardDraft({
 
     clearStoredPlan();
     setPlan(null);
+    planRef.current = null;
     setPlanId(null);
     const blankDraft = createInitialWorkspaceWizardBasicDraft();
     setBasicDraft(blankDraft);
@@ -268,7 +333,7 @@ export function useWorkspaceWizardDraft({
     if (nextPlan) {
       setMode("advanced");
     }
-  }, [clearStoredPlan, ensurePlan, mode]);
+  }, [clearStoredPlan, ensurePlan, mode, workspaceEditId]);
 
   const discardStoredDraft = useCallback(() => {
     clearStoredPlan();
@@ -277,7 +342,7 @@ export function useWorkspaceWizardDraft({
 
   const savePlan = useCallback(
     async (planOverride?: WorkspacePlan) => {
-      const activePlan = planOverride ?? plan;
+      const activePlan = planOverride ?? planRef.current;
 
       if (!activePlan || !planId) {
         return false;
@@ -313,11 +378,11 @@ export function useWorkspaceWizardDraft({
         setIsSaving(false);
       }
     },
-    [commitPlan, plan, planId]
+    [commitPlan, planId]
   );
 
   const simulatePlan = useCallback(async (planOverride?: WorkspacePlan) => {
-    const activePlan = planOverride ?? plan;
+    const activePlan = planOverride ?? planRef.current;
 
     if (!activePlan || !planId) {
       return false;
@@ -352,7 +417,7 @@ export function useWorkspaceWizardDraft({
     } finally {
       setIsSimulating(false);
     }
-  }, [commitPlan, plan, planId]);
+  }, [commitPlan, planId]);
 
   const requestReview = useCallback(() => {
     updatePlan((current) => {
@@ -372,7 +437,11 @@ export function useWorkspaceWizardDraft({
   }, [updatePlan]);
 
   const createWorkspace = useCallback(async () => {
-    const basePlan = (await ensurePlan({ resumeStored: false, draftOverride: basicDraft })) ?? plan;
+    if (workspaceEditId) {
+      return null;
+    }
+
+    const basePlan = (await ensurePlan({ resumeStored: false, draftOverride: basicDraft })) ?? planRef.current;
 
     if (!basePlan) {
       return null;
@@ -458,10 +527,64 @@ export function useWorkspaceWizardDraft({
     } finally {
       setIsCreating(false);
     }
-  }, [basicDraft, basicRules, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, plan]);
+  }, [basicDraft, basicRules, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, workspaceEditId]);
+
+  const applyWorkspaceChanges = useCallback(async () => {
+    const activePlan = planRef.current;
+    const activeBaseline = workspaceEditSeedRef.current;
+
+    if (!activePlan || !workspaceEditId) {
+      return null;
+    }
+
+    setIsApplyingWorkspaceChanges(true);
+
+    try {
+      const response = await fetch("/api/workspaces", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          workspaceId: workspaceEditId,
+          name: activePlan.workspace.name,
+          directory: activePlan.workspace.directory,
+          plan: activePlan,
+          baseline: activeBaseline
+        })
+      });
+
+      const result = (await response.json()) as {
+        workspaceId?: string;
+        workspacePath?: string;
+        error?: string;
+      };
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || "OpenClaw could not update the workspace.");
+      }
+
+      clearStoredPlan();
+      await onRefresh();
+      onWorkspaceUpdated?.(result.workspaceId ?? workspaceEditId);
+
+      toast.success("Workspace updated.", {
+        description: result.workspacePath || activePlan.workspace.directory || activePlan.workspace.name
+      });
+
+      return result;
+    } catch (error) {
+      toast.error("Workspace update failed.", {
+        description: error instanceof Error ? error.message : "Unknown workspace error."
+      });
+      return null;
+    } finally {
+      setIsApplyingWorkspaceChanges(false);
+    }
+  }, [clearStoredPlan, onRefresh, onWorkspaceUpdated, workspaceEditId]);
 
   const deployPlan = useCallback(async () => {
-    const activePlan = plan;
+    const activePlan = planRef.current;
 
     if (!activePlan || !planId) {
       return null;
@@ -545,7 +668,7 @@ export function useWorkspaceWizardDraft({
     } finally {
       setIsDeploying(false);
     }
-  }, [clearStoredPlan, commitPlan, onRefresh, onWorkspaceCreated, plan, planId]);
+  }, [clearStoredPlan, commitPlan, onRefresh, onWorkspaceCreated, planId]);
 
   const submitArchitectTurn = useCallback(
     async (message: string) => {
@@ -701,8 +824,10 @@ export function useWorkspaceWizardDraft({
       setMode("advanced");
       setNotice({
         tone: "muted",
-        title: "Resumed previous draft",
-        description: "Architect restored your earlier blueprint so you can keep shaping the same workspace."
+        title: workspaceEditId ? "Resumed workspace edit" : "Resumed previous draft",
+        description: workspaceEditId
+          ? "Architect restored your earlier edit session so you can keep shaping the same workspace."
+          : "Architect restored your earlier blueprint so you can keep shaping the same workspace."
       });
       return true;
     } catch (error) {
@@ -714,11 +839,20 @@ export function useWorkspaceWizardDraft({
       setIsPlanLoading(false);
       planRequestRef.current = null;
     }
-  }, [commitPlan, getStoredPlanId]);
+  }, [commitPlan, getStoredPlanId, workspaceEditId]);
 
   const switchMode = useCallback(
     async (nextMode: WorkspaceWizardMode) => {
       if (nextMode === mode) {
+        return;
+      }
+
+      if (workspaceEditId) {
+        if (nextMode === "basic") {
+          return;
+        }
+
+        setMode("advanced");
         return;
       }
 
@@ -770,7 +904,7 @@ export function useWorkspaceWizardDraft({
 
       setMode("basic");
     },
-    [basicDraft, basicRules, commitPlan, ensurePlan, mode, plan]
+    [basicDraft, basicRules, commitPlan, ensurePlan, mode, plan, workspaceEditId]
   );
 
   const setBasicGoal = useCallback((goal: string) => {
@@ -781,9 +915,11 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) =>
-          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
-        );
+        setPlan((activePlan) => {
+          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          planRef.current = nextPlan;
+          return nextPlan;
+        });
       }
 
       return nextDraft;
@@ -798,9 +934,11 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) =>
-          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
-        );
+        setPlan((activePlan) => {
+          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          planRef.current = nextPlan;
+          return nextPlan;
+        });
       }
 
       return nextDraft;
@@ -815,9 +953,11 @@ export function useWorkspaceWizardDraft({
       };
 
       if (mode === "basic") {
-        setPlan((activePlan) =>
-          activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan
-        );
+        setPlan((activePlan) => {
+          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          planRef.current = nextPlan;
+          return nextPlan;
+        });
       }
 
       return nextDraft;
@@ -828,9 +968,11 @@ export function useWorkspaceWizardDraft({
     (preset: WorkspaceWizardQuickSetupPreset) => {
       const nextRules = createWorkspaceWizardQuickCreateRules(preset);
       setBasicRules(nextRules);
-      setPlan((activePlan) =>
-        activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan
-      );
+      setPlan((activePlan) => {
+        const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan;
+        planRef.current = nextPlan;
+        return nextPlan;
+      });
     },
     [basicDraft]
   );
@@ -844,9 +986,11 @@ export function useWorkspaceWizardDraft({
           workspaceOnly: true
         };
 
-        setPlan((activePlan) =>
-          activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan
-        );
+        setPlan((activePlan) => {
+          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan;
+          planRef.current = nextPlan;
+          return nextPlan;
+        });
 
         return nextRules;
       });
@@ -858,6 +1002,7 @@ export function useWorkspaceWizardDraft({
     if (!open) {
       setMode(initialMode);
       setPlan(null);
+      planRef.current = null;
       setPlanId(null);
       setHasStoredDraft(false);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
@@ -866,33 +1011,46 @@ export function useWorkspaceWizardDraft({
       setCreateProgress(null);
       setDeployProgress(null);
       setIsDocumentRewriting(false);
+      setIsApplyingWorkspaceChanges(false);
       setPendingUserMessage(null);
+      setWorkspaceEditSeed(null);
+      workspaceEditSeedRef.current = null;
       planRequestRef.current = null;
       return;
     }
 
     const storedPlanId = getStoredPlanId();
 
-    setMode(initialMode);
-    setHasStoredDraft(Boolean(storedPlanId));
+    setMode(workspaceEditId ? "advanced" : initialMode);
+    setHasStoredDraft(!workspaceEditId && Boolean(storedPlanId));
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
     setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
     setIsDocumentRewriting(false);
+    setIsApplyingWorkspaceChanges(false);
     setPendingUserMessage(null);
+    setWorkspaceEditSeed(null);
+    workspaceEditSeedRef.current = null;
     planRequestRef.current = null;
 
-    if (initialMode === "advanced") {
+    if (!workspaceEditId && initialMode !== "advanced") {
+      setPlan(null);
+      planRef.current = null;
+      setPlanId(null);
+      return;
+    }
+
+    if (workspaceEditId || initialMode === "advanced") {
       const request = (async () => {
         setIsPlanLoading(true);
 
         try {
-          const nextPlan = await requestPlanner({ resumeStored: true });
+          const nextPlan = await requestPlanner({ resumeStored: !workspaceEditId });
           const committedPlan = commitPlan(nextPlan);
 
-          if (storedPlanId && committedPlan) {
+          if (!workspaceEditId && storedPlanId && committedPlan) {
             setNotice({
               tone: "muted",
               title: "Resumed previous draft",
@@ -916,9 +1074,10 @@ export function useWorkspaceWizardDraft({
       void request;
     } else {
       setPlan(null);
+      planRef.current = null;
       setPlanId(null);
     }
-  }, [commitPlan, getStoredPlanId, initialMode, open, requestPlanner]);
+  }, [commitPlan, getStoredPlanId, initialMode, open, requestPlanner, workspaceEditId]);
 
   return {
     mode,
@@ -936,6 +1095,7 @@ export function useWorkspaceWizardDraft({
     isSimulating,
     isDeploying,
     isCreating,
+    isApplyingWorkspaceChanges,
     isDocumentRewriting,
     createProgress,
     deployProgress,
@@ -957,6 +1117,7 @@ export function useWorkspaceWizardDraft({
     requestReview,
     createWorkspace,
     deployPlan,
+    applyWorkspaceChanges,
     submitArchitectTurn,
     rewriteDocumentWithArchitect
   };

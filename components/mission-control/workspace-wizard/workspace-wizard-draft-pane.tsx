@@ -36,12 +36,13 @@ import type {
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
 import { buildWorkspaceScaffoldPreview, WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
-import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
+import { buildWorkspaceEditableDocuments, normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import type { WorkspaceWizardQuickSetupPreset } from "@/lib/openclaw/workspace-wizard-mappers";
 import type { WorkspaceWizardSourceAnalysis } from "@/lib/openclaw/workspace-wizard-inference";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
+type WorkspaceDraftMode = "create" | "edit";
 
 const templateLabels = Object.fromEntries(
   WORKSPACE_TEMPLATE_OPTIONS.map((option) => [option.value, option.label])
@@ -60,6 +61,7 @@ type DraftSectionKey =
   | "architect-readout"
   | "summary"
   | "defaults"
+  | "documents"
   | "readiness"
   | "deploy-review"
   | `section-${PlannerSectionId}`;
@@ -67,6 +69,7 @@ type DraftSectionKey =
 type WorkspaceWizardDraftPaneProps = {
   className?: string;
   surfaceTheme: SurfaceTheme;
+  workspaceMode?: WorkspaceDraftMode;
   mode: WorkspaceWizardMode;
   snapshot: MissionControlSnapshot;
   basicQuickSetup?: ReactNode;
@@ -90,6 +93,7 @@ type WorkspaceWizardDraftPaneProps = {
 export function WorkspaceWizardDraftPane({
   className,
   surfaceTheme,
+  workspaceMode = "create",
   mode,
   snapshot,
   basicQuickSetup,
@@ -129,6 +133,22 @@ export function WorkspaceWizardDraftPane({
         workspacePath
       }),
     [basicPreset, basicRules, mode, notice, plan, progress, resolvedName, resolvedTemplate, sourceAnalysis, workspacePath]
+  );
+  const editableDocuments = useMemo(
+    () =>
+      plan
+        ? buildWorkspaceEditableDocuments({
+            name: plan.workspace.name || "Workspace",
+            brief: plan.company.mission || plan.product.offer || undefined,
+            template: plan.workspace.template,
+            sourceMode: plan.workspace.sourceMode,
+            rules: plan.workspace.rules,
+            agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
+            docOverrides: plan.workspace.docOverrides,
+            toolExamples: []
+          })
+        : [],
+    [plan]
   );
 
   useEffect(() => {
@@ -211,24 +231,28 @@ export function WorkspaceWizardDraftPane({
             }
           />
 
-          <TrackedSection
-            sectionKey="setup-speed"
-            activeSection={activeSection}
-            surfaceTheme={surfaceTheme}
-            register={(node) => {
-              sectionRefs.current["setup-speed"] = node;
-            }}
-          >
-            <SetupSpeedCard
-              surfaceTheme={surfaceTheme}
-              mode={mode}
-              preset={basicPreset}
-              onPresetChange={onBasicPresetChange}
-              onOpenBlueprintEditor={openBlueprintEditor}
-            />
-          </TrackedSection>
+          {workspaceMode === "create" ? (
+            <>
+              <TrackedSection
+                sectionKey="setup-speed"
+                activeSection={activeSection}
+                surfaceTheme={surfaceTheme}
+                register={(node) => {
+                  sectionRefs.current["setup-speed"] = node;
+                }}
+              >
+                <SetupSpeedCard
+                  surfaceTheme={surfaceTheme}
+                  mode={mode}
+                  preset={basicPreset}
+                  onPresetChange={onBasicPresetChange}
+                  onOpenBlueprintEditor={openBlueprintEditor}
+                />
+              </TrackedSection>
 
-          {basicQuickSetup ? <div className="space-y-3">{basicQuickSetup}</div> : null}
+              {basicQuickSetup ? <div className="space-y-3">{basicQuickSetup}</div> : null}
+            </>
+          ) : null}
 
           {notice ? (
             <TrackedSection
@@ -485,6 +509,54 @@ export function WorkspaceWizardDraftPane({
                   </TrackedSection>
                 );
               })}
+
+              <TrackedSection
+                sectionKey="documents"
+                activeSection={activeSection}
+                surfaceTheme={surfaceTheme}
+                register={(node) => {
+                  sectionRefs.current.documents = node;
+                }}
+              >
+                <div
+                  className={cn(
+                    "rounded-[22px] border p-4",
+                    isLight ? "border-[#e5ddd2] bg-white" : "border-white/10 bg-white/[0.04]"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText className={cn("h-4 w-4", isLight ? "text-[#5f5952]" : "text-slate-300")} />
+                    <p className={cn("text-[14px] font-semibold", isLight ? "text-[#171410]" : "text-white")}>Documents</p>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {editableDocuments.map((document) => (
+                      <FileToken
+                        key={document.path}
+                        surfaceTheme={surfaceTheme}
+                        label={document.path}
+                        tone={
+                          document.generated
+                            ? document.overridden
+                              ? "success"
+                              : "default"
+                            : "accent"
+                        }
+                        interactive={Boolean(onOpenDocumentEditor)}
+                        onClick={onOpenDocumentEditor ? () => onOpenDocumentEditor(document.path) : undefined}
+                      />
+                    ))}
+                  </div>
+
+                  {onOpenDocumentEditor ? (
+                    <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
+                      {workspaceMode === "edit"
+                        ? "These are the current workspace files. Click a chip to edit one."
+                        : "These are the scaffold documents that will be written for this workspace."}
+                    </p>
+                  ) : null}
+                </div>
+              </TrackedSection>
 
               <TrackedSection sectionKey="deploy-review" activeSection={activeSection} surfaceTheme={surfaceTheme} register={(node) => {
                 sectionRefs.current["deploy-review"] = node;

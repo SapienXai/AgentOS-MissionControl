@@ -39,6 +39,10 @@ export interface WorkspaceScaffoldDocument {
   overridden: boolean;
 }
 
+export interface WorkspaceEditableDocument extends WorkspaceScaffoldDocument {
+  generated: boolean;
+}
+
 const TEMPLATE_LABELS: Record<WorkspaceTemplate, string> = {
   software: "Software project",
   frontend: "Frontend app",
@@ -77,6 +81,34 @@ export function buildWorkspaceScaffoldDocuments(context: WorkspaceScaffoldDocume
       overridden: hasOverride
     } satisfies WorkspaceScaffoldDocument;
   });
+}
+
+export function buildWorkspaceEditableDocuments(context: WorkspaceScaffoldDocumentContext) {
+  const scaffoldDocuments = buildWorkspaceScaffoldDocuments(context).map(
+    (document) =>
+      ({
+        ...document,
+        generated: true
+      }) satisfies WorkspaceEditableDocument
+  );
+  const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
+  const extraDocuments = normalizeWorkspaceDocOverrides(context.docOverrides)
+    .filter((entry) => !scaffoldPathSet.has(entry.path))
+    .map(
+      (entry) =>
+        ({
+          path: entry.path,
+          title: entry.path,
+          description: "Existing workspace file.",
+          category: inferWorkspaceDocCategory(entry.path),
+          baseContent: entry.content,
+          content: entry.content,
+          overridden: false,
+          generated: false
+        }) satisfies WorkspaceEditableDocument
+    );
+
+  return [...scaffoldDocuments, ...extraDocuments];
 }
 
 export function normalizeWorkspaceDocOverrides(overrides?: WorkspaceDocOverride[]) {
@@ -332,6 +364,22 @@ function buildWorkspaceScaffoldDocumentSpecs(
   }
 
   return specs;
+}
+
+function inferWorkspaceDocCategory(path: string): WorkspaceDocCategory {
+  if (path.startsWith("memory/")) {
+    return "memory";
+  }
+
+  if (path.startsWith("docs/")) {
+    return "docs";
+  }
+
+  if (path.startsWith("deliverables/")) {
+    return "deliverables";
+  }
+
+  return "core";
 }
 
 function renderAgentsMarkdown({

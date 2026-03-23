@@ -17,8 +17,11 @@ type WorkspaceWizardHeaderProps = {
   surfaceTheme: SurfaceTheme;
   mode: WorkspaceWizardMode;
   onModeChange: (mode: WorkspaceWizardMode) => void;
-  onNewDraft: () => void | Promise<void>;
+  onNewDraft?: () => void | Promise<void>;
   badges: HeaderBadge[];
+  title?: string;
+  showModeToggle?: boolean;
+  showNewDraft?: boolean;
 };
 
 export function WorkspaceWizardHeader({
@@ -26,7 +29,10 @@ export function WorkspaceWizardHeader({
   mode,
   onModeChange,
   onNewDraft,
-  badges
+  badges,
+  title = "Create workspace",
+  showModeToggle = true,
+  showNewDraft = true
 }: WorkspaceWizardHeaderProps) {
   const isLight = surfaceTheme === "light";
 
@@ -64,7 +70,7 @@ export function WorkspaceWizardHeader({
                   isLight ? "text-[#2d2118]" : "text-white"
                 )}
               >
-                Create workspace
+                {title}
               </h2>
             </div>
           </div>
@@ -93,39 +99,43 @@ export function WorkspaceWizardHeader({
             </div>
           ) : null}
 
-          <div
-            className={cn(
-              "inline-flex rounded-full border p-0.5",
-              isLight ? "border-[#e4ddd3] bg-[#f4efe7]" : "border-white/10 bg-white/[0.04]"
-            )}
-          >
-            <ModeButton
-              surfaceTheme={surfaceTheme}
-              active={mode === "basic"}
-              label="Basic"
-              onClick={() => onModeChange("basic")}
-            />
-            <ModeButton
-              surfaceTheme={surfaceTheme}
-              active={mode === "advanced"}
-              label="Advanced"
-              onClick={() => onModeChange("advanced")}
-            />
-          </div>
+          {showModeToggle ? (
+            <div
+              className={cn(
+                "inline-flex rounded-full border p-0.5",
+                isLight ? "border-[#e4ddd3] bg-[#f4efe7]" : "border-white/10 bg-white/[0.04]"
+              )}
+            >
+              <ModeButton
+                surfaceTheme={surfaceTheme}
+                active={mode === "basic"}
+                label="Basic"
+                onClick={() => onModeChange("basic")}
+              />
+              <ModeButton
+                surfaceTheme={surfaceTheme}
+                active={mode === "advanced"}
+                label="Advanced"
+                onClick={() => onModeChange("advanced")}
+              />
+            </div>
+          ) : null}
 
-          <button
-            type="button"
-            onClick={onNewDraft}
-            className={cn(
-              "inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-[11px] transition-colors",
-              isLight
-                ? "border-[#dfd8ce] bg-white text-[#38322d] hover:bg-[#f5f1ea]"
-                : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
-            )}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New draft
-          </button>
+          {showNewDraft && onNewDraft ? (
+            <button
+              type="button"
+              onClick={onNewDraft}
+              className={cn(
+                "inline-flex h-8 items-center gap-2 rounded-full border px-2.5 text-[11px] transition-colors",
+                isLight
+                  ? "border-[#dfd8ce] bg-white text-[#38322d] hover:bg-[#f5f1ea]"
+                  : "border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
+              )}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New draft
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

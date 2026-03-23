@@ -707,8 +707,14 @@ function createBlueprintDraftFromPlan(plan: WorkspacePlan): BlueprintDraft {
 
 function applyBlueprintDraftToPlan(plan: WorkspacePlan, draft: BlueprintDraft) {
   const next = structuredClone(plan);
+  const previousCompanyName = plan.company.name.trim();
+  const previousWorkspaceName = plan.workspace.name.trim();
+  const nextCompanyName = draft.companyName.trim();
+  const nextWorkspaceName = draft.workspaceName.trim();
+  const companyNameChanged = nextCompanyName !== previousCompanyName;
+  const workspaceNameChanged = nextWorkspaceName !== previousWorkspaceName;
 
-  next.company.name = draft.companyName.trim();
+  next.company.name = nextCompanyName;
   next.company.mission = draft.companyMission.trim();
   next.company.targetCustomer = draft.companyTargetCustomer.trim();
   next.company.constraints = splitLines(draft.companyConstraints);
@@ -720,7 +726,7 @@ function applyBlueprintDraftToPlan(plan: WorkspacePlan, draft: BlueprintDraft) {
   next.product.nonGoals = splitLines(draft.productNonGoals);
   next.product.launchPriority = splitLines(draft.productLaunchPriority);
 
-  next.workspace.name = draft.workspaceName.trim();
+  next.workspace.name = nextWorkspaceName;
   next.workspace.directory = normalizeOptionalValue(draft.workspaceDirectory);
   next.workspace.sourceMode = draft.workspaceSourceMode;
   next.workspace.repoUrl = normalizeOptionalValue(draft.workspaceRepoUrl);
@@ -737,6 +743,12 @@ function applyBlueprintDraftToPlan(plan: WorkspacePlan, draft: BlueprintDraft) {
     generateMemory: draft.workspaceRuleGenerateMemory,
     kickoffMission: draft.workspaceRuleKickoffMission
   } satisfies WorkspaceCreateRules;
+
+  if (workspaceNameChanged && !companyNameChanged) {
+    next.company.name = nextWorkspaceName;
+  } else if (companyNameChanged && !workspaceNameChanged) {
+    next.workspace.name = nextCompanyName;
+  }
 
   next.team.allowEphemeralSubagents = draft.teamAllowEphemeralSubagents;
   next.team.maxParallelRuns = Number.isFinite(Number(draft.teamMaxParallelRuns))

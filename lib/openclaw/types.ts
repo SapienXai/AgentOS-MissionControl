@@ -679,10 +679,30 @@ export interface WorkspaceCreateInput {
   agents?: WorkspaceAgentBlueprintInput[];
 }
 
+export interface WorkspaceEditSeed {
+  workspaceId: string;
+  workspacePath: string;
+  name: string;
+  directory: string;
+  template: WorkspaceTemplate;
+  sourceMode: WorkspaceSourceMode;
+  teamPreset: WorkspaceTeamPreset;
+  modelProfile: WorkspaceModelProfile;
+  modelId?: string;
+  repoUrl?: string;
+  existingPath?: string;
+  rules: WorkspaceCreateRules;
+  docOverrides: WorkspaceDocOverride[];
+  agents: WorkspaceAgentBlueprintInput[];
+  brief: string;
+}
+
 export interface WorkspaceUpdateInput {
   workspaceId: string;
   name?: string;
   directory?: string;
+  plan?: WorkspacePlan;
+  baseline?: WorkspaceEditSeed;
 }
 
 export interface WorkspaceDeleteInput {
@@ -1024,6 +1044,7 @@ export type WorkspacePlanDeployStreamEvent =
 export interface AgentCreateInput {
   id: string;
   workspaceId: string;
+  workspacePath?: string;
   modelId?: string;
   name?: string;
   emoji?: string;
@@ -1036,6 +1057,7 @@ export interface AgentCreateInput {
 export interface AgentUpdateInput {
   id: string;
   workspaceId?: string;
+  workspacePath?: string;
   modelId?: string;
   name?: string;
   emoji?: string;

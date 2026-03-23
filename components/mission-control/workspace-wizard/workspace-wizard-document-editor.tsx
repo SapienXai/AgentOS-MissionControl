@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  buildWorkspaceScaffoldDocuments,
+  buildWorkspaceEditableDocuments,
   normalizeWorkspaceDocOverrides
 } from "@/lib/openclaw/workspace-docs";
 import type { WorkspacePlan } from "@/lib/openclaw/types";
@@ -114,7 +114,7 @@ export function WorkspaceWizardDocumentEditor({
       return null;
     }
 
-    const documents = buildWorkspaceScaffoldDocuments({
+    const documents = buildWorkspaceEditableDocuments({
       name: plan.workspace.name || "Workspace",
       brief: plan.company.mission || plan.product.offer || undefined,
       template: plan.workspace.template,
@@ -217,8 +217,12 @@ export function WorkspaceWizardDocumentEditor({
 
     const summary =
       draftValue === document.baseContent
-        ? `Reset ${document.path} to the generated default scaffold.`
-        : `Updated ${document.path} scaffold content.`;
+        ? document.generated
+          ? `Reset ${document.path} to the generated default scaffold.`
+          : `Kept ${document.path} at the loaded workspace content.`
+        : document.generated
+          ? `Updated ${document.path} scaffold content.`
+          : `Updated ${document.path} existing file content.`;
 
     const saved = await onSave(nextPlan, summary);
 
@@ -262,16 +266,20 @@ export function WorkspaceWizardDocumentEditor({
             <span
               className={cn(
                 "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em]",
-                document.overridden
-                  ? isLight
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                    : "border-emerald-300/30 bg-emerald-300/12 text-emerald-100"
+                document.generated
+                  ? document.overridden
+                    ? isLight
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-emerald-300/30 bg-emerald-300/12 text-emerald-100"
+                    : isLight
+                      ? "border-[#e0d7cc] bg-white text-[#7a7168]"
+                      : "border-white/10 bg-white/[0.05] text-slate-400"
                   : isLight
-                    ? "border-[#e0d7cc] bg-white text-[#7a7168]"
-                    : "border-white/10 bg-white/[0.05] text-slate-400"
+                    ? "border-cyan-200 bg-cyan-50 text-cyan-900"
+                    : "border-cyan-300/25 bg-cyan-300/12 text-cyan-100"
               )}
             >
-              {document.overridden ? "Customized" : "Generated"}
+              {document.generated ? (document.overridden ? "Customized" : "Generated") : "Existing"}
             </span>
           </div>
 
@@ -318,7 +326,7 @@ export function WorkspaceWizardDocumentEditor({
                   : "rounded-full border-white/10 bg-white/[0.04] text-slate-200 hover:bg-white/[0.08]"
               }
             >
-              Reset to default
+              {document.generated ? "Reset to default" : "Reset to loaded content"}
             </Button>
 
             <Button
@@ -333,8 +341,8 @@ export function WorkspaceWizardDocumentEditor({
             >
               {busy ? <LoaderCircle className="mr-2 h-4 w-4 animate-spin" /> : <Pencil className="mr-2 h-4 w-4" />}
               Apply changes
-              </Button>
-            </div>
+            </Button>
+          </div>
 
           <div className={cn("rounded-[18px] border px-4 py-3", isLight ? "border-[#e5ded3] bg-white" : "border-white/10 bg-white/[0.04]")}>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr),auto] md:items-end">

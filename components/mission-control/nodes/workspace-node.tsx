@@ -1,7 +1,7 @@
 "use client";
 
 import type { Node, NodeProps } from "@xyflow/react";
-import { FolderKanban, Layers3, Orbit, Sparkles } from "lucide-react";
+import { Eye, EyeOff, FolderKanban, Layers3, Orbit } from "lucide-react";
 import { motion } from "motion/react";
 
 import type { WorkspaceNodeData } from "@/components/mission-control/canvas-types";
@@ -53,7 +53,12 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
           <div className="flex flex-wrap justify-end gap-1.5">
             <Metric icon={Orbit} label="Agents" value={String(data.workspace.agentIds.length)} />
             <Metric icon={Layers3} label="Models" value={String(data.workspace.modelIds.length)} />
-            <Metric icon={Sparkles} label="Runs" value={String(data.workspace.activeRuntimeIds.length)} />
+            <TaskToggleMetric
+              value={String(data.workspace.activeRuntimeIds.length)}
+              taskCardsHidden={data.taskCardsHidden}
+              disabled={data.taskCardCount === 0 || !data.onToggleTaskCards}
+              onToggle={() => data.onToggleTaskCards?.()}
+            />
           </div>
         </div>
       </div>
@@ -78,6 +83,55 @@ function Metric({
       </span>
       <span className="font-display text-[12px] text-white">{value}</span>
     </div>
+  );
+}
+
+function TaskToggleMetric({
+  value,
+  taskCardsHidden,
+  disabled,
+  onToggle
+}: {
+  value: string;
+  taskCardsHidden: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={taskCardsHidden}
+      aria-label={taskCardsHidden ? "Show task cards in this workspace" : "Hide task cards in this workspace"}
+      title={taskCardsHidden ? "Show task cards in this workspace" : "Hide task cards in this workspace"}
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      className={cn(
+        "nodrag nopan group inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 disabled:cursor-default disabled:opacity-50",
+        taskCardsHidden
+          ? "border-cyan-300/28 bg-cyan-300/14 text-cyan-50 hover:bg-cyan-300/20"
+          : "border-white/[0.06] bg-slate-950/65 hover:border-white/[0.12] hover:bg-white/[0.08] hover:text-white",
+        disabled && "pointer-events-none"
+      )}
+    >
+      {taskCardsHidden ? (
+        <EyeOff className="h-3 w-3 text-cyan-100" />
+      ) : (
+        <Eye className="h-3 w-3 text-slate-400 transition-colors group-hover:text-slate-200" />
+      )}
+      <span
+        className={cn(
+          "workspace-node__metric-label text-[9px] uppercase tracking-[0.16em]",
+          taskCardsHidden ? "text-cyan-100/70" : "text-slate-500 group-hover:text-slate-300"
+        )}
+      >
+        Runs
+      </span>
+      <span className="font-display text-[12px] text-white">{value}</span>
+    </button>
   );
 }
 

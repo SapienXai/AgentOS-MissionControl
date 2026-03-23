@@ -9,6 +9,9 @@ import type {
 export type WorkspaceNodeData = Record<string, unknown> & {
   workspace: WorkspaceProject;
   emphasis: boolean;
+  taskCardCount: number;
+  taskCardsHidden: boolean;
+  onToggleTaskCards?: () => void;
 };
 
 export type AgentNodeData = Record<string, unknown> & {

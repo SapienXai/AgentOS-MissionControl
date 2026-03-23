@@ -74,6 +74,7 @@ import type {
   TaskFeedEvent,
   TaskRecord,
   RuntimeRecord,
+  WorkspacePlan,
   RuntimeOutputItem,
   RuntimeOutputRecord,
   RuntimeCreatedFile,
@@ -83,8 +84,10 @@ import type {
   WorkspaceDocOverride,
   WorkspaceDeleteInput,
   WorkspaceCreateInput,
+  WorkspaceEditSeed,
   WorkspaceModelProfile,
   WorkspaceSourceMode,
+  WorkspaceTeamPreset,
   WorkspaceTemplate,
   WorkspaceUpdateInput,
   WorkspaceProject
@@ -355,12 +358,20 @@ type WorkspaceProjectManifestAgent = {
   isPrimary: boolean;
   skillId: string | null;
   modelId: string | null;
+  enabled: boolean;
   policy: AgentPolicy | null;
+  emoji: string | null;
+  theme: string | null;
 };
 type WorkspaceProjectManifest = {
+  name: string | null;
+  directory: string | null;
   template: WorkspaceTemplate | null;
   sourceMode: WorkspaceSourceMode | null;
   agentTemplate: string | null;
+  teamPreset: WorkspaceTeamPreset | null;
+  modelProfile: WorkspaceModelProfile | null;
+  rules: WorkspaceCreateRules | null;
   hidden: boolean;
   systemTag: string | null;
   agents: WorkspaceProjectManifestAgent[];
@@ -734,9 +745,11 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       Array.from(workspaceByPath.values()).map(async (workspace) => {
         const workspaceAgents = agentsByWorkspace.get(workspace.id) ?? [];
         const metadata = await readWorkspaceInspectorMetadata(workspace.path, workspaceAgents);
+        const manifest = manifestByWorkspace.get(workspace.path) ?? null;
 
         return {
           ...workspace,
+          name: manifest?.name ?? workspace.name,
           modelIds: unique(workspace.modelIds),
           activeRuntimeIds: unique(workspace.activeRuntimeIds),
           health: resolveWorkspaceHealth(workspace.agentIds, agents),
@@ -3053,10 +3066,14 @@ export async function createAgent(input: AgentCreateInput) {
   }
 
   const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  assertAgentIdAvailable(snapshot, agentId, input.workspaceId);
-  const workspace = snapshot.workspaces.find((entry) => entry.id === input.workspaceId);
+  const resolvedWorkspacePath =
+    normalizeOptionalValue(input.workspacePath) ??
+    snapshot.workspaces.find((entry) => entry.id === input.workspaceId)?.path;
+  const resolvedWorkspaceId =
+    input.workspaceId || (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : null);
+  assertAgentIdAvailable(snapshot, agentId, resolvedWorkspaceId);
 
-  if (!workspace) {
+  if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
     throw new Error("Workspace was not found for this agent.");
   }
 
@@ -3067,16 +3084,16 @@ export async function createAgent(input: AgentCreateInput) {
   const theme = normalizeOptionalValue(input.theme) ?? presetMeta.defaultTheme;
   const heartbeat = serializeHeartbeatConfig(resolveHeartbeatDraft(policy.preset, input.heartbeat));
   const setupAgentId =
-    snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup")?.id ?? null;
+    snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup")?.id ?? null;
 
   const args = [
     "agents",
     "add",
     agentId,
     "--workspace",
-    workspace.path,
+    resolvedWorkspacePath,
     "--agent-dir",
-    buildWorkspaceAgentStatePath(workspace.path, agentId),
+    buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId),
     "--non-interactive",
     "--json"
   ];
@@ -3088,14 +3105,14 @@ export async function createAgent(input: AgentCreateInput) {
   await runOpenClaw(args);
 
   const policySkillId = await ensureAgentPolicySkill({
-    workspacePath: workspace.path,
+    workspacePath: resolvedWorkspacePath,
     agentId,
     agentName: displayName,
     policy,
     setupAgentId
   });
 
-  const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
+  const configEntry = await upsertAgentConfigEntry(agentId, resolvedWorkspacePath, {
     name: displayName,
     model: normalizeOptionalValue(input.modelId),
     heartbeat,
@@ -3110,17 +3127,20 @@ export async function createAgent(input: AgentCreateInput) {
         : null
   });
 
-  await applyAgentIdentity(agentId, workspace.path, {
+  await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: displayName || configEntry.name,
     emoji,
     theme,
     avatar: normalizeOptionalValue(input.avatar)
   });
 
-  await upsertWorkspaceProjectAgentMetadata(workspace.path, {
+  await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
     name: displayName,
     role: formatAgentPresetLabel(policy.preset),
+    emoji,
+    theme,
+    enabled: true,
     skillId: policySkillId,
     modelId: normalizeOptionalValue(input.modelId),
     isPrimary: false,
@@ -3131,7 +3151,7 @@ export async function createAgent(input: AgentCreateInput) {
 
   return {
     agentId,
-    workspaceId: workspace.id
+    workspaceId: resolvedWorkspaceId
   };
 }
 
@@ -3149,11 +3169,14 @@ export async function updateAgent(input: AgentUpdateInput) {
     throw new Error("Agent was not found.");
   }
 
-  const workspace = snapshot.workspaces.find(
-    (entry) => entry.id === (input.workspaceId || agent.workspaceId)
-  );
+  const resolvedWorkspacePath =
+    normalizeOptionalValue(input.workspacePath) ??
+    snapshot.workspaces.find((entry) => entry.id === (input.workspaceId || agent.workspaceId))?.path ??
+    agent.workspacePath;
+  const resolvedWorkspaceId =
+    input.workspaceId || (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : agent.workspaceId);
 
-  if (!workspace) {
+  if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
     throw new Error("Workspace was not found for this agent.");
   }
 
@@ -3168,17 +3191,17 @@ export async function updateAgent(input: AgentUpdateInput) {
     )
   );
   const setupAgentId =
-    snapshot.agents.find((entry) => entry.workspaceId === workspace.id && entry.policy.preset === "setup" && entry.id !== agentId)?.id ??
+    snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup" && entry.id !== agentId)?.id ??
     null;
   const policySkillId = await ensureAgentPolicySkill({
-    workspacePath: workspace.path,
+    workspacePath: resolvedWorkspacePath,
     agentId,
     agentName: normalizeOptionalValue(input.name) ?? currentName ?? agentId,
     policy,
     setupAgentId
   });
 
-  const configEntry = await upsertAgentConfigEntry(agentId, workspace.path, {
+  const configEntry = await upsertAgentConfigEntry(agentId, resolvedWorkspacePath, {
     name: normalizeOptionalValue(input.name),
     model: normalizeOptionalValue(input.modelId),
     heartbeat,
@@ -3193,16 +3216,19 @@ export async function updateAgent(input: AgentUpdateInput) {
         : null
   });
 
-  await applyAgentIdentity(agentId, workspace.path, {
+  await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: normalizeOptionalValue(input.name) ?? configEntry.name,
     emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
     theme: normalizeOptionalValue(input.theme) ?? currentTheme,
     avatar: normalizeOptionalValue(input.avatar)
   });
 
-  await upsertWorkspaceProjectAgentMetadata(workspace.path, {
+  await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
     name: normalizeOptionalValue(input.name) ?? currentName ?? configEntry.name ?? agentId,
+    emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
+    theme: normalizeOptionalValue(input.theme) ?? currentTheme,
+    enabled: true,
     modelId: normalizeOptionalValue(input.modelId) ?? (agent.modelId === "unassigned" ? null : agent.modelId),
     isPrimary: agent.isDefault,
     policy
@@ -3212,7 +3238,7 @@ export async function updateAgent(input: AgentUpdateInput) {
 
   return {
     agentId,
-    workspaceId: workspace.id
+    workspaceId: resolvedWorkspaceId
   };
 }
 
@@ -3445,6 +3471,16 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
     throw new Error("Workspace id is required.");
   }
 
+  if (input.plan) {
+    const baseline = input.baseline ?? (await readWorkspaceEditSeed(workspaceId));
+    const workspace = createWorkspaceProjectFromEditSeed(baseline);
+    return applyWorkspacePlanEdits(workspace, input.plan, {
+      name: input.name,
+      directory: input.directory,
+      baseline
+    });
+  }
+
   const snapshot = await getMissionControlSnapshot({ force: true });
   const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
 
@@ -3490,6 +3526,331 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
     previousWorkspaceId: workspace.id,
     workspacePath: targetPath
   };
+}
+
+function createWorkspaceProjectFromEditSeed(seed: WorkspaceEditSeed): WorkspaceProject {
+  return {
+    id: seed.workspaceId,
+    name: seed.name,
+    slug: slugify(path.basename(seed.workspacePath)),
+    path: seed.workspacePath,
+    kind: "workspace",
+    agentIds: [],
+    modelIds: [],
+    activeRuntimeIds: [],
+    totalSessions: 0,
+    health: "standby",
+    bootstrap: {
+      template: null,
+      sourceMode: null,
+      agentTemplate: null,
+      coreFiles: [],
+      optionalFiles: [],
+      folders: [],
+      projectShell: [],
+      localSkillIds: []
+    },
+    capabilities: {
+      skills: [],
+      tools: [],
+      workspaceOnlyAgentCount: 0
+    }
+  };
+}
+
+async function applyWorkspacePlanEdits(
+  workspace: WorkspaceProject,
+  plan: WorkspacePlan,
+  input: {
+    name?: string;
+    directory?: string;
+    baseline: WorkspaceEditSeed;
+  }
+) {
+  const desiredName = normalizeOptionalValue(input.name) ?? normalizeOptionalValue(plan.workspace.name) ?? workspace.name;
+  const requestedDirectory = normalizeOptionalValue(input.directory);
+  const baselineDirectory = normalizeOptionalValue(input.baseline.directory) ?? workspace.path;
+  const baselineName = normalizeOptionalValue(input.baseline.name) ?? workspace.name;
+  const baselineBrief = normalizeOptionalValue(input.baseline.brief) ?? "";
+  const desiredBrief = normalizeOptionalValue(plan.company.mission) ?? normalizeOptionalValue(plan.product.offer) ?? "";
+  const currentDocOverrides = normalizeWorkspaceDocOverrides(plan.workspace.docOverrides);
+  const baselineDocOverrides = normalizeWorkspaceDocOverrides(input.baseline.docOverrides);
+  const currentDocOverrideMap = new Map(currentDocOverrides.map((entry) => [entry.path, entry.content]));
+  const baselineDocOverrideMap = new Map(baselineDocOverrides.map((entry) => [entry.path, entry.content]));
+  const currentEnabledAgents = plan.team.persistentAgents.filter((agent) => agent.enabled);
+  const baselineEnabledAgents = input.baseline.agents.filter((agent) => agent.enabled);
+  const nameChanged = desiredName.trim() !== baselineName.trim();
+  const scaffoldInputsChanged =
+    nameChanged ||
+    desiredBrief !== baselineBrief ||
+    plan.workspace.template !== input.baseline.template ||
+    plan.workspace.sourceMode !== input.baseline.sourceMode ||
+    !areWorkspaceCreateRulesEqual(plan.workspace.rules, input.baseline.rules) ||
+    !areWorkspaceAgentsEqual(currentEnabledAgents, baselineEnabledAgents);
+  const directoryChanged = Boolean(requestedDirectory && requestedDirectory !== baselineDirectory);
+  const targetPath = directoryChanged
+    ? resolveWorkspaceTargetPath(workspace.path, undefined, requestedDirectory)
+    : nameChanged
+      ? resolveWorkspaceTargetPath(workspace.path, desiredName, undefined)
+      : workspace.path;
+  const workspaceRelocated = targetPath !== workspace.path;
+
+  if (workspaceRelocated) {
+    await ensurePathAvailable(targetPath, workspace.path);
+
+    try {
+      await rename(workspace.path, targetPath);
+    } catch (error) {
+      throw new Error(
+        error instanceof Error
+          ? `Unable to move workspace directory. ${error.message}`
+          : "Unable to move workspace directory."
+      );
+    }
+
+    const configList = await readAgentConfigList();
+    const updatedConfig = configList.map((entry) =>
+      entry.workspace === workspace.path
+        ? {
+            ...entry,
+            workspace: targetPath,
+            agentDir:
+              typeof entry.agentDir === "string" && entry.agentDir.startsWith(`${workspace.path}${path.sep}`)
+                ? path.join(targetPath, path.relative(workspace.path, entry.agentDir))
+                : entry.agentDir
+          }
+        : entry
+    );
+
+    await writeAgentConfigList(updatedConfig);
+  }
+
+  const currentWorkspacePath = targetPath;
+  const projectManifestPath = path.join(currentWorkspacePath, ".openclaw", "project.json");
+  let createdAt = new Date().toISOString();
+  let hidden = false;
+  let systemTag: string | null = null;
+
+  try {
+    const raw = await readFile(projectManifestPath, "utf8");
+    const parsed = JSON.parse(raw);
+
+    if (isObjectRecord(parsed)) {
+      createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : createdAt;
+      hidden = parsed.hidden === true;
+      systemTag = typeof parsed.systemTag === "string" ? parsed.systemTag : null;
+    }
+  } catch {
+    // Ignore missing or unreadable metadata and write a fresh manifest below.
+  }
+
+  const manifestAgents = plan.team.persistentAgents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    role: agent.role,
+    enabled: agent.enabled,
+    emoji: normalizeOptionalValue(agent.emoji) ?? null,
+    theme: normalizeOptionalValue(agent.theme) ?? null,
+    isPrimary: Boolean(agent.isPrimary),
+    skillId: normalizeOptionalValue(agent.skillId) ?? null,
+    modelId: normalizeOptionalValue(agent.modelId) ?? null,
+    policy: agent.policy ?? null
+  }));
+  const teamPreset: WorkspaceTeamPreset =
+    manifestAgents.length <= 1
+      ? "solo"
+      : manifestAgents.every((agent) => agent.enabled)
+        ? "core"
+        : "custom";
+  const projectManifest = {
+    version: 1,
+    slug: slugify(path.basename(currentWorkspacePath)),
+    name: desiredName,
+    directory: currentWorkspacePath,
+    icon: getWorkspaceTemplateMeta(plan.workspace.template).icon,
+    createdAt,
+    updatedAt: new Date().toISOString(),
+    template: plan.workspace.template,
+    sourceMode: plan.workspace.sourceMode,
+    teamPreset,
+    modelProfile: plan.workspace.modelProfile,
+    agentTemplate: teamPreset === "solo" ? "solo" : "core-team",
+    rules: {
+      workspaceOnly: plan.workspace.rules.workspaceOnly,
+      generateStarterDocs: plan.workspace.rules.generateStarterDocs,
+      generateMemory: plan.workspace.rules.generateMemory,
+      kickoffMission: plan.workspace.rules.kickoffMission
+    },
+    hidden,
+    systemTag,
+    agents: manifestAgents
+  };
+
+  if (scaffoldInputsChanged) {
+    const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
+      name: desiredName,
+      brief: desiredBrief || desiredName,
+      template: plan.workspace.template,
+      sourceMode: plan.workspace.sourceMode,
+      rules: plan.workspace.rules,
+      agents: currentEnabledAgents,
+      toolExamples: await detectWorkspaceToolExamples(currentWorkspacePath),
+      docOverrides: currentDocOverrides
+    });
+    const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
+
+    for (const document of scaffoldDocuments) {
+      await writeTextFileEnsured(path.join(currentWorkspacePath, document.path), document.content);
+    }
+
+    for (const override of currentDocOverrides) {
+      if (scaffoldPathSet.has(override.path)) {
+        continue;
+      }
+
+      await writeTextFileEnsured(path.join(currentWorkspacePath, override.path), override.content);
+    }
+  } else {
+    const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
+      name: baselineName,
+      brief: baselineBrief || baselineName,
+      template: input.baseline.template,
+      sourceMode: input.baseline.sourceMode,
+      rules: input.baseline.rules,
+      agents: baselineEnabledAgents,
+      toolExamples: [],
+      docOverrides: []
+    });
+    const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
+
+    for (const override of currentDocOverrides) {
+      const baselineContent = baselineDocOverrideMap.get(override.path);
+
+      if (baselineContent === override.content) {
+        continue;
+      }
+
+      await writeTextFileEnsured(path.join(currentWorkspacePath, override.path), override.content);
+    }
+
+    for (const baselineOverride of baselineDocOverrides) {
+      if (currentDocOverrideMap.has(baselineOverride.path)) {
+        continue;
+      }
+
+      const scaffoldDocument = scaffoldDocuments.find((document) => document.path === baselineOverride.path);
+
+      if (!scaffoldDocument || !scaffoldPathSet.has(scaffoldDocument.path)) {
+        continue;
+      }
+
+      await writeTextFileEnsured(path.join(currentWorkspacePath, scaffoldDocument.path), scaffoldDocument.baseContent);
+    }
+  }
+
+  if (workspaceRelocated || !areWorkspaceAgentsEqual(currentEnabledAgents, baselineEnabledAgents)) {
+    const currentWorkspace = {
+      ...workspace,
+      id: workspaceIdFromPath(currentWorkspacePath),
+      path: currentWorkspacePath
+    };
+
+    await syncWorkspaceAgentsToPlan({
+      currentWorkspace,
+      desiredAgents: plan.team.persistentAgents,
+      workspaceSlug: slugify(path.basename(currentWorkspacePath)),
+      previousWorkspaceId: input.baseline.workspaceId,
+      previousWorkspacePath: input.baseline.workspacePath
+    });
+  }
+
+  await writeTextFileEnsured(projectManifestPath, `${JSON.stringify(projectManifest, null, 2)}\n`);
+
+  snapshotCache = null;
+  runtimeHistoryCache = new Map();
+
+  return {
+    workspaceId: workspaceIdFromPath(currentWorkspacePath),
+    previousWorkspaceId: workspace.id,
+    workspacePath: currentWorkspacePath
+  };
+}
+
+async function syncWorkspaceAgentsToPlan(input: {
+  currentWorkspace: WorkspaceProject;
+  desiredAgents: WorkspaceAgentBlueprintInput[];
+  workspaceSlug: string;
+  previousWorkspaceId?: string;
+  previousWorkspacePath?: string;
+}) {
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  const currentAgents = Array.from(
+    new Map(
+      snapshot.agents
+        .filter((agent) => {
+          if (agent.workspaceId === input.currentWorkspace.id) {
+            return true;
+          }
+
+          if (input.previousWorkspaceId && agent.workspaceId === input.previousWorkspaceId) {
+            return true;
+          }
+
+          return Boolean(input.previousWorkspacePath && agent.workspacePath === input.previousWorkspacePath);
+        })
+        .map((agent) => [agent.id, agent])
+    ).values()
+  );
+  const matchedAgentIds = new Set<string>();
+
+  for (const desiredAgent of input.desiredAgents) {
+    const currentAgent = findMatchingWorkspaceAgent(currentAgents, input.workspaceSlug, desiredAgent.id);
+
+    if (!desiredAgent.enabled) {
+      if (currentAgent) {
+        matchedAgentIds.add(currentAgent.id);
+        await deleteAgent({ agentId: currentAgent.id });
+      }
+
+      continue;
+    }
+
+    if (currentAgent) {
+      matchedAgentIds.add(currentAgent.id);
+      await updateAgent({
+        id: currentAgent.id,
+        workspaceId: input.currentWorkspace.id,
+        workspacePath: input.currentWorkspace.path,
+        name: normalizeOptionalValue(desiredAgent.name) ?? currentAgent.name,
+        emoji: normalizeOptionalValue(desiredAgent.emoji) ?? currentAgent.identity.emoji,
+        theme: normalizeOptionalValue(desiredAgent.theme) ?? currentAgent.identity.theme,
+        modelId: normalizeOptionalValue(desiredAgent.modelId) ?? (currentAgent.modelId === "unassigned" ? undefined : currentAgent.modelId),
+        policy: desiredAgent.policy,
+        heartbeat: desiredAgent.heartbeat
+      });
+      continue;
+    }
+
+    const createdAgentId = await createAgent({
+      id: createWorkspaceAgentId(input.workspaceSlug, desiredAgent.id),
+      workspaceId: input.currentWorkspace.id,
+      workspacePath: input.currentWorkspace.path,
+      name: normalizeOptionalValue(desiredAgent.name) ?? undefined,
+      emoji: normalizeOptionalValue(desiredAgent.emoji) ?? undefined,
+      theme: normalizeOptionalValue(desiredAgent.theme) ?? undefined,
+      modelId: normalizeOptionalValue(desiredAgent.modelId) ?? undefined,
+      policy: desiredAgent.policy,
+      heartbeat: desiredAgent.heartbeat
+    });
+
+    matchedAgentIds.add(createdAgentId.agentId);
+  }
+
+  for (const currentAgent of currentAgents) {
+    if (!matchedAgentIds.has(currentAgent.id)) {
+      await deleteAgent({ agentId: currentAgent.id });
+    }
+  }
 }
 
 export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
@@ -4051,6 +4412,9 @@ async function scaffoldWorkspaceContents(
           id: agent.id,
           name: agent.name,
           role: agent.role,
+          enabled: agent.enabled,
+          emoji: normalizeOptionalValue(agent.emoji) ?? null,
+          theme: normalizeOptionalValue(agent.theme) ?? null,
           isPrimary: Boolean(agent.isPrimary),
           skillId: normalizeOptionalValue(agent.skillId) ?? null,
           modelId: normalizeOptionalValue(agent.modelId) ?? null,
@@ -6482,6 +6846,238 @@ async function readWorkspaceInspectorMetadata(
   };
 }
 
+export async function readWorkspaceEditSeed(workspaceId: string): Promise<WorkspaceEditSeed> {
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+
+  if (!workspace) {
+    throw new Error("Workspace was not found.");
+  }
+
+  const manifest = await readWorkspaceProjectManifest(workspace.path);
+  const displayName = manifest.name ?? workspace.name;
+  const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
+  const configuredSkills = uniqueStrings(workspaceAgents.flatMap((agent) => agent.skills));
+  const configuredTools = uniqueStrings(workspaceAgents.flatMap((agent) => agent.tools));
+  const bootstrapProfile = await readAgentBootstrapProfile(workspace.path, {
+    agentId: workspaceAgents[0]?.id ?? workspace.id,
+    agentName: workspaceAgents[0]?.name ?? displayName,
+    configuredSkills,
+    configuredTools
+  });
+  const template = manifest.template ?? workspace.bootstrap.template ?? "software";
+  const sourceMode = manifest.sourceMode ?? workspace.bootstrap.sourceMode ?? "empty";
+  const teamPreset = manifest.teamPreset ?? (workspaceAgents.length <= 1 ? "solo" : "core");
+  const modelProfile = manifest.modelProfile ?? "balanced";
+  const rules = manifest.rules ?? DEFAULT_WORKSPACE_RULES;
+  const agents =
+    manifest.agents.length > 0
+      ? manifest.agents.map((entry) => {
+          const currentAgent = findMatchingWorkspaceAgent(workspaceAgents, workspace.slug, entry.id);
+          const resolvedPolicy = resolveAgentPolicy(
+            entry.policy?.preset ?? currentAgent?.policy.preset ?? DEFAULT_AGENT_PRESET,
+            entry.policy ?? currentAgent?.policy
+          );
+
+          return {
+            id: entry.id,
+            role: entry.role ?? formatAgentPresetLabel(resolvedPolicy.preset),
+            name: entry.name ?? currentAgent?.name ?? entry.role ?? entry.id,
+            enabled: entry.enabled,
+            emoji: entry.emoji ?? currentAgent?.identity.emoji,
+            theme: entry.theme ?? currentAgent?.identity.theme,
+            skillId: entry.skillId ?? undefined,
+            modelId:
+              entry.modelId ??
+              (currentAgent?.modelId && currentAgent.modelId !== "unassigned" ? currentAgent.modelId : undefined),
+            isPrimary: entry.isPrimary,
+            policy: resolvedPolicy,
+            heartbeat: {
+              enabled: currentAgent?.heartbeat.enabled ?? false,
+              ...(currentAgent?.heartbeat.every ? { every: currentAgent.heartbeat.every } : {})
+            }
+          } satisfies WorkspaceAgentBlueprintInput;
+        })
+      : buildDefaultWorkspaceAgents(template, teamPreset, displayName);
+  const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
+    name: displayName,
+    brief: bootstrapProfile.purpose || displayName,
+    template,
+    sourceMode,
+    rules,
+    agents,
+    toolExamples: await detectWorkspaceToolExamples(workspace.path),
+    docOverrides: []
+  });
+  const docOverrides: WorkspaceDocOverride[] = [];
+  const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
+  const editableDocPaths = await collectWorkspaceEditableDocPaths(workspace.path);
+
+  for (const document of scaffoldDocuments) {
+    const filePath = path.join(workspace.path, document.path);
+
+    try {
+      const currentContent = await readFile(filePath, "utf8");
+
+      if (currentContent !== document.baseContent) {
+        docOverrides.push({
+          path: document.path,
+          content: currentContent
+        });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  for (const relativePath of editableDocPaths) {
+    if (scaffoldPathSet.has(relativePath)) {
+      continue;
+    }
+
+    const filePath = path.join(workspace.path, relativePath);
+
+    try {
+      const currentContent = await readFile(filePath, "utf8");
+      docOverrides.push({
+        path: relativePath,
+        content: currentContent
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    workspaceId: workspace.id,
+    workspacePath: workspace.path,
+    name: displayName,
+    directory: workspace.path,
+    template,
+    sourceMode,
+    teamPreset,
+    modelProfile,
+    modelId: workspace.modelIds[0] && workspace.modelIds[0] !== "unassigned" ? workspace.modelIds[0] : undefined,
+    rules,
+    docOverrides,
+    agents,
+    brief: bootstrapProfile.purpose || displayName
+  };
+}
+
+function areWorkspaceCreateRulesEqual(left: WorkspaceCreateRules, right: WorkspaceCreateRules) {
+  return (
+    left.workspaceOnly === right.workspaceOnly &&
+    left.generateStarterDocs === right.generateStarterDocs &&
+    left.generateMemory === right.generateMemory &&
+    left.kickoffMission === right.kickoffMission
+  );
+}
+
+function areWorkspaceAgentsEqual(
+  left: WorkspaceAgentBlueprintInput[],
+  right: WorkspaceAgentBlueprintInput[]
+) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const normalizeAgent = (agent: WorkspaceAgentBlueprintInput) => ({
+    id: agent.id.trim(),
+    role: agent.role.trim(),
+    name: agent.name.trim(),
+    enabled: agent.enabled,
+    emoji: normalizeOptionalValue(agent.emoji) ?? null,
+    theme: normalizeOptionalValue(agent.theme) ?? null,
+    skillId: normalizeOptionalValue(agent.skillId) ?? null,
+    modelId: normalizeOptionalValue(agent.modelId) ?? null,
+    isPrimary: Boolean(agent.isPrimary),
+    policy: agent.policy
+      ? {
+          preset: agent.policy.preset,
+          missingToolBehavior: agent.policy.missingToolBehavior,
+          installScope: agent.policy.installScope,
+          fileAccess: agent.policy.fileAccess,
+          networkAccess: agent.policy.networkAccess
+        }
+      : null,
+    heartbeat: agent.heartbeat
+      ? {
+          enabled: agent.heartbeat.enabled,
+          every: normalizeOptionalValue(agent.heartbeat.every) ?? null
+        }
+      : null
+  });
+
+  const sortById = (leftAgent: WorkspaceAgentBlueprintInput, rightAgent: WorkspaceAgentBlueprintInput) =>
+    leftAgent.id.localeCompare(rightAgent.id);
+
+  const normalizedLeft = [...left].sort(sortById).map(normalizeAgent);
+  const normalizedRight = [...right].sort(sortById).map(normalizeAgent);
+
+  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
+async function collectWorkspaceEditableDocPaths(workspacePath: string) {
+  const docPaths = new Set<string>();
+  const rootEntries = await readdir(workspacePath, { withFileTypes: true });
+
+  for (const entry of rootEntries) {
+    if (entry.isFile() && isEditableMarkdownFile(entry.name)) {
+      docPaths.add(entry.name);
+    }
+  }
+
+  for (const directoryName of ["docs", "memory"] as const) {
+    const directoryPath = path.join(workspacePath, directoryName);
+
+    if (!(await pathMatchesKind(directoryPath, "directory"))) {
+      continue;
+    }
+
+    const relativePaths = await collectMarkdownPathsInDirectory(directoryPath, directoryName);
+    for (const relativePath of relativePaths) {
+      docPaths.add(relativePath);
+    }
+  }
+
+  const deliverablesReadmePath = path.join(workspacePath, "deliverables", "README.md");
+  if (await pathMatchesKind(deliverablesReadmePath, "file")) {
+    docPaths.add("deliverables/README.md");
+  }
+
+  return Array.from(docPaths).sort((left, right) => left.localeCompare(right));
+}
+
+async function collectMarkdownPathsInDirectory(absoluteDirectoryPath: string, relativePrefix: string) {
+  const results: string[] = [];
+  const entries = await readdir(absoluteDirectoryPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
+
+    const nextRelativePath = path.join(relativePrefix, entry.name);
+    const nextAbsolutePath = path.join(absoluteDirectoryPath, entry.name);
+
+    if (entry.isDirectory()) {
+      results.push(...(await collectMarkdownPathsInDirectory(nextAbsolutePath, nextRelativePath)));
+      continue;
+    }
+
+    if (entry.isFile() && isEditableMarkdownFile(entry.name)) {
+      results.push(nextRelativePath);
+    }
+  }
+
+  return results;
+}
+
+function isEditableMarkdownFile(fileName: string) {
+  return fileName.toLowerCase().endsWith(".md");
+}
+
 async function collectWorkspaceResourceState(
   workspacePath: string,
   entries: Array<{
@@ -6534,20 +7130,31 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
           .map((entry) => parseWorkspaceProjectManifestAgent(entry))
           .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
       : [];
+    const rules = parseWorkspaceCreateRules(parsed.rules);
 
     return {
+      name: typeof parsed.name === "string" ? parsed.name : null,
+      directory: typeof parsed.directory === "string" ? parsed.directory : null,
       template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
       sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
       agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
+      teamPreset: isWorkspaceTeamPreset(parsed.teamPreset) ? parsed.teamPreset : null,
+      modelProfile: isWorkspaceModelProfile(parsed.modelProfile) ? parsed.modelProfile : null,
+      rules,
       hidden: parsed.hidden === true,
       systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
       agents
     };
   } catch {
     return {
+      name: null,
+      directory: null,
       template: null,
       sourceMode: null,
       agentTemplate: null,
+      teamPreset: null,
+      modelProfile: null,
+      rules: null,
       hidden: false,
       systemTag: null,
       agents: []
@@ -6562,6 +7169,9 @@ async function upsertWorkspaceProjectAgentMetadata(
     name?: string | null;
     role?: string | null;
     isPrimary?: boolean;
+    enabled?: boolean;
+    emoji?: string | null;
+    theme?: string | null;
     skillId?: string | null;
     modelId?: string | null;
     policy: AgentPolicy;
@@ -6591,6 +7201,9 @@ async function upsertWorkspaceProjectAgentMetadata(
     name: agent.name ?? existingAgent?.name ?? null,
     role: agent.role ?? existingAgent?.role ?? null,
     isPrimary: agent.isPrimary ?? existingAgent?.isPrimary ?? false,
+    enabled: agent.enabled ?? existingAgent?.enabled ?? true,
+    emoji: agent.emoji ?? existingAgent?.emoji ?? null,
+    theme: agent.theme ?? existingAgent?.theme ?? null,
     skillId: agent.skillId ?? existingAgent?.skillId ?? null,
     modelId: agent.modelId ?? existingAgent?.modelId ?? null,
     policy: agent.policy
@@ -6684,10 +7297,66 @@ function parseWorkspaceProjectManifestAgent(value: unknown): WorkspaceProjectMan
     name: typeof value.name === "string" ? value.name : null,
     role: typeof value.role === "string" ? value.role : null,
     isPrimary: Boolean(value.isPrimary),
+    enabled: value.enabled !== false,
     skillId: typeof value.skillId === "string" ? value.skillId : null,
     modelId: typeof value.modelId === "string" ? value.modelId : null,
+    emoji: typeof value.emoji === "string" ? value.emoji : null,
+    theme: typeof value.theme === "string" ? value.theme : null,
     policy: parseAgentPolicy(value.policy)
   };
+}
+
+function findMatchingWorkspaceAgent(
+  agents: OpenClawAgent[],
+  workspaceSlug: string,
+  agentKey: string
+) {
+  const normalizedKey = slugify(agentKey);
+  const workspacePrefix = `${workspaceSlug}-`;
+
+  return (
+    agents.find((agent) => agent.id === createWorkspaceAgentId(workspaceSlug, agentKey)) ??
+    agents.find((agent) => agent.id === `${workspacePrefix}${normalizedKey}`) ??
+    agents.find((agent) => normalizedKey.length > 0 && agent.id.endsWith(`-${normalizedKey}`)) ??
+    agents.find((agent) => agent.id === normalizedKey) ??
+    null
+  );
+}
+
+function parseWorkspaceCreateRules(value: unknown): WorkspaceCreateRules | null {
+  if (!isObjectRecord(value)) {
+    return null;
+  }
+
+  const workspaceOnly = typeof value.workspaceOnly === "boolean" ? value.workspaceOnly : null;
+  const generateStarterDocs =
+    typeof value.generateStarterDocs === "boolean" ? value.generateStarterDocs : null;
+  const generateMemory = typeof value.generateMemory === "boolean" ? value.generateMemory : null;
+  const kickoffMission = typeof value.kickoffMission === "boolean" ? value.kickoffMission : null;
+
+  if (
+    workspaceOnly === null &&
+    generateStarterDocs === null &&
+    generateMemory === null &&
+    kickoffMission === null
+  ) {
+    return null;
+  }
+
+  return {
+    workspaceOnly: workspaceOnly ?? true,
+    generateStarterDocs: generateStarterDocs ?? DEFAULT_WORKSPACE_RULES.generateStarterDocs,
+    generateMemory: generateMemory ?? DEFAULT_WORKSPACE_RULES.generateMemory,
+    kickoffMission: kickoffMission ?? DEFAULT_WORKSPACE_RULES.kickoffMission
+  };
+}
+
+function isWorkspaceTeamPreset(value: unknown): value is WorkspaceTeamPreset {
+  return value === "solo" || value === "core" || value === "custom";
+}
+
+function isWorkspaceModelProfile(value: unknown): value is WorkspaceModelProfile {
+  return value === "balanced" || value === "fast" || value === "quality";
 }
 
 function parseAgentPolicy(value: unknown): AgentPolicy | null {

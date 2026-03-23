@@ -56,6 +56,7 @@ export function MissionCanvas({
   hiddenRuntimeIds,
   hiddenTaskKeys,
   lockedTaskKeys,
+  onToggleWorkspaceTaskCards,
   onEditAgent,
   onDeleteAgent,
   onReplyTask,
@@ -74,6 +75,7 @@ export function MissionCanvas({
   hiddenRuntimeIds: string[];
   hiddenTaskKeys: string[];
   lockedTaskKeys: string[];
+  onToggleWorkspaceTaskCards: (workspaceId: string) => void;
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onReplyTask: (task: TaskRecord) => void;
@@ -102,6 +104,7 @@ export function MissionCanvas({
     hiddenRuntimeIds,
     hiddenTaskKeys,
     lockedTaskKeys,
+    onToggleWorkspaceTaskCards,
     onEditAgent,
     onDeleteAgent,
     onReplyTask,
@@ -167,6 +170,7 @@ export function MissionCanvas({
       hiddenRuntimeIds,
       hiddenTaskKeys,
       lockedTaskKeys,
+      onToggleWorkspaceTaskCards,
       onEditAgent,
       onDeleteAgent,
       onReplyTask,
@@ -193,6 +197,7 @@ export function MissionCanvas({
     hiddenRuntimeIds,
     hiddenTaskKeys,
     lockedTaskKeys,
+    onToggleWorkspaceTaskCards,
     onEditAgent,
     onDeleteAgent,
     onReplyTask,
@@ -382,6 +387,7 @@ function buildCanvasGraph(
   hiddenRuntimeIds: string[],
   hiddenTaskKeys: string[],
   lockedTaskKeys: string[],
+  onToggleWorkspaceTaskCards: (workspaceId: string) => void,
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onReplyTask: (task: TaskRecord) => void,
@@ -404,10 +410,16 @@ function buildCanvasGraph(
 
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
     const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
-    const workspaceTasks = snapshot.tasks.filter(
-      (task) =>
-        task.workspaceId === workspace.id && !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+    const workspaceTaskRecords = snapshot.tasks.filter((task) => task.workspaceId === workspace.id);
+    const workspaceToggleTasks = workspaceTaskRecords.filter(
+      (task) => !lockedTaskKeys.includes(task.key)
     );
+    const workspaceTasks = workspaceTaskRecords.filter(
+      (task) => !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys)
+    );
+    const workspaceTaskCardsHidden =
+      workspaceToggleTasks.length > 0 &&
+      workspaceToggleTasks.every((task) => isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys));
     const groupX = (workspaceIndex % 2) * 1160 + 44;
     const groupY = Math.floor(workspaceIndex / 2) * 920 + 42;
     const agentX = groupX + 52;
@@ -498,7 +510,10 @@ function buildCanvasGraph(
       selected: false,
       data: {
         workspace,
-        emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id
+        emphasis: !activeWorkspaceId || activeWorkspaceId === workspace.id,
+        taskCardCount: workspaceToggleTasks.length,
+        taskCardsHidden: workspaceTaskCardsHidden,
+        onToggleTaskCards: workspaceToggleTasks.length > 0 ? () => onToggleWorkspaceTaskCards(workspace.id) : undefined
       }
     });
   });

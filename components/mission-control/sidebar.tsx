@@ -72,13 +72,6 @@ type AgentDraft = {
   heartbeat: AgentHeartbeatDraft;
 };
 
-type WorkspaceDraft = {
-  workspaceId: string;
-  name: string;
-  directory: string;
-  currentPath: string;
-};
-
 type SidebarSectionId = "overview" | "workspaces" | "agents" | "models";
 
 export function MissionSidebar({
@@ -96,7 +89,8 @@ export function MissionSidebar({
   onRunModelSetDefault,
   onConnectModelProvider,
   onOpenModelSetup,
-  onOpenAddModels
+  onOpenAddModels,
+  onEditWorkspace
 }: {
   snapshot: MissionControlSnapshot;
   activeWorkspaceId: string | null;
@@ -126,6 +120,7 @@ export function MissionSidebar({
   onConnectModelProvider: (provider: string) => void;
   onOpenModelSetup: () => void;
   onOpenAddModels: () => void;
+  onEditWorkspace: (workspaceId: string) => void;
 }) {
   const healthTone = toneForHealth(snapshot.diagnostics.health);
   const statusDot =
@@ -140,13 +135,11 @@ export function MissionSidebar({
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
   const [isEditAgentAdvancedOpen, setIsEditAgentAdvancedOpen] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
-  const [isEditWorkspaceOpen, setIsEditWorkspaceOpen] = useState(false);
   const [isDeleteWorkspaceOpen, setIsDeleteWorkspaceOpen] = useState(false);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [isDeleteAgentOpen, setIsDeleteAgentOpen] = useState(false);
   const [isDeletingAgent, setIsDeletingAgent] = useState(false);
   const [editDraft, setEditDraft] = useState<AgentDraft | null>(null);
-  const [workspaceDraft, setWorkspaceDraft] = useState<WorkspaceDraft | null>(null);
   const [workspaceDeleteTarget, setWorkspaceDeleteTarget] = useState<MissionControlSnapshot["workspaces"][number] | null>(null);
   const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
@@ -260,16 +253,6 @@ export function MissionSidebar({
       agentDeleteTarget.status === "ready"
     : false;
 
-  const openEditWorkspace = (workspace: MissionControlSnapshot["workspaces"][number]) => {
-    setWorkspaceDraft({
-      workspaceId: workspace.id,
-      name: workspace.name,
-      directory: "",
-      currentPath: workspace.path
-    });
-    setIsEditWorkspaceOpen(true);
-  };
-
   const openDeleteWorkspace = (workspace: MissionControlSnapshot["workspaces"][number]) => {
     setWorkspaceDeleteTarget(workspace);
     setWorkspaceDeleteConfirmText("");
@@ -356,51 +339,6 @@ export function MissionSidebar({
       });
     } finally {
       setIsSavingAgent(false);
-    }
-  };
-
-  const submitEditWorkspace = async () => {
-    if (!workspaceDraft) {
-      return;
-    }
-
-    setIsSavingWorkspace(true);
-
-    try {
-      const response = await fetch("/api/workspaces", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          workspaceId: workspaceDraft.workspaceId,
-          name: workspaceDraft.name.trim() || undefined,
-          directory: workspaceDraft.directory.trim() || undefined
-        })
-      });
-
-      const result = (await response.json()) as {
-        workspaceId?: string;
-        workspacePath?: string;
-        error?: string;
-      };
-
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "OpenClaw could not update the workspace.");
-      }
-
-      toast.success("Workspace updated in OpenClaw.", {
-        description: result.workspacePath || workspaceDraft.currentPath
-      });
-      setIsEditWorkspaceOpen(false);
-      await onRefresh();
-      onSelectWorkspace(result.workspaceId ?? workspaceDraft.workspaceId);
-    } catch (error) {
-      toast.error("Workspace update failed.", {
-        description: error instanceof Error ? error.message : "Unknown workspace error."
-      });
-    } finally {
-      setIsSavingWorkspace(false);
     }
   };
 
@@ -711,7 +649,7 @@ export function MissionSidebar({
                                 variant="secondary"
                                 size="sm"
                                 className="h-8 rounded-full px-3 text-[11px]"
-                                onClick={() => openEditWorkspace(workspace)}
+                                onClick={() => onEditWorkspace(workspace.id)}
                               >
                                 Edit
                               </Button>
@@ -1067,71 +1005,6 @@ export function MissionSidebar({
           </div>
         ) : null}
       </div>
-
-      <Dialog open={isEditWorkspaceOpen} onOpenChange={setIsEditWorkspaceOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit OpenClaw workspace</DialogTitle>
-            <DialogDescription>
-              Renaming a workspace moves the real directory and updates every attached agent binding.
-            </DialogDescription>
-          </DialogHeader>
-
-          {workspaceDraft ? (
-            <div className="space-y-4">
-              <FormField label="Workspace name" htmlFor="edit-workspace-name">
-                <Input
-                  id="edit-workspace-name"
-                  value={workspaceDraft.name}
-                  onChange={(event) =>
-                    setWorkspaceDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            name: event.target.value
-                          }
-                        : current
-                    )
-                  }
-                  placeholder="Workspace name"
-                />
-              </FormField>
-
-              <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-3.5 py-3">
-                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Current path</p>
-                <p className="mt-1.5 break-all font-mono text-xs text-slate-300">{workspaceDraft.currentPath}</p>
-              </div>
-
-              <FormField label="Directory override" htmlFor="edit-workspace-directory">
-                <Input
-                  id="edit-workspace-directory"
-                  value={workspaceDraft.directory}
-                  onChange={(event) =>
-                    setWorkspaceDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            directory: event.target.value
-                          }
-                        : current
-                    )
-                  }
-                  placeholder="Leave blank to rename in the same parent folder"
-                />
-              </FormField>
-            </div>
-          ) : null}
-
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setIsEditWorkspaceOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={submitEditWorkspace} disabled={isSavingWorkspace || !workspaceDraft?.name.trim()}>
-              {isSavingWorkspace ? "Saving…" : "Save workspace"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isDeleteWorkspaceOpen} onOpenChange={setIsDeleteWorkspaceOpen}>
         <DialogContent>

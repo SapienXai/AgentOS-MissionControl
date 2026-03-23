@@ -76,7 +76,9 @@ const workspaceCreateRequestSchema = workspaceSchema.extend({
 const workspaceUpdateSchema = z.object({
   workspaceId: z.string().min(1),
   name: z.string().optional(),
-  directory: z.string().optional()
+  directory: z.string().optional(),
+  plan: z.any().optional(),
+  baseline: z.any().optional()
 });
 
 const workspaceDeleteSchema = z.object({
