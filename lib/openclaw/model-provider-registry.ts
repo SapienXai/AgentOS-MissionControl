@@ -94,6 +94,26 @@ export function getModelProviderDescriptor(providerId: AddModelsProviderId) {
   return descriptor;
 }
 
+export function isAddModelsProviderId(value: unknown): value is AddModelsProviderId {
+  return typeof value === "string" && modelProviderRegistry.some((provider) => provider.id === value);
+}
+
+export function normalizeAddModelsProviderId(value: unknown): AddModelsProviderId | null {
+  if (isAddModelsProviderId(value)) {
+    return value;
+  }
+
+  if (value && typeof value === "object" && "id" in value) {
+    const candidateId = (value as { id?: unknown }).id;
+
+    if (isAddModelsProviderId(candidateId)) {
+      return candidateId;
+    }
+  }
+
+  return null;
+}
+
 export function formatModelProviderLabel(providerId: string) {
   const descriptor = modelProviderRegistry.find((provider) => provider.id === providerId);
 

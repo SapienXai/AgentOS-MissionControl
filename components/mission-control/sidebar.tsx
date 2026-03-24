@@ -1,23 +1,21 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import type { LucideIcon } from "lucide-react";
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
 import {
   AlertTriangle,
   Bot,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
+  ChevronDown,
+  ChevronUp,
   Cpu,
   FolderKanban,
   Home,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
-  Sparkles,
-  SquareTerminal,
   Workflow
 } from "lucide-react";
 
@@ -79,7 +77,7 @@ export function MissionSidebar({
   activeWorkspaceId,
   requestedAgentAction,
   connectionState,
-  collapsed,
+  collapsed: isPanelCollapsed,
   modelManager,
   onToggleCollapsed,
   onSelectWorkspace,
@@ -122,6 +120,7 @@ export function MissionSidebar({
   onOpenAddModels: () => void;
   onEditWorkspace: (workspaceId: string) => void;
 }) {
+  const [isRailCollapsed, setIsRailCollapsed] = useState(false);
   const healthTone = toneForHealth(snapshot.diagnostics.health);
   const statusDot =
     snapshot.diagnostics.health === "healthy"
@@ -183,6 +182,23 @@ export function MissionSidebar({
   const showEditAgentHeartbeatControls = editDraft
     ? isEditAgentAdvancedOpen || editDraft.policy.preset === "monitoring"
     : false;
+  const openPanelFromRail = () => {
+    if (isRailCollapsed) {
+      setIsRailCollapsed(false);
+    }
+
+    if (isPanelCollapsed) {
+      onToggleCollapsed();
+    }
+  };
+  const togglePanelFromRail = () => {
+    if (isPanelCollapsed) {
+      openPanelFromRail();
+      return;
+    }
+
+    onToggleCollapsed();
+  };
   const navItems: Array<{
     id: SidebarSectionId;
     label: string;
@@ -440,32 +456,41 @@ export function MissionSidebar({
 
   return (
     <>
-      <div className="panel-surface panel-glow flex h-full overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
+      <div className="relative flex h-full items-start overflow-visible">
         <div
           className={cn(
-            "flex h-full shrink-0 flex-col items-center bg-[linear-gradient(180deg,rgba(7,10,18,0.98),rgba(3,6,12,0.98))] px-3 py-4",
-            collapsed ? "w-full" : "w-[78px] border-r border-white/[0.08]"
+            "panel-surface panel-glow relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-3 py-4 transition-[max-height] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            isPanelCollapsed ? "w-full rounded-[30px]" : "w-[78px] rounded-l-[30px] rounded-r-none border-r-0",
+            isRailCollapsed
+              ? "max-h-[176px]"
+              : "max-h-full"
           )}
         >
           <button
             type="button"
-            aria-label={collapsed ? "Expand mission control" : "Collapse mission control"}
-            onClick={onToggleCollapsed}
-            className="flex h-12 w-12 items-center justify-center rounded-[18px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)] transition-all hover:border-cyan-200/30 hover:bg-cyan-400/[0.16]"
+            aria-label={isPanelCollapsed ? "Open mission control" : "Collapse mission control"}
+            onClick={togglePanelFromRail}
+            className="flex h-12 w-12 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-[18px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
           >
-            <Workflow className="h-5 w-5 text-cyan-200" />
+            <Image
+              src="/assets/logo.webp"
+              alt=""
+              width={32}
+              height={32}
+              aria-hidden="true"
+              className="pointer-events-none h-8 w-8 select-none object-contain"
+              priority
+            />
           </button>
 
-          <button
-            type="button"
-            aria-label={collapsed ? "Expand mission control" : "Collapse mission control"}
-            onClick={onToggleCollapsed}
-            className="mt-4 inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
+          <div
+            className={cn(
+              "mt-6 flex w-full flex-1 flex-col items-center gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              isRailCollapsed
+                ? "max-h-0 -translate-y-3 opacity-0 pointer-events-none"
+                : "max-h-[420px] translate-y-0 opacity-100"
+            )}
           >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </button>
-
-          <div className="mt-6 flex flex-1 flex-col items-center gap-2">
             {navItems.map((item) => (
               <RailNavButton
                 key={item.id}
@@ -475,7 +500,12 @@ export function MissionSidebar({
                 onClick={() => {
                   setActiveSection(item.id);
 
-                  if (collapsed) {
+                  if (isPanelCollapsed) {
+                    openPanelFromRail();
+                    return;
+                  }
+
+                  if (activeSection === item.id) {
                     onToggleCollapsed();
                   }
                 }}
@@ -483,51 +513,68 @@ export function MissionSidebar({
             ))}
           </div>
 
-          <div className="mt-4 flex flex-col items-center gap-2">
-            <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
-            {collapsed ? (
-              <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">{snapshot.mode}</p>
-            ) : null}
+          <div className="mt-auto flex w-full flex-col items-center gap-2 pb-1">
+            <div className="flex flex-col items-center gap-2">
+              <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
+              {isPanelCollapsed ? (
+                <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">{snapshot.mode}</p>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              aria-label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
+              onClick={() => {
+                if (!isPanelCollapsed) {
+                  onToggleCollapsed();
+                }
+
+                setIsRailCollapsed((current) => !current);
+              }}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
+            >
+              {isRailCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+            </button>
           </div>
+
         </div>
 
-        {!collapsed ? (
-          <div className="min-w-0 flex-1 bg-[linear-gradient(180deg,rgba(6,10,18,0.96),rgba(3,6,14,0.98))]">
-            <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-              <div className="shrink-0 border-b border-white/[0.08] px-5 pb-4 pt-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">OpenClaw</p>
-                    <h1 className="mt-2 font-display text-[1.38rem] text-white">Mission Control</h1>
-                    <p className="mt-2 text-[12px] leading-5 text-slate-400">
-                      Classic operations rail for live workspaces, agents, and model routing.
-                    </p>
-                  </div>
+        <div
+          className={cn(
+            "panel-surface panel-glow h-full min-w-0 flex-1 overflow-hidden rounded-r-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            isPanelCollapsed
+              ? "-translate-x-4 opacity-0 pointer-events-none"
+              : "translate-x-0 opacity-100",
+            !isPanelCollapsed && "rounded-l-none border-l-0"
+          )}
+        >
+          <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+            <div className="shrink-0 px-5 pb-4 pt-5">
+              <div className="flex w-full items-baseline justify-center gap-2 whitespace-nowrap text-center">
+                <span className="font-display text-[15px] font-semibold tracking-[0.2em] text-slate-100">
+                  AgentOS
+                </span>
+                <span className="text-[11px] font-medium text-slate-600">|</span>
+                <span className="font-display text-[11px] font-normal tracking-[0.2em] text-slate-500">
+                  Mission Control
+                </span>
+              </div>
 
-                  <div className="rounded-[18px] border border-white/10 bg-white/[0.04] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                    <Workflow className="h-4 w-4 text-cyan-200" />
-                  </div>
-                </div>
+              <div className="mt-4 h-px w-full bg-white/[0.08]" />
 
                 <div className="mt-4 rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(13,20,34,0.98),rgba(6,10,18,0.96))] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
-                      <div>
-                        <p className={cn("text-[13px] font-medium capitalize", healthTone)}>
-                          {snapshot.diagnostics.health}
-                        </p>
-                        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                          {connectionState === "live" ? "stream online" : connectionState}
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-3">
+                    <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
+                    <div className="min-w-0">
+                      <p className={cn("text-[13px] font-medium capitalize", healthTone)}>
+                        {snapshot.diagnostics.health}
+                      </p>
+                      <p className="truncate text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                        {connectionState === "live" ? "online" : connectionState}
+                        <span className="mx-2 text-slate-600">·</span>
+                        {gatewayAddress}
+                      </p>
                     </div>
-                    <Badge variant="muted">{snapshot.mode}</Badge>
-                  </div>
-
-                  <div className="mt-3 rounded-[16px] border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Gateway</p>
-                    <p className="mt-1.5 text-[13px] text-white">{gatewayAddress}</p>
                   </div>
 
                   {snapshot.diagnostics.issues.length > 0 ? (
@@ -550,7 +597,7 @@ export function MissionSidebar({
                 </div>
               </div>
 
-              <div className="flex-1 space-y-6 p-4">
+            <div className="flex-1 space-y-6 p-4">
                 {activeSection === "overview" ? (
                   <>
                     <SidebarSectionHeader
@@ -757,104 +804,67 @@ export function MissionSidebar({
                       eyebrow="Models"
                       title="Models & providers"
                       detail="Connect providers, choose a default route, and manage live model readiness."
-                      action={
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-[11px]"
-                            onClick={onOpenAddModels}
-                          >
-                            Add models
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-[11px]"
-                            disabled={modelManager.runState === "running"}
-                            onClick={onRunModelRefresh}
-                          >
-                            {modelManager.runState === "running" ? (
-                              <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                            )}
-                            Refresh
-                          </Button>
-                        </div>
-                      }
                     />
 
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <OverviewTile
-                        label="Default"
-                        value={
-                          snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
-                          snapshot.diagnostics.modelReadiness.defaultModel ||
-                          "Not set"
-                        }
-                      />
-                      <OverviewTile
-                        label="Providers"
-                        value={String(
-                          snapshot.diagnostics.modelReadiness.authProviders.filter((provider) => provider.connected).length
-                        )}
-                      />
-                      <OverviewTile
-                        label="Routes"
-                        value={`${snapshot.diagnostics.modelReadiness.availableModelCount}/${snapshot.diagnostics.modelReadiness.totalModelCount}`}
-                      />
-                    </div>
-
-                    {!modelManager.systemReady ? (
-                      <div className="rounded-[20px] border border-amber-400/15 bg-amber-400/[0.08] p-4">
-                        <p className="text-[13px] font-medium text-amber-50">Finish system setup first</p>
-                        <p className="mt-1.5 text-[12px] leading-5 text-amber-100/80">
-                          Provider auth and model verification need a live OpenClaw gateway and writable runtime state.
-                        </p>
-                        <div className="mt-3">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-[11px]"
-                            onClick={onOpenModelSetup}
-                          >
-                            Open setup
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="space-y-3">
-                      {snapshot.diagnostics.modelReadiness.authProviders.map((provider) => (
-                        <ProviderCard
-                          key={provider.provider}
-                          provider={provider}
-                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
-                          onConnect={() => onConnectModelProvider(provider.provider)}
-                        />
-                      ))}
-                    </div>
-
                     <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="font-display text-[15px] text-white">Default route</p>
-                          <p className="mt-1 text-[12px] leading-5 text-slate-400">
-                            Pick the model AgentOS should prefer for live work, or discover new routes first.
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Default</p>
+                        <p className="font-display text-[15px] text-white">
+                          {snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+                            snapshot.diagnostics.modelReadiness.defaultModel ||
+                            "Not set"}
+                        </p>
+                        <p className="text-[12px] leading-5 text-slate-400">
+                          Connect providers, choose a default route, and keep live model readiness visible.
+                        </p>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 border-t border-white/[0.06] pt-4 sm:grid-cols-2">
+                        <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
+                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Providers</p>
+                          <p className="mt-1.5 text-[13px] leading-5 text-white">
+                            {
+                              snapshot.diagnostics.modelReadiness.authProviders.filter((provider) => provider.connected)
+                                .length
+                            }{" "}
+                            connected
                           </p>
                         </div>
-                        <Badge variant="muted">
-                          {snapshot.diagnostics.modelReadiness.localModelCount} local · {snapshot.diagnostics.modelReadiness.remoteModelCount} remote
-                        </Badge>
+                        <div className="rounded-[16px] border border-white/[0.06] bg-white/[0.03] px-3 py-2.5">
+                          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Routes</p>
+                          <p className="mt-1.5 text-[13px] leading-5 text-white">
+                            {snapshot.diagnostics.modelReadiness.availableModelCount}/
+                            {snapshot.diagnostics.modelReadiness.totalModelCount} available
+                          </p>
+                        </div>
                       </div>
 
-                      <label className="mt-3 block">
+                      {!modelManager.systemReady ? (
+                        <div className="mt-4 rounded-[16px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2.5">
+                          <p className="text-[13px] font-medium text-amber-50">Finish system setup first</p>
+                          <p className="mt-1.5 text-[12px] leading-5 text-amber-100/80">
+                            Provider auth and model verification need a live OpenClaw gateway and writable runtime
+                            state.
+                          </p>
+                          <div className="mt-3">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="h-8 rounded-full px-3 text-[11px]"
+                              onClick={onOpenModelSetup}
+                            >
+                              Open setup
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <label className="mt-4 block space-y-1 border-t border-white/[0.06] pt-4">
                         <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Default model</span>
                         <select
                           value={selectedModelId}
                           onChange={(event) => setModelSelectionDraft(event.target.value)}
-                          className="mt-1.5 h-10 w-full rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-100 outline-none"
+                          className="h-10 w-full rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-100 outline-none"
                         >
                           <option value="">Auto choose</option>
                           {availableModels.map((model) => (
@@ -865,19 +875,11 @@ export function MissionSidebar({
                         </select>
                       </label>
 
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          variant="default"
-                          size="sm"
-                          className="h-8 rounded-full px-3 text-[11px]"
-                          onClick={onOpenAddModels}
-                        >
-                          Add models
-                        </Button>
+                      <div className="mt-4 grid gap-2">
                         <Button
                           variant="secondary"
                           size="sm"
-                          className="h-8 rounded-full px-3 text-[11px]"
+                          className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
                           disabled={!modelManager.systemReady || modelManager.runState === "running"}
                           onClick={() => onRunModelSetDefault(selectedModelId || undefined)}
                         >
@@ -886,26 +888,49 @@ export function MissionSidebar({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 rounded-full px-3 text-[11px]"
+                          className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
                           disabled={!modelManager.systemReady || modelManager.runState === "running"}
                           onClick={onRunModelDiscover}
                         >
                           Discover routes
                         </Button>
                       </div>
+                    </div>
 
-                      {snapshot.diagnostics.modelReadiness.issues.length > 0 ? (
-                        <div className="mt-3 space-y-2">
-                          {snapshot.diagnostics.modelReadiness.issues.map((issue) => (
-                            <div
-                              key={issue}
-                              className="rounded-[14px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2 text-[12px] leading-5 text-amber-100"
-                            >
-                              {issue}
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
+                        onClick={onOpenAddModels}
+                      >
+                        Add models
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-full justify-center rounded-full px-3 text-[11px]"
+                        disabled={modelManager.runState === "running"}
+                        onClick={onRunModelRefresh}
+                      >
+                        {modelManager.runState === "running" ? (
+                          <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        Refresh
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {snapshot.diagnostics.modelReadiness.authProviders.map((provider) => (
+                        <ProviderCard
+                          key={provider.provider}
+                          provider={provider}
+                          disabled={!modelManager.systemReady || modelManager.runState === "running"}
+                          onConnect={() => onConnectModelProvider(provider.provider)}
+                        />
+                      ))}
                     </div>
 
                     {discoveredModels.length > 0 ? (
@@ -977,7 +1002,6 @@ export function MissionSidebar({
                       ))}
                     </div>
 
-                    <ModelManagerConsole manager={modelManager} />
                   </>
                 ) : null}
               </div>
@@ -997,13 +1021,12 @@ export function MissionSidebar({
                           ? `${activeWorkspace.agentIds.length} agents · ${activeWorkspace.activeRuntimeIds.length} runs`
                           : `${snapshot.agents.length} agents · ${snapshot.runtimes.length} runs`}
                       </p>
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
           </div>
-        ) : null}
+        </div>
+      </div>
       </div>
 
       <Dialog open={isDeleteWorkspaceOpen} onOpenChange={setIsDeleteWorkspaceOpen}>
@@ -1658,153 +1681,6 @@ function ProviderCard({
   );
 }
 
-function ModelManagerConsole({
-  manager
-}: {
-  manager: {
-    runState: "idle" | "running" | "success" | "error";
-    statusMessage: string | null;
-    resultMessage: string | null;
-    log: string;
-    manualCommand: string | null;
-    docsUrl: string | null;
-  };
-}) {
-  const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
-  const canOpenTerminal = Boolean(manager.manualCommand?.trim().startsWith("openclaw "));
-  const statusCopy =
-    manager.statusMessage ||
-    manager.resultMessage ||
-    "Refresh provider status, connect a route, or choose a default model to keep AgentOS ready.";
-
-  const copyCommand = async () => {
-    if (!manager.manualCommand) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(manager.manualCommand);
-      toast.success("Command copied.", {
-        description: "Open Terminal and paste the command to continue model setup."
-      });
-    } catch (error) {
-      toast.error("Could not copy command.", {
-        description: error instanceof Error ? error.message : "Clipboard access is unavailable."
-      });
-    }
-  };
-
-  const openTerminal = async () => {
-    if (!manager.manualCommand || !canOpenTerminal) {
-      return;
-    }
-
-    setIsOpeningTerminal(true);
-
-    try {
-      const response = await fetch("/api/system/open-terminal", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          command: manager.manualCommand
-        })
-      });
-
-      const result = (await response.json().catch(() => null)) as { error?: string } | null;
-
-      if (!response.ok || result?.error) {
-        throw new Error(result?.error || "Unable to open Terminal.");
-      }
-
-      toast.success("Terminal opened.", {
-        description: "Finish the OpenClaw provider flow there, then return and refresh this panel."
-      });
-    } catch (error) {
-      toast.error("Could not open Terminal.", {
-        description: error instanceof Error ? error.message : "Open Terminal manually and run the command below."
-      });
-    } finally {
-      setIsOpeningTerminal(false);
-    }
-  };
-
-  return (
-    <div className="rounded-[20px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="font-display text-[15px] text-white">Model setup console</p>
-            <Badge variant={modelRunBadgeVariant(manager.runState)}>
-              {manager.runState === "idle" ? "idle" : manager.runState}
-            </Badge>
-          </div>
-          <p className="mt-1 text-[12px] leading-5 text-slate-400">{statusCopy}</p>
-        </div>
-        {manager.runState === "running" ? (
-          <LoaderCircle className="mt-0.5 h-4 w-4 animate-spin text-cyan-200" />
-        ) : (
-          <Sparkles className="mt-0.5 h-4 w-4 text-cyan-200" />
-        )}
-      </div>
-
-      <pre className="mt-3 max-h-[180px] overflow-auto rounded-[16px] border border-white/[0.08] bg-slate-950/[0.72] px-3 py-2.5 font-mono text-[10px] leading-5 text-slate-300">
-        {manager.log || "No model-management output yet.\n\nProvider auth and model actions will stream here."}
-      </pre>
-
-      {manager.manualCommand ? (
-        <div className="mt-3 rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
-          <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Manual command</p>
-          <p className="mt-1.5 break-all font-mono text-[11px] leading-5 text-slate-200">{manager.manualCommand}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-8 rounded-full px-3 text-[11px]"
-              onClick={copyCommand}
-            >
-              <Copy className="mr-1.5 h-3.5 w-3.5" />
-              Copy command
-            </Button>
-            {canOpenTerminal ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 rounded-full px-3 text-[11px]"
-                onClick={openTerminal}
-                disabled={isOpeningTerminal}
-              >
-                {isOpeningTerminal ? (
-                  <>
-                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Opening...
-                  </>
-                ) : (
-                  <>
-                    <SquareTerminal className="mr-1.5 h-3.5 w-3.5" />
-                    Open Terminal
-                  </>
-                )}
-              </Button>
-            ) : null}
-          </div>
-          {manager.docsUrl ? (
-            <a
-              href={manager.docsUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 inline-flex items-center gap-1 text-[11px] text-slate-300 underline underline-offset-4"
-            >
-              Setup docs
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function resolveSidebarModelSelection(snapshot: MissionControlSnapshot) {
   return (
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
@@ -1857,24 +1733,6 @@ function resolveProviderSidebarDetail(provider: string) {
   }
 
   return "Connect this provider to make its remote routes available inside AgentOS.";
-}
-
-function modelRunBadgeVariant(
-  runState: "idle" | "running" | "success" | "error"
-): ComponentProps<typeof Badge>["variant"] {
-  if (runState === "success") {
-    return "success";
-  }
-
-  if (runState === "error") {
-    return "warning";
-  }
-
-  if (runState === "running") {
-    return "default";
-  }
-
-  return "muted";
 }
 
 function FormField({

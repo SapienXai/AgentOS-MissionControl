@@ -25,7 +25,9 @@ import { Input } from "@/components/ui/input";
 import {
   otherModelProviders,
   primaryModelProviders,
-  getModelProviderDescriptor
+  getModelProviderDescriptor,
+  isAddModelsProviderId,
+  normalizeAddModelsProviderId
 } from "@/lib/openclaw/model-provider-registry";
 import { getModelProviderAdapter } from "@/lib/openclaw/model-provider-adapters";
 import type {
@@ -83,7 +85,8 @@ export function AddModelsDialog({
   initialProvider?: AddModelsProviderId | null;
   onSnapshotChange: (snapshot: MissionControlSnapshot) => void;
 }) {
-  const [activeProvider, setActiveProvider] = useState<AddModelsProviderId | null>(initialProvider);
+  const normalizedInitialProvider = normalizeAddModelsProviderId(initialProvider);
+  const [activeProvider, setActiveProvider] = useState<AddModelsProviderId | null>(normalizedInitialProvider);
   const [otherProvidersOpen, setOtherProvidersOpen] = useState(false);
   const [providerDrafts, setProviderDrafts] = useState<Partial<Record<AddModelsProviderId, ProviderDraft>>>({});
   const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
@@ -96,16 +99,17 @@ export function AddModelsDialog({
       return;
     }
 
-    if (initialProvider) {
-      handleInitialProviderOpen(initialProvider);
+    if (normalizedInitialProvider) {
+      handleInitialProviderOpen(normalizedInitialProvider);
       return;
     }
 
-    setActiveProvider((current) => current ?? null);
-  }, [open, initialProvider]);
+    setActiveProvider((current) => (isAddModelsProviderId(current) ? current : null));
+  }, [open, normalizedInitialProvider]);
 
-  const activeDraft = activeProvider ? resolveDraft(providerDrafts[activeProvider]) : initialDraftState();
-  const activeDescriptor = activeProvider ? getModelProviderDescriptor(activeProvider) : null;
+  const activeProviderId = isAddModelsProviderId(activeProvider) ? activeProvider : null;
+  const activeDraft = activeProviderId ? resolveDraft(providerDrafts[activeProviderId]) : initialDraftState();
+  const activeDescriptor = activeProviderId ? getModelProviderDescriptor(activeProviderId) : null;
 
   async function selectProvider(providerId: AddModelsProviderId) {
     setActiveProvider(providerId);
@@ -353,7 +357,7 @@ export function AddModelsDialog({
                 <ProviderCard
                   key={provider.id}
                   descriptor={provider}
-                  active={activeProvider === provider.id}
+                  active={activeProviderId === provider.id}
                   connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
                   detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
                   onClick={() => {
@@ -389,7 +393,7 @@ export function AddModelsDialog({
                     <ProviderCard
                       key={provider.id}
                       descriptor={provider}
-                      active={activeProvider === provider.id}
+                      active={activeProviderId === provider.id}
                       compact
                       connected={resolveConnectionDetail(snapshot, providerDrafts, provider.id).connected}
                       detail={resolveConnectionDetail(snapshot, providerDrafts, provider.id).detail}
@@ -403,7 +407,7 @@ export function AddModelsDialog({
             </div>
 
             <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-4 sm:p-5">
-              {activeProvider && activeDescriptor ? (
+              {activeProviderId && activeDescriptor ? (
                 <>
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
@@ -422,7 +426,7 @@ export function AddModelsDialog({
                   </div>
 
                   <div className="mt-5 flex flex-wrap gap-2">
-                    {buildProgressSteps(activeProvider, activeDraft).map((step) => (
+                    {buildProgressSteps(activeProviderId, activeDraft).map((step) => (
                       <div
                         key={step.label}
                         className={cn(
@@ -461,7 +465,7 @@ export function AddModelsDialog({
                     </div>
                   ) : null}
 
-                  {activeProvider === "openai-codex" ? (
+                  {activeProviderId === "openai-codex" ? (
                     <div className="mt-6 rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
@@ -475,7 +479,7 @@ export function AddModelsDialog({
                           className="h-10 rounded-full px-5"
                           disabled={activeDraft.flowState === "connecting" && !activeDraft.manualCommand}
                           onClick={() => {
-                            void connectProvider(activeProvider);
+                            void connectProvider(activeProviderId);
                           }}
                         >
                           {activeDraft.flowState === "connecting" && !activeDraft.manualCommand ? (
@@ -539,7 +543,7 @@ export function AddModelsDialog({
                                 size="sm"
                                 className="h-9 rounded-full px-3"
                                 onClick={() => {
-                                  void discoverProvider(activeProvider);
+                                  void discoverProvider(activeProviderId);
                                 }}
                               >
                                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
@@ -565,8 +569,8 @@ export function AddModelsDialog({
                           <Input
                             type="password"
                             value={activeDraft.apiKey}
-                            onChange={(event) => updateDraft(activeProvider, { apiKey: event.target.value })}
-                            placeholder={activeProvider === "openrouter" ? "sk-or-v1-..." : "Paste API key"}
+                            onChange={(event) => updateDraft(activeProviderId, { apiKey: event.target.value })}
+                            placeholder={activeProviderId === "openrouter" ? "sk-or-v1-..." : "Paste API key"}
                             className="mt-2"
                           />
                         </div>
@@ -575,7 +579,7 @@ export function AddModelsDialog({
                           className="h-11 rounded-full px-5"
                           disabled={activeDraft.flowState === "connecting" || !activeDraft.apiKey.trim()}
                           onClick={() => {
-                            void connectProvider(activeProvider);
+                            void connectProvider(activeProviderId);
                           }}
                         >
                           {activeDraft.flowState === "connecting" ? (
@@ -600,7 +604,7 @@ export function AddModelsDialog({
                         className="h-9 rounded-full px-4"
                         disabled={activeDraft.flowState === "discovery-loading"}
                         onClick={() => {
-                          void discoverProvider(activeProvider);
+                          void discoverProvider(activeProviderId);
                         }}
                       >
                         {activeDraft.flowState === "discovery-loading" ? (
@@ -618,7 +622,7 @@ export function AddModelsDialog({
                         size="sm"
                         className="h-9 rounded-full px-4"
                         onClick={() => {
-                          void runStatus(activeProvider);
+                          void runStatus(activeProviderId);
                         }}
                       >
                         Refresh status
@@ -638,21 +642,21 @@ export function AddModelsDialog({
                   {activeDraft.models.length > 0 ? (
                     <div className="mt-6">
                       <ModelPicker
-                        provider={activeProvider}
+                        provider={activeProviderId}
                         models={activeDraft.models}
                         selectedModelIds={activeDraft.selectedModelIds}
                         search={activeDraft.search}
-                        onSearchChange={(value) => updateDraft(activeProvider, { search: value })}
+                        onSearchChange={(value) => updateDraft(activeProviderId, { search: value })}
                         onToggleModel={(modelId) => {
                           const selected = activeDraft.selectedModelIds.includes(modelId);
-                          updateDraft(activeProvider, {
+                          updateDraft(activeProviderId, {
                             selectedModelIds: selected
                               ? activeDraft.selectedModelIds.filter((entry) => entry !== modelId)
                               : [...activeDraft.selectedModelIds, modelId]
                           });
                         }}
                         onAddSelected={() => {
-                          void addSelectedModels(activeProvider);
+                          void addSelectedModels(activeProviderId);
                         }}
                         isAdding={activeDraft.flowState === "connecting" && activeDraft.statusMessage === "Adding selected models..."}
                       />

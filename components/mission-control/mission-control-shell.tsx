@@ -55,6 +55,7 @@ import type {
   OpenClawUpdateStreamEvent,
   TaskRecord
 } from "@/lib/openclaw/types";
+import { normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
 
 type ComposeIntent = {
@@ -1153,7 +1154,7 @@ export function MissionControlShell({
   };
 
   const openAddModelsDialog = (provider?: AddModelsProviderId | null) => {
-    setInitialAddModelsProvider(provider ?? null);
+    setInitialAddModelsProvider(normalizeAddModelsProviderId(provider));
     setIsAddModelsDialogOpen(true);
   };
 
