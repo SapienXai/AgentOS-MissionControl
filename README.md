@@ -287,7 +287,7 @@ agentos doctor
 Install a specific published version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.1.8 bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.1.9 bash
 ```
 
 Package manager install:
@@ -342,8 +342,8 @@ openclaw gateway status --json
 Push a tag in the format below to build platform-specific release assets on GitHub Releases:
 
 ```bash
-git tag agentos-v0.1.8
-git push origin agentos-v0.1.8
+git tag agentos-v0.1.9
+git push origin agentos-v0.1.9
 ```
 
 The release workflow uploads:
