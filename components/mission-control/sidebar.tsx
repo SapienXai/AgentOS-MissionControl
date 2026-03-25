@@ -1715,6 +1715,22 @@ function formatProviderLabel(provider: string) {
     return "Ollama";
   }
 
+  if (normalized === "xai") {
+    return "xAI";
+  }
+
+  if (normalized === "gemini") {
+    return "Gemini";
+  }
+
+  if (normalized === "deepseek") {
+    return "DeepSeek";
+  }
+
+  if (normalized === "mistral") {
+    return "Mistral";
+  }
+
   return provider
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
@@ -1722,15 +1738,33 @@ function formatProviderLabel(provider: string) {
 }
 
 function resolveProviderSidebarDetail(provider: string) {
-  if (provider === "openai-codex") {
+  const normalized = provider.trim().toLowerCase();
+
+  if (normalized === "openai-codex") {
     return "Use the OpenClaw OpenAI Codex route. If your ChatGPT plan includes Codex access, connect that account here.";
   }
 
-  if (provider === "openrouter") {
+  if (normalized === "openrouter") {
     return "Paste an API key to unlock OpenRouter-hosted routes.";
   }
 
-  if (provider === "ollama") {
+  if (normalized === "gemini") {
+    return "Paste a Gemini API key to unlock Gemini-hosted routes.";
+  }
+
+  if (normalized === "deepseek") {
+    return "Paste a DeepSeek API key to unlock DeepSeek-hosted routes.";
+  }
+
+  if (normalized === "mistral") {
+    return "Paste a Mistral API key to unlock Mistral and Codestral routes.";
+  }
+
+  if (normalized === "xai") {
+    return "Paste an xAI API key to unlock Grok routes.";
+  }
+
+  if (normalized === "ollama") {
     return "Local model provider. Pull models locally to make new routes available.";
   }
 

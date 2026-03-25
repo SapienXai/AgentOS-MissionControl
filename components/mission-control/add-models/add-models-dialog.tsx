@@ -692,8 +692,8 @@ export function AddModelsDialog({
                   <div>
                     <p className="font-display text-[0.95rem] text-white">Choose a provider to begin</p>
                     <p className="mt-2 max-w-[400px] text-[12px] leading-[1.05rem] text-slate-400">
-                      Start with ChatGPT, OpenRouter, or Ollama Local. The flow will guide you through connect,
-                      discovery, selection, and add.
+                      Start with ChatGPT, OpenRouter, Gemini, DeepSeek, Mistral, or Ollama Local. The flow will
+                      guide you through connect, discovery, selection, and add.
                     </p>
                   </div>
                 </div>

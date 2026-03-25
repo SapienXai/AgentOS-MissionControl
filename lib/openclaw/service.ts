@@ -7976,6 +7976,22 @@ function formatProviderLabel(provider: string) {
     return "Ollama";
   }
 
+  if (normalized === "xai") {
+    return "xAI";
+  }
+
+  if (normalized === "gemini") {
+    return "Gemini";
+  }
+
+  if (normalized === "deepseek") {
+    return "DeepSeek";
+  }
+
+  if (normalized === "mistral") {
+    return "Mistral";
+  }
+
   return provider
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
@@ -7983,7 +7999,21 @@ function formatProviderLabel(provider: string) {
 }
 
 function resolveProviderSetupDetail(provider: string) {
-  if (provider.trim().toLowerCase() === "openrouter") {
+  const normalized = provider.trim().toLowerCase();
+
+  if (normalized === "openai-codex") {
+    return "Use the ChatGPT account-based login flow in terminal to use this route.";
+  }
+
+  if (
+    normalized === "openrouter" ||
+    normalized === "openai" ||
+    normalized === "anthropic" ||
+    normalized === "xai" ||
+    normalized === "gemini" ||
+    normalized === "deepseek" ||
+    normalized === "mistral"
+  ) {
     return `Add your ${formatProviderLabel(provider)} API key in terminal to use this route.`;
   }
 

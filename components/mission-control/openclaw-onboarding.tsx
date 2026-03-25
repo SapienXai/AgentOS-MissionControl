@@ -1280,6 +1280,22 @@ function formatProviderLabel(provider: string) {
     return "Ollama";
   }
 
+  if (normalized === "xai") {
+    return "xAI";
+  }
+
+  if (normalized === "gemini") {
+    return "Gemini";
+  }
+
+  if (normalized === "deepseek") {
+    return "DeepSeek";
+  }
+
+  if (normalized === "mistral") {
+    return "Mistral";
+  }
+
   return provider
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))

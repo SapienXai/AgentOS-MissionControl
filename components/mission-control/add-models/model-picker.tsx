@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
 import type { AddModelsCatalogModel, AddModelsProviderId } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -42,11 +43,12 @@ export function ModelPicker({
   isAdding: boolean;
 }) {
   const recommendedModels = models.filter((model) => model.recommended);
-  const showSearch = models.length > 8 || provider === "openrouter";
   const availableSelectedCount = selectedModelIds.filter(
     (modelId) => !models.find((model) => model.id === modelId)?.alreadyAdded
   ).length;
   const hasOpenRouterTabs = provider === "openrouter";
+  const searchPlaceholder = getModelProviderDescriptor(provider).searchPlaceholder;
+  const showSearch = models.length > 8 || Boolean(searchPlaceholder);
   const filteredRecommendedModels = filterModels(recommendedModels, search);
   const filteredAllModels = filterModels(models, search);
 
@@ -70,7 +72,7 @@ export function ModelPicker({
           <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={provider === "openrouter" ? "Search OpenRouter models" : "Search models"}
+            placeholder={searchPlaceholder ?? "Search models"}
             className="h-9 pl-9 text-[12px]"
           />
         </div>

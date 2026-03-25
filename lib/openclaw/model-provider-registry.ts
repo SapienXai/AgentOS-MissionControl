@@ -69,6 +69,39 @@ export const modelProviderRegistry: ModelProviderDescriptor[] = [
     helperText: "Use this for API-key-based OpenAI routing."
   },
   {
+    id: "gemini",
+    label: "Gemini",
+    shortLabel: "Gemini",
+    description: "Add a Gemini API key, discover Google models, and pick the routes you want.",
+    category: "other",
+    connectKind: "apiKey",
+    accent: "from-[#e6f7ff] via-[#f4fbff] to-white",
+    helperText: "Simple API key connection.",
+    searchPlaceholder: "Search Gemini models"
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    shortLabel: "DeepSeek",
+    description: "Add a DeepSeek API key, discover the catalog, and add the models you need.",
+    category: "other",
+    connectKind: "apiKey",
+    accent: "from-[#e7eeff] via-[#f4f7ff] to-white",
+    helperText: "Simple API key connection.",
+    searchPlaceholder: "Search DeepSeek models"
+  },
+  {
+    id: "mistral",
+    label: "Mistral",
+    shortLabel: "Mistral",
+    description: "Add a Mistral API key, discover Mistral and Codestral models, and curate your routes.",
+    category: "other",
+    connectKind: "apiKey",
+    accent: "from-[#f2e8ff] via-[#fbf7ff] to-white",
+    helperText: "Simple API key connection.",
+    searchPlaceholder: "Search Mistral models"
+  },
+  {
     id: "xai",
     label: "xAI",
     shortLabel: "xAI",

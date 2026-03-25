@@ -521,7 +521,10 @@ export type AddModelsProviderId =
   | "ollama"
   | "openai"
   | "anthropic"
-  | "xai";
+  | "xai"
+  | "gemini"
+  | "deepseek"
+  | "mistral";
 
 export type AddModelsProviderCategory = "primary" | "other";
 

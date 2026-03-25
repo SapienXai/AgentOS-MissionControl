@@ -40,7 +40,10 @@ const providerIdSchema = z.enum([
   "ollama",
   "openai",
   "anthropic",
-  "xai"
+  "xai",
+  "gemini",
+  "deepseek",
+  "mistral"
 ]);
 const optionalInputString = z.preprocess((value) => {
   if (typeof value !== "string") {
@@ -624,6 +627,18 @@ function isRecommendedModel(provider: AddModelsProviderId, modelId: string) {
 
   if (provider === "xai") {
     return /grok-4|grok-code/.test(normalized);
+  }
+
+  if (provider === "gemini") {
+    return /gemini-2\.|gemini-3/.test(normalized);
+  }
+
+  if (provider === "deepseek") {
+    return /deepseek-(chat|reasoner|coder|r1|v3)/.test(normalized);
+  }
+
+  if (provider === "mistral") {
+    return /mistral-(large|small|medium|tiny)|codestral|pixtral|ministral/.test(normalized);
   }
 
   return false;

@@ -30,6 +30,18 @@ const providerLogoConfig: Record<string, ProviderLogoConfig> = {
     kind: "simple",
     icon: requireSimpleIcon("siAnthropic", "Anthropic")
   },
+  gemini: {
+    kind: "simple",
+    icon: requireSimpleIcon("siGooglegemini", "Gemini")
+  },
+  deepseek: {
+    kind: "image",
+    src: "/assets/provider-logos/deepseek.svg"
+  },
+  mistral: {
+    kind: "simple",
+    icon: requireSimpleIcon("siMistralai", "Mistral")
+  },
   openrouter: {
     kind: "simple",
     icon: requireSimpleIcon("siOpenrouter", "OpenRouter")

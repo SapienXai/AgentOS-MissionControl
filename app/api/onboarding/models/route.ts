@@ -640,6 +640,22 @@ function formatProviderLabel(provider: string) {
     return "Ollama";
   }
 
+  if (normalized === "xai") {
+    return "xAI";
+  }
+
+  if (normalized === "gemini") {
+    return "Gemini";
+  }
+
+  if (normalized === "deepseek") {
+    return "DeepSeek";
+  }
+
+  if (normalized === "mistral") {
+    return "Mistral";
+  }
+
   return provider
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
@@ -647,9 +663,10 @@ function formatProviderLabel(provider: string) {
 }
 
 function resolveProviderAuthHandoff(provider: string) {
+  const normalized = provider.trim().toLowerCase();
   const label = formatProviderLabel(provider);
 
-  if (provider.trim().toLowerCase() === "openrouter") {
+  if (normalized === "openrouter") {
     return {
       command: "openclaw models auth paste-token --provider openrouter",
       statusMessage: `Preparing ${label} API key setup in terminal...`,
@@ -659,7 +676,7 @@ function resolveProviderAuthHandoff(provider: string) {
   }
 
   return {
-    command: `openclaw models auth login --provider ${provider} --set-default`,
+    command: `openclaw models auth login --provider ${normalized} --set-default`,
     statusMessage: `Preparing ${label} auth in terminal...`,
     continueMessage: `Continue in terminal to connect ${label}. After auth completes, return here and refresh setup.`,
     verificationMessage: `The model was saved. Continue in terminal to connect ${label} and finish setup.`
