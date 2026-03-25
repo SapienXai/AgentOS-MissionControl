@@ -1973,6 +1973,7 @@ export function MissionControlShell({
             onRunModelDiscover={runModelDiscover}
             onRunModelRefresh={runModelRefresh}
             onRunModelSetDefault={runModelSetDefault}
+            onOpenAddModels={openAddModelsDialog}
             onContinueToModels={() => setOnboardingStage("models")}
             onBackToSystem={() => setOnboardingStage("system")}
             onDismiss={dismissOnboarding}

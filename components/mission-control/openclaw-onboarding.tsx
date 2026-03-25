@@ -1,6 +1,16 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Copy, LoaderCircle, RefreshCw, Sparkles, SquareTerminal } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Copy,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  SquareTerminal
+} from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
 
@@ -51,6 +61,7 @@ export function OpenClawOnboarding({
   onRunModelDiscover,
   onRunModelRefresh,
   onRunModelSetDefault,
+  onOpenAddModels,
   onContinueToModels,
   onBackToSystem,
   onDismiss,
@@ -73,6 +84,7 @@ export function OpenClawOnboarding({
   onRunModelDiscover: () => void;
   onRunModelRefresh: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
+  onOpenAddModels: () => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
   onDismiss: () => void;
@@ -259,6 +271,7 @@ export function OpenClawOnboarding({
             onRunModelDiscover={onRunModelDiscover}
             onRunModelRefresh={onRunModelRefresh}
             onRunModelSetDefault={onRunModelSetDefault}
+            onOpenAddModels={onOpenAddModels}
           />
         )}
 
@@ -492,7 +505,8 @@ function ModelStage({
   onSelectedModelIdChange,
   onRunModelDiscover,
   onRunModelRefresh,
-  onRunModelSetDefault
+  onRunModelSetDefault,
+  onOpenAddModels
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
@@ -507,6 +521,7 @@ function ModelStage({
   onRunModelDiscover: () => void;
   onRunModelRefresh: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
+  onOpenAddModels: () => void;
 }) {
   const modelReadiness = snapshot.diagnostics.modelReadiness;
   const [detailsOpen, setDetailsOpen] = useState(() => discoveredModels.length > 0);
@@ -600,6 +615,16 @@ function ModelStage({
         </label>
 
         <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={onOpenAddModels}
+            className={secondaryActionClassName(surfaceTheme)}
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Add models
+          </Button>
           <Button
             type="button"
             variant="secondary"
