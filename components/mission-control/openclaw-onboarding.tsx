@@ -10,6 +10,7 @@ import {
   isOpenClawMissionReady,
   isOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
+import { formatModelLabel } from "@/lib/openclaw/presenters";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
@@ -85,11 +86,18 @@ export function OpenClawOnboarding({
   const selectableDiscoveredModels = discoveredModels.filter(
     (model) => !availableModels.some((availableModel) => availableModel.id === model.modelId)
   );
+  const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
-  const stageStatusCopy = stageRun.statusMessage || stageRun.resultMessage || resolveStageDescription(stage, systemActionDescription);
+  const stageStatusCopy =
+    stageRun.statusMessage ||
+    stageRun.resultMessage ||
+    resolveStageDescription(stage, systemActionDescription, selectedModelLabel);
   const phaseLabel = stage === "system" ? resolveSystemPhaseLabel(systemPhase, snapshot) : resolveModelPhaseLabel(modelPhase, snapshot);
   const showDetails =
-    stageRun.runState !== "idle" || Boolean(stageRun.manualCommand) || stageRun.log.trim().length > 0;
+    stageRun.runState !== "idle" ||
+    Boolean(stageRun.manualCommand) ||
+    stageRun.log.trim().length > 0 ||
+    (stage === "models" && discoveredModels.length > 0);
   const stageBadgeLabel = resolveStageBadgeLabel(stageRun.runState, stage, modelReady);
 
   const primaryAction = resolvePrimaryAction({
@@ -169,8 +177,7 @@ export function OpenClawOnboarding({
               surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-300"
             )}
           >
-            Finish the system layer first, then lock a usable default model so the product is ready
-            for real work.
+            Set up the system, then pick a default model.
           </p>
         </div>
 
@@ -385,6 +392,8 @@ function SystemStage({
   phaseLabel: string;
   run: StageRunDetails;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   return (
     <>
       <div className="mt-3">
@@ -405,8 +414,7 @@ function SystemStage({
             surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400"
           )}
         >
-          Install the CLI if needed, make sure the gateway service exists, and verify a live RPC
-          connection.
+          Install the CLI, start the gateway, and verify RPC.
         </p>
       </div>
 
@@ -463,6 +471,8 @@ function SystemStage({
         statusCopy={statusCopy}
         showDetails={showDetails}
         phaseLabel={phaseLabel}
+        detailsOpen={detailsOpen}
+        onDetailsOpenChange={setDetailsOpen}
         run={run}
       />
     </>
@@ -499,6 +509,18 @@ function ModelStage({
   onRunModelSetDefault: (modelId?: string) => void;
 }) {
   const modelReadiness = snapshot.diagnostics.modelReadiness;
+  const [detailsOpen, setDetailsOpen] = useState(() => discoveredModels.length > 0);
+  const connectedProviders = modelReadiness.authProviders.filter((provider) => provider.connected);
+  const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
+  const defaultModelLabel = modelReadiness.resolvedDefaultModel || modelReadiness.defaultModel || "Not set";
+  const summaryLead = selectedModelId ? `Selected: ${selectedModelLabel ?? defaultModelLabel}` : `Default: ${defaultModelLabel}`;
+  const summaryCopy = `${summaryLead} · ${modelReadiness.availableModelCount}/${modelReadiness.totalModelCount} routes · ${connectedProviders.length} connected`;
+  const hasAdvancedDetails =
+    modelReadiness.issues.length > 0 || connectedProviders.length > 0 || discoveredModels.length > 0;
+  const handleRunModelDiscover = () => {
+    setDetailsOpen(true);
+    onRunModelDiscover();
+  };
 
   return (
     <>
@@ -537,26 +559,8 @@ function ModelStage({
             surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400"
           )}
         >
-          Lock a usable default model before handing the user into the live product.
+          Pick the default model.
         </p>
-      </div>
-
-      <div className="mt-2.5 grid gap-1.5 sm:grid-cols-3">
-        <MetricCard
-          surfaceTheme={surfaceTheme}
-          label="Default model"
-          value={modelReadiness.resolvedDefaultModel || modelReadiness.defaultModel || "Not set"}
-        />
-        <MetricCard
-          surfaceTheme={surfaceTheme}
-          label="Available routes"
-          value={`${modelReadiness.availableModelCount}/${modelReadiness.totalModelCount}`}
-        />
-        <MetricCard
-          surfaceTheme={surfaceTheme}
-          label="Connected providers"
-          value={String(modelReadiness.authProviders.filter((provider) => provider.connected).length)}
-        />
       </div>
 
       <div
@@ -567,165 +571,171 @@ function ModelStage({
             : "border-white/8 bg-[rgba(255,255,255,0.02)]"
         )}
       >
-        <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <label className="block">
-            <span
-              className={cn(
-                "text-[7px] uppercase tracking-[0.16em]",
-                surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-              )}
-            >
-              Default model
-            </span>
-            <select
-              value={selectedModelId}
-              onChange={(event) => onSelectedModelIdChange(event.target.value)}
-              className={cn(
-                "mt-1.5 h-9 w-full rounded-[12px] border px-2.5 text-[11px] outline-none",
-                surfaceTheme === "light"
-                  ? "border-[#dccabd] bg-white text-[#33251c]"
-                  : "border-white/10 bg-white/[0.04] text-slate-100"
-              )}
-            >
-              <option value="">Auto choose</option>
-              {availableModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name} · {model.provider}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div
+        <label className="block">
+          <span
             className={cn(
-              "rounded-[12px] border px-2.5 py-1.5 text-[10px]",
-              surfaceTheme === "light"
-                ? "border-[#eadcd0] bg-[#fff7f2] text-[#705b4d]"
-                : "border-white/10 bg-white/[0.03] text-slate-400"
+              "text-[7px] uppercase tracking-[0.16em]",
+              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
             )}
           >
-            {modelReadiness.localModelCount} local · {modelReadiness.remoteModelCount} remote
-          </div>
-        </div>
+            Default model
+          </span>
+          <select
+            value={selectedModelId}
+            onChange={(event) => onSelectedModelIdChange(event.target.value)}
+            className={cn(
+              "mt-1.5 h-9 w-full rounded-[12px] border px-2.5 text-[11px] outline-none",
+              surfaceTheme === "light"
+                ? "border-[#dccabd] bg-white text-[#33251c]"
+                : "border-white/10 bg-white/[0.04] text-slate-100"
+            )}
+          >
+            <option value="">Auto choose</option>
+            {availableModels.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name} · {model.provider}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            onClick={onRunModelDiscover}
+            onClick={handleRunModelDiscover}
             disabled={run.runState === "running"}
             className={secondaryActionClassName(surfaceTheme)}
           >
             {discoveredModels.length > 0 ? "Scan again" : "Discover models"}
           </Button>
+          {hasAdvancedDetails ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDetailsOpen((current) => !current)}
+              aria-expanded={detailsOpen}
+              className={ghostActionClassName(surfaceTheme)}
+            >
+              {detailsOpen ? "Hide details" : "Show details"}
+            </Button>
+          ) : null}
         </div>
 
-        {modelReadiness.issues.length > 0 ? (
-          <div className="mt-2.5 space-y-1">
-            {modelReadiness.issues.map((issue) => (
-              <p
-                key={issue}
-                className={cn(
-                  "rounded-[10px] border px-2 py-1.5 text-[9px] leading-[0.85rem]",
-                  surfaceTheme === "light"
-                    ? "border-amber-200 bg-amber-50 text-amber-800"
-                    : "border-amber-300/20 bg-amber-300/10 text-amber-100"
-                )}
-              >
-                {issue}
-              </p>
-            ))}
-          </div>
-        ) : null}
+        <p
+          className={cn(
+            "mt-2 text-[9px] leading-[0.95rem]",
+            surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
+          )}
+        >
+          {summaryCopy}
+        </p>
 
-        {snapshot.diagnostics.modelReadiness.authProviders.length > 0 ? (
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {snapshot.diagnostics.modelReadiness.authProviders.map((provider) => (
-              <span
-                key={provider.provider}
-                className={cn(
-                  "rounded-full border px-2 py-0.5 text-[9px]",
-                  provider.connected
-                    ? surfaceTheme === "light"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
-                    : surfaceTheme === "light"
-                      ? "border-[#dccabd] bg-white text-[#705b4d]"
-                      : "border-white/10 bg-white/[0.04] text-slate-300"
-                )}
-              >
-                {formatProviderLabel(provider.provider)}
-                {provider.detail ? ` · ${provider.detail}` : ""}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        {detailsOpen ? (
+          <div className="mt-2.5 space-y-2">
+            {modelReadiness.issues.length > 0 ? (
+              <div className="space-y-1">
+                {modelReadiness.issues.map((issue) => (
+                  <p
+                    key={issue}
+                    className={cn(
+                      "rounded-[10px] border px-2 py-1.5 text-[9px] leading-[0.85rem]",
+                      surfaceTheme === "light"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-amber-300/20 bg-amber-300/10 text-amber-100"
+                    )}
+                  >
+                    {issue}
+                  </p>
+                ))}
+              </div>
+            ) : null}
 
-        {discoveredModels.length > 0 ? (
-          <div className="mt-2.5 space-y-1.5">
-            <p
-              className={cn(
-                "text-[7px] uppercase tracking-[0.16em]",
-                surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-              )}
-            >
-              Discovered routes
-            </p>
-            <div className="space-y-1.5">
-              {discoveredModels.slice(0, 3).map((model) => (
-                <div
-                  key={model.modelId}
+            {connectedProviders.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {connectedProviders.map((provider) => (
+                  <span
+                    key={provider.provider}
+                    className={cn(
+                      "rounded-full border px-2 py-0.5 text-[9px]",
+                      surfaceTheme === "light"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+                    )}
+                  >
+                    {formatProviderLabel(provider.provider)}
+                    {provider.detail ? ` · ${provider.detail}` : ""}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {discoveredModels.length > 0 ? (
+              <div className="space-y-1.5">
+                <p
                   className={cn(
-                    "flex items-center justify-between gap-2 rounded-[12px] border px-2 py-1.5",
-                    surfaceTheme === "light"
-                      ? "border-[#eadcd0] bg-[#fff7f2]"
-                      : "border-white/10 bg-white/[0.03]"
+                    "text-[7px] uppercase tracking-[0.16em]",
+                    surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
                   )}
                 >
-                  <div className="min-w-0">
-                    <p
+                  Routes
+                </p>
+                <div className="space-y-1.5">
+                  {discoveredModels.slice(0, 3).map((model) => (
+                    <div
+                      key={model.modelId}
                       className={cn(
-                        "truncate text-[10px]",
-                        surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white"
+                        "flex items-center justify-between gap-2 rounded-[12px] border px-2 py-1.5",
+                        surfaceTheme === "light"
+                          ? "border-[#eadcd0] bg-[#fff7f2]"
+                          : "border-white/10 bg-white/[0.03]"
                       )}
                     >
-                      {model.name}
-                    </p>
-                    <p
-                      className={cn(
-                        "mt-0.5 text-[8px] leading-[0.85rem]",
-                        surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
-                      )}
-                    >
-                      {formatProviderLabel(model.provider)}
-                      {model.isFree ? " · free" : ""}
-                      {model.supportsTools ? " · tools" : ""}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => onRunModelSetDefault(model.modelId)}
-                    disabled={run.runState === "running"}
-                    className={secondaryActionClassName(surfaceTheme)}
-                  >
-                    Use
-                  </Button>
+                      <div className="min-w-0">
+                        <p
+                          className={cn(
+                            "truncate text-[10px]",
+                            surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white"
+                          )}
+                        >
+                          {model.name}
+                        </p>
+                        <p
+                          className={cn(
+                            "mt-0.5 text-[8px] leading-[0.85rem]",
+                            surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+                          )}
+                        >
+                          {formatProviderLabel(model.provider)}
+                          {model.isFree ? " · free" : ""}
+                          {model.supportsTools ? " · tools" : ""}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => onRunModelSetDefault(model.modelId)}
+                        disabled={run.runState === "running"}
+                        className={secondaryActionClassName(surfaceTheme)}
+                      >
+                        Use
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p
-              className={cn(
-                "text-[9px] leading-[0.95rem]",
-                surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
-              )}
-            >
-              The dropdown only shows routes that are already configured. Use a discovered route
-              here to add it first; if credentials are missing, Mission Control will hand you off
-              to OpenClaw.
-            </p>
+                <p
+                  className={cn(
+                    "text-[9px] leading-[0.95rem]",
+                    surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
+                  )}
+                >
+                  Configured routes only. Missing credentials will hand you off to OpenClaw.
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -735,6 +745,8 @@ function ModelStage({
         statusCopy={statusCopy}
         showDetails={showDetails}
         phaseLabel={phaseLabel}
+        detailsOpen={detailsOpen}
+        onDetailsOpenChange={setDetailsOpen}
         run={run}
       />
     </>
@@ -746,12 +758,16 @@ function StageConsole({
   statusCopy,
   showDetails,
   phaseLabel,
+  detailsOpen,
+  onDetailsOpenChange,
   run
 }: {
   surfaceTheme: SurfaceTheme;
   statusCopy: string;
   showDetails: boolean;
   phaseLabel: string;
+  detailsOpen: boolean;
+  onDetailsOpenChange: (value: boolean) => void;
   run: StageRunDetails;
 }) {
   const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
@@ -765,7 +781,7 @@ function StageConsole({
     try {
       await navigator.clipboard.writeText(run.manualCommand);
       toast.success("Command copied.", {
-        description: "Open Terminal and paste the command to continue setup."
+        description: "Open Terminal and paste it."
       });
     } catch (error) {
       toast.error("Could not copy command.", {
@@ -799,11 +815,11 @@ function StageConsole({
       }
 
       toast.success("Terminal opened.", {
-        description: "Finish the OpenClaw auth flow there, then return and refresh setup."
+        description: "Finish auth there, then refresh."
       });
     } catch (error) {
       toast.error("Could not open Terminal.", {
-        description: error instanceof Error ? error.message : "Open Terminal manually and run the command below."
+        description: error instanceof Error ? error.message : "Open Terminal manually and run the command."
       });
     } finally {
       setIsOpeningTerminal(false);
@@ -820,14 +836,28 @@ function StageConsole({
       )}
     >
       <div className="px-2.5 py-2">
-        <p
-          className={cn(
-            "text-[7px] uppercase tracking-[0.16em]",
-            surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-          )}
-        >
-          Current status
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p
+            className={cn(
+              "text-[7px] uppercase tracking-[0.16em]",
+              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+            )}
+          >
+            Status
+          </p>
+          {showDetails ? (
+            <button
+              type="button"
+              onClick={() => onDetailsOpenChange(!detailsOpen)}
+              className={cn(
+                "text-[8px] uppercase tracking-[0.16em] transition-colors",
+                surfaceTheme === "light" ? "text-[#8f7664] hover:text-[#6f5949]" : "text-slate-500 hover:text-slate-300"
+              )}
+            >
+              {detailsOpen ? "Hide details" : "Show details"}
+            </button>
+          ) : null}
+        </div>
         <p
           className={cn(
             "mt-1 text-[11px] leading-[1rem]",
@@ -838,7 +868,7 @@ function StageConsole({
         </p>
       </div>
 
-      {showDetails ? (
+      {showDetails && detailsOpen ? (
         <>
           <div
             className={cn(
@@ -852,7 +882,7 @@ function StageConsole({
                 surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
               )}
             >
-              Setup log
+              Log
             </p>
             <span className={surfaceTheme === "light" ? "text-[10px] text-[#8c7362]" : "text-[10px] text-slate-400"}>
               {phaseLabel}
@@ -864,7 +894,7 @@ function StageConsole({
               surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
             )}
           >
-            {run.log || "No command output yet.\n\nStart this step and Mission Control will stream each action here."}
+            {run.log || "No output yet.\n\nStart the step to stream logs."}
           </pre>
           {run.manualCommand ? (
             <div
@@ -879,7 +909,7 @@ function StageConsole({
                   surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
                 )}
               >
-                {canOpenTerminal ? "Run in terminal" : "Manual fallback"}
+                {canOpenTerminal ? "Terminal" : "Manual"}
               </p>
               {canOpenTerminal ? (
                 <p
@@ -888,7 +918,7 @@ function StageConsole({
                     surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400"
                   )}
                 >
-                  Open Terminal and run this command to continue setup.
+                  Open Terminal and run this command.
                 </p>
               ) : null}
               <p
@@ -955,48 +985,20 @@ function StageConsole({
   );
 }
 
-function MetricCard({
-  surfaceTheme,
-  label,
-  value
-}: {
-  surfaceTheme: SurfaceTheme;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-[12px] border px-2.5 py-2",
-        surfaceTheme === "light"
-          ? "border-[#e5d5c9] bg-[#fffaf6]"
-          : "border-white/8 bg-[rgba(255,255,255,0.02)]"
-      )}
-    >
-      <p className={cn("text-[7px] uppercase tracking-[0.16em]", surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500")}>
-        {label}
-      </p>
-      <p className={cn("mt-1 text-[11px] leading-[0.92rem]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
 function buildWizardSteps(stage: WizardStage, systemReady: boolean, modelReady: boolean) {
   return [
     {
       id: "system",
       order: 1,
       label: "System setup",
-      description: "CLI, gateway service, live RPC, runtime state",
+      description: "CLI, gateway, RPC, runtime state",
       state: resolveStepState(systemReady, stage === "system" && !systemReady)
     },
     {
       id: "models",
       order: 2,
       label: "Model setup",
-      description: "Default model, provider auth, live smoke test",
+      description: "Default model, auth",
       state: resolveStepState(modelReady, stage === "models" && !modelReady)
     }
   ] as Array<{ id: string; order: number; label: string; description: string; state: StepState }>;
@@ -1020,6 +1022,7 @@ function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboa
   const runtimeStateComplete =
     (snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable) ||
     phase === "ready";
+  const runtimeReady = liveComplete && runtimeStateComplete;
 
   return [
     {
@@ -1027,17 +1030,17 @@ function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboa
       label: "OpenClaw CLI",
       description: snapshot.diagnostics.installed
         ? `Installed${snapshot.diagnostics.version ? ` · v${snapshot.diagnostics.version}` : ""}`
-        : "Install the OpenClaw CLI on this machine.",
+        : "Install the OpenClaw CLI.",
       state: resolveStepState(cliComplete, !cliComplete && (phase === "detecting" || phase === "installing-cli"))
     },
     {
       id: "gateway",
       label: "Gateway service",
       description: snapshot.diagnostics.loaded
-        ? "The local gateway service is already registered on this machine."
+        ? "Gateway is already registered."
         : directGatewayRun
-          ? "Gateway is live via direct run."
-          : "Register the gateway service once so Mission Control can start it reliably.",
+          ? "Gateway is running directly."
+          : "Register the gateway service once.",
       state: resolveStepState(
         gatewayComplete,
         !gatewayComplete && (phase === "installing-gateway" || (cliComplete && phase === "detecting"))
@@ -1045,26 +1048,20 @@ function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenClawOnboa
     },
     {
       id: "runtime",
-      label: "Live connection",
-      description: snapshot.diagnostics.rpcOk
-        ? "Mission Control is connected to a live OpenClaw gateway."
-        : "Start the gateway and wait for RPC health to turn online.",
+      label: "Runtime ready",
+      description: runtimeReady
+        ? "RPC and state are ready."
+        : liveComplete
+          ? "RPC is online; verify state access."
+          : gatewayComplete
+            ? "Gateway is up; verify RPC."
+            : "Start the gateway and verify RPC.",
       state: resolveStepState(
-        liveComplete,
-        !liveComplete &&
-          (phase === "starting-gateway" || phase === "verifying" || (gatewayComplete && phase === "detecting"))
-      )
-    },
-    {
-      id: "state",
-      label: "Runtime state",
-      description:
-        snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable
-          ? "Mission Control can write to the OpenClaw state root and agent session stores."
-          : "Verify write access to the OpenClaw runtime state before live work begins.",
-      state: resolveStepState(
-        runtimeStateComplete,
-        !runtimeStateComplete && (phase === "verifying" || liveComplete)
+        runtimeReady,
+        !runtimeReady &&
+          (phase === "starting-gateway" ||
+            phase === "verifying" ||
+            (gatewayComplete && phase === "detecting"))
       )
     }
   ] as Array<{ id: string; label: string; description: string; state: StepState }>;
@@ -1105,12 +1102,32 @@ function resolvePrimaryAction(params: {
   return { kind: "auto" as const, label: "Auto configure models" };
 }
 
-function resolveStageDescription(stage: WizardStage, systemActionDescription: string) {
+function resolveSelectedModelLabel(
+  selectedModelId: string,
+  availableModels: Array<{ id: string; name: string; provider: string }>
+) {
+  if (!selectedModelId.trim()) {
+    return null;
+  }
+
+  const selectedModel = availableModels.find((model) => model.id === selectedModelId);
+  return selectedModel?.name || formatModelLabel(selectedModelId);
+}
+
+function resolveStageDescription(
+  stage: WizardStage,
+  systemActionDescription: string,
+  selectedModelLabel?: string | null
+) {
   if (stage === "system") {
     return systemActionDescription;
   }
 
-  return "Choose or connect a usable model route so the product is actually ready.";
+  if (selectedModelLabel) {
+    return `Selected model: ${selectedModelLabel}.`;
+  }
+
+  return "Choose or connect a usable model route.";
 }
 
 function resolveStepState(complete: boolean, current: boolean): StepState {

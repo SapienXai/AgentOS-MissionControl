@@ -3657,7 +3657,7 @@ function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent): OpenCl
 function resolveModelOnboardingActionCopy(intent: ModelOnboardingIntent) {
   if (intent === "discover") {
     return {
-      statusMessage: "Scanning remote model routes...",
+      statusMessage: "Scanning models...",
       successTitle: "Models discovered.",
       errorTitle: "Model discovery failed."
     };
@@ -3665,7 +3665,7 @@ function resolveModelOnboardingActionCopy(intent: ModelOnboardingIntent) {
 
   if (intent === "login-provider") {
     return {
-      statusMessage: "Preparing provider auth...",
+      statusMessage: "Checking auth...",
       successTitle: "Provider connected.",
       errorTitle: "Provider auth needs attention."
     };
@@ -3673,14 +3673,14 @@ function resolveModelOnboardingActionCopy(intent: ModelOnboardingIntent) {
 
   if (intent === "refresh") {
     return {
-      statusMessage: "Refreshing model status...",
+      statusMessage: "Refreshing...",
       successTitle: "Model setup refreshed.",
       errorTitle: "Model refresh failed."
     };
   }
 
   return {
-    statusMessage: "Checking available models and provider auth...",
+    statusMessage: "Checking models...",
     successTitle: "Model setup ready.",
     errorTitle: "Model setup failed."
   };
@@ -3690,21 +3690,21 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
   if (!snapshot.diagnostics.installed) {
     return {
       label: "Install OpenClaw",
-      description: "Download the OpenClaw CLI and prepare this machine for Mission Control."
+      description: "Download the CLI and get Mission Control ready."
     };
   }
 
   if (resolveOpenClawSystemReady(snapshot)) {
     return {
       label: "Enter Mission Control",
-      description: "OpenClaw is online and the runtime state is writable."
+      description: "OpenClaw is online and runtime state is writable."
     };
   }
 
   if (snapshot.diagnostics.rpcOk) {
     return {
       label: "Repair runtime access",
-      description: "OpenClaw is online, but Mission Control still needs verified write access to the runtime state."
+      description: "OpenClaw is online, but write access still needs verification."
     };
   }
 
@@ -3712,20 +3712,20 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
     return {
       label: "Prepare local gateway",
       description:
-        "OpenClaw CLI is already ready. Mission Control will register the local gateway service once, then start it."
+        "Register and start the local gateway."
     };
   }
 
   if (!snapshot.diagnostics.rpcOk) {
     return {
       label: "Start OpenClaw",
-      description: "Start the local gateway service and wait for a live RPC connection."
+      description: "Start the local gateway and wait for RPC."
     };
   }
 
   return {
     label: "Start OpenClaw",
-    description: "Start the local gateway service and wait for a live RPC connection."
+    description: "Start the local gateway and wait for RPC."
   };
 }
 
