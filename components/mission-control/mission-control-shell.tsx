@@ -4,13 +4,16 @@ import {
   AlertTriangle,
   ArrowUpCircle,
   CheckCircle2,
+  ChevronDown,
   EyeOff,
   LoaderCircle,
   MoonStar,
   RefreshCw,
   Settings2,
+  Square,
   SunMedium
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
@@ -2653,6 +2656,31 @@ function CanvasTopBar({
   const settingsChromeButtonStyles = settingsChromeButtonClassName(surfaceTheme);
   const settingsThemeSwitchTrackStyles = settingsThemeSwitchTrackClassName(surfaceTheme);
   const settingsThemeSwitchThumbStyles = settingsThemeSwitchThumbClassName(surfaceTheme);
+  const [gatewayServiceMenuOpen, setGatewayServiceMenuOpen] = useState(false);
+  const gatewayServiceMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!gatewayServiceMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node;
+
+      if (!gatewayServiceMenuRef.current?.contains(target)) {
+        setGatewayServiceMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [gatewayServiceMenuOpen]);
+
+  const gatewayServiceStatus = snapshot.diagnostics.rpcOk
+    ? "Online"
+    : snapshot.diagnostics.loaded
+      ? "Service only"
+      : "Offline";
 
   return (
     <div className="flex w-full items-center justify-between px-0 pt-6">
@@ -3000,7 +3028,7 @@ function CanvasTopBar({
                       surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
                     )}
                   >
-                    Reopen the wizard, control the gateway, and manage the minimum model setup from one place.
+                    Reopen the wizard or manage the gateway endpoint.
                   </p>
                 </div>
                 <span
@@ -3041,88 +3069,6 @@ function CanvasTopBar({
                 >
                   Refresh setup
                 </Button>
-              </div>
-
-              <div
-                className={cn(
-                  "mt-3 rounded-[14px] border px-2.5 py-2.5",
-                  surfaceTheme === "light"
-                    ? "border-[#eadcd0] bg-white"
-                    : "border-white/10 bg-white/[0.03]"
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-400")}>
-                      Gateway control
-                    </p>
-                    <p
-                      className={cn(
-                        "mt-0.5 text-[10px] leading-[1.05rem]",
-                        surfaceTheme === "light" ? "text-[#816958]" : "text-slate-500"
-                      )}
-                    >
-                      {snapshot.diagnostics.rpcOk
-                        ? "Live RPC connection is online."
-                        : snapshot.diagnostics.loaded
-                          ? "Service is loaded but Mission Control cannot verify RPC yet."
-                          : "Service is not loaded on this machine yet."}
-                    </p>
-                  </div>
-                  <span
-                    className={cn(
-                      "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
-                      snapshot.diagnostics.rpcOk
-                        ? surfaceTheme === "light"
-                          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                          : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
-                        : surfaceTheme === "light"
-                          ? "border-amber-300 bg-amber-50 text-amber-700"
-                          : "border-amber-300/25 bg-amber-300/10 text-amber-200"
-                    )}
-                  >
-                    {snapshot.diagnostics.rpcOk ? "Online" : snapshot.diagnostics.loaded ? "Service only" : "Offline"}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isGatewayControlRunning || snapshot.diagnostics.rpcOk}
-                    onClick={() => {
-                      void onControlGateway("start");
-                    }}
-                    className={settingsSecondaryButtonStyles}
-                  >
-                    {gatewayControlAction === "start" ? "Starting..." : "Start"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isGatewayControlRunning || !snapshot.diagnostics.loaded}
-                    onClick={() => {
-                      void onControlGateway("restart");
-                    }}
-                    className={settingsSecondaryButtonStyles}
-                  >
-                    {gatewayControlAction === "restart" ? "Restarting..." : "Restart"}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isGatewayControlRunning || !snapshot.diagnostics.loaded}
-                    onClick={() => {
-                      void onControlGateway("stop");
-                    }}
-                    className={settingsSecondaryButtonStyles}
-                  >
-                    {gatewayControlAction === "stop" ? "Stopping..." : "Stop"}
-                  </Button>
-                </div>
               </div>
 
               <div
@@ -3221,7 +3167,7 @@ function CanvasTopBar({
                   : "border-white/8 bg-white/[0.03]"
               )}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
                 <div>
                   <Label
                     htmlFor="workspace-root"
@@ -3229,14 +3175,6 @@ function CanvasTopBar({
                   >
                     Workspace root
                   </Label>
-                  <p
-                    className={cn(
-                      "mt-0.5 text-[10px] leading-[1.05rem]",
-                      surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
-                    )}
-                  >
-                    Default parent path for newly created workspaces. Existing workspaces stay at their current paths.
-                  </p>
                 </div>
                 <span
                   className={cn(
@@ -3263,23 +3201,7 @@ function CanvasTopBar({
                     : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
                 )}
               />
-              <p
-                className={cn(
-                  "mt-1.5 break-all font-mono text-[9px] leading-[1rem]",
-                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
-                )}
-              >
-                Configured root: {snapshot.diagnostics.configuredWorkspaceRoot ? compactPath(snapshot.diagnostics.configuredWorkspaceRoot) : "default"}
-              </p>
-              <p
-                className={cn(
-                  "mt-1 break-all font-mono text-[9px] leading-[1rem]",
-                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
-                )}
-              >
-                Effective root: {compactPath(snapshot.diagnostics.workspaceRoot)}
-              </p>
-              <div className="mt-3 flex items-center gap-2">
+              <div className="mt-2.5 flex items-center gap-2">
                 <Button
                   type="button"
                   size="sm"
@@ -3290,7 +3212,7 @@ function CanvasTopBar({
                   }}
                   className={settingsSecondaryButtonStyles}
                 >
-                  Use default
+                  Reset
                 </Button>
                 <Button
                   type="button"
@@ -3307,7 +3229,7 @@ function CanvasTopBar({
                       Saving...
                     </>
                   ) : (
-                    "Save root"
+                    "Save"
                   )}
                 </Button>
               </div>
@@ -3321,98 +3243,156 @@ function CanvasTopBar({
                   : "border-white/8 bg-white/[0.03]"
               )}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <Label
-                    htmlFor="gateway-url"
-                    className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500")}
-                  >
-                    OpenClaw gateway
-                  </Label>
-                  <p
+              <div className="flex items-center justify-between gap-3">
+                <p
+                  className={cn(
+                    "text-[11px] uppercase tracking-[0.18em]",
+                    surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-400"
+                  )}
+                >
+                  Gateway
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <span
                     className={cn(
-                      "mt-0.5 text-[10px] leading-[1.05rem]",
-                      surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+                      "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
+                      surfaceTheme === "light"
+                        ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
+                        : "border-white/10 bg-white/[0.05] text-slate-300"
                     )}
                   >
-                    Enter a `ws://` or `wss://` endpoint. Leave it empty to use the local default gateway.
-                  </p>
+                    {snapshot.diagnostics.bindMode || "default"}
+                  </span>
+                  <div className="relative" ref={gatewayServiceMenuRef}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      disabled={isGatewayControlRunning}
+                      onClick={() => {
+                        setGatewayServiceMenuOpen((current) => !current);
+                      }}
+                      className={cn(
+                        "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[8px] uppercase tracking-[0.18em] transition-[background-color,border-color,color,transform] duration-150 active:scale-[0.96]",
+                        snapshot.diagnostics.rpcOk
+                          ? surfaceTheme === "light"
+                            ? "border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 hover:text-emerald-700"
+                            : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200 hover:bg-emerald-300/16 hover:border-emerald-300/35"
+                          : snapshot.diagnostics.loaded
+                            ? surfaceTheme === "light"
+                              ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-300 hover:text-amber-800"
+                              : "border-amber-300/25 bg-amber-300/10 text-amber-200 hover:bg-amber-300/16 hover:border-amber-300/35"
+                            : surfaceTheme === "light"
+                              ? "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700"
+                              : "border-rose-300/25 bg-rose-300/10 text-rose-200 hover:bg-rose-300/16 hover:border-rose-300/35"
+                      )}
+                      aria-haspopup="menu"
+                      aria-expanded={gatewayServiceMenuOpen}
+                      aria-label={`Gateway service status: ${gatewayServiceStatus}. Open actions menu.`}
+                      title="Gateway actions"
+                    >
+                      <span>{gatewayServiceStatus}</span>
+                      <ChevronDown className="h-3 w-3 opacity-80" />
+                    </Button>
+
+                    {gatewayServiceMenuOpen ? (
+                      <div
+                        className={cn(
+                          "absolute right-0 top-[calc(100%+8px)] z-30 min-w-[152px] rounded-[14px] border p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl",
+                          surfaceTheme === "light"
+                            ? "border-[#d9c9bc] bg-[#fdfaf7]/98"
+                            : "border-white/[0.1] bg-slate-950/96"
+                        )}
+                      >
+                        <GatewayServiceMenuButton
+                          icon={ArrowUpCircle}
+                          label={gatewayControlAction === "start" ? "Starting..." : "Start"}
+                          disabled={isGatewayControlRunning || snapshot.diagnostics.rpcOk}
+                          onClick={() => {
+                            setGatewayServiceMenuOpen(false);
+                            void onControlGateway("start");
+                          }}
+                          surfaceTheme={surfaceTheme}
+                        />
+                        <GatewayServiceMenuButton
+                          icon={RefreshCw}
+                          label={gatewayControlAction === "restart" ? "Restarting..." : "Restart"}
+                          disabled={isGatewayControlRunning || !snapshot.diagnostics.loaded}
+                          onClick={() => {
+                            setGatewayServiceMenuOpen(false);
+                            void onControlGateway("restart");
+                          }}
+                          surfaceTheme={surfaceTheme}
+                        />
+                        <GatewayServiceMenuButton
+                          icon={Square}
+                          label={gatewayControlAction === "stop" ? "Stopping..." : "Stop"}
+                          disabled={isGatewayControlRunning || !snapshot.diagnostics.loaded}
+                          onClick={() => {
+                            setGatewayServiceMenuOpen(false);
+                            void onControlGateway("stop");
+                          }}
+                          surfaceTheme={surfaceTheme}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <span
-                  className={cn(
-                    "rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light"
-                      ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
-                      : "border-white/10 bg-white/[0.05] text-slate-300"
-                  )}
-                >
-                  {snapshot.diagnostics.bindMode || "default"}
-                </span>
               </div>
 
-              <Input
-                id="gateway-url"
-                value={gatewayDraft}
-                onChange={(event) => onGatewayDraftChange(event.target.value)}
-                placeholder="ws://127.0.0.1:18789"
-                disabled={isSavingGateway}
-                style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
-                className={cn(
-                  "mt-2.5 h-9 rounded-[14px] px-2.5 text-[11px]",
-                  surfaceTheme === "light"
-                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
-                    : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
-                )}
-              />
+              <div className="mt-2 grid gap-2">
+                <div className="min-w-0">
+                  <Label htmlFor="gateway-url" className="sr-only">
+                    Gateway endpoint
+                  </Label>
+                  <Input
+                    id="gateway-url"
+                    value={gatewayDraft}
+                    onChange={(event) => onGatewayDraftChange(event.target.value)}
+                    placeholder="ws://127.0.0.1:18789"
+                    disabled={isSavingGateway}
+                    style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
+                    className={cn(
+                      "h-8 min-w-0 rounded-[12px] px-2.5 font-mono text-[12px]",
+                      surfaceTheme === "light"
+                        ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
+                        : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
+                    )}
+                  />
+                </div>
 
-              <p
-                className={cn(
-                  "mt-1.5 break-all font-mono text-[9px] leading-[1rem]",
-                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
-                )}
-              >
-                Configured endpoint: {snapshot.diagnostics.configuredGatewayUrl || "local default"}
-              </p>
-              <p
-                className={cn(
-                  "mt-1 break-all font-mono text-[9px] leading-[1rem]",
-                  surfaceTheme === "light" ? "text-[#6f5a4b]" : "text-slate-300"
-                )}
-              >
-                Effective endpoint: {snapshot.diagnostics.gatewayUrl}
-              </p>
-
-              <div className="mt-3 flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  disabled={isSavingGateway}
-                  onClick={() => {
-                    void onSaveGatewaySettings(null);
-                  }}
-                  className={settingsSecondaryButtonStyles}
-                >
-                  Use local
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={isSavingGateway}
-                  onClick={() => {
-                    void onSaveGatewaySettings(gatewayDraft);
-                  }}
-                  className={settingsPrimaryButtonStyles}
-                >
-                  {isSavingGateway ? (
-                    <>
-                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    "Save gateway"
-                  )}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    disabled={isSavingGateway}
+                    onClick={() => {
+                      void onSaveGatewaySettings(null);
+                    }}
+                    className={settingsSecondaryButtonStyles}
+                  >
+                    Local
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isSavingGateway}
+                    onClick={() => {
+                      void onSaveGatewaySettings(gatewayDraft);
+                    }}
+                    className={settingsPrimaryButtonStyles}
+                  >
+                    {isSavingGateway ? (
+                      <>
+                        <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -3862,6 +3842,41 @@ function settingsThemeSwitchThumbClassName(surfaceTheme: SurfaceTheme) {
     surfaceTheme === "light"
       ? "translate-x-7 bg-[#c8946f] text-white"
       : "translate-x-0 bg-cyan-300 text-slate-950"
+  );
+}
+
+function GatewayServiceMenuButton({
+  icon: Icon,
+  label,
+  disabled = false,
+  onClick,
+  surfaceTheme
+}: {
+  icon: LucideIcon;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  surfaceTheme: SurfaceTheme;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-[10px] px-2.5 py-2 text-left text-[11px] transition-colors",
+        disabled
+          ? surfaceTheme === "light"
+            ? "cursor-not-allowed text-[#8f7866]/60"
+            : "cursor-not-allowed text-slate-400/60"
+          : surfaceTheme === "light"
+            ? "text-[#4f3d31] hover:bg-[#efe5dc] hover:text-[#34261d]"
+            : "text-slate-200 hover:bg-white/[0.06] hover:text-white"
+      )}
+      onClick={onClick}
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      <span>{label}</span>
+    </button>
   );
 }
 
