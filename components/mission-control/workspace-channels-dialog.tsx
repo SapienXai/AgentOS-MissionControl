@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Plus, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,8 @@ export function WorkspaceChannelsDialog({
   const [isLoadingDiscoveredGroups, setIsLoadingDiscoveredGroups] = useState(false);
   const [discoveredGroupsError, setDiscoveredGroupsError] = useState<string | null>(null);
   const [collapsedWorkspaceChannelIds, setCollapsedWorkspaceChannelIds] = useState<string[]>([]);
+  const [delegatePickerChannelId, setDelegatePickerChannelId] = useState<string | null>(null);
+  const [delegateDraftAgentId, setDelegateDraftAgentId] = useState("");
 
   useEffect(() => {
     if (!open) {
@@ -133,6 +135,8 @@ export function WorkspaceChannelsDialog({
       setIsLoadingDiscoveredGroups(false);
       setDiscoveredGroupsError(null);
       setCollapsedWorkspaceChannelIds([]);
+      setDelegatePickerChannelId(null);
+      setDelegateDraftAgentId("");
       return;
     }
 
@@ -490,6 +494,79 @@ export function WorkspaceChannelsDialog({
     }
   };
 
+  const handleAddDelegate = async (channelId: string, agentId: string) => {
+    if (!workspace || !agentId) {
+      return;
+    }
+
+    beginSaving("Adding delegate agent...");
+
+    let succeeded = false;
+
+    try {
+      const result = await patchWorkspaceChannel({
+        action: "bind-agent",
+        channelId,
+        agentId,
+        workspacePath: workspace.path
+      });
+
+      if (result.registry && onSnapshotChange) {
+        onSnapshotChange((current) => replaceSnapshotChannelRegistry(current, result.registry!));
+      }
+
+      setDelegatePickerChannelId(null);
+      setDelegateDraftAgentId("");
+      succeeded = true;
+    } catch (error) {
+      toast.error("Delegate update failed.", {
+        description: error instanceof Error ? error.message : "Unknown channel error."
+      });
+    } finally {
+      endSaving();
+    }
+
+    if (succeeded) {
+      toast.success("Delegate agent added.");
+      void onRefresh().catch(() => {});
+    }
+  };
+
+  const handleRemoveDelegate = async (channelId: string, agentId: string) => {
+    if (!workspace) {
+      return;
+    }
+
+    beginSaving("Removing delegate agent...");
+
+    let succeeded = false;
+
+    try {
+      const result = await patchWorkspaceChannel({
+        action: "unbind-agent",
+        channelId,
+        agentId
+      });
+
+      if (result.registry && onSnapshotChange) {
+        onSnapshotChange((current) => replaceSnapshotChannelRegistry(current, result.registry!));
+      }
+
+      succeeded = true;
+    } catch (error) {
+      toast.error("Delegate update failed.", {
+        description: error instanceof Error ? error.message : "Unknown channel error."
+      });
+    } finally {
+      endSaving();
+    }
+
+    if (succeeded) {
+      toast.success("Delegate agent removed.");
+      void onRefresh().catch(() => {});
+    }
+  };
+
   const handleRefreshDiscoveredGroups = async () => {
     if (!workspace) {
       return;
@@ -788,6 +865,15 @@ export function WorkspaceChannelsDialog({
                           ]
                         : workspaceAgents;
                       const boundAgentCount = workspaceBinding?.agentIds.length ?? 0;
+                      const delegateAgents = (workspaceBinding?.agentIds ?? [])
+                        .filter((agentId) => agentId !== primaryAgentId)
+                        .map((agentId) => snapshot.agents.find((agent) => agent.id === agentId) ?? null)
+                        .filter((agent): agent is MissionControlSnapshot["agents"][number] => Boolean(agent));
+                      const availableDelegateAgents = workspaceAgents.filter(
+                        (agent) =>
+                          agent.id !== primaryAgentId &&
+                          !delegateAgents.some((delegateAgent) => delegateAgent.id === agent.id)
+                      );
                       const currentAssignments = (workspaceBinding?.groupAssignments ?? []).filter(
                         (assignment) => assignment.enabled !== false
                       );
@@ -869,6 +955,95 @@ export function WorkspaceChannelsDialog({
 
                           {!isChannelCollapsed ? (
                             <div className="mt-3 border-t border-white/6 pt-3">
+                              <div className="mb-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-[11px] font-medium text-white">Delegate agents</p>
+                                    <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                      {delegateAgents.length}
+                                    </Badge>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 rounded-full px-2.5 text-[11px]"
+                                    disabled={isSaving || availableDelegateAgents.length === 0}
+                                    onClick={() => {
+                                      setDelegatePickerChannelId((current) =>
+                                        current === channel.id ? null : channel.id
+                                      );
+                                      setDelegateDraftAgentId(availableDelegateAgents[0]?.id ?? "");
+                                    }}
+                                  >
+                                    <Plus className="mr-1 h-3.5 w-3.5" />
+                                    Add delegate
+                                  </Button>
+                                </div>
+
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  {delegateAgents.length > 0 ? (
+                                    delegateAgents.map((agent) => (
+                                      <div
+                                        key={`${channel.id}-${agent.id}`}
+                                        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white"
+                                      >
+                                        <span className="truncate">{agent.name}</span>
+                                        <button
+                                          type="button"
+                                          className="rounded-full p-0.5 text-slate-400 transition-colors hover:text-white"
+                                          disabled={isSaving}
+                                          onClick={() => void handleRemoveDelegate(channel.id, agent.id)}
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-[11px] text-slate-400">No delegates yet.</p>
+                                  )}
+                                </div>
+
+                                {delegatePickerChannelId === channel.id ? (
+                                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                                    <select
+                                      value={delegateDraftAgentId}
+                                      onChange={(event) => setDelegateDraftAgentId(event.target.value)}
+                                      className="flex h-8 min-w-[170px] rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none"
+                                      disabled={isSaving}
+                                    >
+                                      {availableDelegateAgents.map((agent) => (
+                                        <option key={agent.id} value={agent.id}>
+                                          {agent.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      className="h-8 rounded-full px-3 text-[11px]"
+                                      disabled={isSaving || !delegateDraftAgentId}
+                                      onClick={() => void handleAddDelegate(channel.id, delegateDraftAgentId)}
+                                    >
+                                      Add
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      size="sm"
+                                      className="h-8 rounded-full px-3 text-[11px]"
+                                      disabled={isSaving}
+                                      onClick={() => {
+                                        setDelegatePickerChannelId(null);
+                                        setDelegateDraftAgentId("");
+                                      }}
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                   <p className="text-[11px] font-medium text-white">Allowed groups</p>
