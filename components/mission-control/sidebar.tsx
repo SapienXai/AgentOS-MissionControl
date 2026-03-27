@@ -512,7 +512,7 @@ export function MissionSidebar({
       <div className="relative flex h-full items-start overflow-visible">
         <div
           className={cn(
-            "panel-surface panel-glow relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-3 py-4 transition-[max-height] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "panel-surface panel-glow mission-ease-smooth relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-3 py-4 transition-[max-height] duration-500",
             isPanelCollapsed ? "w-full rounded-[30px]" : "w-[78px] rounded-l-[30px] rounded-r-none border-r-0",
             isRailCollapsed
               ? "max-h-[176px]"
@@ -538,7 +538,7 @@ export function MissionSidebar({
 
           <div
             className={cn(
-              "mt-6 flex w-full flex-1 flex-col items-center gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              "mission-ease-smooth mt-6 flex w-full flex-1 flex-col items-center gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-500",
               isRailCollapsed
                 ? "max-h-0 -translate-y-3 opacity-0 pointer-events-none"
                 : "max-h-[420px] translate-y-0 opacity-100"
@@ -594,7 +594,7 @@ export function MissionSidebar({
 
         <div
           className={cn(
-            "panel-surface panel-glow h-full min-w-0 flex-1 overflow-hidden rounded-r-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-r-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
             isPanelCollapsed
               ? "-translate-x-4 opacity-0 pointer-events-none"
               : "translate-x-0 opacity-100",
