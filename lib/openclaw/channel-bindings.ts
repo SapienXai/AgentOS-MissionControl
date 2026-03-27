@@ -33,7 +33,12 @@ export function getWorkspaceChannelIdsForAgent(
   return getWorkspaceChannels(snapshot, workspaceId)
     .filter((channel) =>
       channel.primaryAgentId === agentId ||
-      channel.workspaces.some((binding) => binding.workspaceId === workspaceId && binding.agentIds.includes(agentId))
+      channel.workspaces.some(
+        (binding) =>
+          binding.workspaceId === workspaceId &&
+          (binding.agentIds.includes(agentId) ||
+            binding.groupAssignments.some((assignment) => assignment.enabled !== false && assignment.agentId === agentId))
+      )
     )
     .map((channel) => channel.id);
 }

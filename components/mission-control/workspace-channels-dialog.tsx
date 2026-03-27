@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -89,6 +89,7 @@ export function WorkspaceChannelsDialog({
   const [discoveredGroups, setDiscoveredGroups] = useState<TelegramDiscoveredGroup[]>([]);
   const [isLoadingDiscoveredGroups, setIsLoadingDiscoveredGroups] = useState(false);
   const [discoveredGroupsError, setDiscoveredGroupsError] = useState<string | null>(null);
+  const [collapsedWorkspaceChannelIds, setCollapsedWorkspaceChannelIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) {
@@ -108,6 +109,7 @@ export function WorkspaceChannelsDialog({
       setDiscoveredGroups([]);
       setIsLoadingDiscoveredGroups(false);
       setDiscoveredGroupsError(null);
+      setCollapsedWorkspaceChannelIds([]);
       return;
     }
 
@@ -516,7 +518,7 @@ export function WorkspaceChannelsDialog({
         .filter((assignment) => assignment.enabled !== false && assignment.chatId !== group.chatId)
         .map((assignment) => ({
           chatId: assignment.chatId,
-          agentId: null,
+          agentId: assignment.agentId ?? null,
           title: assignment.title ?? null,
           enabled: true
         }));
@@ -551,6 +553,60 @@ export function WorkspaceChannelsDialog({
 
     if (succeeded) {
       toast.success(nextEnabled ? "Group added to allowlist." : "Group removed from allowlist.");
+      void onRefresh().catch(() => {});
+    }
+  };
+
+  const handleGroupOwnerChange = async (
+    channelId: string,
+    currentAssignments: WorkspaceChannelGroupAssignment[],
+    group: TelegramDiscoveredGroup,
+    nextAgentId: string
+  ) => {
+    beginSaving(`Updating ${group.title ?? group.chatId} owner...`);
+
+    let succeeded = false;
+
+    try {
+      const nextAssignments = currentAssignments
+        .filter((assignment) => assignment.enabled !== false)
+        .map((assignment) =>
+          assignment.chatId === group.chatId
+            ? {
+                chatId: assignment.chatId,
+                agentId: nextAgentId || null,
+                title: group.title ?? assignment.title ?? null,
+                enabled: true
+              }
+            : {
+                chatId: assignment.chatId,
+                agentId: assignment.agentId ?? null,
+                title: assignment.title ?? null,
+                enabled: true
+              }
+        );
+
+      const result = await patchWorkspaceChannel({
+        action: "groups",
+        channelId,
+        groupAssignments: nextAssignments
+      });
+
+      if (result.registry && onSnapshotChange) {
+        onSnapshotChange((current) => replaceSnapshotChannelRegistry(current, result.registry!));
+      }
+
+      succeeded = true;
+    } catch (error) {
+      toast.error("Group owner update failed.", {
+        description: error instanceof Error ? error.message : "Unknown channel error."
+      });
+    } finally {
+      endSaving();
+    }
+
+    if (succeeded) {
+      toast.success("Group owner updated.");
       void onRefresh().catch(() => {});
     }
   };
@@ -685,11 +741,11 @@ export function WorkspaceChannelsDialog({
 
             <div className="mt-3">
               {workspaceChannels.length > 0 ? (
-                <ScrollArea className="max-h-[290px] pr-1">
-                  <div className="space-y-2">
+                <div className="max-h-[68vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
                     {workspaceChannels.map((channel) => {
                       const workspaceBinding =
                         channel.workspaces.find((entry) => entry.workspaceId === workspace?.id) ?? null;
+                      const isChannelCollapsed = collapsedWorkspaceChannelIds.includes(channel.id);
                       const primaryAgentId = channel.primaryAgentId ?? "";
                       const primaryAgentName = primaryAgentId
                         ? snapshot.agents.find((agent) => agent.id === primaryAgentId)?.name ?? primaryAgentId
@@ -722,6 +778,28 @@ export function WorkspaceChannelsDialog({
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 rounded-full px-2.5 text-[11px]"
+                                disabled={isSaving}
+                                onClick={() =>
+                                  setCollapsedWorkspaceChannelIds((current) =>
+                                    current.includes(channel.id)
+                                      ? current.filter((value) => value !== channel.id)
+                                      : [...current, channel.id]
+                                  )
+                                }
+                              >
+                                <ChevronDown
+                                  className={`mr-1 h-3.5 w-3.5 transition-transform ${
+                                    isChannelCollapsed ? "-rotate-90" : "rotate-0"
+                                  }`}
+                                />
+                                {isChannelCollapsed ? "Show groups" : "Hide groups"}
+                              </Button>
+
                               <select
                                 id={`workspace-channel-primary-${channel.id}`}
                                 value={primaryAgentId}
@@ -750,89 +828,129 @@ export function WorkspaceChannelsDialog({
                             </div>
                           </div>
 
-                          <div className="mt-3 border-t border-white/6 pt-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="text-[11px] font-medium text-white">Allowed groups</p>
-                                <p className="mt-1 text-[11px] text-slate-400">
-                                  Recent Telegram groups are detected from logs. Selected groups follow the channel primary.
-                                </p>
+                          {!isChannelCollapsed ? (
+                            <div className="mt-3 border-t border-white/6 pt-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-[11px] font-medium text-white">Allowed groups</p>
+                                  <p className="mt-1 text-[11px] text-slate-400">
+                                    Recent Telegram groups are detected from logs. Unassigned groups fall back to the channel primary.
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                    {currentAssignments.length} selected
+                                  </Badge>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 rounded-full px-2.5 text-[11px]"
+                                    disabled={isSaving || isLoadingDiscoveredGroups}
+                                    onClick={() => void handleRefreshDiscoveredGroups()}
+                                  >
+                                    {isLoadingDiscoveredGroups ? "Refreshing..." : "Refresh"}
+                                  </Button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                                  {currentAssignments.length} selected
-                                </Badge>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 rounded-full px-2.5 text-[11px]"
-                                  disabled={isSaving || isLoadingDiscoveredGroups}
-                                  onClick={() => void handleRefreshDiscoveredGroups()}
-                                >
-                                  {isLoadingDiscoveredGroups ? "Refreshing..." : "Refresh"}
-                                </Button>
-                              </div>
-                            </div>
 
-                            {discoveredGroupsError ? (
-                              <p className="mt-2 text-[11px] text-rose-300">{discoveredGroupsError}</p>
-                            ) : null}
+                              {discoveredGroupsError ? (
+                                <p className="mt-2 text-[11px] text-rose-300">{discoveredGroupsError}</p>
+                              ) : null}
 
-                            {groupOptions.length > 0 ? (
-                              <div className="mt-3 space-y-2">
-                                {groupOptions.map((group) => {
-                                  const checked = currentAssignments.some((assignment) => assignment.chatId === group.chatId);
-                                  return (
-                                    <label
-                                      key={`${channel.id}-${group.chatId}`}
-                                      className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        className="mt-0.5 h-4 w-4 rounded border-white/15 bg-white/5 accent-cyan-300"
-                                        checked={checked}
-                                        disabled={isSaving}
-                                        onChange={(event) =>
-                                          void handleToggleAllowedGroup(
-                                            channel.id,
-                                            currentAssignments,
-                                            group,
-                                            event.target.checked
-                                          )
-                                        }
-                                      />
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <p className="truncate text-sm font-medium text-white">
-                                            {group.title ?? `Group ${group.chatId}`}
-                                          </p>
-                                          {!discoveredGroups.some((entry) => entry.chatId === group.chatId) ? (
-                                            <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                                              Saved
-                                            </Badge>
-                                          ) : null}
+                              {groupOptions.length > 0 ? (
+                                <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                                  {groupOptions.map((group) => {
+                                    const currentAssignment =
+                                      currentAssignments.find((assignment) => assignment.chatId === group.chatId) ?? null;
+                                    const checked = Boolean(currentAssignment);
+                                    return (
+                                      <div
+                                        key={`${channel.id}-${group.chatId}`}
+                                        className="rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          <input
+                                            type="checkbox"
+                                            className="mt-0.5 h-4 w-4 rounded border-white/15 bg-white/5 accent-cyan-300"
+                                            checked={checked}
+                                            disabled={isSaving}
+                                            onChange={(event) =>
+                                              void handleToggleAllowedGroup(
+                                                channel.id,
+                                                currentAssignments,
+                                                group,
+                                                event.target.checked
+                                              )
+                                            }
+                                          />
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <p className="truncate text-sm font-medium text-white">
+                                                {group.title ?? `Group ${group.chatId}`}
+                                              </p>
+                                              {!discoveredGroups.some((entry) => entry.chatId === group.chatId) ? (
+                                                <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                                  Saved
+                                                </Badge>
+                                              ) : null}
+                                            </div>
+                                            <p className="mt-1 truncate text-[11px] text-slate-400">
+                                              {group.chatId}
+                                              {group.lastSeen ? ` · seen ${formatGroupTimestamp(group.lastSeen)}` : ""}
+                                            </p>
+                                          </div>
                                         </div>
-                                        <p className="mt-1 truncate text-[11px] text-slate-400">
-                                          {group.chatId}
-                                          {group.lastSeen ? ` · seen ${formatGroupTimestamp(group.lastSeen)}` : ""}
-                                        </p>
+                                        <div className="mt-2 flex items-center justify-end gap-2">
+                                          <span className="text-[11px] text-slate-400">Owner</span>
+                                          <select
+                                            value={currentAssignment?.agentId ?? ""}
+                                            disabled={isSaving || !checked}
+                                            onChange={(event) =>
+                                              void handleGroupOwnerChange(
+                                                channel.id,
+                                                currentAssignments,
+                                                group,
+                                                event.target.value
+                                              )
+                                            }
+                                            className="flex h-8 min-w-[170px] rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                          >
+                                            <option value="">Use primary agent</option>
+                                            {workspaceAgents.map((agent) => (
+                                              <option key={agent.id} value={agent.id}>
+                                                {agent.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        {checked ? (
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-[11px] text-slate-400">
+                                              {currentAssignment?.agentId
+                                                ? `Owner: ${
+                                                    workspaceAgents.find((agent) => agent.id === currentAssignment.agentId)
+                                                      ?.name ?? currentAssignment.agentId
+                                                  }`
+                                                : "Owner: Use primary agent"}
+                                            </p>
+                                          </div>
+                                        ) : null}
                                       </div>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] text-slate-400">
-                                No Telegram groups found yet. Send one message in the target group, then refresh here.
-                              </div>
-                            )}
-                          </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] text-slate-400">
+                                  No Telegram groups found yet. Send one message in the target group, then refresh here.
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
-                  </div>
-                </ScrollArea>
+                </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-4 text-sm text-slate-400">
                   No channels have been added to this workspace yet.

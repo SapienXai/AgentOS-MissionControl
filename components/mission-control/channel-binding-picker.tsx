@@ -30,9 +30,9 @@ export function ChannelBindingPicker({
       <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-white">Channel bindings</p>
+            <p className="text-sm font-medium text-white">Channel participation</p>
             <p className="mt-1 text-xs leading-5 text-slate-400">
-              Bind this agent to workspace channels. Add Telegram channels from the workspace screen first.
+              Add Telegram channels from the workspace screen first. Primary agents speak publicly; selected agents assist internally.
             </p>
           </div>
         </div>
@@ -44,9 +44,9 @@ export function ChannelBindingPicker({
     <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-white">Channel bindings</p>
+          <p className="text-sm font-medium text-white">Channel participation</p>
           <p className="mt-1 text-xs leading-5 text-slate-400">
-            Bind this agent to one or more workspace channels. Telegram routing stays in OpenClaw.
+            Primary agents speak on Telegram. Selected channels let this agent assist the primary internally.
           </p>
         </div>
       </div>
@@ -82,15 +82,14 @@ export function ChannelBindingPicker({
                   <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
                     {channel.type}
                   </Badge>
-                  {selected ? (
-                    <Badge className="h-5 rounded-full px-2 text-[10px]">Selected</Badge>
-                  ) : null}
                   {isPrimaryForAgent ? (
-                    <Badge className="h-5 rounded-full px-2 text-[10px]">Primary</Badge>
+                    <Badge className="h-5 rounded-full px-2 text-[10px]">Primary voice</Badge>
+                  ) : selected ? (
+                    <Badge className="h-5 rounded-full px-2 text-[10px]">Assistant</Badge>
                   ) : null}
                   {sharedCount > 1 ? (
                     <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                      Shared
+                      Team
                     </Badge>
                   ) : null}
                 </div>
@@ -114,7 +113,7 @@ export function ChannelBindingPicker({
                   )
                 }
               >
-                {selected ? (isPrimaryForAgent ? "Primary" : "Remove") : "Bind"}
+                {selected ? (isPrimaryForAgent ? "Primary" : "Remove") : "Assist"}
               </Button>
             </div>
           );
