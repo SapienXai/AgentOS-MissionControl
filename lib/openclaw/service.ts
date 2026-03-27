@@ -592,7 +592,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       settings
     );
     const channelRegistry = await readChannelRegistry();
-    const channelAccounts = await readChannelAccounts();
+    const channelAccounts = applyChannelAccountDisplayNames(await readChannelAccounts(), channelRegistry);
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
     const profileByWorkspace = new Map<string, AgentBootstrapProfile>();
@@ -3538,6 +3538,8 @@ export async function setWorkspaceChannelGroups(input: {
     throw new Error("Channel id is required.");
   }
 
+  const removedGroupIds: string[] = [];
+
   await mutateChannelRegistry((registry) => {
     const channel = registry.channels.find((entry) => entry.id === channelId);
     if (!channel) {
@@ -3548,6 +3550,12 @@ export async function setWorkspaceChannelGroups(input: {
     if (!workspace) {
       throw new Error("Workspace binding was not found for this channel.");
     }
+
+    const previousGroupIds = new Set(
+      workspace.groupAssignments
+        .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
+        .map((assignment) => assignment.chatId)
+    );
 
     workspace.groupAssignments = uniqueByChatId(
       input.groupAssignments.map((assignment) => ({
@@ -3563,7 +3571,19 @@ export async function setWorkspaceChannelGroups(input: {
         .filter((assignment) => assignment.enabled !== false && assignment.agentId)
         .map((assignment) => assignment.agentId as string)
     ]);
-  });
+
+    const nextGroupIds = new Set(
+      workspace.groupAssignments
+        .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
+        .map((assignment) => assignment.chatId)
+    );
+
+    for (const chatId of previousGroupIds) {
+      if (!nextGroupIds.has(chatId)) {
+        removedGroupIds.push(chatId);
+      }
+    }
+  }, { removedGroupIds });
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -7665,11 +7685,10 @@ async function readChannelAccounts() {
       "channels",
       "--json"
     ]);
+    const accounts: ChannelAccountRecord[] = Object.entries(channels).flatMap(([type, config]) => {
+      const records = isObjectRecord(config?.accounts) ? (config.accounts as Record<string, unknown>) : {};
 
-    return Object.entries(channels).flatMap(([type, config]) => {
-      const accounts = isObjectRecord(config?.accounts) ? (config.accounts as Record<string, unknown>) : {};
-
-      return Object.entries(accounts).flatMap(([accountId, account]) => {
+      return Object.entries(records).flatMap(([accountId, account]) => {
         if (!isPlannerChannelTypeValue(type)) {
           return [];
         }
@@ -7686,9 +7705,171 @@ async function readChannelAccounts() {
         ] satisfies ChannelAccountRecord[];
       });
     });
+    return dedupeChannelAccounts(accounts, channels);
   } catch {
     return [] as ChannelAccountRecord[];
   }
+}
+
+type TelegramPairingRequest = {
+  id?: string;
+  code?: string;
+  createdAt?: string;
+  lastSeenAt?: string;
+  meta?: {
+    username?: string;
+    firstName?: string;
+    accountId?: string;
+  };
+};
+
+async function readTelegramPairingAccounts() {
+  try {
+    const raw = await readFile(path.join(openClawStateRootPath, "credentials", "telegram-pairing.json"), "utf8");
+    const parsed = JSON.parse(raw) as { requests?: TelegramPairingRequest[] } | null;
+    const requests = Array.isArray(parsed?.requests) ? parsed.requests : [];
+    const accounts = new Map<string, ChannelAccountRecord>();
+
+    for (const request of requests) {
+      const accountId = normalizeOptionalValue(request.meta?.accountId);
+      if (!accountId) {
+        continue;
+      }
+
+      accounts.set(accountId, {
+        id: accountId,
+        type: "telegram",
+        name:
+          normalizeOptionalValue(request.meta?.username) ??
+          normalizeOptionalValue(request.meta?.firstName) ??
+          accountId,
+        enabled: true
+      });
+    }
+
+    return Array.from(accounts.values());
+  } catch {
+    return [] as ChannelAccountRecord[];
+  }
+}
+
+async function readTelegramAccountBotIds() {
+  try {
+    const telegramDir = path.join(openClawStateRootPath, "telegram");
+    const files = await readdir(telegramDir);
+    const pairs = await Promise.all(
+      files
+        .filter((fileName) => fileName.startsWith("update-offset-") && fileName.endsWith(".json"))
+        .map(async (fileName) => {
+          try {
+            const raw = await readFile(path.join(telegramDir, fileName), "utf8");
+            const parsed = JSON.parse(raw) as { botId?: string } | null;
+            const botId = normalizeOptionalValue(parsed?.botId);
+            const accountId = fileName.slice("update-offset-".length, -".json".length);
+
+            if (!botId || !accountId) {
+              return null;
+            }
+
+            return [accountId, botId] as const;
+          } catch {
+            return null;
+          }
+        })
+    );
+
+    return new Map(pairs.filter((entry): entry is readonly [string, string] => Boolean(entry)));
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+function dedupeChannelAccounts(
+  accounts: ChannelAccountRecord[],
+  channels: Record<string, Record<string, unknown>>
+) {
+  const telegramConfig = isObjectRecord(channels.telegram) ? (channels.telegram as Record<string, unknown>) : null;
+  const telegramRecords = isObjectRecord(telegramConfig?.accounts)
+    ? (telegramConfig.accounts as Record<string, unknown>)
+    : {};
+  const telegramDefaultAccount = normalizeOptionalValue(telegramConfig?.defaultAccount as string | null | undefined);
+  const telegramByBot = new Map<string, ChannelAccountRecord>();
+  const others: ChannelAccountRecord[] = [];
+
+  for (const account of accounts) {
+    if (account.type !== "telegram") {
+      others.push(account);
+      continue;
+    }
+
+    const record = isObjectRecord(telegramRecords[account.id]) ? (telegramRecords[account.id] as Record<string, unknown>) : null;
+    const token = normalizeOptionalValue(record?.botToken as string | null | undefined);
+    const botId = token?.split(":", 1)[0]?.trim();
+
+    if (!botId) {
+      if (!telegramByBot.has(account.id)) {
+        telegramByBot.set(account.id, account);
+      }
+      continue;
+    }
+
+    const current = telegramByBot.get(botId);
+    if (!current) {
+      telegramByBot.set(botId, account);
+      continue;
+    }
+
+    const candidateScore = scoreTelegramAccountChoice(account.id, telegramDefaultAccount);
+    const currentScore = scoreTelegramAccountChoice(current.id, telegramDefaultAccount);
+    if (candidateScore > currentScore) {
+      telegramByBot.set(botId, account);
+    }
+  }
+
+  return [...others, ...Array.from(telegramByBot.values())];
+}
+
+function scoreTelegramAccountChoice(accountId: string, defaultAccountId: string | null | undefined) {
+  if (defaultAccountId && accountId === defaultAccountId) {
+    return 3;
+  }
+
+  if (accountId !== "default") {
+    return 2;
+  }
+
+  return 1;
+}
+
+async function findTelegramAccountByToken(token: string, accounts: ChannelAccountRecord[]) {
+  const botId = normalizeOptionalValue(token.split(":", 1)[0]);
+  if (!botId) {
+    return null;
+  }
+
+  const accountBotIds = await readTelegramAccountBotIds();
+  return accounts.find((account) => accountBotIds.get(account.id) === botId) ?? null;
+}
+
+async function buildTelegramAccountId(name: string) {
+  const baseSlug = slugify(name.trim()) || "telegram";
+  const baseId = `telegram-${baseSlug}`;
+  const registry = await readChannelRegistry();
+  const existingIds = new Set([
+    ...registry.channels.filter((channel) => channel.type === "telegram").map((channel) => channel.id),
+    ...(await readChannelAccounts()).filter((account) => account.type === "telegram").map((account) => account.id)
+  ]);
+
+  if (!existingIds.has(baseId)) {
+    return baseId;
+  }
+
+  let index = 2;
+  while (existingIds.has(`${baseId}-${index}`)) {
+    index += 1;
+  }
+
+  return `${baseId}-${index}`;
 }
 
 async function writeChannelRegistry(registry: ChannelRegistry) {
@@ -7699,7 +7880,8 @@ export async function getChannelRegistry() {
   return readChannelRegistry();
 }
 
-export async function createTelegramChannelAccount(input: { name: string; token: string }) {
+export async function createTelegramChannelAccount(input: { name: string; token: string; accountId?: string }) {
+  const accountId = normalizeOptionalValue(input.accountId) ?? (await buildTelegramAccountId(input.name));
   const before = new Set(
     (await readChannelAccounts())
       .filter((account) => account.type === "telegram")
@@ -7707,22 +7889,84 @@ export async function createTelegramChannelAccount(input: { name: string; token:
   );
 
   await runOpenClaw(
-    ["channels", "add", "--channel", "telegram", "--token", input.token, "--name", input.name],
+    [
+      "channels",
+      "add",
+      "--channel",
+      "telegram",
+      "--account",
+      accountId,
+      "--token",
+      input.token,
+      "--name",
+      input.name
+    ],
     { timeoutMs: 60000 }
   );
 
-  const after = (await readChannelAccounts()).filter((account) => account.type === "telegram");
-  const created =
-    after.find((account) => !before.has(account.id) && account.name === input.name) ??
-    after.find((account) => !before.has(account.id)) ??
-    after.find((account) => account.name === input.name) ??
-    null;
+  const explicitAccount: ChannelAccountRecord = {
+    id: accountId,
+    type: "telegram",
+    name: input.name.trim() || accountId,
+    enabled: true
+  };
 
-  if (!created) {
-    throw new Error("Telegram channel could not be resolved after provisioning.");
+  const afterAccounts = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+  const explicitMatch = afterAccounts.find((account) => account.id === accountId);
+  if (explicitMatch) {
+    return {
+      ...explicitMatch,
+      name: input.name.trim() || explicitMatch.name
+    };
   }
 
-  return created;
+  const resolveDeadline = Date.now() + 8000;
+  let created: ChannelAccountRecord | null = null;
+
+  while (Date.now() < resolveDeadline) {
+    const after = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+    created =
+      after.find((account) => account.id === accountId) ??
+      after.find((account) => !before.has(account.id) && account.name === input.name) ??
+      after.find((account) => !before.has(account.id)) ??
+      after.find((account) => account.name === input.name) ??
+      null;
+
+    if (created) {
+      break;
+    }
+
+    const pairingAccounts = await readTelegramPairingAccounts();
+    created =
+      pairingAccounts.find((account) => !before.has(account.id) && account.name === input.name) ??
+      pairingAccounts.find((account) => !before.has(account.id)) ??
+      pairingAccounts.find((account) => account.name === input.name) ??
+      null;
+
+    if (created) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  }
+
+  if (!created) {
+    const existing = await findTelegramAccountByToken(
+      input.token,
+      (await readChannelAccounts()).filter((account) => account.type === "telegram")
+    );
+
+    if (existing) {
+      created = existing;
+    } else {
+      created = explicitAccount;
+    }
+  }
+
+  return {
+    ...created,
+    name: input.name.trim() || created.name
+  };
 }
 
 async function upsertWorkspaceProjectAgentMetadata(
@@ -8069,6 +8313,19 @@ function uniqueByChatId(assignments: WorkspaceChannelGroupAssignment[]) {
   return Array.from(seen.values());
 }
 
+function applyChannelAccountDisplayNames(accounts: ChannelAccountRecord[], registry: ChannelRegistry) {
+  const labels = new Map(
+    registry.channels
+      .filter((channel) => Boolean(channel.id))
+      .map((channel) => [channel.id, channel.name.trim() || channel.id] as const)
+  );
+
+  return accounts.map((account) => ({
+    ...account,
+    name: labels.get(account.id) ?? account.name
+  }));
+}
+
 function cloneChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
   return normalizeChannelRegistry({
     version: 1,
@@ -8092,6 +8349,85 @@ type ManagedTelegramRoutingCleanup = {
   removedGroupIds?: string[];
 };
 
+type DiscoveredTelegramGroup = {
+  chatId: string;
+  title: string | null;
+  lastSeen: string | null;
+};
+
+type OpenClawChannelLogsPayload = {
+  lines?: Array<{
+    time?: string;
+    message?: string;
+    raw?: string;
+  }>;
+};
+
+export async function discoverTelegramGroups() {
+  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
+    "channels",
+    "logs",
+    "--channel",
+    "telegram",
+    "--json",
+    "--lines",
+    "200"
+  ]).catch(() => null);
+
+  if (!payload?.lines?.length) {
+    return [] as DiscoveredTelegramGroup[];
+  }
+
+  const discovered = new Map<string, DiscoveredTelegramGroup>();
+
+  const rememberGroup = (group: DiscoveredTelegramGroup) => {
+    const existing = discovered.get(group.chatId);
+    if (!existing) {
+      discovered.set(group.chatId, group);
+      return;
+    }
+
+    discovered.set(group.chatId, {
+      chatId: group.chatId,
+      title: group.title ?? existing.title,
+      lastSeen: selectLatestIsoTimestamp(existing.lastSeen, group.lastSeen)
+    });
+  };
+
+  for (const line of payload.lines) {
+    const lineTime = typeof line?.time === "string" ? line.time : null;
+
+    for (const group of extractTelegramGroupsFromUnknown(line, lineTime)) {
+      rememberGroup(group);
+    }
+
+    if (typeof line?.raw === "string") {
+      try {
+        const parsed = JSON.parse(line.raw);
+        for (const group of extractTelegramGroupsFromUnknown(parsed, lineTime)) {
+          rememberGroup(group);
+        }
+      } catch {
+        for (const group of extractTelegramGroupsFromText(line.raw, lineTime)) {
+          rememberGroup(group);
+        }
+      }
+    }
+
+    if (typeof line?.message === "string") {
+      for (const group of extractTelegramGroupsFromText(line.message, lineTime)) {
+        rememberGroup(group);
+      }
+    }
+  }
+
+  return Array.from(discovered.values()).sort((left, right) => {
+    const leftLabel = left.title ?? left.chatId;
+    const rightLabel = right.title ?? right.chatId;
+    return leftLabel.localeCompare(rightLabel);
+  });
+}
+
 async function updateManagedTelegramRouting(
   registry: ChannelRegistry,
   cleanup: ManagedTelegramRoutingCleanup = {}
@@ -8107,7 +8443,7 @@ async function updateManagedTelegramRouting(
     managedChannels.flatMap((channel) =>
       channel.workspaces.flatMap((workspace) =>
         workspace.groupAssignments
-          .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+          .filter((assignment) => assignment.enabled !== false)
           .map((assignment) => assignment.chatId)
       )
     )
@@ -8193,7 +8529,144 @@ async function updateManagedTelegramRouting(
     await runOpenClaw(["config", "unset", "channels.telegram.defaultAccount"]).catch(() => {});
   }
 
+  const nextGroupsConfig = Object.fromEntries(
+    Array.from(managedGroupIds).map((chatId) => [chatId, { requireMention: true }])
+  );
+
+  await runOpenClaw([
+    "config",
+    "set",
+    "channels.telegram.groups",
+    JSON.stringify(nextGroupsConfig),
+    "--strict-json"
+  ]);
+
   await runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"]);
+}
+
+function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | null): DiscoveredTelegramGroup[] {
+  const discovered = new Map<string, DiscoveredTelegramGroup>();
+  const queue: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || current.depth > 6) {
+      continue;
+    }
+
+    const candidate = current.value;
+    if (candidate === null || candidate === undefined) {
+      continue;
+    }
+
+    if (typeof candidate !== "object") {
+      continue;
+    }
+
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        queue.push({ value: item, depth: current.depth + 1 });
+      }
+      continue;
+    }
+
+    if (!isObjectRecord(candidate)) {
+      continue;
+    }
+
+    const chatId = normalizeTelegramGroupChatId(candidate.chatId);
+    if (chatId) {
+      const title =
+        normalizeOptionalValue(candidate.title as string | null | undefined) ??
+        normalizeOptionalValue(candidate.chatTitle as string | null | undefined) ??
+        null;
+      discovered.set(chatId, {
+        chatId,
+        title,
+        lastSeen: lineTime
+      });
+    }
+
+    for (const nested of Object.values(candidate)) {
+      queue.push({ value: nested, depth: current.depth + 1 });
+    }
+  }
+
+  return Array.from(discovered.values());
+}
+
+function extractTelegramGroupsFromText(text: string, lineTime: string | null): DiscoveredTelegramGroup[] {
+  const discovered = new Map<string, DiscoveredTelegramGroup>();
+  const objectPattern = /\{[^{}]*"chatId"\s*:\s*-?\d+[^{}]*\}/g;
+
+  for (const match of text.matchAll(objectPattern)) {
+    const fragment = match[0];
+    try {
+      const parsed = JSON.parse(fragment);
+      for (const group of extractTelegramGroupsFromUnknown(parsed, lineTime)) {
+        discovered.set(group.chatId, group);
+      }
+      continue;
+    } catch {
+      // Fall through to regex extraction below.
+    }
+
+    const chatIdMatch = fragment.match(/"chatId"\s*:\s*(-?\d+)/);
+    const chatId = normalizeTelegramGroupChatId(chatIdMatch?.[1] ?? null);
+    if (!chatId) {
+      continue;
+    }
+
+    const titleMatch = fragment.match(/"title"\s*:\s*"([^"]+)"/);
+    discovered.set(chatId, {
+      chatId,
+      title: titleMatch?.[1] ?? null,
+      lastSeen: lineTime
+    });
+  }
+
+  return Array.from(discovered.values());
+}
+
+function normalizeTelegramGroupChatId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value < 0) {
+    return String(value);
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return /^-\d+$/.test(trimmed) ? trimmed : null;
+}
+
+function selectLatestIsoTimestamp(current: string | null, candidate: string | null) {
+  if (!candidate) {
+    return current;
+  }
+
+  if (!current) {
+    return candidate;
+  }
+
+  const currentValue = Date.parse(current);
+  const candidateValue = Date.parse(candidate);
+  if (Number.isNaN(candidateValue)) {
+    return current;
+  }
+
+  if (Number.isNaN(currentValue) || candidateValue > currentValue) {
+    return candidate;
+  }
+
+  return current;
 }
 
 async function mutateChannelRegistry(

@@ -25,7 +25,13 @@ import {
   replaceSnapshotChannelRegistry,
   upsertSnapshotChannelAccount
 } from "@/lib/openclaw/channel-bindings";
-import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot, WorkspaceChannelGroupAssignment } from "@/lib/openclaw/types";
+
+type TelegramDiscoveredGroup = {
+  chatId: string;
+  title: string | null;
+  lastSeen: string | null;
+};
 
 export function WorkspaceChannelsDialog({
   snapshot,
@@ -46,6 +52,7 @@ export function WorkspaceChannelsDialog({
     () => snapshot.workspaces.find((entry) => entry.id === workspaceId) ?? null,
     [snapshot.workspaces, workspaceId]
   );
+  const workspaceIdValue = workspace?.id ?? null;
   const workspaceAgents = useMemo(
     () => snapshot.agents.filter((agent) => agent.workspaceId === workspace?.id),
     [snapshot.agents, workspace?.id]
@@ -79,6 +86,9 @@ export function WorkspaceChannelsDialog({
   const [newName, setNewName] = useState("");
   const [newToken, setNewToken] = useState("");
   const [newPrimaryAgentId, setNewPrimaryAgentId] = useState("");
+  const [discoveredGroups, setDiscoveredGroups] = useState<TelegramDiscoveredGroup[]>([]);
+  const [isLoadingDiscoveredGroups, setIsLoadingDiscoveredGroups] = useState(false);
+  const [discoveredGroupsError, setDiscoveredGroupsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -95,14 +105,72 @@ export function WorkspaceChannelsDialog({
       });
       setDeleteTarget(null);
       setDeleteConfirmText("");
+      setDiscoveredGroups([]);
+      setIsLoadingDiscoveredGroups(false);
+      setDiscoveredGroupsError(null);
       return;
     }
 
     setAddMode(telegramAccounts.length > 0 ? "existing" : "new");
-    setNewPrimaryAgentId((current) => current || workspaceAgents[0]?.id || "");
     setNewName("");
     setNewToken("");
-  }, [open, telegramAccounts.length, workspaceAgents]);
+  }, [open, telegramAccounts.length]);
+
+  useEffect(() => {
+    if (!open || newPrimaryAgentId) {
+      return;
+    }
+
+    setNewPrimaryAgentId(workspaceAgents[0]?.id || "");
+  }, [open, newPrimaryAgentId, workspaceAgents]);
+
+  useEffect(() => {
+    if (!open || !workspaceIdValue) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadDiscoveredGroups = async () => {
+      setIsLoadingDiscoveredGroups(true);
+      setDiscoveredGroupsError(null);
+
+      try {
+        const response = await fetch(
+          `/api/workspaces/${encodeURIComponent(workspaceIdValue)}/channels/discovered-groups`,
+          {
+            method: "GET"
+          }
+        );
+        const result = (await response.json()) as {
+          error?: string;
+          groups?: TelegramDiscoveredGroup[];
+        };
+
+        if (!response.ok || result.error) {
+          throw new Error(result.error || "Telegram groups could not be loaded.");
+        }
+
+        if (!cancelled) {
+          setDiscoveredGroups(Array.isArray(result.groups) ? result.groups : []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setDiscoveredGroupsError(error instanceof Error ? error.message : "Telegram groups could not be loaded.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingDiscoveredGroups(false);
+        }
+      }
+    };
+
+    void loadDiscoveredGroups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, workspaceIdValue]);
 
   type ChannelMutationResult = {
     error?: string;
@@ -397,6 +465,96 @@ export function WorkspaceChannelsDialog({
     }
   };
 
+  const handleRefreshDiscoveredGroups = async () => {
+    if (!workspace) {
+      return;
+    }
+
+    setIsLoadingDiscoveredGroups(true);
+    setDiscoveredGroupsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspace.id)}/channels/discovered-groups`,
+        {
+          method: "GET"
+        }
+      );
+      const result = (await response.json()) as {
+        error?: string;
+        groups?: TelegramDiscoveredGroup[];
+      };
+
+      if (!response.ok || result.error) {
+        throw new Error(result.error || "Telegram groups could not be loaded.");
+      }
+
+      setDiscoveredGroups(Array.isArray(result.groups) ? result.groups : []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Telegram groups could not be loaded.";
+      setDiscoveredGroupsError(message);
+      toast.error("Telegram groups could not be refreshed.", {
+        description: message
+      });
+    } finally {
+      setIsLoadingDiscoveredGroups(false);
+    }
+  };
+
+  const handleToggleAllowedGroup = async (
+    channelId: string,
+    currentAssignments: WorkspaceChannelGroupAssignment[],
+    group: TelegramDiscoveredGroup,
+    nextEnabled: boolean
+  ) => {
+    beginSaving(nextEnabled ? `Allowing ${group.title ?? group.chatId}...` : `Removing ${group.title ?? group.chatId}...`);
+
+    let succeeded = false;
+
+    try {
+      const nextAssignments = currentAssignments
+        .filter((assignment) => assignment.enabled !== false && assignment.chatId !== group.chatId)
+        .map((assignment) => ({
+          chatId: assignment.chatId,
+          agentId: null,
+          title: assignment.title ?? null,
+          enabled: true
+        }));
+
+      if (nextEnabled) {
+        nextAssignments.push({
+          chatId: group.chatId,
+          agentId: null,
+          title: group.title ?? null,
+          enabled: true
+        });
+      }
+
+      const result = await patchWorkspaceChannel({
+        action: "groups",
+        channelId,
+        groupAssignments: nextAssignments
+      });
+
+      if (result.registry && onSnapshotChange) {
+        onSnapshotChange((current) => replaceSnapshotChannelRegistry(current, result.registry!));
+      }
+
+      succeeded = true;
+    } catch (error) {
+      toast.error("Allowed groups update failed.", {
+        description: error instanceof Error ? error.message : "Unknown channel error."
+      });
+    } finally {
+      endSaving();
+    }
+
+    if (succeeded) {
+      toast.success(nextEnabled ? "Group added to allowlist." : "Group removed from allowlist.");
+      void onRefresh().catch(() => {});
+    }
+  };
+
   const deleteSummary = useMemo(() => {
     if (!deleteTarget) {
       return null;
@@ -537,6 +695,10 @@ export function WorkspaceChannelsDialog({
                         ? snapshot.agents.find((agent) => agent.id === primaryAgentId)?.name ?? primaryAgentId
                         : "Unset";
                       const boundAgentCount = workspaceBinding?.agentIds.length ?? 0;
+                      const currentAssignments = (workspaceBinding?.groupAssignments ?? []).filter(
+                        (assignment) => assignment.enabled !== false
+                      );
+                      const groupOptions = buildTelegramGroupOptions(discoveredGroups, currentAssignments);
 
                       return (
                         <div
@@ -586,6 +748,85 @@ export function WorkspaceChannelsDialog({
                                 Disconnect
                               </Button>
                             </div>
+                          </div>
+
+                          <div className="mt-3 border-t border-white/6 pt-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-[11px] font-medium text-white">Allowed groups</p>
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                  Recent Telegram groups are detected from logs. Selected groups follow the channel primary.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                  {currentAssignments.length} selected
+                                </Badge>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 rounded-full px-2.5 text-[11px]"
+                                  disabled={isSaving || isLoadingDiscoveredGroups}
+                                  onClick={() => void handleRefreshDiscoveredGroups()}
+                                >
+                                  {isLoadingDiscoveredGroups ? "Refreshing..." : "Refresh"}
+                                </Button>
+                              </div>
+                            </div>
+
+                            {discoveredGroupsError ? (
+                              <p className="mt-2 text-[11px] text-rose-300">{discoveredGroupsError}</p>
+                            ) : null}
+
+                            {groupOptions.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {groupOptions.map((group) => {
+                                  const checked = currentAssignments.some((assignment) => assignment.chatId === group.chatId);
+                                  return (
+                                    <label
+                                      key={`${channel.id}-${group.chatId}`}
+                                      className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="mt-0.5 h-4 w-4 rounded border-white/15 bg-white/5 accent-cyan-300"
+                                        checked={checked}
+                                        disabled={isSaving}
+                                        onChange={(event) =>
+                                          void handleToggleAllowedGroup(
+                                            channel.id,
+                                            currentAssignments,
+                                            group,
+                                            event.target.checked
+                                          )
+                                        }
+                                      />
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <p className="truncate text-sm font-medium text-white">
+                                            {group.title ?? `Group ${group.chatId}`}
+                                          </p>
+                                          {!discoveredGroups.some((entry) => entry.chatId === group.chatId) ? (
+                                            <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                              Saved
+                                            </Badge>
+                                          ) : null}
+                                        </div>
+                                        <p className="mt-1 truncate text-[11px] text-slate-400">
+                                          {group.chatId}
+                                          {group.lastSeen ? ` · seen ${formatGroupTimestamp(group.lastSeen)}` : ""}
+                                        </p>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] text-slate-400">
+                                No Telegram groups found yet. Send one message in the target group, then refresh here.
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -905,4 +1146,38 @@ function uniqueStrings(values: string[]) {
 
 function normalizeDeleteConfirmation(value: string) {
   return value.trim().toLowerCase();
+}
+
+function buildTelegramGroupOptions(
+  discoveredGroups: TelegramDiscoveredGroup[],
+  currentAssignments: WorkspaceChannelGroupAssignment[]
+) {
+  const options = new Map<string, TelegramDiscoveredGroup>();
+
+  for (const group of discoveredGroups) {
+    options.set(group.chatId, group);
+  }
+
+  for (const assignment of currentAssignments) {
+    options.set(assignment.chatId, {
+      chatId: assignment.chatId,
+      title: assignment.title ?? options.get(assignment.chatId)?.title ?? null,
+      lastSeen: options.get(assignment.chatId)?.lastSeen ?? null
+    });
+  }
+
+  return Array.from(options.values()).sort((left, right) => {
+    const leftLabel = left.title ?? left.chatId;
+    const rightLabel = right.title ?? right.chatId;
+    return leftLabel.localeCompare(rightLabel);
+  });
+}
+
+function formatGroupTimestamp(value: string) {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    return value;
+  }
+
+  return new Date(parsed).toISOString().replace("T", " ").slice(0, 16);
 }
