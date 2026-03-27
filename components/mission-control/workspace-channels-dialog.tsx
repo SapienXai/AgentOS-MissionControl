@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/sonner";
 import {
@@ -841,7 +840,7 @@ export function WorkspaceChannelsDialog({
 
             <div className="mt-3">
               {workspaceChannels.length > 0 ? (
-                <div className="max-h-[68vh] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                <div className="space-y-2">
                     {workspaceChannels.map((channel) => {
                       const workspaceBinding =
                         channel.workspaces.find((entry) => entry.workspaceId === workspace?.id) ?? null;
@@ -1073,7 +1072,7 @@ export function WorkspaceChannelsDialog({
                               ) : null}
 
                               {groupOptions.length > 0 ? (
-                                <div className="mt-3 max-h-[300px] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                                <div className="mt-3 space-y-2">
                                   {groupOptions.map((group) => {
                                     const currentAssignment =
                                       currentAssignments.find((assignment) => assignment.chatId === group.chatId) ?? null;
@@ -1188,75 +1187,73 @@ export function WorkspaceChannelsDialog({
 
               <TabsContent className="mt-3" value="existing">
                 {telegramAccounts.length > 0 ? (
-                  <ScrollArea className="max-h-[240px] pr-1">
-                    <div className="space-y-2">
-                      {telegramAccounts.map((account) => {
-                        const alreadyAdded = existingAccountIds.has(account.id);
+                  <div className="space-y-2">
+                    {telegramAccounts.map((account) => {
+                      const alreadyAdded = existingAccountIds.has(account.id);
 
-                        return (
-                          <div
-                            key={account.id}
-                            className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className="truncate text-sm font-medium text-white">{account.name}</p>
-                                <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                                  telegram
-                                </Badge>
-                                {alreadyAdded ? (
-                                  <Badge className="h-5 rounded-full px-2 text-[10px]">In workspace</Badge>
-                                ) : null}
-                              </div>
-                              <p className="mt-1 truncate text-[11px] text-slate-400">{account.id}</p>
-                              {existingAddStatus.accountId === account.id && existingAddStatus.kind !== "idle" ? (
-                                <p
-                                  className={
-                                    existingAddStatus.kind === "error"
-                                      ? "mt-1 text-[11px] text-rose-300"
-                                      : existingAddStatus.kind === "success"
-                                        ? "mt-1 text-[11px] text-emerald-300"
-                                        : "mt-1 text-[11px] text-slate-400"
-                                  }
-                                >
-                                  {existingAddStatus.kind === "loading"
-                                    ? "Adding..."
-                                    : existingAddStatus.message}
-                                </p>
+                      return (
+                        <div
+                          key={account.id}
+                          className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-medium text-white">{account.name}</p>
+                              <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                telegram
+                              </Badge>
+                              {alreadyAdded ? (
+                                <Badge className="h-5 rounded-full px-2 text-[10px]">In workspace</Badge>
                               ) : null}
                             </div>
-                            <div className="flex shrink-0 items-center gap-1.5">
-                              <Button
-                                type="button"
-                                variant={alreadyAdded ? "secondary" : "default"}
-                                size="sm"
-                                className="h-8 rounded-full px-2.5 text-[11px] whitespace-nowrap"
-                                disabled={isSaving || alreadyAdded}
-                                onClick={() => handleAddExisting(account.id, account.name)}
+                            <p className="mt-1 truncate text-[11px] text-slate-400">{account.id}</p>
+                            {existingAddStatus.accountId === account.id && existingAddStatus.kind !== "idle" ? (
+                              <p
+                                className={
+                                  existingAddStatus.kind === "error"
+                                    ? "mt-1 text-[11px] text-rose-300"
+                                    : existingAddStatus.kind === "success"
+                                      ? "mt-1 text-[11px] text-emerald-300"
+                                      : "mt-1 text-[11px] text-slate-400"
+                                }
                               >
-                                {existingAddStatus.accountId === account.id && existingAddStatus.kind === "loading"
+                                {existingAddStatus.kind === "loading"
                                   ? "Adding..."
-                                  : alreadyAdded
-                                    ? "Added"
-                                    : "Add"}
-                              </Button>
-
-                              <Button
-                                type="button"
-                                variant="destructive"
-                                size="sm"
-                                className="h-8 rounded-full px-2.5 text-[11px] whitespace-nowrap"
-                                disabled={isSaving}
-                                onClick={() => openDeleteConfirmation(account)}
-                              >
-                                Delete
-                              </Button>
-                            </div>
+                                  : existingAddStatus.message}
+                              </p>
+                            ) : null}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <Button
+                              type="button"
+                              variant={alreadyAdded ? "secondary" : "default"}
+                              size="sm"
+                              className="h-8 rounded-full px-2.5 text-[11px] whitespace-nowrap"
+                              disabled={isSaving || alreadyAdded}
+                              onClick={() => handleAddExisting(account.id, account.name)}
+                            >
+                              {existingAddStatus.accountId === account.id && existingAddStatus.kind === "loading"
+                                ? "Adding..."
+                                : alreadyAdded
+                                  ? "Added"
+                                  : "Add"}
+                            </Button>
+
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              className="h-8 rounded-full px-2.5 text-[11px] whitespace-nowrap"
+                              disabled={isSaving}
+                              onClick={() => openDeleteConfirmation(account)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-4 text-sm text-slate-400">
                     No stored Telegram accounts yet. Switch to <span className="text-white">New</span> to add one.
@@ -1371,30 +1368,28 @@ export function WorkspaceChannelsDialog({
             {deleteSummary.affectedWorkspaceDetails.length > 0 ? (
               <div className="space-y-2">
                 <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Affected workspaces</p>
-                <ScrollArea className="max-h-[220px] pr-1">
-                  <div className="space-y-2">
-                    {deleteSummary.affectedWorkspaceDetails.map((workspaceDetail) => (
-                      <div
-                        key={workspaceDetail.workspaceId}
-                        className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-white">{workspaceDetail.workspaceName}</p>
-                            <p className="mt-1 text-[11px] text-slate-400">
-                              {workspaceDetail.agentNames.length > 0
-                                ? workspaceDetail.agentNames.join(", ")
-                                : "No direct agent bindings"}
-                            </p>
-                          </div>
-                          <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                            {workspaceDetail.groupRouteCount} group routes
-                          </Badge>
+                <div className="space-y-2">
+                  {deleteSummary.affectedWorkspaceDetails.map((workspaceDetail) => (
+                    <div
+                      key={workspaceDetail.workspaceId}
+                      className="rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-white">{workspaceDetail.workspaceName}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {workspaceDetail.agentNames.length > 0
+                              ? workspaceDetail.agentNames.join(", ")
+                              : "No direct agent bindings"}
+                          </p>
                         </div>
+                        <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                          {workspaceDetail.groupRouteCount} group routes
+                        </Badge>
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 
