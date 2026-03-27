@@ -8104,11 +8104,11 @@ async function readChannelRegistry() {
           .map((entry) => parseWorkspaceChannelSummary(entry))
           .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
       : [];
-
-    return normalizeChannelRegistry({
+    const registry = normalizeChannelRegistry({
       version: 1 as const,
       channels
     } satisfies ChannelRegistry);
+    return await reconcileTelegramRegistryAccounts(registry);
   } catch {
     return normalizeChannelRegistry({
       version: 1 as const,
@@ -8289,6 +8289,55 @@ async function findTelegramAccountByToken(token: string, accounts: ChannelAccoun
 
   const accountBotIds = await readTelegramAccountBotIds();
   return accounts.find((account) => accountBotIds.get(account.id) === botId) ?? null;
+}
+
+async function reconcileTelegramRegistryAccounts(registry: ChannelRegistry) {
+  const telegramAccounts = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+  if (telegramAccounts.length === 0) {
+    return registry;
+  }
+
+  const accountIds = new Set(telegramAccounts.map((account) => account.id));
+  const accountsByName = new Map<string, ChannelAccountRecord[]>();
+
+  for (const account of telegramAccounts) {
+    const key = account.name.trim().toLowerCase();
+    if (!key) {
+      continue;
+    }
+
+    const current = accountsByName.get(key) ?? [];
+    current.push(account);
+    accountsByName.set(key, current);
+  }
+
+  let changed = false;
+  const nextChannels = registry.channels.map((channel) => {
+    if (channel.type !== "telegram" || accountIds.has(channel.id)) {
+      return channel;
+    }
+
+    const matches = accountsByName.get(channel.name.trim().toLowerCase()) ?? [];
+    if (matches.length !== 1) {
+      return channel;
+    }
+
+    changed = true;
+    return {
+      ...channel,
+      id: matches[0].id,
+      name: matches[0].name
+    };
+  });
+
+  if (!changed) {
+    return registry;
+  }
+
+  return normalizeChannelRegistry({
+    version: 1,
+    channels: nextChannels
+  });
 }
 
 async function buildTelegramAccountId(name: string) {

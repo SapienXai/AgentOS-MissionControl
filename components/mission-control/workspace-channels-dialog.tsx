@@ -62,11 +62,34 @@ export function WorkspaceChannelsDialog({
     [snapshot, workspace]
   );
   const telegramAccounts = useMemo(
-    () =>
-      snapshot.channelAccounts
-        .filter((account) => account.type === "telegram")
-        .sort((left, right) => left.name.localeCompare(right.name)),
-    [snapshot.channelAccounts]
+    () => {
+      const accounts = new Map<string, MissionControlSnapshot["channelAccounts"][number]>();
+
+      for (const account of snapshot.channelAccounts) {
+        if (account.type !== "telegram") {
+          continue;
+        }
+
+        accounts.set(account.id, account);
+      }
+
+      for (const channel of snapshot.channelRegistry.channels) {
+        if (channel.type !== "telegram") {
+          continue;
+        }
+
+        const existing = accounts.get(channel.id);
+        accounts.set(channel.id, {
+          id: channel.id,
+          type: "telegram",
+          name: channel.name,
+          enabled: existing?.enabled ?? true
+        });
+      }
+
+      return Array.from(accounts.values()).sort((left, right) => left.name.localeCompare(right.name));
+    },
+    [snapshot.channelAccounts, snapshot.channelRegistry.channels]
   );
 
   const [isSaving, setIsSaving] = useState(false);
@@ -750,6 +773,20 @@ export function WorkspaceChannelsDialog({
                       const primaryAgentName = primaryAgentId
                         ? snapshot.agents.find((agent) => agent.id === primaryAgentId)?.name ?? primaryAgentId
                         : "Unset";
+                      const currentPrimaryAgent = primaryAgentId
+                        ? snapshot.agents.find((agent) => agent.id === primaryAgentId) ?? null
+                        : null;
+                      const currentPrimaryWorkspace = currentPrimaryAgent
+                        ? snapshot.workspaces.find((entry) => entry.id === currentPrimaryAgent.workspaceId) ?? null
+                        : null;
+                      const primaryAgentOptions = currentPrimaryAgent
+                        ? [
+                            ...workspaceAgents,
+                            ...(!workspaceAgents.some((agent) => agent.id === currentPrimaryAgent.id)
+                              ? [currentPrimaryAgent]
+                              : [])
+                          ]
+                        : workspaceAgents;
                       const boundAgentCount = workspaceBinding?.agentIds.length ?? 0;
                       const currentAssignments = (workspaceBinding?.groupAssignments ?? []).filter(
                         (assignment) => assignment.enabled !== false
@@ -808,9 +845,11 @@ export function WorkspaceChannelsDialog({
                                 disabled={isSaving}
                               >
                                 <option value="">Select primary</option>
-                                {workspaceAgents.map((agent) => (
+                                {primaryAgentOptions.map((agent) => (
                                   <option key={agent.id} value={agent.id}>
-                                    {agent.name}
+                                    {agent.id === currentPrimaryAgent?.id && agent.workspaceId !== workspace?.id
+                                      ? `${agent.name} (${currentPrimaryWorkspace?.name ?? "other workspace"})`
+                                      : agent.name}
                                   </option>
                                 ))}
                               </select>
