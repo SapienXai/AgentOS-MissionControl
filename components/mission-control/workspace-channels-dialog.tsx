@@ -885,15 +885,40 @@ export function WorkspaceChannelsDialog({
                                             }
                                           />
                                           <div className="min-w-0 flex-1">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                              <p className="truncate text-sm font-medium text-white">
-                                                {group.title ?? `Group ${group.chatId}`}
-                                              </p>
-                                              {!discoveredGroups.some((entry) => entry.chatId === group.chatId) ? (
-                                                <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                                                  Saved
-                                                </Badge>
-                                              ) : null}
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                              <div className="min-w-0 flex items-center gap-2">
+                                                <p className="truncate text-sm font-medium text-white">
+                                                  {group.title ?? `Group ${group.chatId}`}
+                                                </p>
+                                                {!discoveredGroups.some((entry) => entry.chatId === group.chatId) ? (
+                                                  <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                                                    Saved
+                                                  </Badge>
+                                                ) : null}
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-[11px] text-slate-400">Owner</span>
+                                                <select
+                                                  value={currentAssignment?.agentId ?? ""}
+                                                  disabled={isSaving || !checked}
+                                                  onChange={(event) =>
+                                                    void handleGroupOwnerChange(
+                                                      channel.id,
+                                                      currentAssignments,
+                                                      group,
+                                                      event.target.value
+                                                    )
+                                                  }
+                                                  className="flex h-8 min-w-[150px] shrink-0 rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                  <option value="">Use primary agent</option>
+                                                  {workspaceAgents.map((agent) => (
+                                                    <option key={agent.id} value={agent.id}>
+                                                      {agent.name}
+                                                    </option>
+                                                  ))}
+                                                </select>
+                                              </div>
                                             </div>
                                             <p className="mt-1 truncate text-[11px] text-slate-400">
                                               {group.chatId}
@@ -901,41 +926,6 @@ export function WorkspaceChannelsDialog({
                                             </p>
                                           </div>
                                         </div>
-                                        <div className="mt-2 flex items-center justify-end gap-2">
-                                          <span className="text-[11px] text-slate-400">Owner</span>
-                                          <select
-                                            value={currentAssignment?.agentId ?? ""}
-                                            disabled={isSaving || !checked}
-                                            onChange={(event) =>
-                                              void handleGroupOwnerChange(
-                                                channel.id,
-                                                currentAssignments,
-                                                group,
-                                                event.target.value
-                                              )
-                                            }
-                                            className="flex h-8 min-w-[170px] rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                                          >
-                                            <option value="">Use primary agent</option>
-                                            {workspaceAgents.map((agent) => (
-                                              <option key={agent.id} value={agent.id}>
-                                                {agent.name}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        </div>
-                                        {checked ? (
-                                          <div className="flex flex-wrap items-center gap-2">
-                                            <p className="text-[11px] text-slate-400">
-                                              {currentAssignment?.agentId
-                                                ? `Owner: ${
-                                                    workspaceAgents.find((agent) => agent.id === currentAssignment.agentId)
-                                                      ?.name ?? currentAssignment.agentId
-                                                  }`
-                                                : "Owner: Use primary agent"}
-                                            </p>
-                                          </div>
-                                        ) : null}
                                       </div>
                                     );
                                   })}
