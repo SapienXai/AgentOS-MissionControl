@@ -52,6 +52,10 @@ type TelegramTetherSummary = {
   roleLines: string[];
   roleTone: "primary" | "owner" | "delegate" | "mixed";
 };
+type SpringVelocity = {
+  x: number;
+  y: number;
+};
 const emptyPersistedNodePositions: PersistedNodePositionMap = {};
 
 const nodeTypes = {
@@ -65,6 +69,9 @@ const edgeTypes = {
 };
 const justCreatedTaskDurationMs = 12000;
 const nodePositionsStorageKey = "mission-control-node-positions";
+const telegramModuleSpringStiffness = 220;
+const telegramModuleSpringDamping = 20;
+const telegramModuleSettlingThreshold = 0.35;
 
 export function MissionCanvas({
   snapshot,
@@ -149,6 +156,7 @@ export function MissionCanvas({
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CanvasEdge>(initialGraph.edges);
+  const telegramSpringVelocitiesRef = useRef<Map<string, SpringVelocity>>(new Map());
 
   useEffect(() => {
     const persistedPositions = readPersistedNodePositions();
@@ -281,6 +289,86 @@ export function MissionCanvas({
       })
     );
   }, [selectedNodeId, composerTargetAgentId, isComposerActive, setNodes]);
+
+  useEffect(() => {
+    let frameId = 0;
+    let previousTime = performance.now();
+
+    const tick = (time: number) => {
+      const dtSeconds = Math.min(0.032, Math.max(0.008, (time - previousTime) / 1000));
+      previousTime = time;
+
+      setNodes((currentNodes) => {
+        let didUpdate = false;
+        const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
+        const nextNodes = currentNodes.map((node) => {
+          if (node.type !== "telegram-module") {
+            return node;
+          }
+
+          const agentNode = nodesById.get(node.data.agent.id);
+          if (!agentNode || agentNode.type !== "agent") {
+            telegramSpringVelocitiesRef.current.delete(node.id);
+            return node;
+          }
+
+          if (node.dragging) {
+            telegramSpringVelocitiesRef.current.delete(node.id);
+            return node;
+          }
+
+          const targetPosition = resolveTelegramModuleAnchorPosition(
+            agentNode.position,
+            agentNode.width ?? agentNode.measured?.width,
+            agentNode.height ?? agentNode.measured?.height
+          );
+          const springVelocity = telegramSpringVelocitiesRef.current.get(node.id) ?? { x: 0, y: 0 };
+          const nextPosition = stepTelegramModuleSpring(
+            node.position,
+            targetPosition,
+            springVelocity,
+            dtSeconds
+          );
+
+          if (nextPosition.settled) {
+            telegramSpringVelocitiesRef.current.delete(node.id);
+
+            if (node.position.x === targetPosition.x && node.position.y === targetPosition.y) {
+              return node;
+            }
+
+            didUpdate = true;
+            return {
+              ...node,
+              position: targetPosition
+            };
+          }
+
+          telegramSpringVelocitiesRef.current.set(node.id, springVelocity);
+
+          if (
+            Math.abs(nextPosition.position.x - node.position.x) < 0.001 &&
+            Math.abs(nextPosition.position.y - node.position.y) < 0.001
+          ) {
+            return node;
+          }
+
+          didUpdate = true;
+          return {
+            ...node,
+            position: nextPosition.position
+          };
+        });
+
+        return didUpdate ? nextNodes : currentNodes;
+      });
+
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [setNodes]);
 
   useEffect(() => {
     if (!reactFlowRef.current) {
@@ -600,20 +688,16 @@ function buildCanvasGraph(
 
       if (showTelegramTether) {
         const telegramModuleId = toTelegramTetherNodeId(agent);
+        const telegramModulePosition = resolveTelegramModuleAnchorPosition(agentPosition);
 
         telegramModuleNodes.push({
           id: telegramModuleId,
           type: "telegram-module",
-          parentId: agent.id,
           draggable: true,
           selectable: false,
           width: 64,
           height: 64,
-          position: resolvePersistedPosition(
-            toPersistedTelegramModulePositionKey(agent),
-            { x: -80, y: -32 },
-            persistedNodePositions
-          ),
+          position: telegramModulePosition,
           zIndex: isComposerHighlightedAgent ? 55 : 18,
           selected: false,
           data: {
@@ -905,6 +989,63 @@ function buildTelegramTetherSummary(
   };
 }
 
+function resolveTelegramModuleAnchorPosition(
+  agentPosition: PersistedNodePosition,
+  agentWidth = 212,
+  agentHeight = 220
+) {
+  const horizontalOffset = Math.round(Math.max(88, agentWidth * 0.42));
+  const verticalOffset = Math.round(Math.max(34, agentHeight * 0.18));
+
+  return {
+    x: agentPosition.x - horizontalOffset,
+    y: agentPosition.y - verticalOffset
+  };
+}
+
+function stepTelegramModuleSpring(
+  currentPosition: PersistedNodePosition,
+  targetPosition: PersistedNodePosition,
+  velocity: SpringVelocity,
+  dtSeconds: number
+) {
+  const forceX =
+    (targetPosition.x - currentPosition.x) * telegramModuleSpringStiffness -
+    velocity.x * telegramModuleSpringDamping;
+  const forceY =
+    (targetPosition.y - currentPosition.y) * telegramModuleSpringStiffness -
+    velocity.y * telegramModuleSpringDamping;
+
+  velocity.x += forceX * dtSeconds;
+  velocity.y += forceY * dtSeconds;
+
+  const nextPosition = {
+    x: currentPosition.x + velocity.x * dtSeconds,
+    y: currentPosition.y + velocity.y * dtSeconds
+  };
+
+  const settled =
+    Math.abs(targetPosition.x - nextPosition.x) < telegramModuleSettlingThreshold &&
+    Math.abs(targetPosition.y - nextPosition.y) < telegramModuleSettlingThreshold &&
+    Math.abs(velocity.x) < telegramModuleSettlingThreshold &&
+    Math.abs(velocity.y) < telegramModuleSettlingThreshold;
+
+  if (settled) {
+    velocity.x = 0;
+    velocity.y = 0;
+
+    return {
+      position: targetPosition,
+      settled: true
+    };
+  }
+
+  return {
+    position: nextPosition,
+    settled: false
+  };
+}
+
 function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]) {
   const previousById = new Map(previousNodes.map((node) => [node.id, node]));
 
@@ -1023,8 +1164,9 @@ function readPersistedNodePositions() {
       return {} as PersistedNodePositionMap;
     }
 
-    const entries = Object.entries(parsed as Record<string, unknown>).filter(([, value]) => {
+    const entries = Object.entries(parsed as Record<string, unknown>).filter(([key, value]) => {
       return (
+        !isTelegramModulePersistedPositionKey(key) &&
         typeof value === "object" &&
         value !== null &&
         typeof (value as PersistedNodePosition).x === "number" &&
@@ -1043,7 +1185,7 @@ function readPersistedNodePositions() {
 function extractPersistedNodePositions(nodes: CanvasNode[]) {
   return Object.fromEntries(
     nodes
-      .filter((node) => node.type === "agent" || node.type === "task" || node.type === "telegram-module")
+      .filter((node) => node.type === "agent" || node.type === "task")
       .map((node) => [
         resolveNodePersistedPositionKey(node),
         {
@@ -1052,6 +1194,10 @@ function extractPersistedNodePositions(nodes: CanvasNode[]) {
         }
       ])
   ) as PersistedNodePositionMap;
+}
+
+function isTelegramModulePersistedPositionKey(key: string) {
+  return key.startsWith("telegram-module");
 }
 
 function arePersistedNodePositionsEqual(
