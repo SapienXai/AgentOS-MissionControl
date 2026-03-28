@@ -23,11 +23,13 @@ import type {
   AgentNodeData,
   MissionEdgeData,
   TaskNodeData,
+  TelegramTetherNodeData,
   WorkspaceNodeData
 } from "@/components/mission-control/canvas-types";
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { MissionConnectionEdge } from "@/components/mission-control/edges/mission-connection-edge";
 import { TaskNode } from "@/components/mission-control/nodes/task-node";
+import { TelegramTetherNode } from "@/components/mission-control/nodes/telegram-tether-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, OpenClawAgent, TaskRecord } from "@/lib/openclaw/types";
@@ -36,19 +38,27 @@ import { cn } from "@/lib/utils";
 type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;
 type AgentCanvasNode = Node<AgentNodeData, "agent">;
 type TaskCanvasNode = Node<TaskNodeData, "task">;
+type TelegramModuleCanvasNode = Node<TelegramTetherNodeData, "telegram-module">;
 type CanvasEdge = Edge<MissionEdgeData, "simplebezier">;
-type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | TaskCanvasNode;
+type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | TaskCanvasNode | TelegramModuleCanvasNode;
 type PersistedNodePosition = {
   x: number;
   y: number;
 };
 type PersistedNodePositionMap = Record<string, PersistedNodePosition>;
+type TelegramTetherSummary = {
+  channelCount: number;
+  channelNames: string[];
+  roleLines: string[];
+  roleTone: "primary" | "owner" | "delegate" | "mixed";
+};
 const emptyPersistedNodePositions: PersistedNodePositionMap = {};
 
 const nodeTypes = {
   workspace: WorkspaceNode,
   agent: AgentNode,
-  task: TaskNode
+  task: TaskNode,
+  "telegram-module": TelegramTetherNode
 };
 const edgeTypes = {
   simplebezier: MissionConnectionEdge
@@ -159,12 +169,18 @@ export function MissionCanvas({
         const persistedKey =
           node.type === "agent"
             ? toPersistedAgentPositionKey(node.data.agent)
-            : toPersistedTaskPositionKey(node.data.task);
+            : node.type === "telegram-module"
+              ? toPersistedTelegramModulePositionKey(node.data.agent)
+              : toPersistedTaskPositionKey(node.data.task);
         const legacyPersistedKey =
           node.type === "agent"
             ? toLegacyPersistedAgentPositionKey(node.data.agent.id)
-            : toLegacyPersistedTaskPositionKey(node.data.task.id);
-        const savedPosition = persistedPositions[persistedKey] || persistedPositions[legacyPersistedKey];
+            : node.type === "telegram-module"
+              ? undefined
+              : toLegacyPersistedTaskPositionKey(node.data.task.id);
+        const savedPosition =
+          persistedPositions[persistedKey] ||
+          (legacyPersistedKey ? persistedPositions[legacyPersistedKey] : undefined);
         if (!savedPosition) {
           return node;
         }
@@ -440,7 +456,13 @@ export function MissionCanvas({
         autoPanOnNodeDrag={false}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeClick={(_, node) => onSelectNode(node.id)}
+        onNodeClick={(_, node) => {
+          if (node.type === "telegram-module") {
+            return;
+          }
+
+          onSelectNode(node.id);
+        }}
         fitView
         fitViewOptions={{ padding: 0.14, duration: 700, maxZoom: 0.9 }}
         minZoom={0.42}
@@ -507,6 +529,7 @@ function buildCanvasGraph(
 
   const workspaceNodes: WorkspaceCanvasNode[] = [];
   const contentNodes: Array<AgentCanvasNode | TaskCanvasNode> = [];
+  const telegramModuleNodes: TelegramModuleCanvasNode[] = [];
   const graphTasks: TaskRecord[] = [];
 
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
@@ -538,7 +561,7 @@ function buildCanvasGraph(
     const groupY = Math.floor(workspaceIndex / 2) * 920 + 42;
     const agentX = groupX + 52;
     const taskX = groupX + 390;
-  let laneY = groupY + 118;
+    let laneY = groupY + 118;
 
     workspaceAgents.forEach((agent, agentIndex) => {
       const agentTasks = workspaceTasks
@@ -546,17 +569,20 @@ function buildCanvasGraph(
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
       const agentY = laneY + agentIndex * 4;
       const isComposerHighlightedAgent = isComposerActive && composerTargetAgentId === agent.id;
+      const agentPosition = resolvePersistedPosition(
+        toPersistedAgentPositionKey(agent),
+        { x: agentX, y: agentY },
+        persistedNodePositions,
+        toLegacyPersistedAgentPositionKey(agent.id)
+      );
+      const telegramTether = buildTelegramTetherSummary(snapshot, workspace, agent);
+      const showTelegramTether = agent.isDefault || telegramTether.channelCount > 0;
 
       contentNodes.push({
         id: agent.id,
         type: "agent",
         draggable: true,
-        position: resolvePersistedPosition(
-          toPersistedAgentPositionKey(agent),
-          { x: agentX, y: agentY },
-          persistedNodePositions,
-          toLegacyPersistedAgentPositionKey(agent.id)
-        ),
+        position: agentPosition,
         zIndex: isComposerHighlightedAgent ? 55 : 10,
         selected: false,
         data: {
@@ -565,11 +591,41 @@ function buildCanvasGraph(
           focused: focusedAgentId === agent.id,
           composerFocused: isComposerHighlightedAgent,
           relativeTimeReferenceMs,
+          telegramTetherCount: telegramTether.channelCount,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
           onFocus: onFocusAgent
         }
       });
+
+      if (showTelegramTether) {
+        const telegramModuleId = toTelegramTetherNodeId(agent);
+
+        telegramModuleNodes.push({
+          id: telegramModuleId,
+          type: "telegram-module",
+          parentId: agent.id,
+          draggable: true,
+          selectable: false,
+          width: 64,
+          height: 64,
+          position: resolvePersistedPosition(
+            toPersistedTelegramModulePositionKey(agent),
+            { x: -80, y: -32 },
+            persistedNodePositions
+          ),
+          zIndex: isComposerHighlightedAgent ? 55 : 18,
+          selected: false,
+          data: {
+            agent,
+            emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
+            channelCount: telegramTether.channelCount,
+            channelNames: telegramTether.channelNames,
+            telegramRoleLines: telegramTether.roleLines,
+            telegramRoleTone: telegramTether.roleTone
+          }
+        });
+      }
 
       graphTasks.push(...agentTasks);
 
@@ -641,8 +697,14 @@ function buildCanvasGraph(
     }
   });
 
-  const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes];
-  return { nodes, edges: buildEdgesForNodes(graphTasks, nodes, composerTargetAgentId, isComposerActive) };
+  const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes, ...telegramModuleNodes];
+  return {
+    nodes,
+    edges: [
+      ...buildEdgesForNodes(graphTasks, nodes, composerTargetAgentId, isComposerActive),
+      ...buildTelegramTetherEdges(nodes, composerTargetAgentId, isComposerActive)
+    ]
+  };
 }
 
 function buildEdgesForNodes(
@@ -694,6 +756,49 @@ function buildEdgesForNodes(
   return edges;
 }
 
+function buildTelegramTetherEdges(
+  nodes: CanvasNode[],
+  composerTargetAgentId: string | null,
+  isComposerActive: boolean
+) {
+  const edges: CanvasEdge[] = [];
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+
+  for (const node of nodes) {
+    if (node.type !== "telegram-module") {
+      continue;
+    }
+
+    const sourceAgentId = node.data.agent.id;
+    const source = nodesById.get(sourceAgentId);
+    const target = nodesById.get(node.id);
+
+    if (!source || !target) {
+      continue;
+    }
+
+    edges.push({
+      id: `edge:${sourceAgentId}:${node.id}`,
+      source: sourceAgentId,
+      target: node.id,
+      sourceHandle: "source-telegram",
+      targetHandle: "target-telegram",
+      type: "simplebezier",
+      zIndex: 16,
+      animated: true,
+      data: {
+        telegramTether: true,
+        composerFocused: isComposerActive && composerTargetAgentId === sourceAgentId
+      },
+      style: {
+        strokeWidth: isComposerActive && composerTargetAgentId === sourceAgentId ? 2.15 : 1.85
+      }
+    });
+  }
+
+  return edges;
+}
+
 function isTaskHidden(
   task: TaskRecord,
   hiddenRuntimeIds: string[],
@@ -721,6 +826,83 @@ function isTaskHidden(
 
 function resolveTaskOwnerId(task: TaskRecord) {
   return task.primaryAgentId || task.agentIds[0] || null;
+}
+
+function buildTelegramTetherSummary(
+  snapshot: MissionControlSnapshot,
+  workspace: MissionControlSnapshot["workspaces"][number],
+  agent: OpenClawAgent
+): TelegramTetherSummary {
+  const relatedChannelNames = new Set<string>();
+  let primaryChannelCount = 0;
+  let ownerGroupCount = 0;
+  let delegateChannelCount = 0;
+
+  for (const channel of snapshot.channelRegistry.channels) {
+    if (channel.type !== "telegram") {
+      continue;
+    }
+
+    const workspaceBinding = channel.workspaces.find((entry) => entry.workspaceId === workspace.id) ?? null;
+    if (!workspaceBinding) {
+      continue;
+    }
+
+    const enabledAssignments = workspaceBinding.groupAssignments.filter((assignment) => assignment.enabled !== false);
+    const ownedAssignments = enabledAssignments.filter((assignment) => assignment.agentId === agent.id);
+    const isPrimary = channel.primaryAgentId === agent.id;
+    const isDelegate = !isPrimary && workspaceBinding.agentIds.includes(agent.id);
+    const hasAnyTelegramRole = isPrimary || isDelegate || ownedAssignments.length > 0;
+
+    if (!hasAnyTelegramRole) {
+      continue;
+    }
+
+    relatedChannelNames.add(channel.name);
+    primaryChannelCount += isPrimary ? 1 : 0;
+    delegateChannelCount += isDelegate ? 1 : 0;
+    ownerGroupCount += ownedAssignments.length;
+  }
+
+  const roleLines: string[] = [];
+
+  if (primaryChannelCount > 0) {
+    roleLines.push(
+      `Primary voice in ${primaryChannelCount} channel${primaryChannelCount === 1 ? "" : "s"}`
+    );
+  }
+
+  if (ownerGroupCount > 0) {
+    roleLines.push(`Group owner in ${ownerGroupCount} chat${ownerGroupCount === 1 ? "" : "s"}`);
+  }
+
+  if (delegateChannelCount > 0) {
+    roleLines.push(
+      `Delegate in ${delegateChannelCount} channel${delegateChannelCount === 1 ? "" : "s"}`
+    );
+  }
+
+  if (roleLines.length === 0 && agent.isDefault) {
+    roleLines.push("Default Telegram anchor");
+  }
+
+  const roleTone =
+    primaryChannelCount > 0 && (ownerGroupCount > 0 || delegateChannelCount > 0)
+      ? "mixed"
+      : primaryChannelCount > 0
+        ? "primary"
+        : ownerGroupCount > 0
+          ? "owner"
+          : delegateChannelCount > 0
+            ? "delegate"
+            : "primary";
+
+  return {
+    channelCount: relatedChannelNames.size,
+    channelNames: [...relatedChannelNames].sort((left, right) => left.localeCompare(right)),
+    roleLines,
+    roleTone
+  };
 }
 
 function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]) {
@@ -753,12 +935,7 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
   });
 }
 
-function resolveNodeZIndex(
-  node: CanvasNode,
-  selectedNodeId: string | null,
-  composerTargetAgentId: string | null,
-  isComposerActive: boolean
-) {
+function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null, composerTargetAgentId: string | null, isComposerActive: boolean) {
   if (node.type === "workspace") {
     return 0;
   }
@@ -777,6 +954,22 @@ function resolveNodeZIndex(
     }
 
     return 10;
+  }
+
+  if (node.type === "telegram-module") {
+    if (isComposerActive && composerTargetAgentId === node.data.agent.id && selectedNodeId === node.id) {
+      return 65;
+    }
+
+    if (selectedNodeId === node.id) {
+      return 60;
+    }
+
+    if (isComposerActive && composerTargetAgentId === node.data.agent.id) {
+      return 55;
+    }
+
+    return 18;
   }
 
   if (node.id === selectedNodeId) {
@@ -850,7 +1043,7 @@ function readPersistedNodePositions() {
 function extractPersistedNodePositions(nodes: CanvasNode[]) {
   return Object.fromEntries(
     nodes
-      .filter((node) => node.type === "agent" || node.type === "task")
+      .filter((node) => node.type === "agent" || node.type === "task" || node.type === "telegram-module")
       .map((node) => [
         resolveNodePersistedPositionKey(node),
         {
@@ -895,9 +1088,15 @@ function resolvePersistedPosition(
   return { x: saved.x, y: saved.y };
 }
 
-function resolveNodePersistedPositionKey(node: AgentCanvasNode | TaskCanvasNode) {
+function resolveNodePersistedPositionKey(
+  node: AgentCanvasNode | TaskCanvasNode | TelegramModuleCanvasNode
+) {
   if (node.type === "agent") {
     return toPersistedAgentPositionKey(node.data.agent);
+  }
+
+  if (node.type === "telegram-module") {
+    return toPersistedTelegramModulePositionKey(node.data.agent);
   }
 
   return toPersistedTaskPositionKey(node.data.task);
@@ -909,6 +1108,14 @@ function toPersistedAgentPositionKey(agent: OpenClawAgent) {
 
 function toLegacyPersistedAgentPositionKey(agentId: string) {
   return `agent:${agentId}`;
+}
+
+function toTelegramTetherNodeId(agent: OpenClawAgent) {
+  return `telegram-module-v3:${agent.workspaceId}:${agent.id}`;
+}
+
+function toPersistedTelegramModulePositionKey(agent: OpenClawAgent) {
+  return toTelegramTetherNodeId(agent);
 }
 
 function toPersistedTaskPositionKey(task: TaskRecord) {

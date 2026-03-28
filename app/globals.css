@@ -286,6 +286,11 @@
   opacity: 0.98;
 }
 
+.mission-shell .react-flow__edge .mission-edge__path--telegram-tether {
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
+
 .mission-shell .react-flow__edge.animated .mission-edge__path--glow {
   stroke: var(--mission-edge-glow-active);
   opacity: 0.95;

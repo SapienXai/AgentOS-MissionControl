@@ -20,9 +20,19 @@ export type AgentNodeData = Record<string, unknown> & {
   focused?: boolean;
   composerFocused?: boolean;
   relativeTimeReferenceMs: number;
+  telegramTetherCount?: number;
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
   onFocus?: (agentId: string) => void;
+};
+
+export type TelegramTetherNodeData = Record<string, unknown> & {
+  agent: OpenClawAgent;
+  emphasis: boolean;
+  channelCount: number;
+  channelNames: string[];
+  telegramRoleLines: string[];
+  telegramRoleTone: "primary" | "owner" | "delegate" | "mixed";
 };
 
 export type RuntimeNodeData = Record<string, unknown> & {
@@ -57,4 +67,5 @@ export type ModelNodeData = Record<string, unknown> & {
 
 export type MissionEdgeData = {
   composerFocused?: boolean;
+  telegramTether?: boolean;
 };

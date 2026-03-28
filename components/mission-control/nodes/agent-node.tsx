@@ -51,6 +51,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
       : declaredToolCount > 0
         ? `${declaredToolCount} configured tool${declaredToolCount === 1 ? "" : "s"}`
         : "No tools observed";
+  const telegramTetherCount = data.telegramTetherCount ?? 0;
+  const hasTelegramTether = data.agent.isDefault || telegramTetherCount > 0;
   const heartbeatLabel = data.agent.heartbeat.enabled
     ? data.agent.heartbeat.every ??
       (typeof data.agent.heartbeat.everyMs === "number"
@@ -93,6 +95,18 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
       <div className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full bg-[linear-gradient(180deg,rgba(125,211,252,0.9),rgba(34,211,238,0.14))]" />
       <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-cyan-200/10" />
       <div className="pointer-events-none absolute right-2 top-2 h-10 w-10 rounded-full bg-cyan-300/10 blur-xl" />
+      {hasTelegramTether ? (
+        <div className="pointer-events-none absolute left-[-4px] top-[-4px] h-12 w-12 rounded-full bg-cyan-300/14 blur-xl" />
+      ) : null}
+      {hasTelegramTether ? (
+        <Handle
+          type="source"
+          id="source-telegram"
+          position={Position.Top}
+          style={{ left: 14, top: -4 }}
+          className="!h-2.5 !w-2.5 !border-0 !bg-cyan-200/90 shadow-[0_0_16px_rgba(34,211,238,0.52)]"
+        />
+      ) : null}
       {isAttentionActive ? (
         <>
           <div aria-hidden="true" className="agent-node__composer-glow pointer-events-none absolute inset-[-7px] z-0 rounded-[22px]" />
