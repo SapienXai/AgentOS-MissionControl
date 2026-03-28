@@ -110,15 +110,34 @@ export function TelegramTetherNode({ data, selected }: NodeProps<TelegramTetherF
               </svg>
 
               {activeChannel ? (
-                <motion.div
-                  aria-hidden="true"
-                  className={cn(
-                    "pointer-events-none absolute right-1.25 top-1.25 h-2.5 w-2.5 rounded-full shadow-[0_0_12px_rgba(255,255,255,0.38)]",
-                    roleDotClass
-                  )}
-                  animate={{ scale: [1, 1.22, 1] }}
-                  transition={{ duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-                />
+                <div className="pointer-events-none absolute" style={{ right: 5, top: 5 }}>
+                  <motion.div
+                    aria-hidden="true"
+                    className="absolute -inset-1.5 rounded-full border border-white/45 shadow-[0_0_10px_rgba(255,255,255,0.2)]"
+                    animate={{
+                      scale: [0.88, 1.22, 0.88],
+                      opacity: [0, 0.95, 0]
+                    }}
+                    transition={{
+                      duration: 1.9,
+                      repeat: Number.POSITIVE_INFINITY,
+                      ease: "easeInOut"
+                    }}
+                  />
+                  <motion.div
+                    aria-hidden="true"
+                    className={cn("h-2 w-2 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.42)]", roleDotClass)}
+                    animate={{
+                      scale: [1, 1.12, 1],
+                      opacity: [0.9, 1, 0.9]
+                    }}
+                    transition={{
+                      duration: 1.9,
+                      repeat: Number.POSITIVE_INFINITY,
+                      ease: "easeInOut"
+                    }}
+                  />
+                </div>
               ) : null}
             </motion.div>
           </motion.div>
