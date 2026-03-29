@@ -512,10 +512,10 @@ export function MissionSidebar({
       <div className="relative flex h-full items-start overflow-visible">
         <div
           className={cn(
-            "panel-surface panel-glow mission-ease-smooth relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-3 py-4 transition-[max-height] duration-500",
-            isPanelCollapsed ? "w-full rounded-[30px]" : "w-[78px] rounded-l-[30px] rounded-r-none border-r-0",
+            "panel-surface panel-glow mission-ease-smooth relative flex h-full shrink-0 self-stretch flex-col items-center overflow-hidden px-1.5 py-2 transition-[max-height] duration-500",
+            isPanelCollapsed ? "w-full" : "w-[60px] border-r border-white/[0.08]",
             isRailCollapsed
-              ? "max-h-[176px]"
+              ? "max-h-[164px]"
               : "max-h-full"
           )}
         >
@@ -523,7 +523,7 @@ export function MissionSidebar({
             type="button"
             aria-label={isPanelCollapsed ? "Open mission control" : "Collapse mission control"}
             onClick={togglePanelFromRail}
-            className="flex h-12 w-12 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-[18px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
+            className="flex h-9 w-9 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-none border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
           >
             <Image
               src="/assets/logo.webp"
@@ -531,14 +531,14 @@ export function MissionSidebar({
               width={32}
               height={32}
               aria-hidden="true"
-              className="pointer-events-none h-8 w-8 select-none object-contain"
+              className="pointer-events-none h-6 w-6 select-none object-contain"
               priority
             />
           </button>
 
           <div
             className={cn(
-              "mission-ease-smooth mt-6 flex w-full flex-1 flex-col items-center gap-2 overflow-hidden transition-[max-height,opacity,transform] duration-500",
+              "mission-ease-smooth mt-3.5 flex w-full flex-1 flex-col items-center gap-1 overflow-hidden transition-[max-height,opacity,transform] duration-500",
               isRailCollapsed
                 ? "max-h-0 -translate-y-3 opacity-0 pointer-events-none"
                 : "max-h-[420px] translate-y-0 opacity-100"
@@ -566,11 +566,11 @@ export function MissionSidebar({
             ))}
           </div>
 
-          <div className="mt-auto flex w-full flex-col items-center gap-2 pb-1">
-            <div className="flex flex-col items-center gap-2">
+          <div className="mt-auto flex w-full flex-col items-center gap-1 pb-1">
+            <div className="flex flex-col items-center gap-1">
               <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
               {isPanelCollapsed ? (
-                <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">{snapshot.mode}</p>
+                <p className="text-[8px] uppercase tracking-[0.16em] text-slate-500">{snapshot.mode}</p>
               ) : null}
             </div>
 
@@ -584,9 +584,9 @@ export function MissionSidebar({
 
                 setIsRailCollapsed((current) => !current);
               }}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-none border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
             >
-              {isRailCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+              {isRailCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
             </button>
           </div>
 
@@ -594,35 +594,35 @@ export function MissionSidebar({
 
         <div
           className={cn(
-            "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-r-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
+            "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-none border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
             isPanelCollapsed
               ? "-translate-x-4 opacity-0 pointer-events-none"
               : "translate-x-0 opacity-100",
-            !isPanelCollapsed && "rounded-l-none border-l-0"
+            !isPanelCollapsed && "border-l-0"
           )}
         >
           <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-            <div className="shrink-0 px-5 pb-4 pt-5">
+            <div className="shrink-0 px-4 pb-3 pt-4">
               <div className="flex w-full items-baseline justify-center gap-2 whitespace-nowrap text-center">
-                <span className="font-display text-[15px] font-semibold tracking-[0.2em] text-slate-100">
+                <span className="font-display text-[14px] font-semibold tracking-[0.18em] text-slate-100">
                   AgentOS
                 </span>
                 <span className="text-[11px] font-medium text-slate-600">|</span>
-                <span className="font-display text-[11px] font-normal tracking-[0.2em] text-slate-500">
+                <span className="font-display text-[10px] font-normal tracking-[0.18em] text-slate-500">
                   Mission Control
                 </span>
               </div>
 
-              <div className="mt-4 h-px w-full bg-white/[0.08]" />
+              <div className="mt-3 h-px w-full bg-white/[0.08]" />
 
-                <div className="mt-4 rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(13,20,34,0.98),rgba(6,10,18,0.96))] p-4">
+                <div className="mt-3 rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(13,20,34,0.98),rgba(6,10,18,0.96))] p-3">
                   <div className="flex items-center gap-3">
                     <StatusDot tone={statusDot} pulse={snapshot.diagnostics.health === "healthy"} />
                     <div className="min-w-0">
-                      <p className={cn("text-[13px] font-medium capitalize", healthTone)}>
+                      <p className={cn("text-[12px] font-medium capitalize", healthTone)}>
                         {snapshot.diagnostics.health}
                       </p>
-                      <p className="truncate text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                      <p className="truncate text-[9px] uppercase tracking-[0.18em] text-slate-500">
                         {connectionState === "live" ? "online" : connectionState}
                         <span className="mx-2 text-slate-600">·</span>
                         {gatewayAddress}
@@ -631,28 +631,28 @@ export function MissionSidebar({
                   </div>
 
                 {snapshot.diagnostics.issues.length > 0 ? (
-                  <div className="mt-3 rounded-[16px] border border-amber-400/15 bg-amber-400/[0.08] px-3 py-2 text-xs text-amber-100">
+                  <div className="mt-2.5 rounded-[14px] border border-amber-400/15 bg-amber-400/[0.08] px-2.5 py-1.5 text-[11px] text-amber-100">
                     {snapshot.diagnostics.issues[0]}
                   </div>
                 ) : null}
 
                 {snapshot.diagnostics.health === "offline" ? (
-                  <div className="mt-3">
+                  <div className="mt-2.5">
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
                       onClick={onOpenModelSetup}
-                      className="h-8 w-full justify-center rounded-full border-amber-300/20 bg-amber-300/10 px-3 text-[11px] text-amber-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300/30 hover:bg-amber-300/16 hover:text-amber-50"
+                      className="h-8 w-full justify-center rounded-none border-amber-300/20 bg-amber-300/10 px-3 text-[10px] text-amber-50 transition-all duration-200 hover:-translate-y-0.5 hover:border-amber-300/30 hover:bg-amber-300/16 hover:text-amber-50"
                     >
-                      <Workflow className="mr-1.5 h-3.5 w-3.5" />
+                      <Workflow className="mr-1.5 h-3 w-3" />
                       Open setup
                     </Button>
                   </div>
                 ) : null}
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-1.5">
                   {navItems.map((item) => (
                     <SectionTab
                       key={item.id}
@@ -1633,13 +1633,13 @@ function RailNavButton({
       onClick={onClick}
       title={label}
       className={cn(
-        "inline-flex h-11 w-11 items-center justify-center rounded-[16px] border transition-all",
+    "inline-flex h-8 w-8 items-center justify-center rounded-none border transition-all",
         active
           ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_12px_28px_rgba(96,165,250,0.35)]"
           : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3.5 w-3.5" />
     </button>
   );
 }
@@ -1660,7 +1660,7 @@ function SectionTab({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition-all",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] uppercase tracking-[0.16em] transition-all",
         active
           ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_10px_24px_rgba(96,165,250,0.28)]"
           : "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.07] hover:text-white"
@@ -1670,7 +1670,7 @@ function SectionTab({
       {badge ? (
         <span
           className={cn(
-            "rounded-full px-1.5 py-0.5 text-[10px] tracking-normal",
+            "rounded-full px-1.5 py-0.5 text-[9px] tracking-normal",
             active ? "bg-slate-950/14 text-slate-950" : "bg-white/[0.08] text-slate-400"
           )}
         >

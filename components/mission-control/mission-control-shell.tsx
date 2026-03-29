@@ -1792,7 +1792,7 @@ export function MissionControlShell({
       <div
         className={cn(
           "pointer-events-none absolute top-0 z-40 hidden lg:block",
-          isSidebarOpen ? "lg:left-[442px]" : "lg:left-[118px]",
+          isSidebarOpen ? "lg:left-[384px]" : "lg:left-[84px]",
           isInspectorOpen ? "lg:right-[426px]" : "lg:right-[84px]"
         )}
       >
@@ -1840,12 +1840,16 @@ export function MissionControlShell({
           <CanvasTitlePill surfaceTheme={surfaceTheme} />
         </div>
 
+        <div className="pointer-events-none absolute left-[84px] top-6 z-10 hidden lg:block">
+          <CanvasTitlePill surfaceTheme={surfaceTheme} />
+        </div>
+
         <div
           className={cn(
-            "pointer-events-auto absolute left-4 top-4 z-30",
+            "pointer-events-auto absolute left-0 top-0 z-30 h-[100dvh] overflow-visible mission-ease-smooth transition-[width] duration-500",
             isSidebarOpen
-              ? "bottom-[calc(env(safe-area-inset-bottom)+124px)] w-[calc(100vw-112px)] max-w-[300px] lg:bottom-[244px] lg:top-6 lg:w-[394px] lg:max-w-none"
-              : "w-[78px] lg:bottom-[244px] lg:top-6"
+              ? "w-[calc(100vw-96px)] max-w-[280px] lg:w-[360px] lg:max-w-none"
+              : "w-[60px]"
           )}
         >
           <MissionSidebar
@@ -2786,10 +2790,8 @@ function CanvasTopBar({
       : "Offline";
 
   return (
-    <div className="flex w-full items-center justify-between px-0 pt-6">
-      <CanvasTitlePill surfaceTheme={surfaceTheme} />
-
-      <div ref={settingsRef} className="pointer-events-auto relative">
+    <div className="flex w-full items-center px-0 pt-6">
+      <div ref={settingsRef} className="pointer-events-auto relative ml-auto">
         <div
           className={cn(
             "flex h-11 items-center gap-3 rounded-full border px-4 shadow-[0_18px_50px_rgba(0,0,0,0.24)] backdrop-blur-xl",
