@@ -17,6 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
+import { RailTooltip } from "@/components/mission-control/rail-tooltip";
 import { Button } from "@/components/ui/button";
 import { Badge as UiBadge, type BadgeProps } from "@/components/ui/badge";
 import {
@@ -51,6 +52,7 @@ import { cn } from "@/lib/utils";
 
 type InspectorPanelProps = {
   snapshot: MissionControlSnapshot;
+  surfaceTheme: "dark" | "light";
   selectedNodeId: string | null;
   lastMission: MissionResponse | null;
   onAbortTask?: (task: TaskRecord) => void;
@@ -75,6 +77,7 @@ export function InspectorPanel(props: InspectorPanelProps) {
 
 function InspectorPanelContent({
   snapshot,
+  surfaceTheme,
   selectedNodeId,
   lastMission,
   onAbortTask,
@@ -263,14 +266,21 @@ function InspectorPanelContent({
           collapsed ? "w-full" : "w-[60px] border-l border-white/[0.08]"
         )}
       >
-        <button
-          type="button"
-          aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
-          onClick={onToggleCollapsed}
-          className="flex h-9 w-9 items-center justify-center rounded-none border border-cyan-300/18 bg-cyan-400/[0.1] shadow-[0_8px_18px_rgba(34,211,238,0.14)] transition-all hover:border-cyan-200/24 hover:bg-cyan-400/[0.14]"
+        <RailTooltip
+          label="Inspector"
+          side="left"
+          surfaceTheme={surfaceTheme}
+          panelCollapsed={collapsed}
         >
-          <TerminalSquare className="h-3.5 w-3.5 text-cyan-200" />
-        </button>
+          <button
+            type="button"
+            aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
+            onClick={onToggleCollapsed}
+            className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-cyan-300/18 bg-cyan-400/[0.1] shadow-[0_8px_18px_rgba(34,211,238,0.14)] transition-all hover:border-cyan-200/24 hover:bg-cyan-400/[0.14]"
+          >
+            <TerminalSquare className="h-3.5 w-3.5 text-cyan-200" />
+          </button>
+        </RailTooltip>
 
         <div className="mt-3.5 flex flex-1 flex-col items-center gap-1">
           {navItems.map((item) => (
@@ -279,6 +289,9 @@ function InspectorPanelContent({
               icon={item.icon}
               label={item.label}
               active={visibleActiveTab === item.id}
+              surfaceTheme={surfaceTheme}
+              panelCollapsed={collapsed}
+              tooltipSide="left"
               disabled={!item.enabled}
               onClick={() => {
                 if (!item.enabled) {
@@ -1723,32 +1736,46 @@ function InspectorRailButton({
   icon: Icon,
   label,
   active,
+  surfaceTheme,
+  panelCollapsed,
+  tooltipSide,
   disabled = false,
   onClick
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
+  surfaceTheme: "dark" | "light";
+  panelCollapsed: boolean;
+  tooltipSide: "left" | "right";
   disabled?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-none border transition-all",
-        disabled
-          ? "border-white/5 bg-white/[0.02] text-slate-600"
-          : active
-            ? "border-cyan-300/18 bg-cyan-400 text-slate-950 shadow-[0_10px_22px_rgba(96,165,250,0.28)]"
-            : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
-      )}
+    <RailTooltip
+      label={label}
+      side={tooltipSide}
+      surfaceTheme={surfaceTheme}
+      panelCollapsed={panelCollapsed}
     >
-      <Icon className="h-3 w-3" />
-    </button>
+      <button
+        type="button"
+        aria-label={label}
+        aria-disabled={disabled}
+        tabIndex={disabled ? -1 : 0}
+        onClick={onClick}
+        className={cn(
+          "inline-flex h-8 w-8 items-center justify-center rounded-[8px] border transition-all",
+          disabled
+            ? "border-white/5 bg-white/[0.02] text-slate-600"
+            : active
+              ? "border-cyan-300/18 bg-cyan-400 text-slate-950 shadow-[0_10px_22px_rgba(96,165,250,0.28)]"
+              : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
+        )}
+      >
+        <Icon className="h-3 w-3" />
+      </button>
+    </RailTooltip>
   );
 }
 

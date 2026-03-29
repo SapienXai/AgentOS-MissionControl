@@ -1852,13 +1852,14 @@ export function MissionControlShell({
               : "w-[60px]"
           )}
         >
-          <MissionSidebar
-            snapshot={uiSnapshot}
-            activeWorkspaceId={activeWorkspaceId}
-            requestedAgentAction={agentActionRequest}
-            connectionState={connectionState}
-            collapsed={!isSidebarOpen}
-            modelManager={{
+        <MissionSidebar
+          snapshot={uiSnapshot}
+          surfaceTheme={surfaceTheme}
+          activeWorkspaceId={activeWorkspaceId}
+          requestedAgentAction={agentActionRequest}
+          connectionState={connectionState}
+          collapsed={!isSidebarOpen}
+          modelManager={{
               runState: modelOnboardingRunState,
               statusMessage: modelOnboardingStatusMessage,
               resultMessage: modelOnboardingResultMessage,
@@ -1893,15 +1894,16 @@ export function MissionControlShell({
               : "w-[60px]"
           )}
         >
-          <InspectorPanel
-            snapshot={uiSnapshot}
-            selectedNodeId={selectedNodeId}
-            lastMission={lastMission}
-            collapsed={!isInspectorOpen}
-            onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
-            activeTab={activeInspectorTab}
-            onActiveTabChange={setActiveInspectorTab}
-            onAbortTask={(task) => {
+        <InspectorPanel
+          snapshot={uiSnapshot}
+          surfaceTheme={surfaceTheme}
+          selectedNodeId={selectedNodeId}
+          lastMission={lastMission}
+          collapsed={!isInspectorOpen}
+          onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
+          activeTab={activeInspectorTab}
+          onActiveTabChange={setActiveInspectorTab}
+          onAbortTask={(task) => {
               if (!isTaskAbortable(task)) {
                 return;
               }

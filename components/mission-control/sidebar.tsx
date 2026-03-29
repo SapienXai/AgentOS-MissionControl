@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 import { StatusDot } from "@/components/mission-control/status-dot";
+import { RailTooltip } from "@/components/mission-control/rail-tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +82,7 @@ type SidebarSectionId = "overview" | "workspaces" | "agents" | "models";
 
 export function MissionSidebar({
   snapshot,
+  surfaceTheme,
   activeWorkspaceId,
   requestedAgentAction,
   connectionState,
@@ -99,6 +101,7 @@ export function MissionSidebar({
   onSnapshotChange
 }: {
   snapshot: MissionControlSnapshot;
+  surfaceTheme: "dark" | "light";
   activeWorkspaceId: string | null;
   requestedAgentAction?: {
     requestId: string;
@@ -519,22 +522,29 @@ export function MissionSidebar({
               : "max-h-full"
           )}
         >
-          <button
-            type="button"
-            aria-label={isPanelCollapsed ? "Open mission control" : "Collapse mission control"}
-            onClick={togglePanelFromRail}
-            className="flex h-9 w-9 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-none border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
+          <RailTooltip
+            label="Mission Control"
+            side="right"
+            surfaceTheme={surfaceTheme}
+            panelCollapsed={isPanelCollapsed}
           >
-            <Image
-              src="/assets/logo.webp"
-              alt=""
-              width={32}
-              height={32}
-              aria-hidden="true"
-              className="pointer-events-none h-6 w-6 select-none object-contain"
-              priority
-            />
-          </button>
+            <button
+              type="button"
+              aria-label={isPanelCollapsed ? "Open mission control" : "Collapse mission control"}
+              onClick={togglePanelFromRail}
+              className="flex h-9 w-9 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-[8px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
+            >
+              <Image
+                src="/assets/logo.webp"
+                alt=""
+                width={32}
+                height={32}
+                aria-hidden="true"
+                className="pointer-events-none h-full w-full select-none object-cover"
+                priority
+              />
+            </button>
+          </RailTooltip>
 
           <div
             className={cn(
@@ -550,6 +560,9 @@ export function MissionSidebar({
                 icon={item.icon}
                 label={item.label}
                 active={activeSection === item.id}
+                surfaceTheme={surfaceTheme}
+                panelCollapsed={isPanelCollapsed}
+                tooltipSide="right"
                 onClick={() => {
                   setActiveSection(item.id);
 
@@ -574,29 +587,36 @@ export function MissionSidebar({
               ) : null}
             </div>
 
-            <button
-              type="button"
-              aria-label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
-              onClick={() => {
-                if (!isPanelCollapsed) {
-                  onToggleCollapsed();
-                }
-
-                setIsRailCollapsed((current) => !current);
-              }}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-none border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
+            <RailTooltip
+              label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
+              side="right"
+              surfaceTheme={surfaceTheme}
+              panelCollapsed={isPanelCollapsed}
             >
-              {isRailCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-            </button>
+              <button
+                type="button"
+                aria-label={isRailCollapsed ? "Expand rail" : "Collapse rail"}
+                onClick={() => {
+                  if (!isPanelCollapsed) {
+                    onToggleCollapsed();
+                  }
+
+                  setIsRailCollapsed((current) => !current);
+                }}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-[8px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
+              >
+                {isRailCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+              </button>
+            </RailTooltip>
           </div>
 
-        </div>
+      </div>
 
-        <div
-          className={cn(
-            "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-none border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
-            isPanelCollapsed
-              ? "-translate-x-4 opacity-0 pointer-events-none"
+      <div
+        className={cn(
+          "panel-surface panel-glow mission-ease-smooth h-full min-w-0 flex-1 overflow-hidden rounded-none border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl transition-[opacity,transform] duration-500",
+          isPanelCollapsed
+            ? "-translate-x-4 opacity-0 pointer-events-none"
               : "translate-x-0 opacity-100",
             !isPanelCollapsed && "border-l-0"
           )}
@@ -1611,7 +1631,6 @@ export function MissionSidebar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
     </>
   );
 }
@@ -1620,27 +1639,40 @@ function RailNavButton({
   icon: Icon,
   label,
   active,
+  surfaceTheme,
+  panelCollapsed,
+  tooltipSide,
   onClick
 }: {
   icon: LucideIcon;
   label: string;
   active: boolean;
+  surfaceTheme: "dark" | "light";
+  panelCollapsed: boolean;
+  tooltipSide: "left" | "right";
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      className={cn(
-    "inline-flex h-8 w-8 items-center justify-center rounded-none border transition-all",
-        active
-          ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_12px_28px_rgba(96,165,250,0.35)]"
-          : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
-      )}
+    <RailTooltip
+      label={label}
+      side={tooltipSide}
+      surfaceTheme={surfaceTheme}
+      panelCollapsed={panelCollapsed}
     >
-      <Icon className="h-3.5 w-3.5" />
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className={cn(
+          "inline-flex h-8 w-8 items-center justify-center rounded-[8px] border transition-all",
+          active
+            ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_12px_28px_rgba(96,165,250,0.35)]"
+            : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
+        )}
+      >
+        <Icon className="h-3.5 w-3.5" />
+      </button>
+    </RailTooltip>
   );
 }
 
