@@ -296,6 +296,33 @@ export function MissionControlShell({
     [selectNode, uiSnapshot.agents]
   );
 
+  const handleComposerTargetAgentSelect = useCallback(
+    (agentId: string) => {
+      if (!focusedAgentId) {
+        return;
+      }
+
+      const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+      if (!agent) {
+        return;
+      }
+
+      if (
+        focusedAgentId === agentId &&
+        activeWorkspaceId === agent.workspaceId &&
+        selectedNodeId === agentId
+      ) {
+        return;
+      }
+
+      setFocusedAgentId(agentId);
+      setActiveWorkspaceId(agent.workspaceId);
+      selectNode(agentId);
+    },
+    [activeWorkspaceId, focusedAgentId, selectNode, selectedNodeId, uiSnapshot.agents]
+  );
+
   const handleCanvasNodePointerDownCapture = useCallback(() => {
     canvasNodeInteractionActiveRef.current = true;
   }, []);
@@ -1943,6 +1970,7 @@ export function MissionControlShell({
             composeIntent={composeIntent}
             isComposerActive={isComposerActive}
             onTargetAgentChange={setComposerTargetAgentId}
+            onTargetAgentSelect={handleComposerTargetAgentSelect}
             onComposerActiveChange={handleComposerActiveChange}
             onRefresh={refresh}
             onOpenWorkspaceCreate={() => {

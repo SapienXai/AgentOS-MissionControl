@@ -74,6 +74,7 @@ export function CommandBar({
   composeIntent,
   isComposerActive,
   onTargetAgentChange,
+  onTargetAgentSelect,
   onComposerActiveChange,
   onRefresh,
   onOpenWorkspaceCreate,
@@ -88,6 +89,7 @@ export function CommandBar({
   composeIntent: ComposeIntent | null;
   isComposerActive: boolean;
   onTargetAgentChange?: (agentId: string | null) => void;
+  onTargetAgentSelect?: (agentId: string) => void;
   onComposerActiveChange?: (active: boolean) => void;
   onRefresh: () => Promise<void>;
   onOpenWorkspaceCreate: () => void;
@@ -287,6 +289,7 @@ export function CommandBar({
 
   const handleTargetAgentChange = (value: string) => {
     setTargetAgentId(value);
+    onTargetAgentSelect?.(value);
   };
 
   const submitMission = async (payload: MissionSubmission) => {
