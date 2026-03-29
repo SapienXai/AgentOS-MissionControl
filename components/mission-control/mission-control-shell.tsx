@@ -1793,7 +1793,7 @@ export function MissionControlShell({
         className={cn(
           "pointer-events-none absolute top-0 z-40 hidden lg:block",
           isSidebarOpen ? "lg:left-[442px]" : "lg:left-[118px]",
-          isInspectorOpen ? "lg:right-[442px]" : "lg:right-[118px]"
+          isInspectorOpen ? "lg:right-[426px]" : "lg:right-[84px]"
         )}
       >
         <CanvasTopBar
@@ -1883,10 +1883,10 @@ export function MissionControlShell({
 
         <div
           className={cn(
-            "pointer-events-auto absolute right-4 top-4 z-30",
+            "pointer-events-auto absolute right-0 top-0 z-30 h-[100dvh] overflow-visible mission-ease-smooth transition-[width] duration-500",
             isInspectorOpen
-              ? "bottom-[calc(env(safe-area-inset-bottom)+124px)] w-[calc(100vw-112px)] max-w-[300px] lg:bottom-[244px] lg:top-6 lg:w-[394px] lg:max-w-none"
-              : "w-[78px] lg:bottom-[244px] lg:top-6"
+              ? "w-[calc(100vw-112px)] max-w-[300px] lg:w-[394px] lg:max-w-none"
+              : "w-[60px]"
           )}
         >
           <InspectorPanel
@@ -2243,7 +2243,8 @@ export function MissionControlShell({
 
         <div
           className={cn(
-            "pointer-events-auto absolute bottom-3 right-4 z-30 text-[11px] tracking-[0.04em] lg:bottom-4 lg:right-6",
+            "pointer-events-auto absolute bottom-3 right-[74px] z-30 text-[11px] tracking-[0.04em] lg:bottom-4",
+            isInspectorOpen ? "lg:right-[426px]" : "lg:right-[86px]",
             surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
           )}
         >

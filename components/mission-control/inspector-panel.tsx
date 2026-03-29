@@ -6,8 +6,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
   Cpu,
   Eye,
   FileJson,
@@ -20,7 +18,7 @@ import { toast } from "sonner";
 
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Badge as UiBadge, type BadgeProps } from "@/components/ui/badge";
 import {
   formatAgentFileAccessLabel,
   formatAgentInstallScopeLabel,
@@ -63,6 +61,13 @@ type InspectorPanelProps = {
 };
 
 type InspectorPanelTab = InspectorPanelProps["activeTab"];
+
+const INSPECTOR_BADGE_CLASS_NAME =
+  "!h-4 !px-1.5 !py-0 !text-[8px] !leading-none !tracking-[0.1em] !whitespace-nowrap";
+
+function Badge({ className, ...props }: BadgeProps) {
+  return <UiBadge {...props} className={cn(INSPECTOR_BADGE_CLASS_NAME, className)} />;
+}
 
 export function InspectorPanel(props: InspectorPanelProps) {
   return <InspectorPanelContent key={props.selectedNodeId ?? "overview"} {...props} />;
@@ -251,32 +256,23 @@ function InspectorPanelContent({
   }, [selectedTaskId, isOptimisticTask]);
 
   return (
-    <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
+    <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-none border border-r-0 border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
       <div
         className={cn(
-          "flex h-full shrink-0 flex-col items-center bg-[linear-gradient(180deg,rgba(7,10,18,0.98),rgba(3,6,12,0.98))] px-3 py-4",
-          collapsed ? "w-full" : "w-[78px] border-l border-white/[0.08]"
+          "flex h-full shrink-0 flex-col items-center bg-[linear-gradient(180deg,rgba(7,10,18,0.98),rgba(3,6,12,0.98))] px-1.5 py-2",
+          collapsed ? "w-full" : "w-[60px] border-l border-white/[0.08]"
         )}
       >
         <button
           type="button"
           aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
           onClick={onToggleCollapsed}
-          className="flex h-12 w-12 items-center justify-center rounded-[18px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)] transition-all hover:border-cyan-200/30 hover:bg-cyan-400/[0.16]"
+          className="flex h-9 w-9 items-center justify-center rounded-none border border-cyan-300/18 bg-cyan-400/[0.1] shadow-[0_8px_18px_rgba(34,211,238,0.14)] transition-all hover:border-cyan-200/24 hover:bg-cyan-400/[0.14]"
         >
-          <TerminalSquare className="h-5 w-5 text-cyan-200" />
+          <TerminalSquare className="h-3.5 w-3.5 text-cyan-200" />
         </button>
 
-        <button
-          type="button"
-          aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
-          onClick={onToggleCollapsed}
-          className="mt-4 inline-flex h-11 w-11 items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.04] text-slate-300 transition-all hover:border-cyan-300/18 hover:bg-white/[0.08] hover:text-white"
-        >
-          {collapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        </button>
-
-        <div className="mt-6 flex flex-1 flex-col items-center gap-2">
+        <div className="mt-3.5 flex flex-1 flex-col items-center gap-1">
           {navItems.map((item) => (
             <InspectorRailButton
               key={item.id}
@@ -299,10 +295,15 @@ function InspectorPanelContent({
           ))}
         </div>
 
-        <div className="mt-4 flex flex-col items-center gap-2">
-          <Badge variant="muted">{selectedEntity ? "live" : "idle"}</Badge>
+        <div className="mt-1.5 flex flex-col items-center gap-0.5">
+          <Badge
+            variant="muted"
+            className="h-4 min-w-[28px] rounded-full px-1 py-0 text-[8px] leading-none tracking-[0.12em]"
+          >
+            {selectedEntity ? "live" : "idle"}
+          </Badge>
           {collapsed ? (
-            <p className="max-w-[56px] truncate text-center text-[9px] uppercase tracking-[0.16em] text-slate-500">
+            <p className="max-w-[44px] truncate text-center text-[8px] uppercase tracking-[0.14em] text-slate-500">
               {selectedDetail}
             </p>
           ) : null}
@@ -312,41 +313,42 @@ function InspectorPanelContent({
       {!collapsed ? (
         <div className="min-w-0 flex-1 bg-[linear-gradient(180deg,rgba(6,10,18,0.96),rgba(3,6,14,0.98))]">
           <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
-            <div className="shrink-0 border-b border-white/[0.08] px-5 pb-4 pt-5">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Inspector</p>
-                  <h2 className="mt-2 line-clamp-1 font-display text-[1.24rem] leading-tight text-white">
-                    {selectedLabel}
-                  </h2>
-                  <p className="mt-2 text-[12px] leading-5 text-slate-400">
-                    {selectedEntity ? "Live selection details." : "Gateway status and activity."}
+            <div className="shrink-0 border-b border-white/[0.08] px-3 pb-2 pt-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[9px] font-medium uppercase tracking-[0.24em] text-slate-500">Inspector</p>
+                  <div className="mt-1 flex min-w-0 items-center gap-1.5">
+                    <h2 className="min-w-0 truncate font-display text-[1.02rem] leading-5 text-white">
+                      {selectedLabel}
+                    </h2>
+                    <Badge
+                      variant="muted"
+                      className="shrink-0 h-4 px-1.5 py-0 text-[8px] leading-none tracking-[0.1em]"
+                    >
+                      {selectedDetail}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 truncate text-[11px] leading-4 text-slate-400">
+                    {selectedTask
+                      ? `${selectedTask.runtimeCount} runs · ${selectedTask.liveRunCount} live · ${formatRelativeTime(selectedTask.updatedAt, relativeTimeReferenceMs)}`
+                      : selectedRuntime
+                        ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · ${selectedRuntime.status} · ${formatRelativeTime(selectedRuntime.updatedAt, relativeTimeReferenceMs)}`
+                        : selectedAgent
+                          ? `${selectedAgent.activeRuntimeIds.length} active runs`
+                        : selectedWorkspace
+                            ? `${selectedWorkspace.agentIds.length} agents attached`
+                            : selectedModel
+                              ? `${selectedModel.provider} model`
+                              : "Live gateway context"}
                   </p>
                 </div>
 
-                <div className="rounded-[18px] border border-white/10 bg-white/[0.04] p-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-                  <TerminalSquare className="h-4 w-4 text-cyan-200" />
+                <div className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-none border border-white/10 bg-white/[0.04] text-cyan-200 sm:flex">
+                  <TerminalSquare className="h-3.5 w-3.5" />
                 </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Badge variant="muted">{selectedDetail}</Badge>
-                <p className="text-[12px] leading-5 text-slate-400">
-                  {selectedTask
-                    ? `${selectedTask.runtimeCount} runs · ${selectedTask.liveRunCount} live · ${formatRelativeTime(selectedTask.updatedAt, relativeTimeReferenceMs)}`
-                    : selectedRuntime
-                      ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)} · ${selectedRuntime.status} · ${formatRelativeTime(selectedRuntime.updatedAt, relativeTimeReferenceMs)}`
-                      : selectedAgent
-                        ? `${selectedAgent.activeRuntimeIds.length} active runs`
-                      : selectedWorkspace
-                          ? `${selectedWorkspace.agentIds.length} agents attached`
-                          : selectedModel
-                            ? `${selectedModel.provider} model`
-                            : "Live gateway context"}
-                </p>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-nowrap gap-1 overflow-x-auto pb-0.5">
                 {navItems
                   .filter((item) => item.enabled)
                   .map((item) => (
@@ -360,7 +362,7 @@ function InspectorPanelContent({
               </div>
             </div>
 
-            <div className="flex-1 p-4">
+            <div className="flex-1 p-3">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={`${selectedNodeId || "overview"}:${visibleActiveTab}`}
@@ -445,8 +447,8 @@ function InspectorPanelContent({
               </AnimatePresence>
             </div>
 
-            <div className="shrink-0 border-t border-white/[0.08] p-4">
-              <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+            <div className="shrink-0 border-t border-white/[0.08] p-3">
+              <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
                     <Radar className="h-4 w-4" />
@@ -1737,15 +1739,15 @@ function InspectorRailButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex h-11 w-11 items-center justify-center rounded-[16px] border transition-all",
+        "inline-flex h-8 w-8 items-center justify-center rounded-none border transition-all",
         disabled
           ? "border-white/5 bg-white/[0.02] text-slate-600"
           : active
-            ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_12px_28px_rgba(96,165,250,0.35)]"
+            ? "border-cyan-300/18 bg-cyan-400 text-slate-950 shadow-[0_10px_22px_rgba(96,165,250,0.28)]"
             : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/15 hover:bg-white/[0.08] hover:text-white"
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-3 w-3" />
     </button>
   );
 }
@@ -1764,7 +1766,7 @@ function InspectorTabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center rounded-full border px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition-all",
+        "inline-flex items-center rounded-full border px-2.5 py-1.5 text-[10px] uppercase tracking-[0.14em] whitespace-nowrap transition-all",
         active
           ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_10px_24px_rgba(96,165,250,0.28)]"
           : "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.07] hover:text-white"
@@ -1787,7 +1789,7 @@ function InfoCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,34,0.86),rgba(8,13,24,0.82))] p-3.5">
+    <section className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,34,0.86),rgba(8,13,24,0.82))] p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">{title}</p>
