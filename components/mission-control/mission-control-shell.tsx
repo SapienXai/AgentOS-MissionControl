@@ -1898,6 +1898,7 @@ export function MissionControlShell({
             }}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
+              setFocusedAgentId(null);
               setActiveWorkspaceId(workspaceId);
               selectNode(workspaceId);
             }}
