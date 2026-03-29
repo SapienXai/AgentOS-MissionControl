@@ -626,7 +626,7 @@ function buildCanvasGraph(
   const focusedAgent = focusedAgentId
     ? snapshot.agents.find((agent) => agent.id === focusedAgentId)
     : null;
-  const isFocusMode = focusedAgent !== null && !isComposerActive;
+  const isFocusMode = focusedAgent !== null;
   const focusWorkspaceId = focusedAgent?.workspaceId ?? null;
   const visibleWorkspaces = isFocusMode
     ? snapshot.workspaces.filter((workspace) => workspace.id === focusWorkspaceId)
