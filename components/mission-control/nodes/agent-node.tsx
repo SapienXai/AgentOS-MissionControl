@@ -8,7 +8,6 @@ import { AnimatePresence, motion } from "motion/react";
 
 import type { AgentNodeData } from "@/components/mission-control/canvas-types";
 import { StatusDot } from "@/components/mission-control/status-dot";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -71,7 +70,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const metaLabel = `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${
     data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"
   } · Last seen ${lastSeenLabel}`;
-  const avatarFallback = getAgentAvatarFallbackLabel(data.agent.name, data.agent.identity.emoji);
   const drawerTools = observedTools.length > 0 ? observedTools : declaredTools;
   const visibleSkills = data.agent.skills.slice(0, 4);
   const visibleTools = drawerTools.slice(0, 3);
@@ -176,25 +174,50 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           className="!h-2.5 !w-2.5 !border-0 !bg-cyan-300/90 shadow-[0_0_14px_rgba(103,232,249,0.42)]"
         />
 
-        <div className="relative overflow-hidden rounded-t-[24px] border-b border-white/[0.12] bg-[linear-gradient(180deg,rgba(14,16,20,0.98),rgba(8,10,14,0.95))]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.22),transparent_34%),radial-gradient(circle_at_82%_18%,rgba(251,191,36,0.16),transparent_30%)]" />
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(8,10,14,0.82))]" />
+        <div className="relative rounded-t-[24px]">
+          <div className="relative h-[144px] overflow-hidden rounded-t-[24px] border-b border-white/[0.12] bg-[linear-gradient(180deg,rgba(14,16,20,0.98),rgba(8,10,14,0.95))]">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.22),transparent_34%),radial-gradient(circle_at_82%_18%,rgba(251,191,36,0.16),transparent_30%)]" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/10" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-[linear-gradient(180deg,transparent,rgba(8,10,14,0.82))]" />
 
-          <Avatar className="!h-[144px] !w-full !rounded-none border-0 bg-transparent">
-            {data.agent.identity.avatar ? (
-              <AvatarImage
-                src={data.agent.identity.avatar}
-                alt={`${data.agent.name} profile photo`}
-                className="object-cover object-center"
-              />
-            ) : null}
-            <AvatarFallback className="!rounded-none bg-[radial-gradient(circle_at_30%_20%,rgba(34,211,238,0.18),transparent_35%),linear-gradient(180deg,rgba(24,28,36,0.98),rgba(8,10,14,0.94))] text-[1.4rem] font-semibold tracking-[0.18em] text-white/90">
-              {avatarFallback}
-            </AvatarFallback>
-          </Avatar>
+            <video
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center brightness-[0.88] contrast-[1.04] saturate-[0.92]"
+              autoPlay
+              loop
+              muted
+              playsInline
+              preload="metadata"
+              aria-hidden="true"
+            >
+              <source src="/assets/agent.mp4" type="video/mp4" />
+            </video>
 
-          <div className="absolute right-2 top-2 z-20" ref={menuRef}>
+            <motion.div
+              aria-hidden="true"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(3,4,7,0.48),rgba(3,4,7,0.84)),radial-gradient(circle_at_center,transparent_38%,rgba(3,4,7,0.34)_100%),radial-gradient(circle_at_20%_10%,rgba(34,211,238,0.07),transparent_34%),radial-gradient(circle_at_82%_18%,rgba(251,191,36,0.04),transparent_28%)]"
+            />
+
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -bottom-2 right-5 h-12 w-12 rounded-full bg-cyan-300/14 blur-2xl"
+            />
+
+            <div className="absolute inset-x-0 bottom-0 z-20 p-3.5">
+              <div className="max-w-[86%]">
+                <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] text-white/65">
+                  <StatusDot tone={dotTone} pulse={data.agent.status === "engaged" || data.agent.status === "monitoring"} />
+                  Agent
+                </div>
+                <p className="mt-1 truncate font-display text-[1.08rem] leading-5 text-white">{data.agent.name}</p>
+                <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-amber-200/90">{themeLabel}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="absolute right-2 top-2 z-40" ref={menuRef}>
             <button
               type="button"
               aria-label={`${data.agent.name} actions`}
@@ -210,7 +233,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
 
             {menuOpen ? (
               <div
-                className="absolute right-0 top-[calc(100%+8px)] z-30 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
+                className="absolute right-0 top-[calc(100%+8px)] z-50 min-w-[136px] rounded-[14px] border border-white/[0.1] bg-slate-950/96 p-1.5 shadow-[0_20px_44px_rgba(0,0,0,0.42)] backdrop-blur-xl"
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
               >
@@ -238,22 +261,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                 />
               </div>
             ) : null}
-          </div>
-
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -bottom-2 right-5 h-12 w-12 rounded-full bg-cyan-300/14 blur-2xl"
-          />
-
-          <div className="absolute inset-x-0 bottom-0 z-20 p-3.5">
-            <div className="max-w-[86%]">
-              <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] text-white/65">
-                <StatusDot tone={dotTone} pulse={data.agent.status === "engaged" || data.agent.status === "monitoring"} />
-                Agent
-              </div>
-              <p className="mt-1 truncate font-display text-[1.08rem] leading-5 text-white">{data.agent.name}</p>
-              <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-amber-200/90">{themeLabel}</p>
-            </div>
           </div>
         </div>
 
@@ -424,25 +431,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
       </div>
     </div>
   );
-}
-
-function getAgentAvatarFallbackLabel(name: string, emoji?: string) {
-  if (emoji) {
-    return emoji;
-  }
-
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  if (parts.length === 0) {
-    return "A";
-  }
-
-  const first = parts[0]?.[0] ?? "A";
-  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? first : parts[0]?.[1] ?? first;
-  return `${first}${last}`.toUpperCase();
 }
 
 function AgentStatTile({
