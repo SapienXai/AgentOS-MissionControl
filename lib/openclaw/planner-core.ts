@@ -1210,9 +1210,14 @@ export function applyPlannerInput(plan: WorkspacePlan, message: string) {
     }
   }
 
-  const customerMatch = normalized.match(/(?:for|serving|targeting|i[çc]in|hedef(?:imiz| kitlemiz)?|ilk kullan[ıi]c[ıi](?:lar)?|ilk m[üu][şs]teri(?:ler)?)\s+([^.!?\n]+)/i);
+  const customerMatch = normalized.match(
+    /(?:for|serving|targeting|i[çc]in|hedef(?:imiz| kitlemiz)?|ilk kullan[ıi]c[ıi](?:lar)?|ilk m[üu][şs]teri(?:ler)?)\s+([^.!?\n]+)/i
+  );
   if (customerMatch && !nextPlan.company.targetCustomer) {
-    nextPlan.company.targetCustomer = sanitizeExtractedText(customerMatch[captureLastGroup(customerMatch)]);
+    const targetCustomer = sanitizeTargetCustomerText(customerMatch[captureLastGroup(customerMatch)]);
+    if (targetCustomer) {
+      nextPlan.company.targetCustomer = targetCustomer;
+    }
   }
 
   const missionMatch = normalized.match(/(?:goal|mission|we want to|build|create|amac[ıi]m[ıi]z|hedef(?:imiz)?|istiyoruz|yapmak istedi[ğg]imiz|kurmak istedi[ğg]imiz|olu[sş]turmak istedi[ğg]imiz)\s+([^.!?\n]+)/i);
@@ -2575,6 +2580,21 @@ function sanitizeExtractedText(value: string) {
     .trim();
 }
 
+function sanitizeTargetCustomerText(value: string) {
+  const cleaned = sanitizeExtractedText(value)
+    .replace(/^(?:yeni|bir|the|a|an|bir de|bide)\s+/i, "")
+    .replace(/\b(?:birlikte|ile|ve|veya)\b/gi, " ")
+    .replace(/\b(?:olarak|diye|benim|bide)\b.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned || looksLikeProceduralTargetCustomer(cleaned)) {
+    return "";
+  }
+
+  return cleaned;
+}
+
 function sanitizeExtractedName(value: string) {
   const cleaned = sanitizeExtractedText(value)
     .replace(/\b(projesi|projesini|workspace|project|company|firma|şirket)\b/gi, " ")
@@ -2598,6 +2618,17 @@ function looksLikeGeneratedName(value: string) {
   const lower = value.toLowerCase();
   return /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m|kurmak|kurulum|oluşturmak|oluşturma|başlatmak|başlama|yapmak|yapma|istiyorum|istiyoruz|istemek|want|build|create|make|start|launch|setup|set up)\b/.test(
     lower
+  );
+}
+
+function looksLikeProceduralTargetCustomer(value: string) {
+  const lower = value.toLowerCase();
+
+  return (
+    /\b(yapal[ıi]m|ekleyelim|başlatal[ıi]m|kural[ıi]m|olsun|diyelim|verelim|koyal[ıi]m|kurmak|kurulum|oluşturmak|oluşturma|başlatmak|başlama|yapmak|yapma|istiyorum|istiyoruz|istemek|want|build|create|make|start|launch|setup|set up)\b/.test(
+      lower
+    ) ||
+    /\b(workspace|workspaces|workspace oluştur|workspace oluşturalım|workspace kur|workspace kuralım)\b/.test(lower)
   );
 }
 

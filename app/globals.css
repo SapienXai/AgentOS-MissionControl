@@ -337,9 +337,9 @@
 .agent-node__composer-rail {
   fill: none;
   vector-effect: non-scaling-stroke;
-  stroke: rgba(125, 211, 252, 0.16);
-  stroke-width: 1.35;
-  opacity: 0.9;
+  stroke: rgba(186, 230, 253, 0.24);
+  stroke-width: 1.9;
+  opacity: 1;
 }
 
 .agent-node__composer-trace {
@@ -352,7 +352,7 @@
 .agent-node__composer-trace--glow {
   stroke: rgba(34, 211, 238, 0.34);
   opacity: 0.72;
-  stroke-width: 8;
+  stroke-width: 9.5;
   stroke-dasharray: 20 80;
   animation: agent-composer-trace 1.85s linear infinite;
   filter: blur(8px);
@@ -360,7 +360,7 @@
 
 .agent-node__composer-trace--core {
   stroke: rgba(186, 230, 253, 0.98);
-  stroke-width: 2.4;
+  stroke-width: 2.9;
   stroke-dasharray: 7 93;
   animation: agent-composer-trace 1.85s linear infinite;
   filter:
@@ -372,7 +372,7 @@
 .agent-node__composer-trace--tail {
   stroke: rgba(103, 232, 249, 0.48);
   opacity: 0.88;
-  stroke-width: 4.2;
+  stroke-width: 4.9;
   stroke-dasharray: 14 86;
   animation: agent-composer-trace 1.85s linear infinite;
   animation-delay: -0.08s;
@@ -382,6 +382,48 @@
 .agent-node__composer-svg,
 .agent-node__composer-trace {
   mix-blend-mode: screen;
+}
+
+.mission-shell--light .agent-node__composer-glow {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 35, 83, 0.24), transparent 58%),
+    radial-gradient(circle at 50% 50%, rgba(255, 83, 119, 0.14), transparent 42%);
+  filter: blur(14px);
+  opacity: 0.72;
+}
+
+.mission-shell--light .agent-node__composer-svg,
+.mission-shell--light .agent-node__composer-trace {
+  mix-blend-mode: normal;
+}
+
+.mission-shell--light .agent-node__composer-rail {
+  stroke: rgba(255, 38, 83, 0.5);
+  stroke-width: 2.15;
+  filter: drop-shadow(0 0 4px rgba(255, 38, 83, 0.2));
+}
+
+.mission-shell--light .agent-node__composer-trace--glow {
+  stroke: rgba(255, 38, 83, 0.56);
+  opacity: 0.78;
+  stroke-width: 8.5;
+  filter: blur(6px);
+}
+
+.mission-shell--light .agent-node__composer-trace--core {
+  stroke: rgba(255, 56, 98, 0.98);
+  stroke-width: 2.8;
+  filter:
+    drop-shadow(0 0 8px rgba(255, 38, 83, 0.85))
+    drop-shadow(0 0 16px rgba(255, 38, 83, 0.34))
+    drop-shadow(0 0 28px rgba(255, 38, 83, 0.16));
+}
+
+.mission-shell--light .agent-node__composer-trace--tail {
+  stroke: rgba(255, 56, 98, 0.72);
+  opacity: 0.9;
+  stroke-width: 4.4;
+  filter: blur(1.8px);
 }
 
 .mission-shell .react-flow__edge .mission-edge__path--composer {
@@ -519,6 +561,38 @@
   }
 }
 
+@keyframes workspace-architect-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes workspace-architect-chip-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.workspace-architect-card-enter {
+  animation: workspace-architect-card-enter 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.workspace-architect-chip-enter {
+  animation: workspace-architect-chip-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agent-node__composer-glow {
     animation: none !important;
@@ -543,5 +617,10 @@
   .mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--core,
   .mission-shell .react-flow__edge .mission-edge__path--composer.mission-edge__path--animated {
     filter: drop-shadow(0 0 14px var(--mission-edge-glow-active));
+  }
+
+  .workspace-architect-card-enter,
+  .workspace-architect-chip-enter {
+    animation: none !important;
   }
 }

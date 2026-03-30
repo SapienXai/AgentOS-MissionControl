@@ -3,7 +3,9 @@
 import { Bot, Sparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 
+import { ArchitectReadoutCard } from "@/components/mission-control/workspace-wizard/architect-readout-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { WorkspacePlan } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -19,6 +21,8 @@ export type WizardMessageRecord = {
 type WizardMessageListProps = {
   surfaceTheme: SurfaceTheme;
   messages: WizardMessageRecord[];
+  architectMessageId?: string | null;
+  architectPlan?: WorkspacePlan | null;
   isTyping?: boolean;
   typingLabel?: string;
   emptyState?: ReactNode;
@@ -29,6 +33,8 @@ type WizardMessageListProps = {
 export function WizardMessageList({
   surfaceTheme,
   messages,
+  architectMessageId = null,
+  architectPlan = null,
   isTyping = false,
   typingLabel = "Typing…",
   emptyState,
@@ -36,21 +42,54 @@ export function WizardMessageList({
   className
 }: WizardMessageListProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({
       block: "end"
     });
-  }, [isTyping, messages]);
+  }, [architectMessageId, architectPlan?.updatedAt, isTyping, messages.length]);
+
+  useEffect(() => {
+    const content = contentRef.current;
+
+    if (!content || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    let frame = 0;
+    const scheduleScroll = () => {
+      globalThis.cancelAnimationFrame(frame);
+      frame = globalThis.requestAnimationFrame(() => {
+        endRef.current?.scrollIntoView({
+          block: "end"
+        });
+      });
+    };
+
+    const observer = new ResizeObserver(scheduleScroll);
+    observer.observe(content);
+
+    return () => {
+      observer.disconnect();
+      globalThis.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   return (
     <ScrollArea className={cn("h-full", className)}>
-      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-4 px-2 py-4 md:gap-5 md:px-4">
+      <div ref={contentRef} className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-4 px-2 py-4 md:gap-5 md:px-4">
         {emptyState}
         {auxiliary}
 
         {messages.map((message) => (
-          <MessageBubble key={message.id} message={message} surfaceTheme={surfaceTheme} />
+          <MessageBubble
+            key={message.id}
+            message={message}
+            surfaceTheme={surfaceTheme}
+            architectMessageId={architectMessageId}
+            architectPlan={architectPlan}
+          />
         ))}
 
         {isTyping ? <TypingBubble surfaceTheme={surfaceTheme} label={typingLabel} /> : null}
@@ -63,12 +102,30 @@ export function WizardMessageList({
 
 function MessageBubble({
   message,
-  surfaceTheme
+  surfaceTheme,
+  architectMessageId,
+  architectPlan
 }: {
   message: WizardMessageRecord;
   surfaceTheme: SurfaceTheme;
+  architectMessageId: string | null;
+  architectPlan: WorkspacePlan | null;
 }) {
   const isLight = surfaceTheme === "light";
+
+  if (message.role === "assistant" && architectPlan && message.id === architectMessageId) {
+    return (
+      <div className="mx-auto w-full max-w-3xl">
+        <ArchitectReadoutCard
+          key={`${message.id}:${architectPlan.updatedAt}`}
+          surfaceTheme={surfaceTheme}
+          plan={architectPlan}
+          variant="message"
+          summaryText={message.text}
+        />
+      </div>
+    );
+  }
 
   if (message.role === "system") {
     return (

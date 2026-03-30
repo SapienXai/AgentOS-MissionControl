@@ -122,7 +122,8 @@ export function WorkspaceWizardDocumentEditor({
       rules: plan.workspace.rules,
       agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
       docOverrides: plan.workspace.docOverrides,
-      toolExamples: []
+      toolExamples: [],
+      contextSources: plan.intake.sources
     });
 
     return documents.find((entry) => entry.path === path) ?? null;

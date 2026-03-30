@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { OperationProgress } from "@/components/mission-control/operation-progress";
 import type { WorkspaceBlueprintEditorFocus } from "@/components/mission-control/workspace-wizard/workspace-wizard-blueprint-editor";
+import { ArchitectReadoutCard } from "@/components/mission-control/workspace-wizard/architect-readout-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { WorkspaceWizardMode } from "@/hooks/use-workspace-wizard-draft";
 import {
@@ -35,8 +36,14 @@ import type {
   WorkspacePlan,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
-import { buildWorkspaceScaffoldPreview, WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
-import { buildWorkspaceEditableDocuments, normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
+import { WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
+import {
+  buildWorkspaceContextManifest,
+  buildWorkspaceContextResourceSpecs,
+  buildWorkspaceEditableDocuments,
+  WORKSPACE_CONTEXT_CORE_PATHS,
+  normalizeWorkspaceDocOverrides
+} from "@/lib/openclaw/workspace-docs";
 import type { WorkspaceWizardQuickSetupPreset } from "@/lib/openclaw/workspace-wizard-mappers";
 import type { WorkspaceWizardSourceAnalysis } from "@/lib/openclaw/workspace-wizard-inference";
 import { cn } from "@/lib/utils";
@@ -145,10 +152,20 @@ export function WorkspaceWizardDraftPane({
             rules: plan.workspace.rules,
             agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
             docOverrides: plan.workspace.docOverrides,
-            toolExamples: []
+            toolExamples: [],
+            contextSources: plan.intake.sources
           })
         : [],
     [plan]
+  );
+  const editableDocumentsByPath = useMemo(
+    () => new Map(editableDocuments.map((document) => [document.path, document])),
+    [editableDocuments]
+  );
+  const contextManifest = useMemo(
+    () =>
+      buildWorkspaceContextManifest(plan?.workspace.template ?? resolvedTemplate, plan?.workspace.rules ?? basicRules),
+    [basicRules, plan?.workspace.rules, plan?.workspace.template, resolvedTemplate]
   );
 
   useEffect(() => {
@@ -314,56 +331,14 @@ export function WorkspaceWizardDraftPane({
                     sectionRefs.current["architect-readout"] = node;
                   }}
                 >
-                <button
-                  type="button"
-                  onClick={() => openBlueprintEditor("company.mission")}
-                  className={cn(
-                    "w-full rounded-[22px] border p-4 text-left transition-colors",
-                      isLight
-                        ? "border-[#e5ddd2] bg-white hover:border-[#d9ccbf] hover:bg-[#fdfbf7]"
-                        : "border-white/10 bg-white/[0.04] hover:border-white/15 hover:bg-white/[0.06]"
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span
-                        className={cn(
-                          "inline-flex size-9 shrink-0 items-center justify-center rounded-full border",
-                          isLight
-                            ? "border-[#e7e0d6] bg-[#faf6f1] text-[#5e5750]"
-                            : "border-white/10 bg-white/[0.05] text-slate-300"
-                        )}
-                      >
-                        <Bot className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className={cn("text-[11px] uppercase tracking-[0.18em]", isLight ? "text-[#a0978b]" : "text-slate-500")}>
-                          Architect readout
-                        </p>
-                        <p className={cn("mt-1 text-[13px] leading-6", isLight ? "text-[#171410]" : "text-white")}>
-                          {plan.architectSummary}
-                        </p>
-
-                        {plan.intake.confirmations.length > 0 ? (
-                          <div className="mt-3 space-y-2">
-                            <p className={cn("text-[11px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
-                              Next decisions
-                            </p>
-                            {plan.intake.confirmations.slice(0, 2).map((item) => (
-                              <div
-                                key={item}
-                                className={cn(
-                                  "rounded-[16px] border px-3 py-2 text-[12px] leading-5",
-                                  isLight ? "border-[#e8e0d6] bg-[#faf6f1] text-[#5d554d]" : "border-white/10 bg-white/[0.05] text-slate-300"
-                                )}
-                              >
-                                {item}
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-                  </button>
+                  <ArchitectReadoutCard
+                    key={plan.updatedAt}
+                    surfaceTheme={surfaceTheme}
+                    plan={plan}
+                    variant="panel"
+                    onOpenBlueprintEditor={openBlueprintEditor}
+                    onOpenDocumentEditor={onOpenDocumentEditor}
+                  />
                 </TrackedSection>
               ) : null}
 
@@ -378,7 +353,7 @@ export function WorkspaceWizardDraftPane({
                   workspacePath={workspacePath}
                   workspaceRoot={snapshot.diagnostics.workspaceRoot}
                   summaryLabel={
-                    plan ? "Updated from Architect's latest read of the conversation." : "Resolved from your quick setup."
+                    plan ? "Architect refreshed the draft." : "Resolved from quick setup."
                   }
                   onOpenBlueprintEditor={openBlueprintEditor}
                 />
@@ -529,29 +504,69 @@ export function WorkspaceWizardDraftPane({
                     <p className={cn("text-[14px] font-semibold", isLight ? "text-[#171410]" : "text-white")}>Documents</p>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {editableDocuments.map((document) => (
-                      <FileToken
-                        key={document.path}
-                        surfaceTheme={surfaceTheme}
-                        label={document.path}
-                        tone={
-                          document.generated
-                            ? document.overridden
-                              ? "success"
-                              : "default"
-                            : "accent"
-                        }
-                        interactive={Boolean(onOpenDocumentEditor)}
-                        onClick={onOpenDocumentEditor ? () => onOpenDocumentEditor(document.path) : undefined}
-                      />
-                    ))}
+                  <div className="mt-3 space-y-3">
+                    {contextManifest.sections.map((section) => {
+                      const sectionDocuments = section.resources
+                        .map((resource) => editableDocumentsByPath.get(resource.relativePath))
+                        .filter((document): document is (typeof editableDocuments)[number] => Boolean(document));
+
+                      return (
+                        <div
+                          key={section.id}
+                          className={cn(
+                            "rounded-[18px] border px-3 py-3",
+                            isLight ? "border-[#e8e0d6] bg-[#faf6f1]" : "border-white/10 bg-white/[0.03]"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className={cn("text-[12px] font-semibold", isLight ? "text-[#171410]" : "text-white")}>
+                                {section.title}
+                              </p>
+                              <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
+                                {section.description}
+                              </p>
+                            </div>
+                            <StatusPill
+                              surfaceTheme={surfaceTheme}
+                              tone={section.enabled ? "success" : "muted"}
+                              label={section.enabled ? "Included" : "Skipped"}
+                            />
+                          </div>
+
+                          {sectionDocuments.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {sectionDocuments.map((document) => (
+                                <FileToken
+                                  key={document.path}
+                                  surfaceTheme={surfaceTheme}
+                                  label={document.path}
+                                  tone={
+                                    document.generated
+                                      ? document.overridden
+                                        ? "success"
+                                        : "default"
+                                      : "accent"
+                                  }
+                                  interactive={Boolean(onOpenDocumentEditor)}
+                                  onClick={onOpenDocumentEditor ? () => onOpenDocumentEditor(document.path) : undefined}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
+                              Disabled by the current workspace rules.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {onOpenDocumentEditor ? (
                     <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
                       {workspaceMode === "edit"
-                        ? "These are the current workspace files. Click a chip to edit one."
+                        ? "These are the current workspace files grouped by the canonical context manifest."
                         : "These are the scaffold documents that will be written for this workspace."}
                     </p>
                   ) : null}
@@ -667,7 +682,23 @@ function buildTrackedDraftSnapshot({
     noticeSignature: notice ? `${notice.tone}:${notice.title}:${notice.description}` : "",
     progressSignature: progress ? JSON.stringify(progress) : "",
     basic: {
-      architectSignature: plan ? `${plan.architectSummary}:${plan.intake.confirmations.join("|")}` : "",
+      architectSignature: plan
+        ? [
+            plan.architectSummary,
+            plan.company.name,
+            plan.company.mission,
+            plan.company.targetCustomer,
+            plan.workspace.template,
+            JSON.stringify(plan.workspace.rules),
+            plan.intake.sources
+              .map((source) => `${source.kind}:${source.status}:${source.label}:${Math.round((source.confidence ?? 0) * 100)}`)
+              .join("|"),
+            plan.intake.inferences
+              .map((inference) => `${inference.section}:${inference.status}:${inference.label}:${inference.value}`)
+              .join("|"),
+            plan.intake.confirmations.join("|")
+          ].join(":")
+        : "",
       summarySignature: [
         resolvedName,
         resolvedTemplate,
@@ -1020,8 +1051,8 @@ function BasicSetupCard({
   onOpenDocumentEditor?: (path: string) => void;
 }) {
   const isLight = surfaceTheme === "light";
+  const contextManifest = buildWorkspaceContextManifest(template, rules);
   const toggleItems = buildBasicSetupToggleItems(template, rules);
-  const filePreview = buildWorkspaceScaffoldPreview(template, rules);
   const overriddenFilePaths = useMemo(
     () => new Set(normalizeWorkspaceDocOverrides(plan?.workspace.docOverrides).map((entry) => entry.path)),
     [plan?.workspace.docOverrides]
@@ -1029,10 +1060,10 @@ function BasicSetupCard({
   const hasPlan = Boolean(plan);
   const presetSummary =
     preset === "fastest"
-      ? "Fastest setup keeps only the core agent files and skips kickoff."
+      ? "Core files only."
       : preset === "custom"
-        ? "Custom setup keeps only the extras you left enabled."
-        : "Standard setup creates starter docs, memory, and a kickoff mission.";
+        ? "Only the extras you kept."
+        : "Starter docs, memory, kickoff.";
 
   return (
     <div className="mt-3 space-y-4">
@@ -1132,31 +1163,68 @@ function BasicSetupCard({
         <div className="flex items-center gap-2">
           <FileText className={cn("h-4 w-4", isLight ? "text-[#5f5952]" : "text-slate-300")} />
           <p className={cn("text-[12px] uppercase tracking-[0.16em]", isLight ? "text-[#8d8276]" : "text-slate-500")}>
-            Will create
+            Canonical manifest
           </p>
         </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {filePreview.map((file) => (
-            <FileToken
-              key={file}
-              surfaceTheme={surfaceTheme}
-              label={file}
-              tone={overriddenFilePaths.has(file) ? "success" : "default"}
-              interactive={Boolean(hasPlan && onOpenDocumentEditor)}
-              onClick={hasPlan && onOpenDocumentEditor ? () => onOpenDocumentEditor(file) : undefined}
-            />
+        <div className="mt-3 space-y-3">
+          {contextManifest.sections.map((section) => (
+            <div
+              key={section.id}
+              className={cn(
+                "rounded-[16px] border px-3 py-3",
+                isLight ? "border-[#e2d9cc] bg-white" : "border-white/10 bg-white/[0.02]"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className={cn("text-[12px] font-semibold", isLight ? "text-[#171410]" : "text-white")}>
+                    {section.title}
+                  </p>
+                  <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#7b7269]" : "text-slate-400")}>
+                    {section.description}
+                  </p>
+                </div>
+                <StatusPill
+                  surfaceTheme={surfaceTheme}
+                  tone={section.enabled ? "success" : "muted"}
+                  label={section.enabled ? "Included" : "Skipped"}
+                />
+              </div>
+              {section.resources.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {section.resources.map((resource) => (
+                    <FileToken
+                      key={resource.relativePath}
+                      surfaceTheme={surfaceTheme}
+                      label={resource.label}
+                      tone={overriddenFilePaths.has(resource.relativePath) ? "success" : "default"}
+                      interactive={Boolean(hasPlan && onOpenDocumentEditor)}
+                      onClick={
+                        hasPlan && onOpenDocumentEditor
+                          ? () => onOpenDocumentEditor(resource.relativePath)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
+                  Disabled by the current workspace rules.
+                </p>
+              )}
+            </div>
           ))}
-          {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" tone="accent" /> : null}
         </div>
+        {rules.kickoffMission ? <FileToken surfaceTheme={surfaceTheme} label="Kickoff mission" tone="accent" /> : null}
         {hasPlan && onOpenDocumentEditor ? (
           <p className={cn("mt-2 text-[11px] leading-5", isLight ? "text-[#7a7168]" : "text-slate-400")}>
-            Click a document chip to edit its scaffold.
+            Click a file chip to edit its scaffold or override.
           </p>
         ) : null}
       </div>
 
       <p className={cn("text-[13px] leading-6", isLight ? "text-[#70685f]" : "text-slate-300")}>
-        {presetSummary} Need more control later? Switch to Advanced and keep the same draft.
+        {presetSummary} Switch to Advanced later if you need more control.
       </p>
     </div>
   );
@@ -1191,8 +1259,8 @@ function SetupSpeedCard({
           </p>
           <p className={cn("mt-1 text-[11px] leading-5", isLight ? "text-[#70685f]" : "text-slate-300")}>
             {mode === "basic"
-              ? "Choose how much scaffold the fast create path should write before the workspace opens."
-              : "These presets also work in Advanced and update the workspace bootstrap rules."}
+              ? "Choose how much scaffold the fast path should write."
+              : "These presets also update the bootstrap rules."}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1221,14 +1289,14 @@ function SetupSpeedCard({
           surfaceTheme={surfaceTheme}
           active={preset === "standard"}
           title="Standard"
-          description="Docs, memory, and kickoff mission"
+          description="Docs, memory, kickoff"
           onClick={() => onPresetChange("standard")}
         />
         <PresetButton
           surfaceTheme={surfaceTheme}
           active={preset === "fastest"}
           title="Fastest setup"
-          description="Core files only, no kickoff"
+          description="Core files only"
           onClick={() => onPresetChange("fastest")}
         />
       </div>
@@ -1341,67 +1409,60 @@ function FileToken({
   );
 }
 
-function buildBasicSetupToggleItems(template: WorkspaceTemplate, rules: WorkspaceCreateRules) {
-  const templateSpecificFiles = getTemplateSpecificFiles(template);
+function buildBasicSetupToggleItems(
+  template: WorkspaceTemplate,
+  rules: WorkspaceCreateRules
+) {
+  const contextResourceSpecs = buildWorkspaceContextResourceSpecs(template);
+  const corePathSet = new Set<string>(WORKSPACE_CONTEXT_CORE_PATHS);
+  const coreFiles = contextResourceSpecs
+    .filter((resource) => corePathSet.has(resource.relativePath))
+    .map((resource) => resource.label);
+  const starterFiles = contextResourceSpecs
+    .filter((resource) => resource.relativePath.startsWith("docs/") || resource.relativePath.startsWith("deliverables/"))
+    .map((resource) => resource.label);
+  const memoryFiles = contextResourceSpecs
+    .filter((resource) => resource.relativePath === "MEMORY.md" || resource.relativePath.startsWith("memory/"))
+    .map((resource) => resource.label);
 
   return [
     {
       id: "core",
       title: "Core agent files",
-      description: "Required bootstrap files that define the workspace identity and operating instructions.",
+      description: "Identity and operating rules.",
       checked: true,
       locked: true,
-      files: ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"],
+      files: coreFiles,
       rule: undefined
     },
     {
       id: "docs",
       title: "Starter docs",
-      description: "Brief, architecture notes, and the initial deliverables handoff scaffold.",
+      description: "Brief, architecture, handoff.",
       checked: rules.generateStarterDocs,
       locked: false,
-      files: ["docs/brief.md", "docs/architecture.md", "deliverables/README.md", ...templateSpecificFiles],
+      files: starterFiles,
       rule: "generateStarterDocs" as const
     },
     {
       id: "memory",
       title: "Memory files",
-      description: "Durable project memory for blueprint decisions and accumulated context.",
+      description: "Durable decisions and context.",
       checked: rules.generateMemory,
       locked: false,
-      files: ["MEMORY.md", "memory/blueprint.md", "memory/decisions.md"],
+      files: memoryFiles,
       rule: "generateMemory" as const
     },
     {
       id: "kickoff",
       title: "Kickoff mission",
-      description: "Runs the first mission immediately after bootstrap so the agent starts with momentum.",
+      description: "Starts the first mission.",
       checked: rules.kickoffMission,
       locked: false,
       files: [],
       rule: "kickoffMission" as const
     }
   ];
-}
-
-function getTemplateSpecificFiles(template: WorkspaceTemplate) {
-  if (template === "frontend") {
-    return ["docs/ux-notes.md"];
-  }
-
-  if (template === "backend") {
-    return ["docs/service-map.md"];
-  }
-
-  if (template === "research") {
-    return ["docs/research-plan.md"];
-  }
-
-  if (template === "content") {
-    return ["docs/content-brief.md"];
-  }
-
-  return [];
 }
 
 function ReadinessList({

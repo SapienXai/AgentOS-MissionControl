@@ -105,7 +105,7 @@ type ResetPreviewState = "idle" | "loading" | "ready" | "error";
 type OnboardingWizardStage = "system" | "models";
 type GatewayControlAction = "start" | "stop" | "restart";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
-type InspectorTabId = "overview" | "output" | "files" | "raw";
+type InspectorTabId = "overview" | "chat" | "output" | "files" | "raw";
 
 const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
@@ -223,7 +223,8 @@ export function MissionControlShell({
   const pendingComposerBlurRef = useRef(false);
   const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
-    (runtime) => runtime.status === "running" || runtime.status === "queued"
+    (runtime) =>
+      (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
   const isOpenClawSystemReady = resolveOpenClawSystemReady(snapshot);
   const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
@@ -1735,6 +1736,19 @@ export function MissionControlShell({
               });
             }}
             onFocusAgent={handleFocusAgent}
+            onMessageAgent={(agentId) => {
+              const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+              if (!agent) {
+                return;
+              }
+
+              setAgentActionRequest(null);
+              setFocusedAgentId(null);
+              setActiveWorkspaceId(agent.workspaceId);
+              selectNode(agentId, "chat");
+              setIsInspectorOpen(true);
+            }}
             onReplyTask={(task) => {
               const prompt = resolveTaskPrompt(task);
               setComposeIntent({
@@ -1927,6 +1941,7 @@ export function MissionControlShell({
           surfaceTheme={surfaceTheme}
           selectedNodeId={selectedNodeId}
           lastMission={lastMission}
+          onRefresh={refresh}
           collapsed={!isInspectorOpen}
           onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
           activeTab={activeInspectorTab}
@@ -3783,6 +3798,10 @@ function isTaskHiddenByPreferences(
   }
 
   return task.runtimeIds.every((runtimeId) => safeHiddenRuntimeIds.includes(runtimeId));
+}
+
+function isDirectChatRuntime(runtime: { metadata: Record<string, unknown> }) {
+  return typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct";
 }
 
 function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {

@@ -64,6 +64,7 @@ const plannerRootPath = path.join(process.cwd(), ".mission-control", "planner");
 const plansRootPath = path.join(plannerRootPath, "plans");
 const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
 const WEBSITE_INSPECTION_TIMEOUT_MS = 3500;
+const WEBSITE_FOLLOWUP_TIMEOUT_MS = 1800;
 const PLANNER_RUNTIME_NAME = "Mission Control Planner Runtime";
 const PLANNER_RUNTIME_SYSTEM_TAG = "mission-control-planner";
 
@@ -1538,7 +1539,8 @@ function resolveWorkspaceScaffoldDocumentForRewrite(
     rules: plan.workspace.rules,
     agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
     docOverrides: plan.workspace.docOverrides,
-    toolExamples: []
+    toolExamples: [],
+    contextSources: plan.intake.sources
   });
 
   const document = documents.find((entry) => entry.path === targetPath);
@@ -2244,6 +2246,23 @@ type PlannerHarvestResult = {
   template?: WorkspaceTemplate;
 };
 
+type WebsitePageSignals = {
+  url: string;
+  label: string;
+  title?: string;
+  description?: string;
+  heading?: string;
+  snippets: string[];
+  companyName?: string;
+  companyNameConfidence?: number;
+  mission?: string;
+  offer?: string;
+  targetCustomer?: string;
+  successSignals: string[];
+  revenueModel?: string;
+  template?: WorkspaceTemplate;
+};
+
 async function harvestPlannerContext(message: string): Promise<PlannerHarvestResult> {
   const urls = extractUrls(message);
   const confirmations: string[] = [];
@@ -2356,33 +2375,104 @@ async function inspectWebsiteContext(url: string): Promise<{
     }
 
     const html = await response.text();
-    const title = extractPreferredMeta(html, ["og:title", "twitter:title"]) ?? extractTagText(html, "title");
-    const description =
-      extractPreferredMeta(html, ["og:description", "twitter:description", "description"]) ??
-      extractFirstParagraph(html);
-    const heading = extractTagText(html, "h1");
-    const snippets = uniqueStrings([heading ?? "", extractFirstParagraph(html), extractSecondParagraph(html)]).filter(
-      Boolean
+    const primaryPage = inspectWebsitePage(url, html);
+    const followUpUrls = collectWebsiteFollowUpUrls(url, html);
+    const followUpPages = await Promise.all(
+      followUpUrls.map(async (followUpUrl) => {
+        try {
+          const followUpResponse = await fetchWebsiteResponse(followUpUrl, WEBSITE_FOLLOWUP_TIMEOUT_MS);
+
+          if (!followUpResponse.ok) {
+            return null;
+          }
+
+          const followUpHtml = await followUpResponse.text();
+          return inspectWebsitePage(followUpUrl, followUpHtml);
+        } catch {
+          return null;
+        }
+      })
     );
-    const harvestText = [title ?? "", description ?? "", ...snippets].filter(Boolean).join(" ");
-    const titleCompanyName = cleanBrandName(title);
-    const domainCompanyName = inferCompanyNameFromUrl(url);
-    const inferredCompanyName = titleCompanyName ?? domainCompanyName;
-    const companyNameConfidence = titleCompanyName ? 96 : domainCompanyName ? domainCompanyName.length <= 3 ? 78 : 86 : undefined;
-    const inferredMission = description || heading;
-    const inferredOffer = description || heading;
-    const templateHint = detectTemplateFromHarvest(`${title ?? ""} ${description ?? ""} ${heading ?? ""}`);
-    const inferredTargetCustomer = inferTargetCustomerFromHarvest(harvestText);
-    const inferredSuccessSignals = inferSuccessSignalsFromHarvest(harvestText, templateHint);
-    const inferredRevenueModel = inferRevenueModelFromHarvest(harvestText);
+    const pageSignals = [primaryPage, ...followUpPages.filter((page): page is WebsitePageSignals => Boolean(page))];
+    const snippets = uniqueStrings(pageSignals.flatMap((page) => page.snippets)).slice(0, 8);
+    const pageNotes = uniqueStrings(
+      pageSignals.flatMap((page) => {
+        const notes: string[] = [];
+
+        if (page.title) {
+          notes.push(`${page.label} title: ${page.title}`);
+        }
+
+        if (page.description) {
+          notes.push(`${page.label} summary: ${page.description}`);
+        }
+
+        if (page.heading && page.heading !== page.description) {
+          notes.push(`${page.label} heading: ${page.heading}`);
+        }
+
+        for (const snippet of page.snippets.slice(0, 3)) {
+          notes.push(`${page.label} note: ${snippet}`);
+        }
+
+        return notes;
+      })
+    ).slice(0, 12);
+    const harvestText = uniqueStrings(
+      pageSignals.flatMap((page) => [page.title ?? "", page.description ?? "", page.heading ?? "", ...page.snippets])
+    )
+      .filter(Boolean)
+      .join(" ");
+    const companyCandidates = pageSignals
+      .map((page, index) =>
+        page.companyName
+          ? ({
+              name: page.companyName,
+              confidence: page.companyNameConfidence ?? undefined,
+              primary: index === 0
+            } satisfies { name: string; confidence: number | undefined; primary: boolean })
+          : null
+      )
+      .filter(
+        (candidate): candidate is { name: string; confidence: number | undefined; primary: boolean } =>
+          Boolean(candidate)
+      );
+    const chosenCompany = companyCandidates.sort(
+      (left, right) =>
+        (right.confidence ?? 0) - (left.confidence ?? 0) || Number(right.primary) - Number(left.primary)
+    )[0];
+    const inferredCompanyName = chosenCompany?.name ?? inferCompanyNameFromUrl(url);
+    const companyNameConfidence = chosenCompany?.confidence ?? (inferredCompanyName ? 86 : undefined);
+    const inferredMission =
+      pickBestWebsiteText(pageSignals.map((page) => page.mission)) ?? primaryPage.description ?? primaryPage.heading;
+    const inferredOffer =
+      pickBestWebsiteText(pageSignals.map((page) => page.offer)) ?? primaryPage.description ?? primaryPage.heading;
+    const templateHint = detectTemplateFromHarvest(
+      [primaryPage.title, primaryPage.description, primaryPage.heading, ...snippets, ...pageNotes].filter(Boolean).join(" ")
+    );
+    const inferredTargetCustomer =
+      pickBestWebsiteText(pageSignals.map((page) => page.targetCustomer)) ?? inferTargetCustomerFromHarvest(harvestText);
+    const inferredSuccessSignals = uniqueStrings([
+      ...pageSignals.flatMap((page) => page.successSignals),
+      ...inferSuccessSignalsFromHarvest(harvestText, templateHint)
+    ]).slice(0, 3);
+    const inferredRevenueModel =
+      pickBestWebsiteText(pageSignals.map((page) => page.revenueModel)) ?? inferRevenueModelFromHarvest(harvestText);
     const confirmations: string[] = [];
 
-    if (!description) {
-      confirmations.push(`I read ${label}, but the mission sentence is still sparse.`);
+    if (!primaryPage.description) {
+      confirmations.push(`I read ${label}, but the homepage summary is still sparse.`);
     }
 
-    if (!heading && !inferredTargetCustomer) {
-      confirmations.push(`I inspected ${label}, but the target customer is still not obvious from the page alone.`);
+    if (followUpPages.some(Boolean)) {
+      const followUpCount = followUpPages.filter(Boolean).length;
+      confirmations.push(
+        `I also checked ${followUpCount} supporting page${followUpCount === 1 ? "" : "s"} for extra context.`
+      );
+    }
+
+    if (!primaryPage.heading && !inferredTargetCustomer) {
+      confirmations.push(`I inspected ${label}, but the target customer is still not obvious from the site alone.`);
     }
 
     if (inferredCompanyName && companyNameConfidence && companyNameConfidence < 80) {
@@ -2394,8 +2484,12 @@ async function inspectWebsiteContext(url: string): Promise<{
         kind: "website",
         label: inferredCompanyName || label,
         url,
-        summary: description || heading || "Website context captured from the linked page.",
-        details: snippets,
+        summary:
+          primaryPage.description ||
+          primaryPage.heading ||
+          pickBestWebsiteText(pageNotes) ||
+          "Website context captured from the linked page.",
+        details: pageNotes.length > 0 ? pageNotes : snippets,
         confidence: companyNameConfidence
       }),
       confirmations,
@@ -2438,7 +2532,125 @@ async function inspectWebsiteContext(url: string): Promise<{
   }
 }
 
-async function fetchWebsiteResponse(url: string) {
+function inspectWebsitePage(url: string, html: string): WebsitePageSignals {
+  const title = extractPreferredMeta(html, ["og:title", "twitter:title"]) ?? extractTagText(html, "title");
+  const siteName = extractPreferredMeta(html, ["og:site_name"]);
+  const description =
+    extractPreferredMeta(html, ["og:description", "twitter:description", "description"]) ??
+    extractFirstParagraph(html);
+  const heading = extractTagText(html, "h1");
+  const headingSnippets = extractHeadingTexts(html, ["h2", "h3"]);
+  const paragraphSnippets = extractParagraphs(html);
+  const listItems = extractListItems(html);
+  const snippets = uniqueStrings([heading ?? "", ...headingSnippets, ...paragraphSnippets, ...listItems]).filter(
+    Boolean
+  );
+  const harvestText = [title ?? "", description ?? "", heading ?? "", ...snippets].filter(Boolean).join(" ");
+  const titleCompanyName = cleanBrandName(title) ?? cleanBrandName(siteName);
+  const domainCompanyName = inferCompanyNameFromUrl(url);
+  const companyName = titleCompanyName ?? domainCompanyName;
+  const companyNameConfidence = titleCompanyName
+    ? 96
+    : domainCompanyName
+      ? domainCompanyName.length <= 3
+        ? 78
+        : 86
+      : undefined;
+  const template = detectTemplateFromHarvest(harvestText);
+
+  return {
+    url,
+    label: summarizeUrlLabel(url),
+    title,
+    description,
+    heading,
+    snippets,
+    companyName,
+    companyNameConfidence,
+    mission: pickBestWebsiteText([description, heading, headingSnippets[0], headingSnippets[1]]),
+    offer: pickBestWebsiteText([description, heading, paragraphSnippets[0], paragraphSnippets[1]]),
+    targetCustomer: inferTargetCustomerFromHarvest(harvestText),
+    successSignals: inferSuccessSignalsFromHarvest(harvestText, template),
+    revenueModel: inferRevenueModelFromHarvest(harvestText),
+    template
+  };
+}
+
+function collectWebsiteFollowUpUrls(baseUrl: string, html: string) {
+  const base = new URL(baseUrl);
+  const candidateUrls = new Set<string>();
+  const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const pathPattern = /\b(about|company|team|story|mission|vision|pricing|plans?|services?|solutions?|products?|product|features?|faq|contact|support|docs?|learn|blog|work|why)\b/i;
+
+  for (const match of html.matchAll(anchorPattern)) {
+    const href = match[1]?.trim();
+
+    if (!href || /^#|^mailto:|^tel:|^javascript:/i.test(href)) {
+      continue;
+    }
+
+    try {
+      const resolved = new URL(href, base);
+
+      if (resolved.origin !== base.origin) {
+        continue;
+      }
+
+      if (resolved.pathname === base.pathname && !resolved.search && !resolved.hash) {
+        continue;
+      }
+
+      const normalized = normalizeWebsiteLink(resolved);
+      const anchorText = cleanHtmlText(match[2] ?? "");
+
+      if (!pathPattern.test(`${normalized.pathname} ${anchorText}`)) {
+        continue;
+      }
+
+      candidateUrls.add(normalized.toString());
+
+      if (candidateUrls.size >= 2) {
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return Array.from(candidateUrls);
+}
+
+function normalizeWebsiteLink(url: URL) {
+  const normalized = new URL(url.toString());
+  normalized.hash = "";
+  normalized.search = "";
+  return normalized;
+}
+
+function extractHeadingTexts(html: string, tags: Array<"h2" | "h3">) {
+  return uniqueStrings(
+    tags.flatMap((tagName) =>
+      Array.from(html.matchAll(new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "gi"))).map((match) =>
+        cleanHtmlText(match[1])
+      )
+    ).filter((entry) => entry.length >= 24)
+  ).slice(0, 6);
+}
+
+function extractListItems(html: string) {
+  return uniqueStrings(
+    Array.from(html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi))
+      .map((match) => cleanHtmlText(match[1]))
+      .filter((entry) => entry.length >= 24)
+  ).slice(0, 6);
+}
+
+function pickBestWebsiteText(values: Array<string | undefined>) {
+  return uniqueStrings(values.filter((value): value is string => Boolean(value?.trim())).map((value) => value.trim()))
+    .sort((left, right) => right.length - left.length)[0];
+}
+
+async function fetchWebsiteResponse(url: string, timeoutMs = WEBSITE_INSPECTION_TIMEOUT_MS) {
   const controller = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -2447,11 +2659,9 @@ async function fetchWebsiteResponse(url: string) {
       timeoutId = setTimeout(() => {
         controller.abort();
         reject(
-          new Error(
-            `Website inspection timed out after ${Math.ceil(WEBSITE_INSPECTION_TIMEOUT_MS / 1000)} seconds.`
-          )
+          new Error(`Website inspection timed out after ${Math.ceil(timeoutMs / 1000)} seconds.`)
         );
-      }, WEBSITE_INSPECTION_TIMEOUT_MS);
+      }, timeoutMs);
     });
 
     return await Promise.race([
@@ -2759,10 +2969,6 @@ function extractFirstParagraph(html: string) {
   return extractParagraphs(html)[0];
 }
 
-function extractSecondParagraph(html: string) {
-  return extractParagraphs(html)[1];
-}
-
 function extractParagraphs(html: string) {
   return Array.from(html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi))
     .map((match) => cleanHtmlText(match[1]))
@@ -2783,7 +2989,7 @@ function cleanBrandName(value?: string) {
   for (const part of parts) {
     if (!isGenericBrandFragment(part)) {
       const trimmed = part.trim();
-      if (trimmed.length >= 2) {
+      if (trimmed.length >= 2 && trimmed.length <= 60 && trimmed.split(/\s+/).length <= 8) {
         return trimmed;
       }
     }
@@ -2832,6 +3038,15 @@ function isGenericBrandFragment(value: string) {
   }
 
   if (normalized.split(/\s+/).length > 5) {
+    return true;
+  }
+
+  if (
+    /\b(join|unlock|discover|learn|build|create|launch|get|start|experience|transform|empower|grow|reach|become)\b/.test(
+      normalized
+    ) &&
+    normalized.split(/\s+/).length > 3
+  ) {
     return true;
   }
 

@@ -86,6 +86,7 @@ export function MissionCanvas({
   hiddenTaskKeys,
   lockedTaskKeys,
   onToggleWorkspaceTaskCards,
+  onMessageAgent,
   onEditAgent,
   onDeleteAgent,
   onFocusAgent,
@@ -111,6 +112,7 @@ export function MissionCanvas({
   hiddenTaskKeys: string[];
   lockedTaskKeys: string[];
   onToggleWorkspaceTaskCards: (workspaceId: string) => void;
+  onMessageAgent?: (agentId: string) => void;
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onFocusAgent: (agentId: string) => void;
@@ -148,6 +150,7 @@ export function MissionCanvas({
     hiddenTaskKeys,
     lockedTaskKeys,
     onToggleWorkspaceTaskCards,
+    onMessageAgent,
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
@@ -226,6 +229,7 @@ export function MissionCanvas({
       hiddenTaskKeys,
       lockedTaskKeys,
       onToggleWorkspaceTaskCards,
+      onMessageAgent,
       onEditAgent,
       onDeleteAgent,
       onFocusAgent,
@@ -257,6 +261,7 @@ export function MissionCanvas({
     hiddenTaskKeys,
     lockedTaskKeys,
     onToggleWorkspaceTaskCards,
+    onMessageAgent,
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
@@ -609,6 +614,7 @@ function buildCanvasGraph(
   hiddenTaskKeys: string[],
   lockedTaskKeys: string[],
   onToggleWorkspaceTaskCards: (workspaceId: string) => void,
+  onMessageAgent: ((agentId: string) => void) | undefined,
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onFocusAgent: (agentId: string) => void,
@@ -701,6 +707,7 @@ function buildCanvasGraph(
           composerFocused: isComposerHighlightedAgent,
           relativeTimeReferenceMs,
           telegramTetherCount: telegramTether.channelCount,
+          onMessage: onMessageAgent,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
           onFocus: onFocusAgent

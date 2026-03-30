@@ -18,9 +18,6 @@ import {
   type WizardMessageRecord,
   WizardMessageList
 } from "@/components/mission-control/workspace-wizard/wizard-message-list";
-import {
-  WizardSuggestionChips
-} from "@/components/mission-control/workspace-wizard/wizard-suggestion-chips";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -58,35 +55,6 @@ type WorkspaceWizardDialogProps = {
   onWorkspaceCreated: (workspaceId: string) => void;
   onWorkspaceUpdated?: (workspaceId: string) => void;
 };
-
-type SuggestionChip = {
-  id: string;
-  label: string;
-  prompt: string;
-};
-
-const basicSuggestions: SuggestionChip[] = [
-  {
-    id: "software",
-    label: "Ship a software workspace",
-    prompt: "Create a software workspace to ship product work, review changes, and keep durable project context."
-  },
-  {
-    id: "frontend",
-    label: "Spin up a frontend squad",
-    prompt: "Create a frontend workspace for rapid UI delivery, QA, and release-ready product handoffs."
-  },
-  {
-    id: "content",
-    label: "Run a content engine",
-    prompt: "Create a content workspace to plan campaigns, produce copy, and keep publishing operations organized."
-  },
-  {
-    id: "research",
-    label: "Start a research pod",
-    prompt: "Create a research workspace for investigation, synthesis, benchmarking, and note capture."
-  }
-];
 
 export function WorkspaceWizardDialog({
   open,
@@ -158,23 +126,17 @@ export function WorkspaceWizardDialog({
     () => buildConversationMessages(wizard.plan, wizard.pendingUserMessage),
     [wizard.pendingUserMessage, wizard.plan]
   );
+  const architectMessageId = useMemo(() => {
+    for (let index = activeMessages.length - 1; index >= 0; index -= 1) {
+      const message = activeMessages[index];
 
-  const activeSuggestions = useMemo(() => {
-    const suggestedReplies = (wizard.plan?.intake.suggestedReplies ?? [])
-      .filter((value) => value.trim().length > 0)
-      .map((value, index) => ({
-        id: `reply-${index}`,
-        label: value,
-        prompt: value
-      }))
-      .slice(0, wizard.mode === "basic" ? 3 : 4);
-
-    if (suggestedReplies.length > 0) {
-      return suggestedReplies;
+      if (message.role === "assistant" && message.author === "Architect") {
+        return message.id;
+      }
     }
 
-    return wizard.plan?.intake.started ? [] : basicSuggestions.slice(0, wizard.mode === "basic" ? 3 : 4);
-  }, [wizard.mode, wizard.plan?.intake.started, wizard.plan?.intake.suggestedReplies]);
+    return null;
+  }, [activeMessages]);
 
   const activeProgress = wizard.isCreating ? wizard.createProgress : wizard.isDeploying ? wizard.deployProgress : null;
   const isArchitectBusy =
@@ -387,6 +349,8 @@ export function WorkspaceWizardDialog({
                   <WizardMessageList
                     surfaceTheme={surfaceTheme}
                     messages={activeMessages}
+                    architectMessageId={architectMessageId}
+                    architectPlan={wizard.plan}
                     isTyping={wizard.isSending}
                     typingLabel="Architect is shaping the next pass..."
                     emptyState={
@@ -433,24 +397,6 @@ export function WorkspaceWizardDialog({
                 }
               >
                 <div className="mx-auto w-full max-w-3xl">
-                  <WizardSuggestionChips
-                    surfaceTheme={surfaceTheme}
-                    chips={activeSuggestions.map((chip) => ({
-                      id: chip.id,
-                      label: chip.label
-                    }))}
-                    disabled={isArchitectBusy}
-                    onSelect={(chip) => {
-                      const selected = activeSuggestions.find((entry) => entry.id === chip.id);
-                      if (!selected) {
-                        return;
-                      }
-
-                      void submitComposerIntent(selected.prompt);
-                    }}
-                    className="mb-2.5"
-                  />
-
                   <WizardComposer
                     surfaceTheme={surfaceTheme}
                     value={composerValue}

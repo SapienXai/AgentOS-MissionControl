@@ -1,6 +1,7 @@
 import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import type {
   AgentPolicy,
+  PlannerContextSource,
   PlannerPersistentAgentSpec,
   WorkspaceCreateRules,
   WorkspaceDocOverride,
@@ -18,6 +19,39 @@ type WorkspaceScaffoldDocumentSpec = {
   render: (context: WorkspaceScaffoldDocumentContext) => string;
 };
 
+export interface WorkspaceContextResourceSpec {
+  id: string;
+  label: string;
+  relativePath: string;
+  kind: "file";
+  headings: string[];
+}
+
+export interface WorkspaceContextManifestSection {
+  id: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  resources: WorkspaceContextResourceSpec[];
+}
+
+export interface WorkspaceContextManifest {
+  template: WorkspaceTemplate | null;
+  rules: WorkspaceCreateRules;
+  sections: WorkspaceContextManifestSection[];
+  resources: WorkspaceContextResourceSpec[];
+}
+
+export const WORKSPACE_CONTEXT_CORE_PATHS = [
+  "AGENTS.md",
+  "SOUL.md",
+  "IDENTITY.md",
+  "TOOLS.md",
+  "HEARTBEAT.md"
+] as const;
+
+export const WORKSPACE_CONTEXT_OPTIONAL_PATHS = ["MEMORY.md"] as const;
+
 export interface WorkspaceScaffoldDocumentContext {
   name: string;
   brief?: string;
@@ -27,6 +61,9 @@ export interface WorkspaceScaffoldDocumentContext {
   agents?: Array<Pick<PlannerPersistentAgentSpec, "role" | "name" | "skillId"> & { policy?: AgentPolicy }>;
   toolExamples?: string[];
   docOverrides?: WorkspaceDocOverride[];
+  contextSources?: Array<
+    Pick<PlannerContextSource, "kind" | "label" | "summary" | "confidence" | "url" | "status">
+  >;
 }
 
 export interface WorkspaceScaffoldDocument {
@@ -61,6 +98,191 @@ export function buildWorkspaceScaffoldDocumentPaths(
   rules: WorkspaceCreateRules
 ) {
   return buildWorkspaceScaffoldDocumentSpecs(template, rules).map((spec) => spec.path);
+}
+
+export function buildWorkspaceContextResourceSpecs(template?: WorkspaceTemplate | null): WorkspaceContextResourceSpec[] {
+  const specs: WorkspaceContextResourceSpec[] = [
+    {
+      id: "agents",
+      label: "AGENTS.md",
+      relativePath: "AGENTS.md",
+      kind: "file",
+      headings: ["Workspace", "Team", "Customize", "Safety defaults", "Daily memory", "Output"]
+    },
+    {
+      id: "soul",
+      label: "SOUL.md",
+      relativePath: "SOUL.md",
+      kind: "file",
+      headings: ["My Purpose", "How I Operate", "My Quirks", "Active Focus"]
+    },
+    {
+      id: "identity",
+      label: "IDENTITY.md",
+      relativePath: "IDENTITY.md",
+      kind: "file",
+      headings: ["Role"]
+    },
+    {
+      id: "tools",
+      label: "TOOLS.md",
+      relativePath: "TOOLS.md",
+      kind: "file",
+      headings: ["Examples", "Notes"]
+    },
+    {
+      id: "heartbeat",
+      label: "HEARTBEAT.md",
+      relativePath: "HEARTBEAT.md",
+      kind: "file",
+      headings: []
+    },
+    {
+      id: "memory-md",
+      label: "MEMORY.md",
+      relativePath: "MEMORY.md",
+      kind: "file",
+      headings: ["Current brief", "Stable facts"]
+    },
+    {
+      id: "memory-blueprint",
+      label: "memory/blueprint.md",
+      relativePath: "memory/blueprint.md",
+      kind: "file",
+      headings: ["Outcome", "Constraints", "Unknowns"]
+    },
+    {
+      id: "memory-decisions",
+      label: "memory/decisions.md",
+      relativePath: "memory/decisions.md",
+      kind: "file",
+      headings: ["Template"]
+    },
+    {
+      id: "docs-brief",
+      label: "docs/brief.md",
+      relativePath: "docs/brief.md",
+      kind: "file",
+      headings: ["Objective", "Success signals", "Open questions"]
+    },
+    {
+      id: "docs-architecture",
+      label: "docs/architecture.md",
+      relativePath: "docs/architecture.md",
+      kind: "file",
+      headings: ["Current shape", "Dependencies", "Risks"]
+    },
+    {
+      id: "deliverables-readme",
+      label: "deliverables/README.md",
+      relativePath: "deliverables/README.md",
+      kind: "file",
+      headings: ["Deliverables"]
+    }
+  ];
+
+  if (template === "frontend") {
+    specs.push({
+      id: "docs-ux-notes",
+      label: "docs/ux-notes.md",
+      relativePath: "docs/ux-notes.md",
+      kind: "file",
+      headings: ["UX Notes"]
+    });
+  }
+
+  if (template === "backend") {
+    specs.push({
+      id: "docs-service-map",
+      label: "docs/service-map.md",
+      relativePath: "docs/service-map.md",
+      kind: "file",
+      headings: ["Service Map"]
+    });
+  }
+
+  if (template === "research") {
+    specs.push({
+      id: "docs-research-plan",
+      label: "docs/research-plan.md",
+      relativePath: "docs/research-plan.md",
+      kind: "file",
+      headings: ["Research Plan"]
+    });
+  }
+
+  if (template === "content") {
+    specs.push({
+      id: "docs-content-brief",
+      label: "docs/content-brief.md",
+      relativePath: "docs/content-brief.md",
+      kind: "file",
+      headings: ["Content Brief"]
+    });
+  }
+
+  return specs;
+}
+
+export function buildWorkspaceContextManifest(
+  template: WorkspaceTemplate | null | undefined,
+  rules: WorkspaceCreateRules
+): WorkspaceContextManifest {
+  const resourceSpecs = buildWorkspaceContextResourceSpecs(template ?? null);
+  const resourceMap = new Map(resourceSpecs.map((spec) => [spec.relativePath, spec]));
+
+  const pickResources = (relativePaths: readonly string[]) =>
+    relativePaths.map((relativePath) => resourceMap.get(relativePath)).filter(Boolean) as WorkspaceContextResourceSpec[];
+
+  const sections: WorkspaceContextManifestSection[] = [
+    {
+      id: "core",
+      title: "Core bootstrap",
+      description: "Required for every workspace and shared by all agents.",
+      enabled: true,
+      resources: pickResources(WORKSPACE_CONTEXT_CORE_PATHS)
+    },
+    {
+      id: "memory",
+      title: "Memory",
+      description: "Durable notes and decisions that survive across sessions.",
+      enabled: rules.generateMemory,
+      resources: rules.generateMemory
+        ? pickResources(["MEMORY.md", "memory/blueprint.md", "memory/decisions.md"])
+        : []
+    },
+    {
+      id: "starter",
+      title: "Starter docs",
+      description: "Planning, architecture, and handoff docs used for the first pass.",
+      enabled: rules.generateStarterDocs,
+      resources: rules.generateStarterDocs
+        ? pickResources(
+            [
+              "docs/brief.md",
+              "docs/architecture.md",
+              "deliverables/README.md",
+              ...(template === "frontend"
+                ? ["docs/ux-notes.md"]
+                : template === "backend"
+                  ? ["docs/service-map.md"]
+                  : template === "research"
+                    ? ["docs/research-plan.md"]
+                    : template === "content"
+                      ? ["docs/content-brief.md"]
+                      : [])
+            ]
+          )
+        : []
+    }
+  ];
+
+  return {
+    template: template ?? null,
+    rules,
+    sections,
+    resources: sections.flatMap((section) => section.resources)
+  };
 }
 
 export function buildWorkspaceScaffoldDocuments(context: WorkspaceScaffoldDocumentContext) {
@@ -246,7 +468,7 @@ function buildWorkspaceScaffoldDocumentSpecs(
       title: "SOUL.md",
       description: "Purpose, operating style, and active focus.",
       category: "core",
-      render: ({ template, brief }) => renderSoulMarkdown(template, brief)
+      render: ({ template, brief, contextSources }) => renderSoulMarkdown(template, brief, contextSources)
     },
     {
       path: "IDENTITY.md",
@@ -274,12 +496,13 @@ function buildWorkspaceScaffoldDocumentSpecs(
   if (rules.generateMemory) {
     specs.push(
       {
-        path: "MEMORY.md",
-        title: "MEMORY.md",
-        description: "Durable project memory.",
-        category: "memory",
-        render: ({ name, template, brief }) => renderMemoryMarkdown(name, template, brief)
-      },
+      path: "MEMORY.md",
+      title: "MEMORY.md",
+      description: "Durable project memory.",
+      category: "memory",
+      render: ({ name, template, brief, contextSources }) =>
+        renderMemoryMarkdown(name, template, brief, contextSources)
+    },
       {
         path: "memory/blueprint.md",
         title: "memory/blueprint.md",
@@ -299,20 +522,21 @@ function buildWorkspaceScaffoldDocumentSpecs(
 
   if (rules.generateStarterDocs) {
     specs.push(
-      {
-        path: "docs/brief.md",
-        title: "docs/brief.md",
-        description: "Objective, source mode, and success signals.",
-        category: "docs",
-        render: ({ name, template, brief, sourceMode }) => renderBriefMarkdown(name, template, brief, sourceMode)
-      },
-      {
-        path: "docs/architecture.md",
-        title: "docs/architecture.md",
-        description: "Current system shape and dependencies.",
-        category: "docs",
-        render: ({ template }) => renderArchitectureMarkdown(template)
-      },
+    {
+      path: "docs/brief.md",
+      title: "docs/brief.md",
+      description: "Objective, source mode, and success signals.",
+      category: "docs",
+      render: ({ name, template, brief, sourceMode, contextSources }) =>
+        renderBriefMarkdown(name, template, brief, sourceMode, contextSources)
+    },
+    {
+      path: "docs/architecture.md",
+      title: "docs/architecture.md",
+      description: "Current system shape and dependencies.",
+      category: "docs",
+      render: ({ template, contextSources }) => renderArchitectureMarkdown(template, contextSources)
+    },
       {
         path: "deliverables/README.md",
         title: "deliverables/README.md",
@@ -432,7 +656,11 @@ ${brief || "Clarify the project goal, definition of done, constraints, and succe
 `;
 }
 
-function renderSoulMarkdown(template: WorkspaceTemplate, brief?: string) {
+function renderSoulMarkdown(
+  template: WorkspaceTemplate,
+  brief?: string,
+  contextSources?: WorkspaceScaffoldDocumentContext["contextSources"]
+) {
   return `# SOUL
 
 ## My Purpose
@@ -449,7 +677,7 @@ Help this ${TEMPLATE_LABELS[template].toLowerCase()} workspace turn intent into 
 - Product-aware
 - Quality-minded
 
-${brief ? `## Active Focus\n${brief}\n` : ""}`;
+${brief ? `## Active Focus\n${brief}\n` : ""}${renderContextSourceNotes(contextSources)}`;
 }
 
 function renderIdentityMarkdown(template: WorkspaceTemplate) {
@@ -485,7 +713,12 @@ function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
 `;
 }
 
-function renderMemoryMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
+function renderMemoryMarkdown(
+  name: string,
+  template: WorkspaceTemplate,
+  brief?: string,
+  contextSources?: WorkspaceScaffoldDocumentContext["contextSources"]
+) {
   return `# ${name} Memory
 
 Durable project facts for this ${TEMPLATE_LABELS[template].toLowerCase()} workspace.
@@ -496,7 +729,8 @@ ${brief || "No brief captured yet. Fill this in as soon as the project goal is c
 ## Stable facts
 - Add durable architecture, product, or workflow facts here.
 - Move longer notes into memory/*.md when they outgrow this file.
-`;
+
+${renderContextSourceNotes(contextSources)}`;
 }
 
 function renderBlueprintMarkdown(name: string, template: WorkspaceTemplate, brief?: string) {
@@ -533,7 +767,8 @@ function renderBriefMarkdown(
   name: string,
   template: WorkspaceTemplate,
   brief: string | undefined,
-  sourceMode: WorkspaceSourceMode
+  sourceMode: WorkspaceSourceMode,
+  contextSources?: WorkspaceScaffoldDocumentContext["contextSources"]
 ) {
   return `# ${name} Brief
 
@@ -551,10 +786,14 @@ ${brief || "Clarify the main goal, target user, and success definition for this 
 
 ## Open questions
 - List the unknowns worth resolving first.
-`;
+
+${renderContextSourceNotes(contextSources)}`;
 }
 
-function renderArchitectureMarkdown(template: WorkspaceTemplate) {
+function renderArchitectureMarkdown(
+  template: WorkspaceTemplate,
+  contextSources?: WorkspaceScaffoldDocumentContext["contextSources"]
+) {
   return `# Architecture
 
 ## Current shape
@@ -565,7 +804,8 @@ function renderArchitectureMarkdown(template: WorkspaceTemplate) {
 
 ## Risks
 - Capture structural, operational, or delivery risks here.
-`;
+
+${renderContextSourceNotes(contextSources)}`;
 }
 
 function renderDeliverablesMarkdown() {
@@ -605,4 +845,43 @@ function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | "conten
 
 - Capture audience, channel, tone, CTA, and distribution assumptions for this content workspace.
 `;
+}
+
+function renderContextSourceNotes(contextSources?: WorkspaceScaffoldDocumentContext["contextSources"]) {
+  const readySources = (contextSources ?? [])
+    .filter((source) => source.status !== "error" && source.summary.trim().length > 0)
+    .slice(0, 4);
+
+  if (readySources.length === 0) {
+    return "";
+  }
+
+  const evidenceSources = readySources.filter((source) => (source.confidence ?? 100) >= 80);
+  const assumptionSources = readySources.filter((source) => (source.confidence ?? 100) < 80);
+
+  const formatLine = (source: (typeof readySources)[number]) => {
+    const kindLabel =
+      source.kind === "website"
+        ? "Website"
+        : source.kind === "repo"
+          ? "Repo"
+          : source.kind === "folder"
+            ? "Folder"
+            : "Prompt";
+    const confidenceLabel = typeof source.confidence === "number" ? ` (${source.confidence}%)` : "";
+
+    return `- ${kindLabel}: ${source.label}${confidenceLabel} - ${source.summary}`;
+  };
+
+  const sections: string[] = [];
+
+  if (evidenceSources.length > 0) {
+    sections.push(`## Evidence\n${evidenceSources.map(formatLine).join("\n")}`);
+  }
+
+  if (assumptionSources.length > 0) {
+    sections.push(`## Assumptions\n${assumptionSources.map(formatLine).join("\n")}`);
+  }
+
+  return sections.length > 0 ? `\n${sections.join("\n\n")}\n` : "";
 }

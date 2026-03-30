@@ -142,6 +142,7 @@ export interface WorkspaceBootstrapState {
   agentTemplate: string | null;
   coreFiles: WorkspaceResourceState[];
   optionalFiles: WorkspaceResourceState[];
+  contextFiles?: WorkspaceResourceState[];
   folders: WorkspaceResourceState[];
   projectShell: WorkspaceResourceState[];
   localSkillIds: string[];
@@ -718,6 +719,7 @@ export interface WorkspaceCreateInput {
   rules?: Partial<WorkspaceCreateRules>;
   docOverrides?: WorkspaceDocOverride[];
   agents?: WorkspaceAgentBlueprintInput[];
+  contextSources?: PlannerContextSource[];
 }
 
 export interface WorkspaceEditSeed {
@@ -736,6 +738,7 @@ export interface WorkspaceEditSeed {
   docOverrides: WorkspaceDocOverride[];
   agents: WorkspaceAgentBlueprintInput[];
   brief: string;
+  contextSources?: PlannerContextSource[];
 }
 
 export interface WorkspaceUpdateInput {

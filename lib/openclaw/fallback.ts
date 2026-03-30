@@ -2,11 +2,20 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
+import {
+  buildWorkspaceContextManifest,
+  WORKSPACE_CONTEXT_CORE_PATHS,
+  WORKSPACE_CONTEXT_OPTIONAL_PATHS
+} from "@/lib/openclaw/workspace-docs";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
 export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
   const now = Date.now();
   const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
+  const excludedContextPaths = new Set<string>([
+    ...WORKSPACE_CONTEXT_CORE_PATHS,
+    ...WORKSPACE_CONTEXT_OPTIONAL_PATHS
+  ]);
 
   return {
     generatedAt: new Date(now).toISOString(),
@@ -93,6 +102,18 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
             { id: "heartbeat", label: "HEARTBEAT.md", present: true }
           ],
           optionalFiles: [{ id: "memory-md", label: "MEMORY.md", present: true }],
+          contextFiles: buildWorkspaceContextManifest("software", {
+            workspaceOnly: true,
+            generateStarterDocs: true,
+            generateMemory: true,
+            kickoffMission: true
+          })
+            .resources.filter((entry) => !excludedContextPaths.has(entry.relativePath))
+            .map((entry) => ({
+              id: entry.id,
+              label: entry.label,
+              present: true
+            })),
           folders: [
             { id: "docs", label: "docs/", present: true },
             { id: "memory", label: "memory/", present: true },

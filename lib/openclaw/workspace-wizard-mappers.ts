@@ -157,7 +157,8 @@ export function buildWorkspaceCreateInputFromPlan(plan: WorkspacePlan): Workspac
     teamPreset: "solo",
     modelProfile: plan.workspace.modelProfile || "balanced",
     docOverrides: plan.workspace.docOverrides,
-    rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules)
+    rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules),
+    contextSources: plan.intake.sources
   };
 }
 
@@ -169,9 +170,12 @@ export function buildWorkspaceCreateBriefFromPlan(plan: WorkspacePlan) {
   const lines = [
     plan.company.mission.trim() || plan.product.offer.trim(),
     plan.company.name.trim() ? `Company: ${plan.company.name.trim()}` : null,
+    plan.company.targetCustomer.trim() ? `Audience: ${plan.company.targetCustomer.trim()}` : null,
+    plan.product.offer.trim() ? `Offer: ${plan.product.offer.trim()}` : null,
+    plan.company.successSignals.length > 0 ? `Success signals: ${plan.company.successSignals.join(", ")}` : null,
     plan.product.scopeV1.length > 0 ? `Scope: ${plan.product.scopeV1.join(", ")}` : null,
     ...plan.intake.sources.flatMap((source) => {
-      if (source.id !== basicSourceId) {
+      if (source.id !== basicSourceId && source.kind !== "website") {
         return [];
       }
 
@@ -184,7 +188,8 @@ export function buildWorkspaceCreateBriefFromPlan(plan: WorkspacePlan) {
       }
 
       if (source.kind === "website" && source.url) {
-        return [`Reference website: ${source.url}`];
+        const confidence = typeof source.confidence === "number" ? ` (${source.confidence}%)` : "";
+        return [`Reference website${confidence}: ${source.url} - ${source.summary}`];
       }
 
       if (source.kind === "prompt") {

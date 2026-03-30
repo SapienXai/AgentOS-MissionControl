@@ -48,8 +48,14 @@ import {
   buildWorkspaceAgentName,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
-import { buildWorkspaceScaffoldDocuments } from "@/lib/openclaw/workspace-docs";
-import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
+import {
+  buildWorkspaceContextManifest,
+  buildWorkspaceScaffoldDocuments,
+  WORKSPACE_CONTEXT_CORE_PATHS,
+  WORKSPACE_CONTEXT_OPTIONAL_PATHS,
+  normalizeWorkspaceDocOverrides,
+  type WorkspaceScaffoldDocumentContext
+} from "@/lib/openclaw/workspace-docs";
 import type {
   AgentCreateInput,
   AgentDeleteInput,
@@ -95,6 +101,7 @@ import type {
   PlannerChannelType,
   ChannelRegistry,
   ChannelAccountRecord,
+  PlannerContextSource,
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelWorkspaceBinding
 } from "@/lib/openclaw/types";
@@ -655,7 +662,9 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
           agentId: rawAgent.id,
           agentName: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id,
           configuredSkills,
-          configuredTools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : []
+          configuredTools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
+          template: manifest.template,
+          rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES
         }));
       profileByWorkspace.set(rawAgent.workspace, profile);
       const agentRuntimes = runtimes
@@ -955,11 +964,12 @@ function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
 }
 
 function buildTaskRecords(runtimes: RuntimeRecord[], agents: OpenClawAgent[]): TaskRecord[] {
+  const taskRuntimes = runtimes.filter((runtime) => !isDirectChatRuntime(runtime));
   const groups = new Map<string, RuntimeRecord[]>();
   const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
-  const dispatchIdBySessionKey = buildDispatchIdBySessionKey(runtimes);
+  const dispatchIdBySessionKey = buildDispatchIdBySessionKey(taskRuntimes);
 
-  for (const runtime of runtimes) {
+  for (const runtime of taskRuntimes) {
     const groupKey = resolveTaskGroupKey(runtime, dispatchIdBySessionKey);
     const group = groups.get(groupKey) ?? [];
     group.push(runtime);
@@ -1099,6 +1109,10 @@ function selectTaskSignalRuntimes(runtimes: RuntimeRecord[]) {
   }
 
   return runtimes;
+}
+
+function isDirectChatRuntime(runtime: RuntimeRecord) {
+  return typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct";
 }
 
 function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
@@ -3753,7 +3767,8 @@ export async function createWorkspaceProject(
     rules: normalized.rules,
     docOverrides: normalized.docOverrides,
     sourceMode: normalized.sourceMode,
-    agents: enabledAgents
+    agents: enabledAgents,
+    contextSources: normalized.contextSources
   });
   await progress.completeStep("scaffold", "Workspace files and starter docs are in place.");
 
@@ -3814,7 +3829,8 @@ export async function createWorkspaceProject(
         agentId: primaryAgentId,
         brief: normalized.brief,
         modelProfile: normalized.modelProfile,
-        template: normalized.template
+        template: normalized.template,
+        rules: normalized.rules
       }, {
         onProgress: async ({ message, percent }) => {
           await progress.updateStep("kickoff", {
@@ -4078,6 +4094,7 @@ async function applyWorkspacePlanEdits(
       generateMemory: plan.workspace.rules.generateMemory,
       kickoffMission: plan.workspace.rules.kickoffMission
     },
+    contextSources: plan.intake.sources,
     hidden,
     systemTag,
     agents: manifestAgents
@@ -4092,7 +4109,8 @@ async function applyWorkspacePlanEdits(
       rules: plan.workspace.rules,
       agents: currentEnabledAgents,
       toolExamples: await detectWorkspaceToolExamples(currentWorkspacePath),
-      docOverrides: currentDocOverrides
+      docOverrides: currentDocOverrides,
+      contextSources: plan.intake.sources
     });
     const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
 
@@ -4116,7 +4134,8 @@ async function applyWorkspacePlanEdits(
       rules: input.baseline.rules,
       agents: baselineEnabledAgents,
       toolExamples: [],
-      docOverrides: []
+      docOverrides: [],
+      contextSources: input.baseline.contextSources ?? []
     });
     const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
 
@@ -4733,6 +4752,7 @@ type ResolvedWorkspaceBootstrapInput = {
   rules: WorkspaceCreateRules;
   docOverrides: WorkspaceDocOverride[];
   agents: WorkspaceAgentBlueprintInput[];
+  contextSources: PlannerContextSource[];
 };
 
 async function materializeWorkspaceSource(params: {
@@ -4774,6 +4794,7 @@ async function scaffoldWorkspaceContents(
     sourceMode: WorkspaceSourceMode;
     docOverrides: WorkspaceDocOverride[];
     agents: WorkspaceAgentBlueprintInput[];
+    contextSources: WorkspaceScaffoldDocumentContext["contextSources"];
   }
 ) {
   const templateMeta = getWorkspaceTemplateMeta(options.template);
@@ -4807,6 +4828,7 @@ async function scaffoldWorkspaceContents(
           generateMemory: options.rules.generateMemory,
           kickoffMission: options.rules.kickoffMission
         },
+        contextSources: options.contextSources,
         agents: options.agents.map((agent) => ({
           id: agent.id,
           name: agent.name,
@@ -4833,7 +4855,8 @@ async function scaffoldWorkspaceContents(
     rules: options.rules,
     agents: options.agents,
     toolExamples,
-    docOverrides: options.docOverrides
+    docOverrides: options.docOverrides,
+    contextSources: options.contextSources
   });
 
   for (const document of scaffoldDocuments) {
@@ -4956,12 +4979,13 @@ async function runWorkspaceKickoffMission(
     brief?: string;
     modelProfile: WorkspaceModelProfile;
     template: WorkspaceTemplate;
+    rules: WorkspaceCreateRules;
   },
   options: {
     onProgress?: KickoffProgressHandler;
   } = {}
 ) {
-  const prompt = buildWorkspaceKickoffPrompt(params.template, params.brief);
+  const prompt = buildWorkspaceKickoffPrompt(params.template, params.brief, params.rules);
   const thinking =
     params.modelProfile === "fast"
       ? "low"
@@ -5182,8 +5206,54 @@ function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWo
     modelProfile,
     rules,
     docOverrides: normalizeWorkspaceDocOverrides(input.docOverrides),
-    agents: normalizedAgents
+    agents: normalizedAgents,
+    contextSources: normalizeWorkspaceContextSources(input.contextSources)
   };
+}
+
+function normalizeWorkspaceContextSources(
+  sources?: WorkspaceCreateInput["contextSources"]
+): PlannerContextSource[] {
+  return (sources ?? []).flatMap((source) => {
+    if (!source || typeof source !== "object") {
+      return [];
+    }
+
+    const kind = isPlannerContextSourceKind(source.kind) ? source.kind : "prompt";
+    const label = normalizeOptionalValue(source.label) ?? kind;
+    const summary = normalizeOptionalValue(source.summary) ?? label;
+    const status = source.status === "error" ? "error" : "ready";
+    const createdAt = normalizeOptionalValue(source.createdAt) ?? new Date().toISOString();
+
+    if (!label || !summary) {
+      return [];
+    }
+
+    return [
+      {
+        id: normalizeOptionalValue(source.id) ?? `${kind}-${slugify(label) || "context"}`,
+        kind,
+        label,
+        summary,
+        details: Array.isArray(source.details)
+          ? source.details
+              .map((entry) => normalizeOptionalValue(entry) ?? "")
+              .filter((entry): entry is string => Boolean(entry))
+          : [],
+        status,
+        createdAt,
+        ...(typeof source.confidence === "number" ? { confidence: source.confidence } : {}),
+        ...(normalizeOptionalValue(source.error)
+          ? { error: normalizeOptionalValue(source.error) }
+          : {}),
+        ...(normalizeOptionalValue(source.url) ? { url: normalizeOptionalValue(source.url) } : {})
+      }
+    ];
+  });
+}
+
+function isPlannerContextSourceKind(value: unknown): value is PlannerContextSource["kind"] {
+  return value === "prompt" || value === "website" || value === "repo" || value === "folder";
 }
 
 async function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInput) {
@@ -6430,6 +6500,7 @@ Preset: ${presetLabel}
 ## Output routing
 - Final deliverables belong in the current deliverables run folder for the task.
 - Keep temporary notes and durable workspace memory inside memory/.
+- Treat MEMORY.md, memory/*.md, docs/brief.md, docs/architecture.md, and any template-specific docs under docs/ as shared workspace context before large edits.
 - Avoid writing final artifacts to the workspace root unless the task explicitly asks for it.
 
 ## Operating rules
@@ -6440,14 +6511,29 @@ ${coordinationSection ? `\n\n${coordinationSection}` : ""}
 `;
 }
 
-function buildWorkspaceKickoffPrompt(template: WorkspaceTemplate, brief?: string) {
+function buildWorkspaceKickoffPrompt(
+  template: WorkspaceTemplate,
+  brief: string | undefined,
+  rules: WorkspaceCreateRules
+) {
   const templateMeta = getWorkspaceTemplateMeta(template);
+  const contextManifest = buildWorkspaceContextManifest(template, rules);
+  const manifestSummary = contextManifest.sections
+    .map((section) => {
+      const resourceList = section.resources.map((resource) => resource.label).join(", ");
+      return section.enabled
+        ? `${section.title}: ${resourceList || "none"}`
+        : `${section.title}: disabled by workspace rules`;
+    })
+    .join("\n");
 
   return [
     `You are bootstrapping a newly created ${templateMeta.label.toLowerCase()} workspace.`,
     brief ? `Project brief: ${brief}` : "No detailed project brief was provided yet.",
     "Inspect the current files and improve the starter workspace without rewriting files that already had meaningful content.",
-    "If docs/architecture.md or memory/blueprint.md exist, refine them based on the real repository state.",
+    "Treat the following workspace context manifest as the source of truth:",
+    manifestSummary,
+    "If those docs exist, refine the brief, architecture, memory, and deliverables guidance based on the real repository state instead of guessing.",
     "Leave the workspace with a concise first task batch and any critical unknowns clearly called out.",
     "Prefer concrete workspace-grounded edits over verbose chat output."
   ].join("\n\n");
@@ -7636,13 +7722,22 @@ async function readAgentBootstrapProfile(
     agentName: string;
     configuredSkills: string[];
     configuredTools: string[];
+    template?: WorkspaceTemplate | null;
+    rules?: WorkspaceCreateRules;
   }
 ): Promise<AgentBootstrapProfile> {
   const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
+  const contextManifest = buildWorkspaceContextManifest(
+    options.template,
+    options.rules ?? DEFAULT_WORKSPACE_RULES
+  );
+  const profileFiles = [
+    ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
+  ];
   const sources: string[] = [];
   const sections = new Map<string, string[]>();
 
-  for (const fileName of bootstrapFiles) {
+  for (const fileName of profileFiles) {
     const filePath = path.join(workspacePath, fileName);
 
     try {
@@ -7667,13 +7762,24 @@ async function readAgentBootstrapProfile(
       agentName: options.agentName,
       skills: options.configuredSkills
     });
-  const operatingInstructions =
-    uniqueStrings([
-      ...extractBulletSection(sections.get("AGENTS.md"), "Safety defaults"),
-      ...extractBulletSection(sections.get("AGENTS.md"), "Daily memory"),
-      ...extractBulletSection(sections.get("SOUL.md"), "How I Operate"),
-      ...extractBulletSection(sections.get("TOOLS.md"), "Examples")
-    ]).slice(0, 6) || [];
+  const operatingInstructions = collectBulletSections(sections, [
+    { file: "AGENTS.md", heading: "Safety defaults" },
+    { file: "AGENTS.md", heading: "Daily memory" },
+    { file: "AGENTS.md", heading: "Output" },
+    { file: "SOUL.md", heading: "How I Operate" },
+    { file: "TOOLS.md", heading: "Examples" },
+    { file: "MEMORY.md", heading: "Stable facts" },
+    { file: "memory/blueprint.md", heading: "Constraints" },
+    { file: "memory/blueprint.md", heading: "Unknowns" },
+    { file: "docs/brief.md", heading: "Success signals" },
+    { file: "docs/brief.md", heading: "Open questions" },
+    { file: "docs/architecture.md", heading: "Dependencies" },
+    { file: "docs/architecture.md", heading: "Risks" },
+    { file: "deliverables/README.md", heading: "Deliverables" },
+    ...contextManifest.resources
+      .filter((spec) => spec.relativePath.startsWith("docs/") && spec.relativePath !== "docs/brief.md" && spec.relativePath !== "docs/architecture.md")
+      .flatMap((spec) => spec.headings.map((heading) => ({ file: spec.relativePath, heading })))
+  ]).slice(0, 8);
   const responseStyle =
     uniqueStrings([
       ...extractInlineList(sections.get("IDENTITY.md"), "Vibe"),
@@ -7682,6 +7788,7 @@ async function readAgentBootstrapProfile(
     ]).slice(0, 6) || [];
   const outputPreference =
     extractOutputPreference(sections.get("AGENTS.md")) ??
+    extractOutputPreference(sections.get("deliverables/README.md")) ??
     inferOutputPreference(options.configuredTools);
 
   return {
@@ -7698,54 +7805,65 @@ async function readWorkspaceInspectorMetadata(
   workspacePath: string,
   agents: OpenClawAgent[]
 ): Promise<Pick<WorkspaceProject, "bootstrap" | "capabilities">> {
-  const [projectMeta, coreFiles, optionalFiles, folders, projectShell, localSkillIds] =
-    await Promise.all([
-      readWorkspaceProjectManifest(workspacePath),
-      collectWorkspaceResourceState(workspacePath, [
-        { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
-        { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
-        { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
-        { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
-        { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
-      ]),
-      collectWorkspaceResourceState(workspacePath, [
-        { id: "memory-md", label: "MEMORY.md", relativePath: "MEMORY.md", kind: "file" }
-      ]),
-      collectWorkspaceResourceState(workspacePath, [
-        { id: "docs", label: "docs/", relativePath: "docs", kind: "directory" },
-        { id: "memory", label: "memory/", relativePath: "memory", kind: "directory" },
-        { id: "deliverables", label: "deliverables/", relativePath: "deliverables", kind: "directory" },
-        { id: "skills", label: "skills/", relativePath: "skills", kind: "directory" },
-        { id: "openclaw", label: ".openclaw/", relativePath: ".openclaw", kind: "directory" }
-      ]),
-      collectWorkspaceResourceState(workspacePath, [
-        {
-          id: "project-json",
-          label: ".openclaw/project.json",
-          relativePath: ".openclaw/project.json",
-          kind: "file"
-        },
-        {
-          id: "events",
-          label: ".openclaw/project-shell/events.jsonl",
-          relativePath: ".openclaw/project-shell/events.jsonl",
-          kind: "file"
-        },
-        {
-          id: "runs",
-          label: ".openclaw/project-shell/runs",
-          relativePath: ".openclaw/project-shell/runs",
-          kind: "directory"
-        },
-        {
-          id: "tasks",
-          label: ".openclaw/project-shell/tasks",
-          relativePath: ".openclaw/project-shell/tasks",
-          kind: "directory"
-        }
-      ]),
-      listLocalWorkspaceSkills(workspacePath)
-    ]);
+  const projectMeta = await readWorkspaceProjectManifest(workspacePath);
+  const contextManifest = buildWorkspaceContextManifest(
+    projectMeta.template ?? null,
+    projectMeta.rules ?? DEFAULT_WORKSPACE_RULES
+  );
+  const nonContextPaths = new Set<string>([
+    ...WORKSPACE_CONTEXT_CORE_PATHS,
+    ...WORKSPACE_CONTEXT_OPTIONAL_PATHS
+  ]);
+  const [coreFiles, optionalFiles, contextFiles, folders, projectShell, localSkillIds] = await Promise.all([
+    collectWorkspaceResourceState(workspacePath, [
+      { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
+      { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
+      { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
+      { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
+      { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
+    ]),
+    collectWorkspaceResourceState(workspacePath, [
+      { id: "memory-md", label: "MEMORY.md", relativePath: "MEMORY.md", kind: "file" }
+    ]),
+    collectWorkspaceResourceState(
+      workspacePath,
+      contextManifest.resources.filter((resource) => !nonContextPaths.has(resource.relativePath))
+    ),
+    collectWorkspaceResourceState(workspacePath, [
+      { id: "docs", label: "docs/", relativePath: "docs", kind: "directory" },
+      { id: "memory", label: "memory/", relativePath: "memory", kind: "directory" },
+      { id: "deliverables", label: "deliverables/", relativePath: "deliverables", kind: "directory" },
+      { id: "skills", label: "skills/", relativePath: "skills", kind: "directory" },
+      { id: "openclaw", label: ".openclaw/", relativePath: ".openclaw", kind: "directory" }
+    ]),
+    collectWorkspaceResourceState(workspacePath, [
+      {
+        id: "project-json",
+        label: ".openclaw/project.json",
+        relativePath: ".openclaw/project.json",
+        kind: "file"
+      },
+      {
+        id: "events",
+        label: ".openclaw/project-shell/events.jsonl",
+        relativePath: ".openclaw/project-shell/events.jsonl",
+        kind: "file"
+      },
+      {
+        id: "runs",
+        label: ".openclaw/project-shell/runs",
+        relativePath: ".openclaw/project-shell/runs",
+        kind: "directory"
+      },
+      {
+        id: "tasks",
+        label: ".openclaw/project-shell/tasks",
+        relativePath: ".openclaw/project-shell/tasks",
+        kind: "directory"
+      }
+    ]),
+    listLocalWorkspaceSkills(workspacePath)
+  ]);
   const tools = uniqueStrings(agents.flatMap((agent) => agent.tools));
   const skills = uniqueStrings([...localSkillIds, ...agents.flatMap((agent) => agent.skills)]);
   const workspaceOnlyAgentCount = agents.filter((agent) => agent.tools.includes("fs.workspaceOnly")).length;
@@ -7757,6 +7875,7 @@ async function readWorkspaceInspectorMetadata(
       agentTemplate: projectMeta.agentTemplate,
       coreFiles,
       optionalFiles,
+      contextFiles,
       folders,
       projectShell,
       localSkillIds
@@ -7782,17 +7901,19 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
   const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspace.id);
   const configuredSkills = uniqueStrings(workspaceAgents.flatMap((agent) => agent.skills));
   const configuredTools = uniqueStrings(workspaceAgents.flatMap((agent) => agent.tools));
-  const bootstrapProfile = await readAgentBootstrapProfile(workspace.path, {
-    agentId: workspaceAgents[0]?.id ?? workspace.id,
-    agentName: workspaceAgents[0]?.name ?? displayName,
-    configuredSkills,
-    configuredTools
-  });
   const template = manifest.template ?? workspace.bootstrap.template ?? "software";
   const sourceMode = manifest.sourceMode ?? workspace.bootstrap.sourceMode ?? "empty";
   const teamPreset = manifest.teamPreset ?? (workspaceAgents.length <= 1 ? "solo" : "core");
   const modelProfile = manifest.modelProfile ?? "balanced";
   const rules = manifest.rules ?? DEFAULT_WORKSPACE_RULES;
+  const bootstrapProfile = await readAgentBootstrapProfile(workspace.path, {
+    agentId: workspaceAgents[0]?.id ?? workspace.id,
+    agentName: workspaceAgents[0]?.name ?? displayName,
+    configuredSkills,
+    configuredTools,
+    template,
+    rules
+  });
   const agents =
     manifest.agents.length > 0
       ? manifest.agents.map((entry) => {
@@ -7831,7 +7952,8 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
     rules,
     agents,
     toolExamples: await detectWorkspaceToolExamples(workspace.path),
-    docOverrides: []
+    docOverrides: [],
+    contextSources: manifest.contextSources ?? []
   });
   const docOverrides: WorkspaceDocOverride[] = [];
   const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
@@ -7885,7 +8007,8 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
     rules,
     docOverrides,
     agents,
-    brief: bootstrapProfile.purpose || displayName
+    brief: bootstrapProfile.purpose || displayName,
+    contextSources: manifest.contextSources ?? []
   };
 }
 
@@ -8073,6 +8196,7 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       rules,
       hidden: parsed.hidden === true,
       systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
+      contextSources: parseWorkspaceProjectManifestContextSources(parsed.contextSources),
       agents,
       channels
     };
@@ -8088,10 +8212,44 @@ async function readWorkspaceProjectManifest(workspacePath: string) {
       rules: null,
       hidden: false,
       systemTag: null,
+      contextSources: [],
       agents: [],
       channels: []
     };
   }
+}
+
+function parseWorkspaceProjectManifestContextSources(raw: unknown): PlannerContextSource[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.flatMap((entry) => {
+    if (!isObjectRecord(entry)) {
+      return [];
+    }
+
+    const kind = isPlannerContextSourceKind(entry.kind) ? entry.kind : "prompt";
+    const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : kind;
+    const summary = typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : label;
+    const id =
+      typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `${kind}-${slugify(label) || "context"}`;
+
+    return normalizeWorkspaceContextSources([
+      {
+        id,
+        kind,
+        label,
+        summary,
+        details: Array.isArray(entry.details) ? entry.details.filter((detail): detail is string => typeof detail === "string") : [],
+        status: entry.status === "error" ? "error" : "ready",
+        createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+        confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
+        url: typeof entry.url === "string" ? entry.url : undefined,
+        error: typeof entry.error === "string" ? entry.error : undefined
+      }
+    ]);
+  });
 }
 
 async function readChannelRegistry() {
@@ -9355,20 +9513,24 @@ function parseAgentPolicy(value: unknown): AgentPolicy | null {
   };
 }
 
+function collectBulletSections(
+  sections: Map<string, string[]>,
+  entries: Array<{ file: string; heading: string }>
+) {
+  return uniqueStrings(entries.flatMap((entry) => extractBulletSection(sections.get(entry.file), entry.heading)));
+}
+
 function extractPurpose(sections: Map<string, string[]>) {
-  const soulPurpose = extractSectionParagraph(sections.get("SOUL.md"), "My Purpose");
-  if (soulPurpose) {
-    return soulPurpose;
-  }
+  const workspaceObjective =
+    extractSectionParagraph(sections.get("docs/brief.md"), "Objective") ??
+    extractSectionParagraph(sections.get("memory/blueprint.md"), "Outcome") ??
+    extractSectionParagraph(sections.get("MEMORY.md"), "Current brief") ??
+    extractSectionParagraph(sections.get("SOUL.md"), "My Purpose") ??
+    extractSectionParagraph(sections.get("IDENTITY.md"), "Role") ??
+    extractSectionParagraph(sections.get("AGENTS.md"), "Customize");
 
-  const identityRole = extractSectionParagraph(sections.get("IDENTITY.md"), "Role");
-  if (identityRole) {
-    return identityRole;
-  }
-
-  const agentsCustomize = extractSectionParagraph(sections.get("AGENTS.md"), "Customize");
-  if (agentsCustomize) {
-    return agentsCustomize;
+  if (workspaceObjective) {
+    return workspaceObjective;
   }
 
   return null;

@@ -10,12 +10,14 @@ import {
   Eye,
   FileJson,
   FolderGit2,
+  MessageSquareText,
   Radar,
   TerminalSquare
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 
+import { AgentChatDrawer } from "@/components/mission-control/agent-chat-drawer";
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
 import { RailTooltip } from "@/components/mission-control/rail-tooltip";
 import { Button } from "@/components/ui/button";
@@ -46,7 +48,8 @@ import type {
   TaskDetailRecord,
   TaskFeedEvent,
   TaskDetailStreamEvent,
-  TaskRecord
+  TaskRecord,
+  WorkspaceResourceState
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -55,11 +58,12 @@ type InspectorPanelProps = {
   surfaceTheme: "dark" | "light";
   selectedNodeId: string | null;
   lastMission: MissionResponse | null;
+  onRefresh?: () => Promise<void>;
   onAbortTask?: (task: TaskRecord) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  activeTab: "overview" | "output" | "files" | "raw";
-  onActiveTabChange: (tab: "overview" | "output" | "files" | "raw") => void;
+  activeTab: "overview" | "chat" | "output" | "files" | "raw";
+  onActiveTabChange: (tab: "overview" | "chat" | "output" | "files" | "raw") => void;
 };
 
 type InspectorPanelTab = InspectorPanelProps["activeTab"];
@@ -80,6 +84,7 @@ function InspectorPanelContent({
   surfaceTheme,
   selectedNodeId,
   lastMission,
+  onRefresh,
   onAbortTask,
   collapsed,
   onToggleCollapsed,
@@ -124,10 +129,13 @@ function InspectorPanelContent({
     Boolean(selectedTaskId) && !isOptimisticTask && !effectiveTaskDetail && !resolvedTaskDetailError;
   const runtimeOutputLoading =
     Boolean(selectedRuntimeId) && !resolvedRuntimeOutput && !resolvedRuntimeOutputError;
+  const showChatTab = Boolean(selectedAgent);
   const showOutputTab = Boolean(selectedRuntime || selectedTask);
   const showFilesTab = Boolean(selectedRuntime || selectedTask);
   const visibleActiveTab =
-    activeTab === "output" && !showOutputTab
+    activeTab === "chat" && !showChatTab
+      ? "overview"
+      : activeTab === "output" && !showOutputTab
       ? "overview"
       : activeTab === "files" && !showFilesTab
         ? "overview"
@@ -155,11 +163,12 @@ function InspectorPanelContent({
     () =>
       [
         { id: "overview", label: "Overview", icon: Eye, enabled: true },
+        { id: "chat", label: "Chat", icon: MessageSquareText, enabled: showChatTab },
         { id: "output", label: outputTabLabel, icon: TerminalSquare, enabled: showOutputTab },
         { id: "files", label: "Files", icon: FolderGit2, enabled: showFilesTab },
         { id: "raw", label: "Raw", icon: FileJson, enabled: true }
       ] satisfies Array<{ id: InspectorPanelTab; label: string; icon: LucideIcon; enabled: boolean }>,
-    [outputTabLabel, showFilesTab, showOutputTab]
+    [outputTabLabel, showChatTab, showFilesTab, showOutputTab]
   );
 
   useEffect(() => {
@@ -382,7 +391,10 @@ function InspectorPanelContent({
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="space-y-3.5"
+                  className={cn(
+                    "space-y-3.5",
+                    visibleActiveTab === "chat" && "flex h-full min-h-0 flex-col space-y-0"
+                  )}
                 >
                   {visibleActiveTab === "overview" ? (
                     <>
@@ -411,6 +423,10 @@ function InspectorPanelContent({
                       {selectedModel ? <ModelContent snapshot={snapshot} modelId={selectedModel.id} /> : null}
                       {!selectedEntity ? <GatewayOverview snapshot={snapshot} lastMission={lastMission} /> : null}
                     </>
+                  ) : null}
+
+                  {visibleActiveTab === "chat" && selectedAgent ? (
+                    <AgentChatDrawer agent={selectedAgent} surfaceTheme={surfaceTheme} onRefresh={onRefresh} />
                   ) : null}
 
                   {visibleActiveTab === "output" && selectedTask ? (
@@ -678,6 +694,12 @@ function WorkspaceContent({
           <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Optional scaffold</p>
           <InspectorPresenceGroup items={[...workspace.bootstrap.optionalFiles, ...workspace.bootstrap.folders]} />
         </div>
+        {workspace.bootstrap.contextFiles?.length ? (
+          <div>
+            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Context docs</p>
+            <InspectorPresenceGroup items={workspace.bootstrap.contextFiles} />
+          </div>
+        ) : null}
         <div>
           <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Project shell</p>
           <InspectorPresenceGroup items={workspace.bootstrap.projectShell} />
@@ -1888,7 +1910,7 @@ function InspectorPresenceGroup({
   items,
   missingVariant = "muted"
 }: {
-  items: MissionControlSnapshot["workspaces"][number]["bootstrap"]["coreFiles"];
+  items: WorkspaceResourceState[];
   missingVariant?: React.ComponentProps<typeof Badge>["variant"];
 }) {
   return (

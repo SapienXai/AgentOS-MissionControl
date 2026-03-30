@@ -780,7 +780,8 @@ export function useWorkspaceWizardDraft({
           rules: result.plan.workspace.rules,
           agents: result.plan.team.persistentAgents.filter((agent) => agent.enabled),
           docOverrides: result.plan.workspace.docOverrides,
-          toolExamples: []
+          toolExamples: [],
+          contextSources: result.plan.intake.sources
         });
         const rewrittenDocument = rewrittenDocuments.find((entry) => entry.path === trimmedPath);
 
