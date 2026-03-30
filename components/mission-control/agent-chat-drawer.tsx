@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, SendHorizontal } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
-import { StatusDot } from "@/components/mission-control/status-dot";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
@@ -84,6 +83,32 @@ function buildAgentChatPrompt(history: ChatMessage[], message: string) {
     : `${prefix}\nOperator: ${trimmed}`;
 }
 
+function tokenizeReply(text: string) {
+  return text.match(/\S+|\s+/g) ?? [];
+}
+
+function getTypingDelay(token: string) {
+  if (/^\s+$/.test(token)) return 14;
+  if (/[.!?]$/.test(token)) return 140;
+  if (/[,:;]$/.test(token)) return 80;
+  return Math.min(80, 26 + token.length * 4);
+}
+
+function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
+  return (
+    <span className="inline-flex items-center gap-[3px] align-middle">
+      {[0, 1, 2].map((index) => (
+        <motion.span
+          key={index}
+          animate={{ opacity: [0.35, 1, 0.35], y: [0, -1, 0] }}
+          transition={{ duration: 1.1, repeat: Infinity, delay: index * 0.14, ease: "easeInOut" }}
+          className={cn("h-1.5 w-1.5 rounded-full", surfaceTheme === "light" ? "bg-[#8f7263]" : "bg-cyan-300")}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function AgentChatDrawer({
   agent,
   surfaceTheme,
@@ -95,33 +120,88 @@ export function AgentChatDrawer({
 }) {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [revealingMessageId, setRevealingMessageId] = useState<string | null>(null);
+  const [revealedText, setRevealedText] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const revealTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
 
-  const dotTone =
-    agent.status === "engaged"
-      ? "bg-cyan-300"
-      : agent.status === "monitoring"
-        ? "bg-emerald-300"
-        : agent.status === "ready"
-          ? "bg-amber-200"
-          : agent.status === "offline"
-            ? "bg-rose-300"
-          : "bg-slate-500";
+  const clearRevealTimer = () => {
+    if (revealTimerRef.current !== null) {
+      globalThis.clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+  };
+
+  const startAssistantReveal = (messageId: string, text: string) => {
+    clearRevealTimer();
+
+    const tokens = tokenizeReply(text.trim());
+    if (tokens.length === 0) {
+      setRevealingMessageId(null);
+      setRevealedText("");
+      return;
+    }
+
+    const firstToken = tokens[0];
+    if (!firstToken) {
+      setRevealingMessageId(null);
+      setRevealedText("");
+      return;
+    }
+
+    let index = 1;
+    setRevealingMessageId(messageId);
+    setRevealedText(firstToken);
+
+    const step = () => {
+      if (index >= tokens.length) {
+        revealTimerRef.current = globalThis.setTimeout(() => {
+          setRevealingMessageId(null);
+          setRevealedText("");
+          revealTimerRef.current = null;
+        }, 220);
+        return;
+      }
+
+      const nextIndex = index + 1;
+      setRevealedText(tokens.slice(0, nextIndex).join(""));
+      const currentToken = tokens[index] ?? "";
+      const delay = getTypingDelay(currentToken);
+      index = nextIndex;
+      revealTimerRef.current = globalThis.setTimeout(step, delay);
+    };
+
+    revealTimerRef.current = globalThis.setTimeout(step, getTypingDelay(firstToken));
+  };
 
   useEffect(() => {
+    clearRevealTimer();
     setMessages(readChat(agent.id));
     setDraft("");
+    setIsSending(false);
+    setIsAgentTyping(false);
+    setRevealingMessageId(null);
+    setRevealedText("");
     requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => clearRevealTimer();
   }, [agent.id]);
 
   useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages.length, agent.id]);
+  }, [messages.length, agent.id, isAgentTyping, revealedText, revealingMessageId]);
 
-  const canSend = Boolean(draft.trim()) && !isSending;
+  const canSend = Boolean(draft.trim()) && !isSending && !revealingMessageId;
+
+  const renderMessageText = (entry: ChatMessage) => {
+    if (entry.role === "assistant" && entry.id === revealingMessageId) {
+      return revealedText;
+    }
+    return entry.text;
+  };
 
   const uiMessages = useMemo(() => {
     if (messages.length > 0) return messages;
@@ -137,9 +217,10 @@ export function AgentChatDrawer({
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || isSending) return;
+    if (!text || isSending || revealingMessageId) return;
 
     setIsSending(true);
+    setIsAgentTyping(true);
     const createdAt = Date.now();
     const userMessage: ChatMessage = {
       id: globalThis.crypto?.randomUUID?.() || `user:${createdAt}`,
@@ -186,9 +267,10 @@ export function AgentChatDrawer({
 
       setMessages(finalized);
       writeChat(agent.id, finalized);
-      if (onRefresh) {
-        await onRefresh().catch(() => null);
-      }
+      setIsSending(false);
+      setIsAgentTyping(false);
+      startAssistantReveal(assistantMessage.id, assistantMessage.text);
+      void onRefresh?.().catch(() => null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown send error.";
       toast.error("Chat message failed.", { description: message });
@@ -198,6 +280,7 @@ export function AgentChatDrawer({
         .slice(-maxStoredMessages);
       setMessages(finalized);
       writeChat(agent.id, finalized);
+      setIsAgentTyping(false);
     } finally {
       setIsSending(false);
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -207,48 +290,14 @@ export function AgentChatDrawer({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-1 flex-col",
+        "flex h-full min-h-0 flex-col overflow-hidden",
         surfaceTheme === "light" ? "text-[#4a382c]" : "text-slate-200"
       )}
     >
       <div
-        className={cn(
-          "shrink-0 border border-white/[0.08] p-3",
-          surfaceTheme === "light"
-            ? "rounded-[20px] border-[#e3d4c8] bg-[#fffaf6]"
-            : "rounded-[20px] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))]"
-        )}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <StatusDot tone={dotTone} pulse={agent.status === "engaged" || agent.status === "monitoring"} />
-              <p className={cn("truncate font-display text-[15px]", surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white")}>
-                {agent.name}
-              </p>
-            </div>
-            <p className={cn("mt-1 truncate text-[11px]", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400")}>
-              Direct agent chat · {agent.modelId}
-            </p>
-          </div>
-          <div
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] uppercase tracking-[0.18em]",
-              surfaceTheme === "light"
-                ? "border-[#e3d4c8] bg-[#f5ebe3] text-[#6c5647]"
-                : "border-white/[0.08] bg-white/[0.04] text-slate-300"
-            )}
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", dotTone)} />
-            {agent.status}
-          </div>
-        </div>
-      </div>
-
-      <div
         ref={listRef}
         className={cn(
-          "mission-scroll mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
+          "mission-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1",
           surfaceTheme === "light" ? "text-[#4a382c]" : "text-slate-200"
         )}
       >
@@ -256,6 +305,7 @@ export function AgentChatDrawer({
           {uiMessages.map((entry) => {
             const isUser = entry.role === "user";
             const isSystem = entry.role === "system";
+            const isActiveAssistant = entry.role === "assistant" && entry.id === revealingMessageId;
             return (
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
                 <div
@@ -269,12 +319,20 @@ export function AgentChatDrawer({
                         ? surfaceTheme === "light"
                           ? "border-[#e3d4c8] bg-[#fff3f6] text-[#4a382c]"
                           : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] text-slate-100"
-                        : surfaceTheme === "light"
-                          ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
-                          : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
+                    : surfaceTheme === "light"
+                      ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
+                      : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{entry.text}</p>
+                  <p className="whitespace-pre-wrap">{renderMessageText(entry)}</p>
+                  {isActiveAssistant ? (
+                    <motion.span
+                      aria-hidden="true"
+                      animate={{ opacity: [0.2, 1, 0.2] }}
+                      transition={{ duration: 0.9, repeat: Infinity, ease: "easeInOut" }}
+                      className="ml-0.5 inline-block h-[1em] w-[1px] translate-y-[2px] bg-current"
+                    />
+                  ) : null}
                   {entry.status === "sending" ? (
                     <p className={cn("mt-1.5 text-[10px] uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500")}>
                       Sending…
@@ -289,59 +347,78 @@ export function AgentChatDrawer({
             );
           })}
         </div>
+
+        <AnimatePresence initial={false}>
+          {isAgentTyping ? (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              className="mt-2 flex justify-start"
+            >
+              <div
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-[18px] border px-3 py-2 text-[12px] leading-5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
+                  surfaceTheme === "light"
+                    ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
+                    : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
+                )}
+              >
+                <span className="font-medium">{agent.name}</span>
+                <span className={cn("text-[10px] uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400")}>
+                  typing
+                </span>
+                <TypingDots surfaceTheme={surfaceTheme} />
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
       </div>
 
       <div
         className={cn(
-          "mt-3 shrink-0 rounded-[20px] border p-3",
+          "mt-2 shrink-0 rounded-[18px] border p-3",
           surfaceTheme === "light"
             ? "border-[#e3d4c8] bg-[#fffaf6]"
             : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))]"
         )}
+        onPointerDown={(event) => {
+          const target = event.target as HTMLElement | null;
+          if (!target || target.closest("textarea") || target.closest("button")) return;
+          textareaRef.current?.focus();
+        }}
       >
         <Textarea
           ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={async (event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               await send();
             }
           }}
-          placeholder={`Message ${agent.name}...`}
+          placeholder={`Message to ${agent.name}...`}
           className={cn(
-            "min-h-[72px] resize-none border-0 bg-transparent px-0 py-0 text-[14px] leading-[1.6] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
+            "min-h-[60px] cursor-text resize-none border-0 bg-transparent px-3.5 py-2.5 text-[13px] leading-[1.5] shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
             surfaceTheme === "light"
               ? "text-[#3f2f24] placeholder:text-[#8f7664]"
               : "text-white placeholder:text-slate-500"
           )}
         />
 
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <AnimatePresence initial={false}>
-            {isSending ? (
-              <motion.div
-                initial={{ opacity: 0, y: 3 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -3 }}
-                className={cn("mr-auto text-[11px]", surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-400")}
-              >
-                Waiting for agent…
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+        <div className="mt-1.5 flex items-center justify-end gap-1.5">
           <Button
             disabled={!canSend}
             className={cn(
-              "h-9 rounded-full px-3.5 shadow-none",
+              "h-8 rounded-full px-3 shadow-none",
               surfaceTheme === "light"
                 ? "bg-[#4a382c] text-[#fffaf6] hover:bg-[#3f2f24]"
                 : "bg-white text-slate-950 hover:bg-white/92"
             )}
             onClick={send}
           >
-            {isSending ? <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />}
+            {isSending ? <LoaderCircle className="mr-[5px] h-[13px] w-[13px] animate-spin" /> : <SendHorizontal className="mr-[5px] h-[13px] w-[13px]" />}
             Send
           </Button>
         </div>

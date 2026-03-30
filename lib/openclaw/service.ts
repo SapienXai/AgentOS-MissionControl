@@ -1112,7 +1112,31 @@ function selectTaskSignalRuntimes(runtimes: RuntimeRecord[]) {
 }
 
 function isDirectChatRuntime(runtime: RuntimeRecord) {
-  return typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct";
+  if (typeof runtime.metadata.chatType === "string" && runtime.metadata.chatType === "direct") {
+    return true;
+  }
+
+  if (typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct") {
+    return true;
+  }
+
+  const prompt =
+    resolveRuntimeMissionText(runtime) ||
+    (typeof runtime.metadata.turnPrompt === "string" ? runtime.metadata.turnPrompt : null);
+
+  if (typeof prompt === "string" && isDirectChatPrompt(prompt)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isDirectChatPrompt(text: string) {
+  return (
+    /You are chatting (?:directly )?with the operator inside Mission Control/i.test(text) ||
+    /Do not create tasks or mention task cards/i.test(text) ||
+    /Messages stay in this drawer and are stored locally in your browser/i.test(text)
+  );
 }
 
 function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
@@ -9784,6 +9808,7 @@ function mapRuntime(
         : undefined,
     metadata: {
       kind: session.kind ?? "direct",
+      chatType: session.kind ?? "direct",
       stage: stage ?? null,
       historical: false
     }

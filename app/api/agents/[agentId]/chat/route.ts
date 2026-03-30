@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
+import { clearMissionControlCaches } from "@/lib/openclaw/service";
 import type { MissionDispatchStatus, MissionResponse } from "@/lib/openclaw/types";
 
 export const runtime = "nodejs";
@@ -53,6 +54,8 @@ export async function POST(
       ],
       { timeoutMs: 120000 }
     );
+
+    clearMissionControlCaches();
 
     return NextResponse.json(toAgentChatResponse(agentId, result), {
       status: normalizeStatus(result.status) === "completed" ? 200 : 202

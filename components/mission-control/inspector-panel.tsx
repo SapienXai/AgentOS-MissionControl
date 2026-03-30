@@ -140,6 +140,7 @@ function InspectorPanelContent({
       : activeTab === "files" && !showFilesTab
         ? "overview"
         : activeTab;
+  const isChatView = visibleActiveTab === "chat" && Boolean(selectedAgent);
   const outputTabLabel = selectedTask ? "Feed" : "Output";
   const selectedLabel =
     selectedWorkspace?.name ||
@@ -334,7 +335,12 @@ function InspectorPanelContent({
 
       {!collapsed ? (
         <div className="min-w-0 flex-1 bg-[linear-gradient(180deg,rgba(6,10,18,0.96),rgba(3,6,14,0.98))]">
-          <div className="mission-scroll flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain">
+          <div
+            className={cn(
+              "mission-scroll flex h-full min-h-0 flex-col overscroll-contain",
+              isChatView ? "overflow-hidden" : "overflow-y-auto"
+            )}
+          >
             <div className="shrink-0 border-b border-white/[0.08] px-3 pb-2 pt-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -384,17 +390,14 @@ function InspectorPanelContent({
               </div>
             </div>
 
-            <div className="flex-1 p-3">
+            <div className={cn("flex-1 p-3", isChatView && "min-h-0 overflow-hidden")}>
               <AnimatePresence mode="wait">
                 <motion.div
                   key={`${selectedNodeId || "overview"}:${visibleActiveTab}`}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className={cn(
-                    "space-y-3.5",
-                    visibleActiveTab === "chat" && "flex h-full min-h-0 flex-col space-y-0"
-                  )}
+                  className={cn("space-y-3.5", isChatView && "flex h-full min-h-0 flex-col space-y-0")}
                 >
                   {visibleActiveTab === "overview" ? (
                     <>
@@ -425,7 +428,7 @@ function InspectorPanelContent({
                     </>
                   ) : null}
 
-                  {visibleActiveTab === "chat" && selectedAgent ? (
+                  {isChatView && selectedAgent ? (
                     <AgentChatDrawer agent={selectedAgent} surfaceTheme={surfaceTheme} onRefresh={onRefresh} />
                   ) : null}
 
@@ -476,42 +479,44 @@ function InspectorPanelContent({
               </AnimatePresence>
             </div>
 
-            <div className="shrink-0 border-t border-white/[0.08] p-3">
-              <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
-                    <Radar className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate font-display text-[15px] text-white">
-                      {selectedTask
-                        ? `${selectedTask.runtimeCount} runs`
-                        : selectedRuntime
-                          ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)}`
-                          : selectedAgent
-                            ? `${selectedAgent.activeRuntimeIds.length} active runs`
-                            : selectedWorkspace
-                              ? `${selectedWorkspace.agentIds.length} agents`
-                              : selectedModel
-                                ? selectedModel.provider
-                                : "Gateway overview"}
-                    </p>
-                    <p className="mt-1 text-[12px] text-slate-400">
-                      {selectedDetail} ·{" "}
-                      {selectedTask
-                        ? `${effectiveTaskDetail?.liveFeed.length ?? 0} live feed events`
-                        : selectedRuntime
-                          ? `${resolvedRuntimeOutput?.items.length ?? 0} transcript entries`
-                          : selectedAgent
-                            ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
-                            : selectedWorkspace
-                              ? `${selectedWorkspace.agentIds.length} attached`
-                              : `${snapshot.presence.length} live beacons`}
-                    </p>
+            {isChatView ? null : (
+              <div className="shrink-0 border-t border-white/[0.08] p-3">
+                <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
+                      <Radar className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-display text-[15px] text-white">
+                        {selectedTask
+                          ? `${selectedTask.runtimeCount} runs`
+                          : selectedRuntime
+                            ? `Run ${shortId(selectedRuntime.runId || selectedRuntime.id, 10)}`
+                            : selectedAgent
+                              ? `${selectedAgent.activeRuntimeIds.length} active runs`
+                              : selectedWorkspace
+                                ? `${selectedWorkspace.agentIds.length} agents`
+                                : selectedModel
+                                  ? selectedModel.provider
+                                  : "Gateway overview"}
+                      </p>
+                      <p className="mt-1 text-[12px] text-slate-400">
+                        {selectedDetail} ·{" "}
+                        {selectedTask
+                          ? `${effectiveTaskDetail?.liveFeed.length ?? 0} live feed events`
+                          : selectedRuntime
+                            ? `${resolvedRuntimeOutput?.items.length ?? 0} transcript entries`
+                            : selectedAgent
+                              ? `${selectedAgent.activeRuntimeIds.length} tracked runs`
+                              : selectedWorkspace
+                                ? `${selectedWorkspace.agentIds.length} attached`
+                                : `${snapshot.presence.length} live beacons`}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       ) : null}
