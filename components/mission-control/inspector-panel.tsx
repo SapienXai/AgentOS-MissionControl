@@ -10,13 +10,14 @@ import {
   Eye,
   FileJson,
   FolderGit2,
+  Lock,
   MessageSquareText,
   Radar,
+  Pencil,
   TerminalSquare
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-
 import { AgentChatDrawer } from "@/components/mission-control/agent-chat-drawer";
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
 import { RailTooltip } from "@/components/mission-control/rail-tooltip";
@@ -63,6 +64,7 @@ type InspectorPanelProps = {
   lastMission: MissionResponse | null;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
+  onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onAbortTask?: (task: TaskRecord) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -92,6 +94,7 @@ function InspectorPanelContent({
   lastMission,
   onRefresh,
   onSnapshotChange,
+  onConfigureAgentCapabilities,
   onAbortTask,
   collapsed,
   onToggleCollapsed,
@@ -414,6 +417,7 @@ function InspectorPanelContent({
                           snapshot={snapshot}
                           agentId={selectedAgent.id}
                           focusSection={agentDetailFocus}
+                          onConfigureAgentCapabilities={onConfigureAgentCapabilities}
                         />
                       ) : null}
                       {selectedTask ? (
@@ -837,11 +841,13 @@ function WorkspaceContent({
 function AgentContent({
   snapshot,
   agentId,
-  focusSection
+  focusSection,
+  onConfigureAgentCapabilities
 }: {
   snapshot: MissionControlSnapshot;
   agentId: string;
   focusSection?: AgentDetailFocus | null;
+  onConfigureAgentCapabilities?: InspectorPanelProps["onConfigureAgentCapabilities"];
 }) {
   const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
@@ -851,6 +857,9 @@ function AgentContent({
   const toolsSectionRef = useRef<HTMLDivElement | null>(null);
   const sessionsSectionRef = useRef<HTMLDivElement | null>(null);
   const observedTools = agent?.observedTools ?? [];
+  const declaredSkills = agent?.skills ?? [];
+  const declaredTools = (agent?.tools ?? []).filter((tool) => tool !== "fs.workspaceOnly");
+  const lockedTools = agent?.tools.includes("fs.workspaceOnly") ? ["fs.workspaceOnly"] : [];
   const policyMeta = agent ? getAgentPresetMeta(agent.policy.preset) : null;
   const policyRows = agent
     ? [
@@ -928,13 +937,31 @@ function AgentContent({
         <p>{model?.available === false ? "Currently unavailable" : model?.local ? "Local model route" : "Remote model route"}</p>
       </InfoCard>
 
-      <InfoCard icon={Cpu} title="Agent summary" value={formatAgentPresetLabel(agent.policy.preset)}>
+      <InfoCard
+        icon={Cpu}
+        title="Agent summary"
+        value={formatAgentPresetLabel(agent.policy.preset)}
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              onConfigureAgentCapabilities?.(agent.id, focusSection === "tools" ? "tools" : "skills");
+            }}
+            className="h-7 rounded-full px-2.5 text-[11px]"
+          >
+            <Pencil className="mr-1 h-3 w-3" />
+            Edit
+          </Button>
+        }
+      >
         <div className="space-y-4">
-          <div>
+          <div className="w-full">
             <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Purpose</p>
-            <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+            <div className="w-full rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
               <p className="text-[13px] leading-5 text-slate-200">
-                {agent.profile.purpose || "No explicit purpose was found in the workspace bootstrap files."}
+              {agent.profile.purpose || "No explicit purpose was found in the workspace bootstrap files."}
               </p>
             </div>
           </div>
@@ -947,10 +974,13 @@ function AgentContent({
                 "border-cyan-300/25 bg-cyan-400/[0.05] shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
             )}
           >
-            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
+              <Badge variant="muted">{declaredSkills.length} configured</Badge>
+            </div>
             <InspectorTagGroup
               emptyLabel="No explicit skills"
-              items={agent.skills}
+              items={declaredSkills}
               emptyVariant="muted"
               itemVariant="muted"
             />
@@ -964,48 +994,72 @@ function AgentContent({
                 "border-cyan-300/25 bg-cyan-400/[0.05] shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
             )}
           >
-            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {lockedTools.length > 0 ? (
+                  <Badge variant="success">
+                    <Lock className="mr-1 h-3 w-3" />
+                    policy locked
+                  </Badge>
+                ) : null}
+                <Badge variant="muted">{declaredTools.length} configured</Badge>
+              </div>
+            </div>
             <div className="space-y-3">
-              <div>
-                <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Declared</p>
-                <InspectorTagGroup
-                  emptyLabel="No explicit tools configured"
-                  items={agent.tools}
-                  emptyVariant="muted"
-                  itemVariant="warning"
-                />
-              </div>
+              <InspectorTagGroup
+                emptyLabel="No explicit tools configured"
+                items={declaredTools}
+                emptyVariant="muted"
+                itemVariant="warning"
+              />
 
-              <div>
-                <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Observed</p>
-                <InspectorTagGroup
-                  emptyLabel="No runtime tool calls recovered yet"
-                  items={observedTools}
-                  emptyVariant="muted"
-                  itemVariant="default"
-                />
-              </div>
+              {lockedTools.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy locked</p>
+                  <div className="flex flex-wrap gap-2">
+                    {lockedTools.map((tool) => (
+                      <Badge key={tool} variant="success">
+                        <Lock className="mr-1 h-3 w-3" />
+                        {tool}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                    This capability is derived from the agent policy and cannot be removed here.
+                  </p>
+                </div>
+              ) : null}
+
+              {observedTools.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Observed</p>
+                  <InspectorTagGroup
+                    emptyLabel="No runtime tool calls recovered yet"
+                    items={observedTools}
+                    emptyVariant="muted"
+                    itemVariant="default"
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
 
-          <div>
-            <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
-            <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-3">
-              <p className="text-[12px] leading-5 text-slate-400">
-                {policyMeta?.description ?? "No policy description available."}
-              </p>
-              <div className="mt-3 grid gap-1.5 text-[13px] text-slate-300">
-                {policyRows.map((row) => (
-                  <p key={row.label}>
-                    {row.label}: <span className="text-white">{row.value}</span>
-                  </p>
-                ))}
-                {agent.profile.outputPreference ? (
-                  <p>
-                    Output preference: <span className="text-white">{agent.profile.outputPreference}</span>
-                  </p>
-                ) : null}
-              </div>
+          <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-3">
+            <p className="text-[12px] leading-5 text-slate-400">
+              {policyMeta?.description ?? "No policy description available."}
+            </p>
+            <div className="mt-3 grid gap-1.5 text-[13px] text-slate-300">
+              {policyRows.map((row) => (
+                <p key={row.label}>
+                  {row.label}: <span className="text-white">{row.value}</span>
+                </p>
+              ))}
+              {agent.profile.outputPreference ? (
+                <p>
+                  Output preference: <span className="text-white">{agent.profile.outputPreference}</span>
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -2059,12 +2113,14 @@ function InfoCard({
   icon: Icon,
   title,
   value,
+  actions,
   children,
   className
 }: {
   icon: LucideIcon;
   title: string;
   value: string;
+  actions?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
@@ -2078,7 +2134,10 @@ function InfoCard({
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">{title}</p>
-          <p className="font-display text-[1rem] text-white">{value}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="min-w-0 font-display text-[1rem] text-white">{value}</p>
+            {actions ? <div className="shrink-0">{actions}</div> : null}
+          </div>
         </div>
         <div className="rounded-[14px] border border-white/[0.08] bg-white/5 p-2 text-slate-300">
           <Icon className="h-3.5 w-3.5" />

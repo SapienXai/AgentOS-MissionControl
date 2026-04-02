@@ -112,8 +112,20 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const observedTools = data.agent.observedTools ?? [];
   const declaredToolCount = declaredTools.length;
   const observedToolCount = observedTools.length;
+  const displayToolCount = new Set([
+    ...declaredTools.filter((tool) => tool !== "fs.workspaceOnly"),
+    ...observedTools
+  ]).size;
   const inspectAgentSection = (focus: AgentDetailFocus) => {
     data.onInspect?.(data.agent.id, focus);
+  };
+  const configureAgentCapabilities = (focus: "skills" | "tools") => {
+    if (data.onConfigureCapabilities) {
+      data.onConfigureCapabilities(data.agent.id, focus);
+      return;
+    }
+
+    inspectAgentSection(focus);
   };
   const statusBadgeVariant =
     data.agent.status === "engaged"
@@ -125,7 +137,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           : data.agent.status === "offline"
             ? "danger"
             : "muted";
-  const displayToolCount = observedToolCount > 0 ? observedToolCount : declaredToolCount;
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
   const skillCount = data.agent.skills.length;
   const telegramTetherCount = data.telegramTetherCount ?? 0;
@@ -143,11 +154,12 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const metaLabel = `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${
     data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"
   } · Last seen ${lastSeenLabel}`;
-  const drawerTools = observedTools.length > 0 ? observedTools : declaredTools;
   const visibleSkills = data.agent.skills.slice(0, 4);
-  const visibleTools = drawerTools.slice(0, 3);
+  const visibleDeclaredTools = declaredTools.slice(0, 3);
+  const visibleObservedTools = observedTools.slice(0, 3);
   const remainingSkills = Math.max(data.agent.skills.length - visibleSkills.length, 0);
-  const remainingTools = Math.max(drawerTools.length - visibleTools.length, 0);
+  const remainingDeclaredTools = Math.max(declaredToolCount - visibleDeclaredTools.length, 0);
+  const remainingObservedTools = Math.max(observedToolCount - visibleObservedTools.length, 0);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -357,13 +369,13 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               label="Skills"
               value={skillCount}
               ariaLabel={`Open skills for ${agentLabel}`}
-              onClick={() => inspectAgentSection("skills")}
+              onClick={() => configureAgentCapabilities("skills")}
             />
             <AgentStatTile
               label="Tools"
               value={displayToolCount}
               ariaLabel={`Open tools for ${agentLabel}`}
-              onClick={() => inspectAgentSection("tools")}
+              onClick={() => configureAgentCapabilities("tools")}
             />
             <AgentStatTile
               label="Sessions"
@@ -474,28 +486,50 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                       </div>
 
                       <div>
-                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">
-                          {observedTools.length > 0 ? "Observed tools" : "Declared tools"}
-                        </p>
+                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Declared tools</p>
                         <div className="flex flex-wrap gap-1">
-                          {visibleTools.length > 0 ? (
-                            visibleTools.map((tool) => (
-                              <Badge key={tool} variant={observedTools.length > 0 ? "default" : "warning"} className="max-w-full truncate text-[10px]">
+                          {visibleDeclaredTools.length > 0 ? (
+                            visibleDeclaredTools.map((tool) => (
+                              <Badge key={tool} variant="warning" className="max-w-full truncate text-[10px]">
                                 {tool}
                               </Badge>
                             ))
                           ) : (
                             <Badge variant="muted" className="text-[10px]">
-                              None recorded
+                              No explicit tools
                             </Badge>
                           )}
-                          {remainingTools > 0 ? (
+                          {remainingDeclaredTools > 0 ? (
                             <Badge variant="muted" className="text-[10px]">
-                              +{remainingTools}
+                              +{remainingDeclaredTools}
                             </Badge>
                           ) : null}
                         </div>
                       </div>
+
+                      {observedTools.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Observed tools</p>
+                          <div className="flex flex-wrap gap-1">
+                            {visibleObservedTools.length > 0 ? (
+                              visibleObservedTools.map((tool) => (
+                                <Badge key={tool} variant="default" className="max-w-full truncate text-[10px]">
+                                  {tool}
+                                </Badge>
+                              ))
+                            ) : (
+                              <Badge variant="muted" className="text-[10px]">
+                                None recorded
+                              </Badge>
+                            )}
+                            {remainingObservedTools > 0 ? (
+                              <Badge variant="muted" className="text-[10px]">
+                                +{remainingObservedTools}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div className="grid grid-cols-2 gap-1.5">
                         <AgentDrawerRow label="File" value={formatAgentFileAccessLabel(data.agent.policy.fileAccess)} />

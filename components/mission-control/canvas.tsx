@@ -91,6 +91,7 @@ export function MissionCanvas({
   onEditAgent,
   onDeleteAgent,
   onFocusAgent,
+  onConfigureAgentCapabilities,
   onInspectAgentDetail,
   onReplyTask,
   onCopyTaskPrompt,
@@ -118,6 +119,7 @@ export function MissionCanvas({
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onFocusAgent: (agentId: string) => void;
+  onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspectAgentDetail?: (agentId: string, focus: AgentDetailFocus) => void;
   onReplyTask: (task: TaskRecord) => void;
   onCopyTaskPrompt: (task: TaskRecord) => void;
@@ -157,6 +159,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onReplyTask,
     onCopyTaskPrompt,
@@ -237,6 +240,7 @@ export function MissionCanvas({
       onEditAgent,
       onDeleteAgent,
       onFocusAgent,
+      onConfigureAgentCapabilities,
       onInspectAgentDetail,
       onReplyTask,
       onCopyTaskPrompt,
@@ -270,6 +274,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onReplyTask,
     onCopyTaskPrompt,
@@ -624,6 +629,7 @@ function buildCanvasGraph(
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onFocusAgent: (agentId: string) => void,
+  onConfigureAgentCapabilities: ((agentId: string, focus: "skills" | "tools") => void) | undefined,
   onInspectAgentDetail: ((agentId: string, focus: AgentDetailFocus) => void) | undefined,
   onReplyTask: (task: TaskRecord) => void,
   onCopyTaskPrompt: (task: TaskRecord) => void,
@@ -718,6 +724,7 @@ function buildCanvasGraph(
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
           onFocus: onFocusAgent,
+          onConfigureCapabilities: onConfigureAgentCapabilities,
           onInspect: onInspectAgentDetail
         }
       });

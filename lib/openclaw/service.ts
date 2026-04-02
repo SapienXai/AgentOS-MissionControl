@@ -372,6 +372,7 @@ type WorkspaceProjectManifestAgent = {
   role: string | null;
   isPrimary: boolean;
   skillId: string | null;
+  toolIds: string[];
   modelId: string | null;
   enabled: boolean;
   policy: AgentPolicy | null;
@@ -663,6 +664,10 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
             fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
           }
         );
+      const configuredTools = uniqueStrings([
+        ...(manifestAgent?.toolIds ?? []),
+        ...(policy.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
+      ]);
       const primaryModel = rawAgent.model || configured?.model || "unassigned";
       const profileKey = rawAgent.agentDir || rawAgent.id;
       const profile =
@@ -674,11 +679,11 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
             configured?.name ||
             rawAgent.name ||
             configured?.identity?.name ||
-            rawAgent.identityName ||
-            rawAgent.id,
+          rawAgent.identityName ||
+          rawAgent.id,
           agentDir: rawAgent.agentDir,
           configuredSkills,
-          configuredTools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
+          configuredTools,
           template: manifest.template,
           rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES
         }));
@@ -752,7 +757,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
         },
         profile,
         skills: configuredSkills,
-        tools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
+        tools: configuredTools,
         observedTools: observedToolNames,
         policy
       };
@@ -3303,6 +3308,8 @@ export async function updateAgent(input: AgentUpdateInput) {
     setupAgentId,
     snapshot
   });
+  const nextDeclaredSkills =
+    input.skills === undefined ? agent.skills : filterAgentPolicySkills(input.skills);
 
   const configEntry = await upsertAgentConfigEntry(
     agentId,
@@ -3311,7 +3318,7 @@ export async function updateAgent(input: AgentUpdateInput) {
       name: normalizeOptionalValue(input.name),
       model: normalizeOptionalValue(input.modelId),
       heartbeat,
-      skills: [...agent.skills, policySkillId],
+      skills: uniqueStrings([...nextDeclaredSkills, policySkillId]),
       tools:
         policy.fileAccess === "workspace-only"
           ? {
@@ -3323,6 +3330,8 @@ export async function updateAgent(input: AgentUpdateInput) {
     },
     snapshot
   );
+  const nextDeclaredTools =
+    input.tools === undefined ? undefined : normalizeDeclaredAgentTools(input.tools);
 
   await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: normalizeOptionalValue(input.name) ?? configEntry.name,
@@ -3340,7 +3349,8 @@ export async function updateAgent(input: AgentUpdateInput) {
     modelId: normalizeOptionalValue(input.modelId) ?? (agent.modelId === "unassigned" ? null : agent.modelId),
     isPrimary: agent.isDefault,
     policy,
-    channelIds: input.channelIds ?? []
+    channelIds: input.channelIds ?? [],
+    toolIds: nextDeclaredTools
   });
 
   snapshotCache = null;
@@ -5757,6 +5767,15 @@ function isAgentPolicySkillId(skillId: string | undefined) {
 
 function filterAgentPolicySkills(skills: string[]) {
   return skills.filter((skillId) => !isAgentPolicySkillId(skillId));
+}
+
+function normalizeDeclaredAgentTools(toolIds: string[]) {
+  return uniqueStrings(
+    toolIds
+      .filter((toolId) => typeof toolId === "string")
+      .map((toolId) => toolId.trim())
+      .filter((toolId) => Boolean(toolId) && toolId !== "fs.workspaceOnly")
+  );
 }
 
 type TelegramCoordinationChannelSummary = {
@@ -8774,6 +8793,7 @@ async function upsertWorkspaceProjectAgentMetadata(
     emoji?: string | null;
     theme?: string | null;
     skillId?: string | null;
+    toolIds?: string[];
     modelId?: string | null;
     policy: AgentPolicy;
     channelIds?: string[];
@@ -8807,9 +8827,15 @@ async function upsertWorkspaceProjectAgentMetadata(
     emoji: agent.emoji ?? existingAgent?.emoji ?? null,
     theme: agent.theme ?? existingAgent?.theme ?? null,
     skillId: agent.skillId ?? existingAgent?.skillId ?? null,
+    toolIds: Array.isArray(agent.toolIds)
+      ? uniqueStrings(
+          agent.toolIds
+            .map((toolId) => toolId.trim())
+            .filter((toolId) => Boolean(toolId) && toolId !== "fs.workspaceOnly")
+        )
+      : existingAgent?.toolIds ?? [],
     modelId: agent.modelId ?? existingAgent?.modelId ?? null,
-    policy: agent.policy
-    ,
+    policy: agent.policy,
     channelIds: Array.isArray(agent.channelIds)
       ? Array.from(new Set(agent.channelIds.filter((entry) => typeof entry === "string" && entry.trim())))
       : existingAgent?.channelIds ?? []
@@ -8953,6 +8979,14 @@ function parseWorkspaceProjectManifestAgent(value: unknown): WorkspaceProjectMan
     isPrimary: Boolean(value.isPrimary),
     enabled: value.enabled !== false,
     skillId: typeof value.skillId === "string" ? value.skillId : null,
+    toolIds: Array.isArray(value.toolIds)
+      ? uniqueStrings(
+          value.toolIds
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((entry) => entry.trim())
+            .filter((entry) => Boolean(entry) && entry !== "fs.workspaceOnly")
+        )
+      : [],
     modelId: typeof value.modelId === "string" ? value.modelId : null,
     emoji: typeof value.emoji === "string" ? value.emoji : null,
     theme: typeof value.theme === "string" ? value.theme : null,

@@ -1118,6 +1118,8 @@ export interface AgentUpdateInput {
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
   channelIds?: string[];
+  skills?: string[];
+  tools?: string[];
 }
 
 export interface AgentDeleteInput {

@@ -18,6 +18,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
+import { AgentCapabilityEditorDialog } from "@/components/mission-control/agent-capability-editor-dialog";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
@@ -85,6 +86,11 @@ type AgentActionRequest = {
   kind: "edit" | "delete";
   agentId: string;
 };
+type CapabilityEditorRequest = {
+  requestId: string;
+  agentId: string;
+  focus: "skills" | "tools";
+};
 type OptimisticMissionTask = {
   requestId: string;
   dispatchId: string | null;
@@ -139,6 +145,7 @@ export function MissionControlShell({
   const [hiddenTaskKeys, setHiddenTaskKeys] = useState<string[]>([]);
   const [lockedTaskKeys, setLockedTaskKeys] = useState<string[]>([]);
   const [agentActionRequest, setAgentActionRequest] = useState<AgentActionRequest | null>(null);
+  const [capabilityEditorRequest, setCapabilityEditorRequest] = useState<CapabilityEditorRequest | null>(null);
   const [taskAbortRequest, setTaskAbortRequest] = useState<TaskRecord | null>(null);
   const [taskAbortRunState, setTaskAbortRunState] = useState<TaskAbortState>("idle");
   const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
@@ -318,6 +325,34 @@ export function MissionControlShell({
     },
     [selectNode, uiSnapshot.agents]
   );
+
+  const handleConfigureAgentCapabilities = useCallback(
+    (agentId: string, focus: "skills" | "tools") => {
+      const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+      if (!agent) {
+        return;
+      }
+
+      setFocusedAgentId(agent.id);
+      setActiveWorkspaceId(agent.workspaceId);
+      selectNode(agent.id);
+      setCapabilityEditorRequest({
+        requestId: `capabilities:${agentId}:${focus}:${Date.now()}`,
+        agentId,
+        focus
+      });
+    },
+    [selectNode, uiSnapshot.agents]
+  );
+
+  const handleCapabilityEditorOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      return;
+    }
+
+    setCapabilityEditorRequest(null);
+  }, []);
 
   const handleComposerTargetAgentSelect = useCallback(
     (agentId: string) => {
@@ -1751,6 +1786,7 @@ export function MissionControlShell({
               });
             }}
             onFocusAgent={handleFocusAgent}
+            onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
             onInspectAgentDetail={handleInspectAgentDetail}
             onMessageAgent={(agentId) => {
               const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
@@ -1960,6 +1996,7 @@ export function MissionControlShell({
             lastMission={lastMission}
             onRefresh={refresh}
             onSnapshotChange={setSnapshot}
+            onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
             collapsed={!isInspectorOpen}
             onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
             activeTab={activeInspectorTab}
@@ -1975,6 +2012,16 @@ export function MissionControlShell({
             }}
           />
         </div>
+
+        <AgentCapabilityEditorDialog
+          open={Boolean(capabilityEditorRequest)}
+          agentId={capabilityEditorRequest?.agentId ?? null}
+          initialFocus={capabilityEditorRequest?.focus ?? "skills"}
+          snapshot={uiSnapshot}
+          onOpenChange={handleCapabilityEditorOpenChange}
+          onSnapshotChange={(updater) => setSnapshot(updater)}
+          onRefresh={refresh}
+        />
 
         <div className="pointer-events-auto absolute bottom-[calc(env(safe-area-inset-bottom)+12px)] left-4 right-4 z-40 lg:bottom-6 lg:left-1/2 lg:right-auto lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">
           <div className="mx-auto mb-1 flex w-fit flex-col items-start gap-1">
