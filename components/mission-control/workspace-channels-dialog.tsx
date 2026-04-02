@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, Loader2, Plus, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ import {
   replaceSnapshotChannelRegistry,
   upsertSnapshotChannelAccount
 } from "@/lib/openclaw/channel-bindings";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, WorkspaceChannelGroupAssignment } from "@/lib/openclaw/types";
 
 type TelegramDiscoveredGroup = {
@@ -59,6 +60,16 @@ export function WorkspaceChannelsDialog({
   const workspaceChannels = useMemo(
     () => (workspace ? getWorkspaceChannels(snapshot, workspace.id) : []),
     [snapshot, workspace]
+  );
+  const resolveAgentDisplayName = useCallback(
+    (agentId: string | null | undefined, fallback = "Unset") => {
+      if (!agentId) {
+        return fallback;
+      }
+
+      return formatAgentDisplayName(snapshot.agents.find((agent) => agent.id === agentId) ?? { name: agentId });
+    },
+    [snapshot.agents]
   );
   const telegramAccounts = useMemo(
     () => {
@@ -721,15 +732,12 @@ export function WorkspaceChannelsDialog({
       .map((binding) => {
         const workspaceEntry = snapshot.workspaces.find((entry) => entry.id === binding.workspaceId) ?? null;
         const agentNames = uniqueStrings(
-          binding.agentIds.map((agentId) => snapshot.agents.find((agent) => agent.id === agentId)?.name ?? agentId)
+          binding.agentIds.map((agentId) => resolveAgentDisplayName(agentId, agentId))
         );
         const groupAgentNames = uniqueStrings(
           binding.groupAssignments
             .filter((assignment) => assignment.enabled !== false && assignment.agentId)
-            .map(
-              (assignment) =>
-                snapshot.agents.find((agent) => agent.id === assignment.agentId)?.name ?? assignment.agentId ?? ""
-            )
+            .map((assignment) => resolveAgentDisplayName(assignment.agentId, assignment.agentId ?? ""))
         );
 
         return {
@@ -750,10 +758,10 @@ export function WorkspaceChannelsDialog({
       channel?.primaryAgentId ?? ""
     ]);
     const affectedAgentNames = uniqueStrings(
-      affectedAgentIds.map((agentId) => snapshot.agents.find((agent) => agent.id === agentId)?.name ?? agentId)
+      affectedAgentIds.map((agentId) => resolveAgentDisplayName(agentId, agentId))
     );
     const primaryAgentName = channel?.primaryAgentId
-      ? snapshot.agents.find((agent) => agent.id === channel.primaryAgentId)?.name ?? channel.primaryAgentId
+      ? resolveAgentDisplayName(channel.primaryAgentId, channel.primaryAgentId)
       : null;
 
     return {
@@ -763,7 +771,7 @@ export function WorkspaceChannelsDialog({
       affectedAgentNames,
       primaryAgentName
     };
-  }, [deleteTarget, snapshot]);
+  }, [deleteTarget, resolveAgentDisplayName, snapshot]);
 
   const isDeleteConfirmationValid =
     deleteTarget !== null &&
@@ -846,9 +854,7 @@ export function WorkspaceChannelsDialog({
                         channel.workspaces.find((entry) => entry.workspaceId === workspace?.id) ?? null;
                       const isChannelCollapsed = collapsedWorkspaceChannelIds.includes(channel.id);
                       const primaryAgentId = channel.primaryAgentId ?? "";
-                      const primaryAgentName = primaryAgentId
-                        ? snapshot.agents.find((agent) => agent.id === primaryAgentId)?.name ?? primaryAgentId
-                        : "Unset";
+                      const primaryAgentName = resolveAgentDisplayName(primaryAgentId, "Unset");
                       const currentPrimaryAgent = primaryAgentId
                         ? snapshot.agents.find((agent) => agent.id === primaryAgentId) ?? null
                         : null;
@@ -933,8 +939,8 @@ export function WorkspaceChannelsDialog({
                                 {primaryAgentOptions.map((agent) => (
                                   <option key={agent.id} value={agent.id}>
                                     {agent.id === currentPrimaryAgent?.id && agent.workspaceId !== workspace?.id
-                                      ? `${agent.name} (${currentPrimaryWorkspace?.name ?? "other workspace"})`
-                                      : agent.name}
+                                      ? `${formatAgentDisplayName(agent)} (${currentPrimaryWorkspace?.name ?? "other workspace"})`
+                                      : formatAgentDisplayName(agent)}
                                   </option>
                                 ))}
                               </select>
@@ -987,7 +993,7 @@ export function WorkspaceChannelsDialog({
                                         key={`${channel.id}-${agent.id}`}
                                         className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-white"
                                       >
-                                        <span className="truncate">{agent.name}</span>
+                                        <span className="truncate">{formatAgentDisplayName(agent)}</span>
                                         <button
                                           type="button"
                                           className="rounded-full p-0.5 text-slate-400 transition-colors hover:text-white"
@@ -1013,7 +1019,7 @@ export function WorkspaceChannelsDialog({
                                     >
                                       {availableDelegateAgents.map((agent) => (
                                         <option key={agent.id} value={agent.id}>
-                                          {agent.name}
+                                          {formatAgentDisplayName(agent)}
                                         </option>
                                       ))}
                                     </select>
@@ -1127,7 +1133,7 @@ export function WorkspaceChannelsDialog({
                                                   <option value="">Use primary agent</option>
                                                   {workspaceAgents.map((agent) => (
                                                     <option key={agent.id} value={agent.id}>
-                                                      {agent.name}
+                                                      {formatAgentDisplayName(agent)}
                                                     </option>
                                                   ))}
                                                 </select>
@@ -1292,7 +1298,7 @@ export function WorkspaceChannelsDialog({
                       <option value="">Select agent</option>
                       {workspaceAgents.map((agent) => (
                         <option key={agent.id} value={agent.id}>
-                          {agent.name}
+                          {formatAgentDisplayName(agent)}
                         </option>
                       ))}
                     </select>

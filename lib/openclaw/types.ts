@@ -207,8 +207,10 @@ export interface ChannelAccountRecord {
 export interface OpenClawAgent {
   id: string;
   name: string;
+  identityName?: string;
   workspaceId: string;
   workspacePath: string;
+  agentDir?: string;
   modelId: string;
   isDefault: boolean;
   status: AgentStatus;

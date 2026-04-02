@@ -35,6 +35,7 @@ import {
   compactPath,
   compactMissionText,
   formatContextWindow,
+  formatAgentDisplayName,
   formatRelativeTime,
   formatTokens,
   resolveRelativeTimeReferenceMs,
@@ -59,6 +60,7 @@ type InspectorPanelProps = {
   selectedNodeId: string | null;
   lastMission: MissionResponse | null;
   onRefresh?: () => Promise<void>;
+  onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
   onAbortTask?: (task: TaskRecord) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -85,6 +87,7 @@ function InspectorPanelContent({
   selectedNodeId,
   lastMission,
   onRefresh,
+  onSnapshotChange,
   onAbortTask,
   collapsed,
   onToggleCollapsed,
@@ -144,7 +147,7 @@ function InspectorPanelContent({
   const outputTabLabel = selectedTask ? "Feed" : "Output";
   const selectedLabel =
     selectedWorkspace?.name ||
-    selectedAgent?.name ||
+    (selectedAgent ? formatAgentDisplayName(selectedAgent) : null) ||
     (selectedTask ? compactMissionText(selectedTask.title || selectedTask.mission || "Task", 48) || "Task" : null) ||
     (selectedRuntime ? compactMissionText(selectedRuntime.title || "Run", 48) || "Run" : null) ||
     selectedModel?.name ||
@@ -429,7 +432,12 @@ function InspectorPanelContent({
                   ) : null}
 
                   {isChatView && selectedAgent ? (
-                    <AgentChatDrawer agent={selectedAgent} surfaceTheme={surfaceTheme} onRefresh={onRefresh} />
+                    <AgentChatDrawer
+                      agent={selectedAgent}
+                      surfaceTheme={surfaceTheme}
+                      onRefresh={onRefresh}
+                      onSnapshotChange={onSnapshotChange}
+                    />
                   ) : null}
 
                   {visibleActiveTab === "output" && selectedTask ? (
@@ -674,7 +682,7 @@ function WorkspaceContent({
           <div className="flex flex-wrap gap-2">
             {agents.map((agent) => (
               <Badge key={agent.id} variant={agent.isDefault ? "default" : "muted"}>
-                {agent.name}
+                {formatAgentDisplayName(agent)}
               </Badge>
             ))}
           </div>
@@ -792,7 +800,7 @@ function WorkspaceContent({
                 className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-[13px] text-white">{agent.name}</p>
+                  <p className="truncate text-[13px] text-white">{formatAgentDisplayName(agent)}</p>
                   <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
                     {agent.currentAction}
                   </p>
@@ -865,7 +873,7 @@ function AgentContent({
   return (
     <>
       <InfoCard icon={Cpu} title="Agent identity" value={agent.id}>
-        <p>{agent.name}</p>
+        <p>{formatAgentDisplayName(agent)}</p>
         <p>{agent.identity.emoji ? `${agent.identity.emoji} · ${agent.identity.theme ?? "theme unset"}` : "No identity emoji"}</p>
         <div className="flex flex-wrap gap-2">
           {agent.isDefault ? <Badge variant="default">default agent</Badge> : null}
@@ -1102,7 +1110,7 @@ function TaskContent({
         ) : null}
         <div className="flex flex-wrap gap-2">
           {workspace ? <Badge variant="muted">{workspace.name}</Badge> : null}
-          {primaryAgent ? <Badge variant="default">{primaryAgent.name}</Badge> : null}
+          {primaryAgent ? <Badge variant="default">{formatAgentDisplayName(primaryAgent)}</Badge> : null}
           {selectedTask.dispatchId ? <Badge variant="muted">dispatch {shortId(selectedTask.dispatchId, 8)}</Badge> : null}
           {isAborted ? <Badge variant="danger">aborted</Badge> : null}
         </div>

@@ -61,7 +61,13 @@ import {
   getWorkspaceChannelIdsForAgent,
   syncWorkspaceAgentChannelBindings
 } from "@/lib/openclaw/channel-bindings";
-import { compactPath, formatContextWindow, formatModelLabel, toneForHealth } from "@/lib/openclaw/presenters";
+import {
+  compactPath,
+  formatAgentDisplayName,
+  formatContextWindow,
+  formatModelLabel,
+  toneForHealth
+} from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -169,7 +175,7 @@ export function MissionSidebar({
             return left.workspaceId.localeCompare(right.workspaceId);
           }
 
-          return left.name.localeCompare(right.name);
+          return formatAgentDisplayName(left).localeCompare(formatAgentDisplayName(right));
         }),
     [snapshot.agents, activeWorkspaceId]
   );
@@ -311,7 +317,7 @@ export function MissionSidebar({
       ...buildAgentDraft(agent.workspaceId, {
         id: agent.id,
         modelId: agent.modelId === "unassigned" ? "" : agent.modelId,
-        name: agent.name,
+        name: formatAgentDisplayName(agent),
         emoji: agent.identity.emoji ?? "",
         theme: agent.identity.theme ?? "",
         avatar: agent.identity.avatar ?? "",
@@ -837,7 +843,10 @@ export function MissionSidebar({
                         </div>
                       ) : null}
 
-                      {visibleAgents.map((agent) => (
+                      {visibleAgents.map((agent) => {
+                        const agentLabel = formatAgentDisplayName(agent);
+
+                        return (
                         <div
                           key={agent.id}
                           className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-3.5"
@@ -846,7 +855,7 @@ export function MissionSidebar({
                             <div className="min-w-0">
                               <p className="truncate text-[13px] font-medium text-white">
                                 {agent.identity.emoji ? `${agent.identity.emoji} ` : ""}
-                                {agent.name}
+                                {agentLabel}
                               </p>
                               <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
                                 {agent.id}
@@ -861,7 +870,7 @@ export function MissionSidebar({
                               </div>
                             </div>
                             <AgentActionMenu
-                              agentName={agent.name}
+                              agentName={agentLabel}
                               onEdit={() => openEditAgent(agent)}
                               onDelete={() => openDeleteAgent(agent)}
                             />
@@ -882,7 +891,8 @@ export function MissionSidebar({
                             </p>
                           ) : null}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </>
                 ) : null}

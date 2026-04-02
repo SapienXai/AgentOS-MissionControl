@@ -40,6 +40,7 @@ import {
 import { matchesMissionRuntime, matchesMissionText } from "@/lib/openclaw/runtime-matching";
 import {
   compactMissionText,
+  formatAgentDisplayName,
   stripMissionRouting
 } from "@/lib/openclaw/presenters";
 import {
@@ -602,7 +603,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     const channelAccounts = applyChannelAccountDisplayNames(await readChannelAccounts(), channelRegistry);
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
-    const profileByWorkspace = new Map<string, AgentBootstrapProfile>();
+    const profileByAgent = new Map<string, AgentBootstrapProfile>();
     const manifestByWorkspace = new Map<string, WorkspaceProjectManifest>();
     const agents: OpenClawAgent[] = [];
     const relationships: RelationshipRecord[] = [];
@@ -635,6 +636,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
 
     for (const rawAgent of agentsList) {
       const configured = configByAgent.get(rawAgent.id);
+      const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
       const workspaceId = workspaceIdFromPath(rawAgent.workspace);
       const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
       const manifest =
@@ -649,24 +651,38 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
           inferAgentPresetFromContext({
             skills: configuredSkills,
             id: rawAgent.id,
-            name: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id
+            name:
+              normalizeOptionalValue(identityOverrides.name) ||
+              configured?.name ||
+              rawAgent.name ||
+              configured?.identity?.name ||
+              rawAgent.identityName ||
+              rawAgent.id
           }),
           {
             fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
           }
         );
       const primaryModel = rawAgent.model || configured?.model || "unassigned";
+      const profileKey = rawAgent.agentDir || rawAgent.id;
       const profile =
-        profileByWorkspace.get(rawAgent.workspace) ??
+        profileByAgent.get(profileKey) ??
         (await readAgentBootstrapProfile(rawAgent.workspace, {
           agentId: rawAgent.id,
-          agentName: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id,
+          agentName:
+            normalizeOptionalValue(identityOverrides.name) ||
+            configured?.name ||
+            rawAgent.name ||
+            configured?.identity?.name ||
+            rawAgent.identityName ||
+            rawAgent.id,
+          agentDir: rawAgent.agentDir,
           configuredSkills,
           configuredTools: configured?.tools?.fs?.workspaceOnly ? ["fs.workspaceOnly"] : [],
           template: manifest.template,
           rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES
         }));
-      profileByWorkspace.set(rawAgent.workspace, profile);
+      profileByAgent.set(profileKey, profile);
       const agentRuntimes = runtimes
         .filter((runtime) => runtime.agentId === rawAgent.id)
         .sort(sortRuntimesByUpdatedAtDesc);
@@ -694,9 +710,21 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
 
       const agent: OpenClawAgent = {
         id: rawAgent.id,
-        name: rawAgent.name || rawAgent.identityName || configured?.name || rawAgent.id,
+        name:
+          normalizeOptionalValue(identityOverrides.name) ||
+          configured?.name ||
+          rawAgent.name ||
+          configured?.identity?.name ||
+          rawAgent.identityName ||
+          rawAgent.id,
+        identityName:
+          normalizeOptionalValue(identityOverrides.name) ||
+          configured?.identity?.name ||
+          rawAgent.identityName ||
+          undefined,
         workspaceId,
         workspacePath: rawAgent.workspace,
+        agentDir: rawAgent.agentDir,
         modelId: primaryModel,
         isDefault: Boolean(rawAgent.isDefault || configured?.default),
         status: statusValue,
@@ -714,9 +742,12 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
           everyMs: heartbeat?.everyMs ?? null
         },
         identity: {
-          emoji: configured?.identity?.emoji || rawAgent.identityEmoji,
+          emoji:
+            normalizeOptionalValue(identityOverrides.emoji) ||
+            configured?.identity?.emoji ||
+            rawAgent.identityEmoji,
           theme: configured?.identity?.theme,
-          avatar: configured?.identity?.avatar,
+          avatar: normalizeOptionalValue(identityOverrides.avatar) || configured?.identity?.avatar,
           source: rawAgent.identitySource
         },
         profile,
@@ -966,7 +997,7 @@ function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
 function buildTaskRecords(runtimes: RuntimeRecord[], agents: OpenClawAgent[]): TaskRecord[] {
   const taskRuntimes = runtimes.filter((runtime) => !isDirectChatRuntime(runtime));
   const groups = new Map<string, RuntimeRecord[]>();
-  const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+  const agentNameById = new Map(agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]));
   const dispatchIdBySessionKey = buildDispatchIdBySessionKey(taskRuntimes);
 
   for (const runtime of taskRuntimes) {
@@ -3197,7 +3228,7 @@ export async function createAgent(input: AgentCreateInput) {
     emoji,
     theme,
     avatar: normalizeOptionalValue(input.avatar)
-  });
+  }, buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId));
 
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
@@ -3298,7 +3329,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
     theme: normalizeOptionalValue(input.theme) ?? currentTheme,
     avatar: normalizeOptionalValue(input.avatar)
-  });
+  }, agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId));
 
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,
@@ -4992,7 +5023,7 @@ async function createBootstrappedWorkspaceAgent(params: {
     name: normalizeOptionalValue(params.agent.name) ?? configEntry.name,
     emoji: normalizeOptionalValue(params.agent.emoji),
     theme: normalizeOptionalValue(params.agent.theme)
-  });
+  }, buildWorkspaceAgentStatePath(params.workspacePath, agentId));
 
   return agentId;
 }
@@ -5818,7 +5849,9 @@ function buildTelegramCoordinationContext(
     return null;
   }
 
-  const agentNameById = new Map(snapshot?.agents.map((agent) => [agent.id, agent.name]) ?? []);
+  const agentNameById = new Map(
+    snapshot?.agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]) ?? []
+  );
   const agentById = new Map(snapshot?.agents.map((agent) => [agent.id, agent]) ?? []);
   const currentAgent = agentById.get(agentId) ?? null;
   const currentWorkspaceId = currentAgent?.workspaceId ?? null;
@@ -6663,8 +6696,9 @@ function isMissingAgentConfigListError(error: unknown) {
 
 function buildAgentConfigListFromSnapshot(snapshot: MissionControlSnapshot) {
   return snapshot.agents.map((agent) => {
+    const displayName = formatAgentDisplayName(agent);
     const identity = {
-      name: agent.name,
+      name: displayName,
       ...(agent.identity.emoji ? { emoji: agent.identity.emoji } : {}),
       ...(agent.identity.theme ? { theme: agent.identity.theme } : {}),
       ...(agent.identity.avatar ? { avatar: agent.identity.avatar } : {})
@@ -6673,7 +6707,7 @@ function buildAgentConfigListFromSnapshot(snapshot: MissionControlSnapshot) {
     const configEntry: MutableAgentConfigEntry = {
       id: agent.id,
       workspace: agent.workspacePath,
-      name: agent.name
+      name: displayName
     };
 
     if (agent.modelId && agent.modelId !== "unassigned") {
@@ -6741,9 +6775,30 @@ async function applyAgentIdentity(
     emoji?: string;
     theme?: string;
     avatar?: string;
-  }
+  },
+  agentDir?: string
 ) {
-  const args = ["agents", "set-identity", "--agent", agentId, "--workspace", workspacePath, "--json"];
+  const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
+  const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
+  const identityMarkdown = renderAgentIdentityMarkdown({
+    name: normalizeOptionalValue(identity.name) ?? agentId,
+    emoji: normalizeOptionalValue(identity.emoji),
+    avatar: normalizeOptionalValue(identity.avatar)
+  });
+
+  await writeTextFileEnsured(identityFilePath, identityMarkdown);
+
+  const args = [
+    "agents",
+    "set-identity",
+    "--agent",
+    agentId,
+    "--workspace",
+    workspacePath,
+    "--identity-file",
+    identityFilePath,
+    "--json"
+  ];
 
   if (identity.name) {
     args.push("--name", identity.name);
@@ -6761,11 +6816,56 @@ async function applyAgentIdentity(
     args.push("--avatar", identity.avatar);
   }
 
-  if (args.length === 7) {
-    return;
+  await runOpenClaw(args);
+}
+
+function renderAgentIdentityMarkdown(identity: {
+  name: string;
+  emoji?: string | null;
+  avatar?: string | null;
+}) {
+  const avatar = normalizeOptionalValue(identity.avatar);
+
+  return `# IDENTITY.md - Who Am I?
+
+- **Name:** ${identity.name}
+- **Creature:** OpenClaw agent
+- **Vibe:** pragmatic, concise, workspace-grounded
+- **Emoji:** ${identity.emoji ?? ""}
+- **Avatar:** ${avatar ?? ""}
+
+---
+
+This identity file lives with the agent state so each agent can keep its own identity.
+`;
+}
+
+async function readAgentIdentityOverrides(agentDir?: string) {
+  const resolvedAgentDir = normalizeOptionalValue(agentDir);
+
+  if (!resolvedAgentDir) {
+    return { name: null, emoji: null, avatar: null };
   }
 
-  await runOpenClaw(args);
+  const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
+
+  try {
+    const raw = await readFile(identityFilePath, "utf8");
+    const lines = raw.split(/\r?\n/);
+    const parseField = (label: string) => {
+      const match = lines.find((line) => new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i").test(line.trim()));
+      const value = match?.match(new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i"))?.[1];
+      return normalizeOptionalValue(value ? cleanMarkdown(value) : null) ?? null;
+    };
+
+    return {
+      name: parseField("Name"),
+      emoji: parseField("Emoji"),
+      avatar: parseField("Avatar")
+    };
+  } catch {
+    return { name: null, emoji: null, avatar: null };
+  }
 }
 
 async function resolveRuntimeTranscriptPath(
@@ -6843,7 +6943,7 @@ function buildTaskFeed(
   outputsByRuntimeId: Map<string, RuntimeOutputRecord>,
   snapshot: MissionControlSnapshot
 ) {
-  const agentNameById = new Map(snapshot.agents.map((agent) => [agent.id, agent.name]));
+  const agentNameById = new Map(snapshot.agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]));
   const events: TaskFeedEvent[] = [];
   const sortedRuns = [...runs].sort((left, right) => (left.updatedAt ?? 0) - (right.updatedAt ?? 0));
 
@@ -6986,7 +7086,9 @@ function buildMissionDispatchFeed(
     return [] as TaskFeedEvent[];
   }
 
-  const agentName = snapshot.agents.find((agent) => agent.id === task.primaryAgentId)?.name ?? "OpenClaw";
+  const agentName = formatAgentDisplayName(
+    snapshot.agents.find((agent) => agent.id === task.primaryAgentId) ?? { name: "OpenClaw" }
+  );
   const events: TaskFeedEvent[] = [
     enrichTaskFeedEvent(
       {
@@ -7744,6 +7846,7 @@ async function readAgentBootstrapProfile(
   options: {
     agentId: string;
     agentName: string;
+    agentDir?: string;
     configuredSkills: string[];
     configuredTools: string[];
     template?: WorkspaceTemplate | null;
@@ -7751,6 +7854,10 @@ async function readAgentBootstrapProfile(
   }
 ): Promise<AgentBootstrapProfile> {
   const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
+  const searchRoots = [
+    workspacePath,
+    normalizeOptionalValue(options.agentDir)
+  ].filter((value): value is string => Boolean(value));
   const contextManifest = buildWorkspaceContextManifest(
     options.template,
     options.rules ?? DEFAULT_WORKSPACE_RULES
@@ -7762,20 +7869,22 @@ async function readAgentBootstrapProfile(
   const sections = new Map<string, string[]>();
 
   for (const fileName of profileFiles) {
-    const filePath = path.join(workspacePath, fileName);
+    for (const rootPath of searchRoots) {
+      const filePath = path.join(rootPath, fileName);
 
-    try {
-      await access(filePath);
-      const raw = await readFile(filePath, "utf8");
-      const trimmed = raw.trim();
-      if (!trimmed) {
+      try {
+        await access(filePath);
+        const raw = await readFile(filePath, "utf8");
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          continue;
+        }
+
+        sources.push(describeBootstrapSourcePath(workspacePath, filePath));
+        sections.set(fileName, trimmed.split(/\r?\n/));
+      } catch {
         continue;
       }
-
-      sources.push(fileName);
-      sections.set(fileName, trimmed.split(/\r?\n/));
-    } catch {
-      continue;
     }
   }
 
@@ -7823,6 +7932,20 @@ async function readAgentBootstrapProfile(
     outputPreference,
     sourceFiles: sources
   };
+}
+
+function describeBootstrapSourcePath(workspacePath: string, filePath: string) {
+  const resolvedWorkspacePath = path.resolve(workspacePath);
+  const resolvedFilePath = path.resolve(filePath);
+
+  if (
+    resolvedFilePath === resolvedWorkspacePath ||
+    resolvedFilePath.startsWith(`${resolvedWorkspacePath}${path.sep}`)
+  ) {
+    return path.relative(resolvedWorkspacePath, resolvedFilePath) || path.basename(resolvedFilePath);
+  }
+
+  return resolvedFilePath;
 }
 
 async function readWorkspaceInspectorMetadata(

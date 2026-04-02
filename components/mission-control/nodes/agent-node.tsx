@@ -17,16 +17,86 @@ import {
   formatAgentNetworkAccessLabel,
   formatAgentPresetLabel
 } from "@/lib/openclaw/agent-presets";
-import { formatModelLabel, formatRelativeTime } from "@/lib/openclaw/presenters";
+import { formatAgentDisplayName, formatModelLabel, formatRelativeTime } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type AgentFlowNode = FlowNode<AgentNodeData, "agent">;
+const agentNameVariants = {
+  hidden: {
+    opacity: 0
+  },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.022,
+      delayChildren: 0.03
+    }
+  },
+  exit: {
+    opacity: 0,
+    transition: {
+      duration: 0.14,
+      ease: "easeInOut"
+    }
+  }
+} as const;
+
+const agentNameGlyphVariants = {
+  hidden: {
+    opacity: 0,
+    y: 10
+  },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      duration: 0.22,
+      ease: [0.22, 1, 0.36, 1]
+    }
+  },
+  exit: {
+    opacity: 0,
+    y: -8,
+    transition: {
+      duration: 0.14,
+      ease: "easeOut"
+    }
+  }
+} as const;
+
+function AnimatedAgentName({ label }: { label: string }) {
+  return (
+    <AnimatePresence initial={false} mode="wait">
+      <motion.span
+        key={label}
+        variants={agentNameVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        aria-label={label}
+        className="inline-block max-w-full whitespace-nowrap"
+      >
+        {Array.from(label).map((glyph, index) => (
+          <motion.span
+            key={`${label}:${index}:${glyph}`}
+            variants={agentNameGlyphVariants}
+            aria-hidden="true"
+            className="inline-block"
+          >
+            {glyph === " " ? "\u00A0" : glyph}
+          </motion.span>
+        ))}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
 
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const drawerPanelId = `agent-drawer-${data.agent.id}`;
+  const agentLabel = formatAgentDisplayName(data.agent);
   const isAttentionActive = selected || data.composerFocused;
   const dotTone =
     data.agent.status === "engaged"
@@ -211,7 +281,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                   <StatusDot tone={dotTone} pulse={data.agent.status === "engaged" || data.agent.status === "monitoring"} />
                   Agent
                 </div>
-                <p className="mt-1 truncate font-display text-[1.08rem] leading-5 text-white">{data.agent.name}</p>
+                <p className="mt-1 truncate font-display text-[1.08rem] leading-5 text-white">
+                  <AnimatedAgentName label={agentLabel} />
+                </p>
                 <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-amber-200/90">{themeLabel}</p>
               </div>
             </div>
@@ -220,7 +292,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           <div className="absolute right-2 top-2 z-40" ref={menuRef}>
             <button
               type="button"
-              aria-label={`${data.agent.name} actions`}
+              aria-label={`${agentLabel} actions`}
               onClick={(event) => {
                 event.stopPropagation();
                 setMenuOpen((current) => !current);

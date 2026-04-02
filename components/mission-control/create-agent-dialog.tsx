@@ -40,6 +40,7 @@ import {
   type AgentHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
 import { syncWorkspaceAgentChannelBindings } from "@/lib/openclaw/channel-bindings";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
@@ -250,7 +251,7 @@ export function CreateAgentDialog({
                   )}
                 >
                   {existingAgentCollision
-                    ? `ID "${normalizedAgentId}" is already used by ${existingAgentCollision.name} in ${collisionWorkspaceLabel}.`
+                    ? `ID "${normalizedAgentId}" is already used by ${formatAgentDisplayName(existingAgentCollision)} in ${collisionWorkspaceLabel}.`
                     : normalizedAgentId && normalizedAgentId !== draft.id.trim()
                       ? `Saved as ${normalizedAgentId}. Suggested workspace-scoped id: ${suggestedAgentId}.`
                       : `Workspace-scoped id: ${suggestedAgentId}.`}

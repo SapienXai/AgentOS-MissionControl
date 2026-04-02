@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/openclaw/types";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type ThinkingLevel = NonNullable<MissionSubmission["thinking"]>;
@@ -122,16 +123,15 @@ export function CommandBar({
     targetWorkspace ? agent.workspaceId === targetWorkspace.id : true
   );
   const selectedAgent = availableAgents.find((agent) => agent.id === targetAgentId) ?? availableAgents[0] ?? null;
+  const selectedAgentLabel = selectedAgent ? formatAgentDisplayName(selectedAgent) : null;
   const effectiveTargetAgentId = selectedAgent?.id ?? null;
   const agentOptions: AgentOption[] = availableAgents.map((agent) => ({
-    label: agent.name,
+    label: formatAgentDisplayName(agent),
     value: agent.id
   }));
   const draftScopeKey = buildDraftScopeKey(targetWorkspace?.id ?? activeWorkspaceId ?? null, effectiveTargetAgentId);
   const canSubmit = Boolean(mission.trim() && effectiveTargetAgentId && !isSubmitting);
-  const dynamicPlaceholder = selectedAgent
-    ? `Compose for ${selectedAgent.name}...`
-    : "Compose a mission...";
+  const dynamicPlaceholder = selectedAgentLabel ? `Compose for ${selectedAgentLabel}...` : "Compose a mission...";
   const inlineSuggestions = buildInlineSuggestions();
   const showSuggestions = inlineSuggestions.length > 0;
   const isDesktopCollapsed =
@@ -342,7 +342,7 @@ export function CommandBar({
           id: globalThis.crypto?.randomUUID?.() || `${submittedAt}`,
           mission: submittedMission,
           agentId: resolvedAgentId,
-          agentName: selectedAgent?.name ?? "Agent",
+          agentName: selectedAgentLabel ?? "Agent",
           workspaceId: targetWorkspace?.id ?? activeWorkspaceId,
           workspaceName: targetWorkspace?.name ?? null,
           submittedAt
@@ -447,7 +447,7 @@ export function CommandBar({
           >
             <div className="flex items-center gap-2 rounded-full border border-white/[0.07] bg-[linear-gradient(180deg,rgba(20,28,43,0.9),rgba(11,17,28,0.88))] px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <span className="inline-flex h-7 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] text-slate-300">
-                {selectedAgent?.name || "No agent"}
+                {selectedAgentLabel || "No agent"}
               </span>
               <p className="min-w-0 flex-1 truncate text-[13px] text-[#f6eee5]/58">
                 {dynamicPlaceholder}

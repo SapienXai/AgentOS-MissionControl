@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 import { getWorkspaceChannels } from "@/lib/openclaw/channel-bindings";
 import { Loader2 } from "lucide-react";
@@ -24,6 +25,15 @@ export function ChannelBindingPicker({
 }) {
   const channels = getWorkspaceChannels(snapshot, workspaceId);
   const selectedChannelIdSet = new Set(channelIds);
+  const resolveAgentDisplayName = (lookupAgentId: string | null | undefined) => {
+    if (!lookupAgentId) {
+      return null;
+    }
+
+    return formatAgentDisplayName(
+      snapshot.agents.find((agent) => agent.id === lookupAgentId) ?? { name: lookupAgentId }
+    );
+  };
 
   if (channels.length === 0) {
     return (
@@ -62,9 +72,7 @@ export function ChannelBindingPicker({
         {channels.map((channel) => {
           const selected = selectedChannelIdSet.has(channel.id);
           const isPrimaryForAgent = Boolean(agentId && channel.primaryAgentId === agentId);
-          const primaryAgentName = channel.primaryAgentId
-            ? snapshot.agents.find((agent) => agent.id === channel.primaryAgentId)?.name ?? channel.primaryAgentId
-            : null;
+          const primaryAgentName = resolveAgentDisplayName(channel.primaryAgentId);
           const workspaceBinding = channel.workspaces.find((binding) => binding.workspaceId === workspaceId) ?? null;
           const sharedCount = workspaceBinding?.agentIds.length ?? 0;
 

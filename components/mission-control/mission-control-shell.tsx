@@ -39,7 +39,7 @@ import { Label } from "@/components/ui/label";
 import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
-import { compactPath } from "@/lib/openclaw/presenters";
+import { compactPath, formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
   isOpenClawSystemReady as resolveOpenClawSystemReady
@@ -1942,6 +1942,7 @@ export function MissionControlShell({
           selectedNodeId={selectedNodeId}
           lastMission={lastMission}
           onRefresh={refresh}
+          onSnapshotChange={setSnapshot}
           collapsed={!isInspectorOpen}
           onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
           activeTab={activeInspectorTab}
@@ -3706,7 +3707,7 @@ function createOptimisticMissionTaskRecord(
       ageMs: 0,
       workspaceId: event.workspaceId ?? undefined,
       primaryAgentId: event.agentId,
-      primaryAgentName: agent?.name ?? "OpenClaw",
+      primaryAgentName: formatAgentDisplayName(agent ?? { name: "OpenClaw" }),
       runtimeIds: [],
       agentIds: [event.agentId],
       sessionIds: [],
