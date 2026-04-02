@@ -6,7 +6,7 @@ import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow
 import { ChevronDown, MessageCircle, MoreHorizontal, UserPlus } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
-import type { AgentNodeData } from "@/components/mission-control/canvas-types";
+import type { AgentDetailFocus, AgentNodeData } from "@/components/mission-control/canvas-types";
 import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -112,6 +112,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const observedTools = data.agent.observedTools ?? [];
   const declaredToolCount = declaredTools.length;
   const observedToolCount = observedTools.length;
+  const inspectAgentSection = (focus: AgentDetailFocus) => {
+    data.onInspect?.(data.agent.id, focus);
+  };
   const statusBadgeVariant =
     data.agent.status === "engaged"
       ? "default"
@@ -350,9 +353,24 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           </div>
 
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <AgentStatTile label="Skills" value={skillCount} />
-            <AgentStatTile label="Tools" value={displayToolCount} />
-            <AgentStatTile label="Sessions" value={data.agent.sessionCount} />
+            <AgentStatTile
+              label="Skills"
+              value={skillCount}
+              ariaLabel={`Open skills for ${agentLabel}`}
+              onClick={() => inspectAgentSection("skills")}
+            />
+            <AgentStatTile
+              label="Tools"
+              value={displayToolCount}
+              ariaLabel={`Open tools for ${agentLabel}`}
+              onClick={() => inspectAgentSection("tools")}
+            />
+            <AgentStatTile
+              label="Sessions"
+              value={data.agent.sessionCount}
+              ariaLabel={`Open sessions for ${agentLabel}`}
+              onClick={() => inspectAgentSection("sessions")}
+            />
           </div>
 
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -507,15 +525,42 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
 
 function AgentStatTile({
   label,
-  value
+  value,
+  onClick,
+  ariaLabel
 }: {
   label: string;
   value: number | string;
+  onClick?: () => void;
+  ariaLabel?: string;
 }) {
-  return (
-    <div className="rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+  const content = (
+    <>
       <p className="text-[15px] font-semibold leading-none text-white">{value}</p>
       <p className="mt-1 text-[8px] uppercase tracking-[0.18em] text-slate-500">{label}</p>
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        aria-label={ariaLabel ?? label}
+        className="nodrag nopan w-full rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-300/18 hover:bg-cyan-400/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 focus-visible:ring-offset-0"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <div className="w-full rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      {content}
     </div>
   );
 }

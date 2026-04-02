@@ -14,6 +14,8 @@ export type WorkspaceNodeData = Record<string, unknown> & {
   onToggleTaskCards?: () => void;
 };
 
+export type AgentDetailFocus = "skills" | "tools" | "sessions";
+
 export type AgentNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
   emphasis: boolean;
@@ -25,6 +27,7 @@ export type AgentNodeData = Record<string, unknown> & {
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
   onFocus?: (agentId: string) => void;
+  onInspect?: (agentId: string, focus: AgentDetailFocus) => void;
 };
 
 export type TelegramTetherNodeData = Record<string, unknown> & {

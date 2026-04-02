@@ -39,6 +39,7 @@ import { Label } from "@/components/ui/label";
 import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
+import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
 import { compactPath, formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
@@ -124,6 +125,7 @@ export function MissionControlShell({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
     initialSnapshot.workspaces[0]?.id ?? null
   );
+  const [selectedAgentDetailFocus, setSelectedAgentDetailFocus] = useState<AgentDetailFocus | null>(null);
   const [focusedAgentId, setFocusedAgentId] = useState<string | null>(null);
   const [composerTargetAgentId, setComposerTargetAgentId] = useState<string | null>(null);
   const [isComposerActive, setIsComposerActive] = useState(false);
@@ -214,10 +216,14 @@ export function MissionControlShell({
     [lockedTaskKeys]
   );
 
-  const selectNode = useCallback((nodeId: string | null, tab: InspectorTabId = "overview") => {
-    setSelectedNodeId(nodeId);
-    setActiveInspectorTab(tab);
-  }, []);
+  const selectNode = useCallback(
+    (nodeId: string | null, tab: InspectorTabId = "overview", agentDetailFocus: AgentDetailFocus | null = null) => {
+      setSelectedNodeId(nodeId);
+      setActiveInspectorTab(tab);
+      setSelectedAgentDetailFocus(agentDetailFocus);
+    },
+    []
+  );
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const canvasNodeInteractionActiveRef = useRef(false);
   const pendingComposerBlurRef = useRef(false);
@@ -293,6 +299,22 @@ export function MissionControlShell({
       setFocusedAgentId((current) => (current === agentId ? null : agentId));
       setActiveWorkspaceId(agent.workspaceId);
       selectNode(agentId);
+    },
+    [selectNode, uiSnapshot.agents]
+  );
+
+  const handleInspectAgentDetail = useCallback(
+    (agentId: string, focus: AgentDetailFocus) => {
+      const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+      if (!agent) {
+        return;
+      }
+
+      setFocusedAgentId(agent.id);
+      setActiveWorkspaceId(agent.workspaceId);
+      setIsInspectorOpen(true);
+      selectNode(agent.id, "overview", focus);
     },
     [selectNode, uiSnapshot.agents]
   );
@@ -562,18 +584,11 @@ export function MissionControlShell({
     const relatedTask = snapshot.tasks.find((task) => task.dispatchId === recentDispatchId);
 
     if (relatedTask) {
-      setSelectedNodeId((current) => {
-        if (current === relatedTask.id) {
-          return current;
-        }
-
-        setActiveInspectorTab("overview");
-        return relatedTask.id;
-      });
+      selectNode(relatedTask.id, "overview");
       setIsInspectorOpen(true);
       setRecentDispatchId(null);
     }
-  }, [recentDispatchId, snapshot.tasks]);
+  }, [recentDispatchId, snapshot.tasks, selectNode]);
 
   useEffect(() => {
     setOptimisticMissionTasks((current) =>
@@ -1736,6 +1751,7 @@ export function MissionControlShell({
               });
             }}
             onFocusAgent={handleFocusAgent}
+            onInspectAgentDetail={handleInspectAgentDetail}
             onMessageAgent={(agentId) => {
               const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
 
@@ -1936,18 +1952,19 @@ export function MissionControlShell({
               : "w-[60px]"
           )}
         >
-        <InspectorPanel
-          snapshot={uiSnapshot}
-          surfaceTheme={surfaceTheme}
-          selectedNodeId={selectedNodeId}
-          lastMission={lastMission}
-          onRefresh={refresh}
-          onSnapshotChange={setSnapshot}
-          collapsed={!isInspectorOpen}
-          onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
-          activeTab={activeInspectorTab}
-          onActiveTabChange={setActiveInspectorTab}
-          onAbortTask={(task) => {
+          <InspectorPanel
+            snapshot={uiSnapshot}
+            surfaceTheme={surfaceTheme}
+            selectedNodeId={selectedNodeId}
+            agentDetailFocus={selectedAgentDetailFocus}
+            lastMission={lastMission}
+            onRefresh={refresh}
+            onSnapshotChange={setSnapshot}
+            collapsed={!isInspectorOpen}
+            onToggleCollapsed={() => setIsInspectorOpen((current) => !current)}
+            activeTab={activeInspectorTab}
+            onActiveTabChange={setActiveInspectorTab}
+            onAbortTask={(task) => {
               if (!isTaskAbortable(task)) {
                 return;
               }

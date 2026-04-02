@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { LucideIcon } from "lucide-react";
 import {
@@ -53,11 +53,13 @@ import type {
   WorkspaceResourceState
 } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
+import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
 
 type InspectorPanelProps = {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
   selectedNodeId: string | null;
+  agentDetailFocus?: AgentDetailFocus | null;
   lastMission: MissionResponse | null;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
@@ -69,6 +71,7 @@ type InspectorPanelProps = {
 };
 
 type InspectorPanelTab = InspectorPanelProps["activeTab"];
+type AgentRuntimeRecord = MissionControlSnapshot["runtimes"][number];
 
 const INSPECTOR_BADGE_CLASS_NAME =
   "!h-4 !px-1.5 !py-0 !text-[8px] !leading-none !tracking-[0.1em] !whitespace-nowrap";
@@ -85,6 +88,7 @@ function InspectorPanelContent({
   snapshot,
   surfaceTheme,
   selectedNodeId,
+  agentDetailFocus,
   lastMission,
   onRefresh,
   onSnapshotChange,
@@ -405,7 +409,13 @@ function InspectorPanelContent({
                   {visibleActiveTab === "overview" ? (
                     <>
                       {selectedWorkspace ? <WorkspaceContent snapshot={snapshot} workspaceId={selectedWorkspace.id} /> : null}
-                      {selectedAgent ? <AgentContent snapshot={snapshot} agentId={selectedAgent.id} /> : null}
+                      {selectedAgent ? (
+                        <AgentContent
+                          snapshot={snapshot}
+                          agentId={selectedAgent.id}
+                          focusSection={agentDetailFocus}
+                        />
+                      ) : null}
                       {selectedTask ? (
                         <TaskContent
                           snapshot={snapshot}
@@ -826,15 +836,20 @@ function WorkspaceContent({
 
 function AgentContent({
   snapshot,
-  agentId
+  agentId,
+  focusSection
 }: {
   snapshot: MissionControlSnapshot;
   agentId: string;
+  focusSection?: AgentDetailFocus | null;
 }) {
   const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const agent = snapshot.agents.find((entry) => entry.id === agentId);
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent?.workspaceId);
   const model = snapshot.models.find((entry) => entry.id === agent?.modelId);
+  const skillsSectionRef = useRef<HTMLDivElement | null>(null);
+  const toolsSectionRef = useRef<HTMLDivElement | null>(null);
+  const sessionsSectionRef = useRef<HTMLDivElement | null>(null);
   const observedTools = agent?.observedTools ?? [];
   const policyMeta = agent ? getAgentPresetMeta(agent.policy.preset) : null;
   const policyRows = agent
@@ -864,7 +879,26 @@ function AgentContent({
   const activeRuntimes = snapshot.runtimes
     .filter((runtime) => agent?.activeRuntimeIds.includes(runtime.id))
     .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const createdFiles = dedupeCreatedFiles(activeRuntimes.flatMap(extractCreatedFilesFromRuntime)).slice(0, 8);
+
+  useEffect(() => {
+    if (!focusSection) {
+      return;
+    }
+
+    const target =
+      focusSection === "skills"
+        ? skillsSectionRef.current
+        : focusSection === "tools"
+          ? toolsSectionRef.current
+          : sessionsSectionRef.current;
+
+    target?.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }, [focusSection]);
 
   if (!agent) {
     return null;
@@ -905,7 +939,14 @@ function AgentContent({
             </div>
           </div>
 
-          <div>
+          <div
+            ref={skillsSectionRef}
+            className={cn(
+              "scroll-mt-4 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 transition-all",
+              focusSection === "skills" &&
+                "border-cyan-300/25 bg-cyan-400/[0.05] shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
+            )}
+          >
             <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
             <InspectorTagGroup
               emptyLabel="No explicit skills"
@@ -915,7 +956,14 @@ function AgentContent({
             />
           </div>
 
-          <div>
+          <div
+            ref={toolsSectionRef}
+            className={cn(
+              "scroll-mt-4 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 transition-all",
+              focusSection === "tools" &&
+                "border-cyan-300/25 bg-cyan-400/[0.05] shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
+            )}
+          >
             <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
             <div className="space-y-3">
               <div>
@@ -977,23 +1025,136 @@ function AgentContent({
         </div>
       </InfoCard>
 
-      <InfoCard icon={TerminalSquare} title="Run history" value={String(activeRuntimes.length)}>
-        {activeRuntimes.length === 0 ? <p>No runtime history has been recorded for this agent yet.</p> : null}
-        {activeRuntimes.map((runtime) => (
-          <div
-            key={runtime.id}
-            className="flex items-center justify-between rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-[13px] text-white">{runtime.title}</p>
-              <p className="truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">{runtime.subtitle}</p>
+      <div ref={sessionsSectionRef} className="scroll-mt-4">
+        <InfoCard
+          icon={TerminalSquare}
+          title="Activity history"
+          value={String(activeRuntimes.length)}
+          className={cn(
+            focusSection === "sessions" &&
+              "border-cyan-300/25 bg-[linear-gradient(180deg,rgba(12,25,37,0.92),rgba(8,13,24,0.88))] shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
+          )}
+        >
+          <p>{agent.sessionCount} recorded sessions overall.</p>
+          <p>
+            {activeRuntimes.length > 0
+              ? `${activeRuntimes.length} history item${activeRuntimes.length === 1 ? "" : "s"} recovered from the latest agent activity.`
+              : "No linked runtime records were recovered for this agent in the current snapshot."}
+          </p>
+          {agent.sessionCount > activeRuntimes.length ? (
+            <p className="text-[12px] text-slate-500">
+              {agent.sessionCount - activeRuntimes.length} session
+              {agent.sessionCount - activeRuntimes.length === 1 ? "" : "s"} do not have recovered runtime data yet.
+            </p>
+          ) : null}
+          {activeRuntimes.length > 0 ? (
+            <div className="space-y-2.5 pt-1">
+              {activeRuntimes.map((runtime) => {
+                const isExpanded = expandedActivityId === runtime.id;
+                const sourceLabel = resolveAgentActivitySourceLabel(runtime.source);
+                const activityTypeLabel = resolveAgentActivityTypeLabel(runtime);
+                const sessionLabel = runtime.sessionId
+                  ? `session ${shortId(runtime.sessionId, 10)}`
+                  : runtime.runId
+                    ? `run ${shortId(runtime.runId, 10)}`
+                    : "session n/a";
+                const tokenLabel = formatActivityTokenLabel(runtime.tokenUsage?.total);
+                const timestampLabel = formatActivityTimestamp(runtime.updatedAt);
+
+                return (
+                  <div
+                    key={runtime.id}
+                    className={cn(
+                      "overflow-hidden rounded-[14px] border bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] transition-all",
+                      isExpanded ? "border-cyan-300/22 shadow-[0_0_0_1px_rgba(34,211,238,0.08)]" : "border-white/[0.08]"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={isExpanded}
+                      className="nodrag nopan flex w-full flex-col gap-2 px-3 py-2.5 text-left transition-colors hover:bg-white/[0.03]"
+                      onClick={() => {
+                        setExpandedActivityId((current) => (current === runtime.id ? null : runtime.id));
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <Badge variant={badgeVariantForRuntimeStatus(runtime.status)}>{runtime.status}</Badge>
+                        <Badge variant={runtime.tokenUsage?.total ? "default" : "muted"}>{tokenLabel}</Badge>
+                      </div>
+
+                      <div className="min-w-0 space-y-1">
+                        <p className="line-clamp-2 text-[13px] leading-5 text-white">{runtime.title}</p>
+                        <p className="line-clamp-2 text-[12px] leading-5 text-slate-300">{runtime.subtitle}</p>
+                      </div>
+
+                      <div className="flex items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-[9px] uppercase tracking-[0.18em] text-slate-500">
+                            {activityTypeLabel} · {sessionLabel}
+                          </p>
+                        </div>
+                        <p className="shrink-0 text-right text-[9px] uppercase tracking-[0.18em] text-slate-500">
+                          {timestampLabel}
+                        </p>
+                      </div>
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {isExpanded ? (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.18 }}
+                          className="overflow-hidden border-t border-white/[0.08]"
+                        >
+                          <div className="space-y-3 px-3 py-3">
+                            <InspectorMetricGrid
+                              items={[
+                                { label: "Source", value: sourceLabel },
+                                { label: "Status", value: runtime.status },
+                                { label: "Updated", value: formatRelativeTime(runtime.updatedAt, relativeTimeReferenceMs) },
+                                { label: "Key", value: shortId(runtime.key, 12) }
+                              ]}
+                            />
+
+                            <div className="flex flex-wrap gap-1.5">
+                              {runtime.sessionId ? <Badge variant="muted">session {shortId(runtime.sessionId, 12)}</Badge> : null}
+                              {runtime.runId ? <Badge variant="muted">run {shortId(runtime.runId, 12)}</Badge> : null}
+                              {runtime.taskId ? <Badge variant="muted">task {shortId(runtime.taskId, 12)}</Badge> : null}
+                              {runtime.modelId ? <Badge variant="muted">model {shortId(runtime.modelId, 12)}</Badge> : null}
+                            </div>
+
+                            <div>
+                              <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Preview</p>
+                              <div className="rounded-[12px] border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                                <p className="text-[12px] leading-5 text-slate-200">{runtime.subtitle}</p>
+                              </div>
+                            </div>
+
+                            {runtime.toolNames?.length ? (
+                              <div>
+                                <p className="mb-2 text-[10px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+                                <InspectorTagGroup
+                                  emptyLabel="No tool names recorded"
+                                  items={runtime.toolNames}
+                                  emptyVariant="muted"
+                                  itemVariant="warning"
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        </motion.div>
+                      ) : null}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
             </div>
-            <Badge variant={badgeVariantForRuntimeStatus(runtime.status)}>
-              {runtime.status}
-            </Badge>
-          </div>
-        ))}
-      </InfoCard>
+          ) : null}
+        </InfoCard>
+      </div>
 
       <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
         <InspectorCreatedFileList
@@ -1030,6 +1191,61 @@ function AgentContent({
       </InfoCard>
     </>
   );
+}
+
+function resolveAgentActivitySourceLabel(source: AgentRuntimeRecord["source"]) {
+  switch (source) {
+    case "session":
+      return "Direct chat";
+    case "turn":
+      return "Conversation";
+    case "cron":
+      return "Scheduled";
+    default:
+      return "Unknown source";
+  }
+}
+
+function resolveAgentActivityTypeLabel(runtime: AgentRuntimeRecord) {
+  if (runtime.taskId) {
+    return "Task";
+  }
+
+  switch (runtime.source) {
+    case "session":
+      return "Chat";
+    case "turn":
+      return "Run";
+    case "cron":
+      return "Scheduled";
+    default:
+      return "Activity";
+  }
+}
+
+function formatActivityTokenLabel(total: number | null | undefined) {
+  if (typeof total !== "number" || Number.isNaN(total)) {
+    return "0 Tokens";
+  }
+
+  if (total >= 1000) {
+    return `${Math.round(total / 1000)}K Tokens`;
+  }
+
+  return `${total} Tokens`;
+}
+
+function formatActivityTimestamp(timestamp: number | null | undefined) {
+  if (typeof timestamp !== "number" || Number.isNaN(timestamp)) {
+    return "No time";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(timestamp));
 }
 
 function TaskContent({
@@ -1843,15 +2059,22 @@ function InfoCard({
   icon: Icon,
   title,
   value,
-  children
+  children,
+  className
 }: {
   icon: LucideIcon;
   title: string;
   value: string;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,34,0.86),rgba(8,13,24,0.82))] p-3">
+    <section
+      className={cn(
+        "rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,34,0.86),rgba(8,13,24,0.82))] p-3 transition-all",
+        className
+      )}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">{title}</p>

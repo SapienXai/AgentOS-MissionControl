@@ -20,6 +20,7 @@ import {
 } from "react";
 
 import type {
+  AgentDetailFocus,
   AgentNodeData,
   MissionEdgeData,
   TaskNodeData,
@@ -90,6 +91,7 @@ export function MissionCanvas({
   onEditAgent,
   onDeleteAgent,
   onFocusAgent,
+  onInspectAgentDetail,
   onReplyTask,
   onCopyTaskPrompt,
   onHideTask,
@@ -116,6 +118,7 @@ export function MissionCanvas({
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onFocusAgent: (agentId: string) => void;
+  onInspectAgentDetail?: (agentId: string, focus: AgentDetailFocus) => void;
   onReplyTask: (task: TaskRecord) => void;
   onCopyTaskPrompt: (task: TaskRecord) => void;
   onHideTask: (task: TaskRecord) => void;
@@ -154,6 +157,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onInspectAgentDetail,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -233,6 +237,7 @@ export function MissionCanvas({
       onEditAgent,
       onDeleteAgent,
       onFocusAgent,
+      onInspectAgentDetail,
       onReplyTask,
       onCopyTaskPrompt,
       onHideTask,
@@ -265,6 +270,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onInspectAgentDetail,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -618,6 +624,7 @@ function buildCanvasGraph(
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onFocusAgent: (agentId: string) => void,
+  onInspectAgentDetail: ((agentId: string, focus: AgentDetailFocus) => void) | undefined,
   onReplyTask: (task: TaskRecord) => void,
   onCopyTaskPrompt: (task: TaskRecord) => void,
   onHideTask: (task: TaskRecord) => void,
@@ -710,7 +717,8 @@ function buildCanvasGraph(
           onMessage: onMessageAgent,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
-          onFocus: onFocusAgent
+          onFocus: onFocusAgent,
+          onInspect: onInspectAgentDetail
         }
       });
 
