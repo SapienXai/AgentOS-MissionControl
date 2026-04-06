@@ -61,6 +61,10 @@ function writeChat(agentId: string, messages: ChatMessage[]) {
   }
 }
 
+function hasPendingReply(messages: ChatMessage[]) {
+  return messages.some((entry) => entry.role === "user" && entry.status === "sending");
+}
+
 function renderAgentReplyText(result: MissionResponse) {
   const payloadText = result.payloads
     .map((entry) => entry.text?.trim())
@@ -239,7 +243,9 @@ export function AgentChatDrawer({
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages.length, agent.id, isAgentTyping, revealedText, revealingMessageId]);
 
-  const canSend = Boolean(draft.trim()) && !isSending && !revealingMessageId;
+  const pendingReply = hasPendingReply(messages);
+  const showAgentTyping = isAgentTyping || pendingReply;
+  const canSend = Boolean(draft.trim()) && !isSending && !revealingMessageId && !pendingReply;
 
   const renderMessageText = (entry: ChatMessage) => {
     if (entry.role === "assistant" && entry.id === revealingMessageId) {
@@ -262,7 +268,7 @@ export function AgentChatDrawer({
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || isSending || revealingMessageId) return;
+    if (!text || isSending || revealingMessageId || pendingReply) return;
 
     setIsSending(true);
     setIsAgentTyping(true);
@@ -277,6 +283,7 @@ export function AgentChatDrawer({
 
     const nextHistory = [...messages, userMessage].slice(-maxStoredMessages);
     setMessages(nextHistory);
+    writeChat(agent.id, nextHistory);
     setDraft("");
 
     const payload = {
@@ -366,7 +373,7 @@ export function AgentChatDrawer({
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
                 <div
                   className={cn(
-                    "max-w-[92%] rounded-[18px] border px-3 py-2 text-[13px] leading-5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
+                    "min-w-0 max-w-[92%] rounded-[18px] border px-3 py-2 text-[13px] leading-5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
                     isSystem
                       ? surfaceTheme === "light"
                         ? "border-[#e3d4c8] bg-[#fffaf6] text-[#6c5647]"
@@ -380,7 +387,7 @@ export function AgentChatDrawer({
                       : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
                   )}
                 >
-                  <p className="whitespace-pre-wrap">{renderMessageText(entry)}</p>
+                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{renderMessageText(entry)}</p>
                   {isActiveAssistant ? (
                     <motion.span
                       aria-hidden="true"
@@ -405,7 +412,7 @@ export function AgentChatDrawer({
         </div>
 
         <AnimatePresence initial={false}>
-          {isAgentTyping ? (
+          {showAgentTyping ? (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
