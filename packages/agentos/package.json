@@ -1,6 +1,6 @@
 {
   "name": "@sapienx/agentos",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "AgentOS Mission Control launcher",
   "type": "module",
   "bin": {
@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "prepare:bundle": "node scripts/prepare-bundle.mjs",
-    "prepack": "pnpm --dir ../.. exec next build --webpack && node scripts/prepare-bundle.mjs"
+    "prepack": "node scripts/run-prepack.mjs"
   },
   "keywords": [
     "agentos",
