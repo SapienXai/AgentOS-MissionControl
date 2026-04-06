@@ -25,7 +25,7 @@ detect_platform() {
       ASSET_PLATFORM="linux"
       ;;
     *)
-      echo "Unsupported operating system: $(uname -s)" >&2
+      echo "Unsupported operating system: $(uname -s). Use install.ps1 on Windows." >&2
       exit 1
       ;;
   esac

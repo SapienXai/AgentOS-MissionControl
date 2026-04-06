@@ -61,6 +61,9 @@ jobs:
           - runner: ubuntu-latest
             platform: linux
             arch: x64
+          - runner: windows-latest
+            platform: win32
+            arch: x64
           - runner: macos-15-intel
             platform: darwin
             arch: x64
@@ -158,10 +161,20 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
           \`\`\`
 
+          Windows PowerShell:
+
+          \`\`\`powershell
+          iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
+          \`\`\`
+
           Specific version:
 
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=${{ needs.validate-release.outputs.version }} bash
+          \`\`\`
+
+          \`\`\`powershell
+          \$env:AGENTOS_VERSION='${{ needs.validate-release.outputs.version }}'; iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
           \`\`\`
 
           ## Included assets
@@ -169,6 +182,7 @@ jobs:
           - \`agentos-darwin-arm64.tgz\`
           - \`agentos-darwin-x64.tgz\`
           - \`agentos-linux-x64.tgz\`
+          - \`agentos-win32-x64.tgz\`
           EOF
 
       - uses: softprops/action-gh-release@v2
@@ -178,4 +192,5 @@ jobs:
           generate_release_notes: true
           files: |
             install.sh
+            install.ps1
             release-assets/*

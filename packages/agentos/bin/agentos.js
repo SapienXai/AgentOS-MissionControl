@@ -714,9 +714,11 @@ function findRepoRoot() {
 
 function detectManagedLauncher(installedPackagePath) {
   const scriptMarker = normalizeForMatch(path.join(installedPackagePath, "bin", "agentos.js"));
+  const launcherNames =
+    process.platform === "win32" ? ["agentos.cmd", "agentos.ps1", "agentos"] : ["agentos"];
   const candidates = new Set([
     resolveCommandPath("agentos"),
-    path.join(defaultBinDir, "agentos")
+    ...launcherNames.map((name) => path.join(defaultBinDir, name))
   ]);
 
   for (const candidate of candidates) {

@@ -277,6 +277,8 @@ export OPENCLAW_BIN=/absolute/path/to/openclaw
 
 GitHub Release installer:
 
+macOS / Linux:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
 agentos start --open
@@ -284,10 +286,27 @@ agentos stop
 agentos doctor
 ```
 
+Windows PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
+agentos start --open
+agentos stop
+agentos doctor
+```
+
 Install a specific published version:
+
+macOS / Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.1.9 bash
+```
+
+Windows PowerShell:
+
+```powershell
+$env:AGENTOS_VERSION='0.1.9'; iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
 ```
 
 Package manager install:
@@ -351,6 +370,7 @@ The release workflow uploads:
 - `agentos-darwin-arm64.tgz`
 - `agentos-darwin-x64.tgz`
 - `agentos-linux-x64.tgz`
+- `agentos-win32-x64.tgz`
 - matching `.sha256` files
 
 ### Run The App
