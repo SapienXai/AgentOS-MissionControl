@@ -6,11 +6,11 @@ export type MissionControlAction =
       name: string;
     };
 
-export function extractMissionControlAction(text: string): {
+export function extractMissionControlAction(text: unknown): {
   action: MissionControlAction | null;
   cleanText: string;
 } {
-  if (!text.trim()) {
+  if (typeof text !== "string" || !text.trim()) {
     return {
       action: null,
       cleanText: ""

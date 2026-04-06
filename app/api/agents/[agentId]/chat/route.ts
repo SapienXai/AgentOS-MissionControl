@@ -15,17 +15,27 @@ const chatSchema = z.object({
   thinking: z.enum(["off", "minimal", "low", "medium", "high"]).optional()
 });
 
+type AgentChatPayloadEntry = {
+  text?: string;
+  content?: string;
+  mediaUrl?: string | null;
+};
+
+type AgentChatPayloadResult = {
+  payloads?: AgentChatPayloadEntry[];
+  meta?: Record<string, unknown>;
+  summary?: string;
+  stopReason?: string | null;
+};
+
 type AgentChatCommandPayload = {
-  runId: string;
-  status: string;
-  summary: string;
-  result?: {
-    payloads?: Array<{
-      text?: string;
-      mediaUrl?: string | null;
-    }>;
-    meta?: Record<string, unknown>;
-  };
+  runId?: string | null;
+  status?: string;
+  summary?: string;
+  payloads?: AgentChatPayloadEntry[];
+  meta?: Record<string, unknown>;
+  stopReason?: string | null;
+  result?: AgentChatPayloadResult;
 };
 
 export async function POST(
@@ -85,11 +95,12 @@ export async function POST(
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {
+  const resultPayload = resolveAgentChatResultPayload(payload);
   let action: MissionControlAction | null = null;
-  const payloads = Array.isArray(payload.result?.payloads)
-    ? payload.result.payloads
+  const payloads = Array.isArray(resultPayload.payloads)
+    ? resultPayload.payloads
         .map((entry) => {
-          const extracted = extractMissionControlAction(typeof entry.text === "string" ? entry.text : "");
+          const extracted = extractMissionControlAction(resolveAgentChatEntryText(entry));
 
           if (!action && extracted.action) {
             action = extracted.action;
@@ -102,7 +113,9 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
         })
         .filter((entry) => entry.text.length > 0)
     : [];
-  const extractedSummary = extractMissionControlAction(payload.summary);
+  const extractedSummary = extractMissionControlAction(
+    typeof payload.summary === "string" ? payload.summary : resultPayload.summary
+  );
 
   if (!action && extractedSummary.action) {
     action = extractedSummary.action;
@@ -115,17 +128,17 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
     "No response text was returned.";
 
   return {
-    runId: payload.runId,
+    runId: typeof payload.runId === "string" && payload.runId.trim() ? payload.runId : null,
     agentId,
-    status: normalizeStatus(payload.status),
+    status: normalizeStatus(resolveAgentChatStatus(payload, resultPayload)),
     summary,
     payloads,
     meta: action
       ? {
-          ...payload.result?.meta,
+          ...resultPayload.meta,
           missionControlAction: action
         }
-      : payload.result?.meta
+      : resultPayload.meta
   };
 }
 
@@ -133,6 +146,42 @@ function normalizeStatus(value: string): MissionDispatchStatus {
   return value === "running" || value === "completed" || value === "stalled" || value === "cancelled"
     ? value
     : "completed";
+}
+
+function resolveAgentChatResultPayload(payload: AgentChatCommandPayload): AgentChatPayloadResult {
+  return isRecord(payload.result) ? payload.result : payload;
+}
+
+function resolveAgentChatEntryText(entry: AgentChatPayloadEntry) {
+  if (typeof entry.text === "string") {
+    return entry.text;
+  }
+
+  if (typeof entry.content === "string") {
+    return entry.content;
+  }
+
+  return "";
+}
+
+function resolveAgentChatStatus(payload: AgentChatCommandPayload, resultPayload: AgentChatPayloadResult) {
+  if (typeof payload.status === "string") {
+    return payload.status;
+  }
+
+  if (resultPayload.stopReason === "aborted") {
+    return "cancelled";
+  }
+
+  if (resultPayload.stopReason === "error") {
+    return "stalled";
+  }
+
+  return "completed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 function readMissionControlAction(meta: MissionResponse["meta"]): MissionControlAction | null {

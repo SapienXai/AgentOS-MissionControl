@@ -147,7 +147,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         ? `${Math.round(data.agent.heartbeat.everyMs / 1000)}s`
         : null)
     : null;
-  const purposeLabel = data.agent.profile.purpose?.trim() || data.agent.currentAction.trim() || "OpenClaw operator";
+  const currentActionLabel = typeof data.agent.currentAction === "string" ? data.agent.currentAction.trim() : "";
+  const purposeLabel = data.agent.profile?.purpose?.trim() || currentActionLabel || "OpenClaw operator";
   const lastSeenLabel = data.agent.lastActiveAt
     ? formatRelativeTime(data.agent.lastActiveAt, data.relativeTimeReferenceMs)
     : "never";
