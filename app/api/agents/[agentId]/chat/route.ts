@@ -40,7 +40,7 @@ type AgentChatCommandPayload = {
 
 export async function POST(
   request: Request,
-  context: { params: Promise<{ agentId: string }> | { agentId: string } }
+  context: { params: Promise<{ agentId: string }> }
 ) {
   try {
     const params = await Promise.resolve(context.params);
