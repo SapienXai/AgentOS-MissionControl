@@ -34,6 +34,15 @@ function sanitizePathEnv(sourceEnv) {
     return env;
   }
 
+  const isolatedLocalAppData = path.join(repoRoot, ".next", "windows-localappdata");
+  const isolatedRoamingAppData = path.join(repoRoot, ".next", "windows-appdata");
+
+  fs.mkdirSync(isolatedLocalAppData, { recursive: true });
+  fs.mkdirSync(isolatedRoamingAppData, { recursive: true });
+
+  env.LOCALAPPDATA = isolatedLocalAppData;
+  env.APPDATA = isolatedRoamingAppData;
+
   const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
   const rawPath = pathKeys.map((key) => env[key]).find(Boolean);
 
