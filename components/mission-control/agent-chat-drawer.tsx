@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
+import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import { MISSION_CONTROL_ACTION_TAG } from "@/lib/openclaw/chat-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/openclaw/types";
@@ -73,6 +74,48 @@ function renderAgentReplyText(result: MissionResponse) {
   return payloadText || result.summary || "No response text was returned.";
 }
 
+function buildWorkspaceTeamPrompt(snapshot: MissionControlSnapshot, agent: OpenClawAgent) {
+  const teammates = snapshot.agents
+    .filter((entry) => entry.workspaceId === agent.workspaceId)
+    .sort((left, right) => {
+      if (left.id === agent.id && right.id !== agent.id) {
+        return -1;
+      }
+
+      if (right.id === agent.id && left.id !== agent.id) {
+        return 1;
+      }
+
+      if (left.isDefault !== right.isDefault) {
+        return left.isDefault ? -1 : 1;
+      }
+
+      return formatAgentDisplayName(left).localeCompare(formatAgentDisplayName(right));
+    });
+
+  if (teammates.length === 0) {
+    return null;
+  }
+
+  const lines = [
+    "Workspace team roster:",
+    "Use this roster, not `agents_list`, when the operator asks who else is in the workspace. That tool may be restricted to your own scope.",
+    "If prior chat messages in this drawer claimed you were the only agent, ignore that older claim if it conflicts with this roster."
+  ];
+
+  for (const teammate of teammates) {
+    const labels = [
+      teammate.id === agent.id ? "you" : null,
+      teammate.isDefault ? "primary" : null,
+      formatAgentPresetLabel(teammate.policy.preset)
+    ].filter(Boolean);
+
+    lines.push(`- ${formatAgentDisplayName(teammate)} (\`${teammate.id}\`) · ${labels.join(" · ")}.`);
+  }
+
+  return lines.join("\n");
+}
+
 function buildAgentChatPrompt(
   history: ChatMessage[],
   message: string,
@@ -80,6 +123,7 @@ function buildAgentChatPrompt(
     agentName: string;
     agentDir?: string;
     workspacePath?: string;
+    workspaceTeamPrompt?: string | null;
   }
 ) {
   const turns = history
@@ -121,6 +165,10 @@ function buildAgentChatPrompt(
     );
   }
 
+  if (options.workspaceTeamPrompt) {
+    instructions.push(options.workspaceTeamPrompt);
+  }
+
   instructions.push(`Your current display name in Mission Control is ${options.agentName}.`);
   const prefix = `${instructions.join("\n")}\n`;
 
@@ -157,11 +205,13 @@ function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
 
 export function AgentChatDrawer({
   agent,
+  snapshot,
   surfaceTheme,
   onRefresh,
   onSnapshotChange
 }: {
   agent: OpenClawAgent;
+  snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
@@ -176,6 +226,7 @@ export function AgentChatDrawer({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const revealTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const agentLabel = formatAgentDisplayName(agent);
+  const workspaceTeamPrompt = useMemo(() => buildWorkspaceTeamPrompt(snapshot, agent), [snapshot, agent]);
 
   const clearRevealTimer = () => {
     if (revealTimerRef.current !== null) {
@@ -290,7 +341,8 @@ export function AgentChatDrawer({
       message: buildAgentChatPrompt(nextHistory, text, {
         agentName: agentLabel,
         agentDir: agent.agentDir,
-        workspacePath: agent.workspacePath
+        workspacePath: agent.workspacePath,
+        workspaceTeamPrompt
       }),
       rawMessage: text,
       thinking: "low" as const

@@ -3249,6 +3249,7 @@ export async function createAgent(input: AgentCreateInput) {
     channelIds: input.channelIds ?? []
   });
 
+  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
   snapshotCache = null;
 
   return {
@@ -3353,6 +3354,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     toolIds: nextDeclaredTools
   });
 
+  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
   snapshotCache = null;
 
   return {
@@ -3407,6 +3409,8 @@ export async function deleteAgent(input: AgentDeleteInput) {
     } catch {
       // Ignore skill cleanup failures for already-pruned workspaces.
     }
+
+    await syncWorkspaceAgentPolicySkills(workspace.path);
   }
 
   snapshotCache = null;
@@ -3873,6 +3877,8 @@ export async function createWorkspaceProject(
     "agents",
     `${createdAgentIds.length} agent${createdAgentIds.length === 1 ? "" : "s"} linked to the workspace.`
   );
+
+  await syncWorkspaceAgentPolicySkills(targetDir);
 
   const primaryAgentId =
     createdAgentIds.find((agentId) =>
@@ -5806,6 +5812,18 @@ type TelegramCoordinationContext = {
   >;
 };
 
+type WorkspaceTeamMemberSummary = {
+  agentId: string;
+  name: string;
+  role: string;
+  isPrimary: boolean;
+  isCurrent: boolean;
+};
+
+type WorkspaceTeamContext = {
+  members: WorkspaceTeamMemberSummary[];
+};
+
 async function ensureAgentPolicySkill(params: {
   workspacePath: string;
   agentId: string;
@@ -5817,6 +5835,11 @@ async function ensureAgentPolicySkill(params: {
 }) {
   const skillId = buildAgentPolicySkillId(params.agentId);
   await ensureTelegramDelegationHelper(params.workspacePath);
+  const team = await buildWorkspaceTeamContext(
+    params.workspacePath,
+    params.agentId,
+    params.snapshot ?? null
+  );
   const coordination = buildTelegramCoordinationContext(
     params.agentId,
     params.snapshot ?? null,
@@ -5824,7 +5847,7 @@ async function ensureAgentPolicySkill(params: {
   );
   await writeTextFileEnsured(
     path.join(params.workspacePath, "skills", skillId, "SKILL.md"),
-    `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, coordination)}\n`
+    `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, team, coordination)}\n`
   );
   return skillId;
 }
@@ -6226,6 +6249,88 @@ await main();
 `;
 }
 
+async function buildWorkspaceTeamContext(
+  workspacePath: string,
+  agentId: string,
+  snapshot: MissionControlSnapshot | null
+): Promise<WorkspaceTeamContext | null> {
+  if (!snapshot) {
+    return null;
+  }
+
+  const currentAgent = snapshot.agents.find((entry) => entry.id === agentId);
+
+  if (!currentAgent) {
+    return null;
+  }
+
+  const manifest = await readWorkspaceProjectManifest(workspacePath);
+  const manifestAgentById = new Map(manifest.agents.map((entry) => [entry.id, entry]));
+  const members = snapshot.agents
+    .filter((entry) => entry.workspaceId === currentAgent.workspaceId)
+    .sort((left, right) => {
+      if (left.id === agentId && right.id !== agentId) {
+        return -1;
+      }
+
+      if (right.id === agentId && left.id !== agentId) {
+        return 1;
+      }
+
+      const leftManifest = manifestAgentById.get(left.id);
+      const rightManifest = manifestAgentById.get(right.id);
+      const leftPrimary = leftManifest?.isPrimary ?? false;
+      const rightPrimary = rightManifest?.isPrimary ?? false;
+
+      if (leftPrimary !== rightPrimary) {
+        return leftPrimary ? -1 : 1;
+      }
+
+      return formatAgentDisplayName(left).localeCompare(formatAgentDisplayName(right));
+    })
+    .map((entry) => {
+      const manifestAgent = manifestAgentById.get(entry.id);
+
+      return {
+        agentId: entry.id,
+        name: formatAgentDisplayName(entry),
+        role: manifestAgent?.role?.trim() || formatAgentPresetLabel(entry.policy.preset),
+        isPrimary: manifestAgent?.isPrimary ?? false,
+        isCurrent: entry.id === agentId
+      } satisfies WorkspaceTeamMemberSummary;
+    });
+
+  return members.length > 0 ? { members } : null;
+}
+
+function renderWorkspaceTeamMarkdown(team: WorkspaceTeamContext | null | undefined) {
+  if (!team || team.members.length === 0) {
+    return null;
+  }
+
+  const lines = [
+    "## Workspace team",
+    "- This workspace currently includes these agents. Do not assume you are the only agent unless you verify the roster again.",
+    "- Use these exact agent ids when referring to teammates or handing work off:"
+  ];
+
+  for (const member of team.members) {
+    const labels = [
+      member.isCurrent ? "you" : null,
+      member.isPrimary ? "primary" : null,
+      member.role
+    ].filter((value): value is string => Boolean(value));
+
+    lines.push(`- ${member.name} (\`${member.agentId}\`) · ${labels.join(" · ")}.`);
+  }
+
+  lines.push(
+    "- If you are asked who is in this workspace, answer from this roster or re-check `.openclaw/project.json` before replying."
+  );
+
+  return lines.join("\n");
+}
+
 export function renderAgentsMarkdown(params: {
   name: string;
   brief?: string;
@@ -6564,9 +6669,11 @@ function renderAgentPolicySkillMarkdown(
   agentName: string,
   policy: AgentPolicy,
   setupAgentId?: string | null,
+  team?: WorkspaceTeamContext | null,
   coordination?: TelegramCoordinationContext | null
 ) {
   const presetLabel = formatAgentPresetLabel(policy.preset);
+  const teamSection = renderWorkspaceTeamMarkdown(team);
   const coordinationSection = renderTelegramCoordinationMarkdown(coordination);
 
   return `# ${agentName} Policy
@@ -6583,7 +6690,7 @@ Preset: ${presetLabel}
 ${buildAgentPolicyPromptLines(policy, setupAgentId)
   .map((line) => line.replace(/^- /, "- "))
   .join("\n")}
-${coordinationSection ? `\n\n${coordinationSection}` : ""}
+${teamSection ? `\n\n${teamSection}` : ""}${coordinationSection ? `\n\n${coordinationSection}` : ""}
 `;
 }
 
@@ -9422,30 +9529,36 @@ function collectTelegramRelatedAgentIds(registry: ChannelRegistry) {
   );
 }
 
-async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry, nextRegistry: ChannelRegistry) {
-  const relevantAgentIds = uniqueStrings([
-    ...collectTelegramRelatedAgentIds(previousRegistry),
-    ...collectTelegramRelatedAgentIds(nextRegistry)
-  ]);
+async function syncAgentPolicySkills(
+  agentIds: string[],
+  options: {
+    snapshot?: MissionControlSnapshot;
+    channelRegistry?: ChannelRegistry;
+  } = {}
+) {
+  const relevantAgentIds = uniqueStrings(agentIds);
 
   if (relevantAgentIds.length === 0) {
     return;
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const nextSnapshot = {
-    ...snapshot,
-    channelRegistry: nextRegistry
-  };
+  const snapshot = options.snapshot ?? (await getMissionControlSnapshot({ force: true, includeHidden: true }));
+  const nextSnapshot = options.channelRegistry
+    ? {
+        ...snapshot,
+        channelRegistry: options.channelRegistry
+      }
+    : snapshot;
 
   for (const agentId of relevantAgentIds) {
-    const agent = snapshot.agents.find((entry) => entry.id === agentId);
+    const agent = nextSnapshot.agents.find((entry) => entry.id === agentId);
+
     if (!agent) {
       continue;
     }
 
     const setupAgentId =
-      snapshot.agents.find(
+      nextSnapshot.agents.find(
         (entry) => entry.workspaceId === agent.workspaceId && entry.policy.preset === "setup" && entry.id !== agent.id
       )?.id ?? null;
 
@@ -9455,7 +9568,8 @@ async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry,
       agentName: agent.name,
       policy: agent.policy,
       setupAgentId,
-      snapshot: nextSnapshot
+      snapshot: nextSnapshot,
+      channelRegistry: options.channelRegistry
     });
 
     await upsertAgentConfigEntry(
@@ -9477,6 +9591,41 @@ async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry,
       nextSnapshot
     );
   }
+}
+
+async function syncWorkspaceAgentPolicySkills(
+  workspacePath: string,
+  options: {
+    snapshot?: MissionControlSnapshot;
+    channelRegistry?: ChannelRegistry;
+  } = {}
+) {
+  const snapshot = options.snapshot ?? (await getMissionControlSnapshot({ force: true, includeHidden: true }));
+  const agentIds = snapshot.agents
+    .filter((entry) => entry.workspacePath === workspacePath)
+    .map((entry) => entry.id);
+
+  await syncAgentPolicySkills(agentIds, {
+    snapshot,
+    channelRegistry: options.channelRegistry
+  });
+}
+
+async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry, nextRegistry: ChannelRegistry) {
+  const relevantAgentIds = uniqueStrings([
+    ...collectTelegramRelatedAgentIds(previousRegistry),
+    ...collectTelegramRelatedAgentIds(nextRegistry)
+  ]);
+
+  if (relevantAgentIds.length === 0) {
+    return;
+  }
+
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  await syncAgentPolicySkills(relevantAgentIds, {
+    snapshot,
+    channelRegistry: nextRegistry
+  });
 }
 
 function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | null): DiscoveredTelegramGroup[] {
