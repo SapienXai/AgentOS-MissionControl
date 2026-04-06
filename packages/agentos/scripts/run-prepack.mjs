@@ -43,11 +43,17 @@ function sanitizePathEnv(sourceEnv) {
 
   const keptEntries = [];
   let removedCount = 0;
+  let removedWindowsAppsCount = 0;
 
   for (const rawEntry of rawPath.split(path.delimiter)) {
     const entry = unquotePathEntry(rawEntry);
 
     if (!entry) {
+      continue;
+    }
+
+    if (isWindowsAppsPath(entry)) {
+      removedWindowsAppsCount += 1;
       continue;
     }
 
@@ -76,7 +82,16 @@ function sanitizePathEnv(sourceEnv) {
     console.log(`Sanitized PATH for prepack by dropping ${removedCount} non-directory ${suffix}.`);
   }
 
+  if (removedWindowsAppsCount > 0) {
+    const suffix = removedWindowsAppsCount === 1 ? "directory" : "directories";
+    console.log(`Sanitized PATH for prepack by dropping ${removedWindowsAppsCount} WindowsApps ${suffix}.`);
+  }
+
   return env;
+}
+
+function isWindowsAppsPath(value) {
+  return /[\\/]microsoft[\\/]windowsapps$/i.test(value.replace(/[\\/]+$/, ""));
 }
 
 function unquotePathEntry(value) {
