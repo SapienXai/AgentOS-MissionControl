@@ -1,15 +1,17 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
+const require = createRequire(import.meta.url);
 
 const env = sanitizePathEnv(process.env);
 
-await runCommand(resolvePnpmCommand(), ["exec", "next", "build", "--webpack"], {
+await runCommand(process.execPath, [resolveNextCliPath(), "build", "--webpack"], {
   cwd: repoRoot,
   env
 });
@@ -19,8 +21,10 @@ await runCommand(process.execPath, [path.join(scriptDir, "prepare-bundle.mjs")],
   env
 });
 
-function resolvePnpmCommand() {
-  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+function resolveNextCliPath() {
+  return require.resolve("next/dist/bin/next", {
+    paths: [repoRoot]
+  });
 }
 
 function sanitizePathEnv(sourceEnv) {
@@ -30,8 +34,8 @@ function sanitizePathEnv(sourceEnv) {
     return env;
   }
 
-  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "Path";
-  const rawPath = env[pathKey];
+  const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+  const rawPath = pathKeys.map((key) => env[key]).find(Boolean);
 
   if (!rawPath) {
     return env;
@@ -60,7 +64,11 @@ function sanitizePathEnv(sourceEnv) {
   }
 
   if (keptEntries.length > 0) {
-    env[pathKey] = keptEntries.join(path.delimiter);
+    for (const key of pathKeys) {
+      delete env[key];
+    }
+
+    env.Path = keptEntries.join(path.delimiter);
   }
 
   if (removedCount > 0) {
