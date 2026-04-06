@@ -300,13 +300,13 @@ Install a specific published version:
 macOS / Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.3.5 bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | AGENTOS_VERSION=0.3.6 bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:AGENTOS_VERSION='0.3.5'; iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
+$env:AGENTOS_VERSION='0.3.6'; iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex
 ```
 
 Package manager install:
@@ -361,8 +361,8 @@ openclaw gateway status --json
 Push a tag in the format below to build platform-specific release assets on GitHub Releases:
 
 ```bash
-git tag agentos-v0.3.5
-git push origin agentos-v0.3.5
+git tag agentos-v0.3.6
+git push origin agentos-v0.3.6
 ```
 
 The release workflow uploads:
