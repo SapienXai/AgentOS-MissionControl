@@ -16,14 +16,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import {
-  formatAgentFileAccessLabel,
-  formatAgentInstallScopeLabel,
-  formatAgentMissingToolBehaviorLabel,
-  formatAgentNetworkAccessLabel,
-  formatAgentPresetLabel,
-  getAgentPresetMeta
-} from "@/lib/openclaw/agent-presets";
+import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
   type CapabilityCatalogResponse,
@@ -258,33 +251,12 @@ export function AgentCapabilityEditorDialog({
     return null;
   }
 
-  const policyMeta = getAgentPresetMeta(agent.policy.preset);
-  const policyRows = [
-    {
-      label: "Preset",
-      value: formatAgentPresetLabel(agent.policy.preset)
-    },
-    {
-      label: "Missing tools",
-      value: formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)
-    },
-    {
-      label: "Install scope",
-      value: formatAgentInstallScopeLabel(agent.policy.installScope)
-    },
-    {
-      label: "File access",
-      value: formatAgentFileAccessLabel(agent.policy.fileAccess)
-    },
-    {
-      label: "Network",
-      value: formatAgentNetworkAccessLabel(agent.policy.networkAccess)
-    }
-  ];
   const nextSkills = isSkillsEditor ? normalizeCapabilityValues(draftSkills) : declaredSkills;
   const nextTools = isToolsEditor ? normalizeCapabilityValues(draftTools) : declaredTools;
   const hasChanges =
     !areCapabilityListsEqual(nextSkills, declaredSkills) || !areCapabilityListsEqual(nextTools, declaredTools);
+  const headerBadgeClassName =
+    "h-5 border-white/[0.08] px-2 py-0 text-[10px] font-normal tracking-[0.06em] normal-case";
 
   const saveCapabilities = async () => {
     if (areCapabilityListsEqual(nextSkills, declaredSkills) && areCapabilityListsEqual(nextTools, declaredTools)) {
@@ -351,10 +323,18 @@ export function AgentCapabilityEditorDialog({
                 ? "Select from OpenClaw and workspace skills or add a custom value."
                 : "Select from built-in tools, plugin tools, or add a custom value."}
             </DialogDescription>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Badge variant={policyMeta.badgeVariant}>{formatAgentPresetLabel(agent.policy.preset)}</Badge>
-              {agent.identity.source ? <Badge variant="muted">{agent.identity.source}</Badge> : null}
-              <Badge variant="muted">{agent.id}</Badge>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <Badge variant="muted" className={headerBadgeClassName}>
+                {formatAgentPresetLabel(agent.policy.preset)}
+              </Badge>
+              {agent.identity.source ? (
+                <Badge variant="muted" className={headerBadgeClassName}>
+                  {agent.identity.source}
+                </Badge>
+              ) : null}
+              <Badge variant="muted" className={headerBadgeClassName}>
+                {agent.id}
+              </Badge>
             </div>
           </DialogHeader>
 
@@ -420,38 +400,20 @@ export function AgentCapabilityEditorDialog({
               />
             </div>
 
-            <div className="border-t border-white/[0.08] px-4 py-3">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Purpose</p>
-              <div className="mt-2 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
-                <p className="text-[13px] leading-5 text-slate-200">
-                  {agent.profile.purpose || "No explicit purpose was found in the workspace bootstrap files."}
-                </p>
+            {error ? (
+              <div className="border-t border-white/[0.08] px-4 py-3">
+                <p className="text-[12px] leading-5 text-rose-300">{error}</p>
               </div>
-
-              <div className="mt-3 rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-3">
-                <p className="text-[12px] leading-5 text-slate-400">
-                  {policyMeta.description ?? "No policy description available."}
-                </p>
-                <div className="mt-3 grid gap-1.5 text-[13px] text-slate-300">
-                  {policyRows.map((row) => (
-                    <p key={row.label}>
-                      {row.label}: <span className="text-white">{row.value}</span>
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {error ? <p className="mt-3 text-[12px] leading-5 text-rose-300">{error}</p> : null}
-            </div>
+            ) : null}
           </div>
 
-          <DialogFooter className="border-t border-white/[0.08] px-4 py-3 sm:flex-row">
+          <DialogFooter className="border-t border-white/[0.08] px-4 py-2 sm:flex-row">
             <Button
               type="button"
               variant="secondary"
               onClick={() => onOpenChange(false)}
               disabled={saving}
-              className="h-9 rounded-full px-3 text-[11px]"
+              className="h-8 rounded-full px-2.5 text-[10px]"
             >
               Cancel
             </Button>
@@ -461,7 +423,7 @@ export function AgentCapabilityEditorDialog({
                 void saveCapabilities();
               }}
               disabled={saving || !hasChanges}
-              className="h-9 rounded-full px-3 text-[11px]"
+              className="h-8 rounded-full px-2.5 text-[10px]"
             >
               {saving ? <LoaderCircle className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
               Save changes

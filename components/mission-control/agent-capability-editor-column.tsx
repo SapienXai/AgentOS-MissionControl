@@ -137,7 +137,7 @@ export function AgentCapabilityEditorColumn({
           </Button>
         </div>
 
-        <div className="max-h-[160px] space-y-1.5 overflow-y-auto pr-1">
+        <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
           <CapabilityOptionList
             kind={title === "Skills" ? "skill" : "tool"}
             options={suggestions}
