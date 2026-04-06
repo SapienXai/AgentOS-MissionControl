@@ -90,23 +90,44 @@ jobs:
 
       - name: Pack AgentOS release asset
         shell: bash
+        env:
+          AGENTOS_VERSION: ${{ needs.validate-release.outputs.version }}
+          AGENTOS_PLATFORM: ${{ matrix.platform }}
+          AGENTOS_ARCH: ${{ matrix.arch }}
         run: |
-          mkdir -p dist
-          rm -f dist/*.tgz
+          node <<'EOF'
+          const fs = require("node:fs");
 
-          npm pack ./packages/agentos --pack-destination dist >/dev/null
-          TARBALL="$(find dist -maxdepth 1 -type f -name '*.tgz' -print -quit)"
-          VERSION="${{ needs.validate-release.outputs.version }}"
-          VERSIONED="agentos-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.tgz"
-          STABLE="agentos-${{ matrix.platform }}-${{ matrix.arch }}.tgz"
+          fs.rmSync("dist", { recursive: true, force: true });
+          fs.mkdirSync("dist", { recursive: true });
+          EOF
 
-          if [ -z "$TARBALL" ]; then
-            echo "No tarball was produced by npm pack." >&2
-            exit 1
-          fi
+          npm pack ./packages/agentos --pack-destination dist
 
-          mv "$TARBALL" "dist/${VERSIONED}"
-          cp "dist/${VERSIONED}" "dist/${STABLE}"
+          node <<'EOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+
+          const distDir = path.join(process.cwd(), "dist");
+          const tarballs = fs
+            .readdirSync(distDir)
+            .filter((fileName) => fileName.endsWith(".tgz"))
+            .sort();
+
+          if (tarballs.length !== 1) {
+            throw new Error(`Expected exactly one tarball in ${distDir}, found ${tarballs.length}.`);
+          }
+
+          const sourcePath = path.join(distDir, tarballs[0]);
+          const versionedName =
+            `agentos-${process.env.AGENTOS_VERSION}-${process.env.AGENTOS_PLATFORM}-${process.env.AGENTOS_ARCH}.tgz`;
+          const stableName = `agentos-${process.env.AGENTOS_PLATFORM}-${process.env.AGENTOS_ARCH}.tgz`;
+          const versionedPath = path.join(distDir, versionedName);
+          const stablePath = path.join(distDir, stableName);
+
+          fs.renameSync(sourcePath, versionedPath);
+          fs.copyFileSync(versionedPath, stablePath);
+          EOF
 
       - name: Create SHA-256 checksums
         shell: bash
