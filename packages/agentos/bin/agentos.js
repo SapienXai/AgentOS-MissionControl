@@ -21,6 +21,7 @@ const runtimeInstallRoot = resolveRuntimeInstallRoot();
 const runtimeStateDir = path.join(runtimeInstallRoot, "run");
 const stopPollIntervalMs = 100;
 const stopTimeoutMs = 5_000;
+const startupGracePeriodMs = 15_000;
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -87,10 +88,26 @@ async function startServer(rawArgs) {
   const trackedState = readRuntimeState(runtimeStatePath);
   const openClawCheck = detectOpenClaw();
   const browserOpener = detectBrowserOpener();
+  const url = createAgentOsUrl(options.host, options.port);
+  const existingServer = await detectExistingServer(options, trackedState, runtimeStatePath);
 
-  if (trackedState?.pid && isProcessRunning(trackedState.pid)) {
+  if (existingServer) {
+    if (options.open) {
+      if (!browserOpener.available) {
+        console.warn(
+          `Browser auto-open is unavailable on this machine${browserOpener.detail ? ` (${browserOpener.detail})` : ""}.`
+        );
+        console.log(`AgentOS is already running on ${existingServer.url} (PID ${existingServer.pid}).`);
+        return;
+      }
+
+      console.log(`AgentOS is already running on ${existingServer.url} (PID ${existingServer.pid}). Opening it...`);
+      openBrowser(existingServer.url, browserOpener);
+      return;
+    }
+
     throw new Error(
-      `AgentOS is already running on port ${options.port} (PID ${trackedState.pid}). Use "agentos stop --port ${options.port}" first.`
+      `AgentOS is already running on port ${options.port} (PID ${existingServer.pid}). Use "agentos stop --port ${options.port}" first.`
     );
   }
 
@@ -98,7 +115,6 @@ async function startServer(rawArgs) {
     clearRuntimeState(runtimeStatePath);
   }
 
-  const url = `http://${displayHost(options.host)}:${options.port}`;
   console.log(`Starting AgentOS on ${url}`);
 
   if (!openClawCheck.available) {
@@ -255,10 +271,18 @@ async function runStop(rawArgs) {
   const options = parseStopArgs(rawArgs);
   const runtimeStatePath = resolveRuntimeStatePath(options.port);
   const trackedState = readRuntimeState(runtimeStatePath);
-  const targetPid = trackedState?.pid ?? findListeningPidForPort(options.port);
+  const listeningPid = findListeningPidForPort(options.port);
+  const trackedPid =
+    trackedState?.pid && isProcessRunning(trackedState.pid) && getStartupWaitMs(trackedState) > 0 ? trackedState.pid : null;
+  const targetPid = listeningPid ?? trackedPid;
 
   if (!targetPid) {
-    clearRuntimeState(runtimeStatePath);
+    if (trackedState) {
+      clearRuntimeState(runtimeStatePath);
+      console.log(`Cleared stale AgentOS runtime state for port ${options.port}. No process is listening on that port.`);
+      return;
+    }
+
     console.log(`No running AgentOS process was found on port ${options.port}.`);
     return;
   }
@@ -280,6 +304,12 @@ async function runStop(rawArgs) {
   const stopped = await waitForProcessExit(targetPid, options.force ? 1_000 : stopTimeoutMs);
 
   if (!stopped) {
+    if (!findListeningPidForPort(options.port)) {
+      clearRuntimeState(runtimeStatePath);
+      console.log(`Cleared stale AgentOS runtime state for port ${options.port}. No process is listening on that port.`);
+      return;
+    }
+
     console.error(
       options.force
         ? `AgentOS did not stop after SIGKILL on port ${options.port}.`
@@ -480,12 +510,60 @@ function detectBrowserOpener() {
   };
 }
 
+async function detectExistingServer(options, trackedState, runtimeStatePath) {
+  const listeningPid = findListeningPidForPort(options.port);
+
+  if (listeningPid) {
+    const host = trackedState?.host || options.host;
+    syncRuntimeState(runtimeStatePath, trackedState, {
+      pid: listeningPid,
+      port: options.port,
+      host
+    });
+
+    return {
+      pid: listeningPid,
+      url: createAgentOsUrl(host, options.port)
+    };
+  }
+
+  if (!trackedState?.pid || !isProcessRunning(trackedState.pid)) {
+    return null;
+  }
+
+  const waitMs = getStartupWaitMs(trackedState);
+
+  if (waitMs > 0) {
+    const readyPid = await waitForListeningPid(options.port, waitMs);
+
+    if (readyPid) {
+      const host = trackedState.host || options.host;
+      syncRuntimeState(runtimeStatePath, trackedState, {
+        pid: readyPid,
+        port: options.port,
+        host
+      });
+
+      return {
+        pid: readyPid,
+        url: createAgentOsUrl(host, options.port)
+      };
+    }
+  }
+
+  return null;
+}
+
 function ensureBundleExists() {
   if (!existsSync(bundledServerPath)) {
     throw new Error(
       "AgentOS bundle is missing. Reinstall the package or rebuild it before publishing."
     );
   }
+}
+
+function createAgentOsUrl(host, port) {
+  return `http://${displayHost(host)}:${port}`;
 }
 
 function displayHost(host) {
@@ -506,7 +584,7 @@ Usage:
 Options:
   start: --port, -p   Port to bind the local server (default: 3000)
   start: --host, -H   Host to bind the local server (default: 127.0.0.1)
-  start: --open, -o   Open AgentOS in the default browser after startup
+  start: --open, -o   Open AgentOS in the default browser after startup or reuse an existing instance
   start: --no-open    Disable browser auto-open even if AGENTOS_OPEN is set
   stop:  --port, -p   Port to stop (default: 3000)
   stop:  --force, -f  Send SIGKILL if SIGTERM does not stop the server
@@ -785,6 +863,25 @@ function writeRuntimeState(runtimeStatePath, payload) {
   writeFileSync(runtimeStatePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
+function syncRuntimeState(runtimeStatePath, trackedState, payload) {
+  if (
+    trackedState?.pid === payload.pid &&
+    trackedState.port === payload.port &&
+    trackedState.host === payload.host
+  ) {
+    return;
+  }
+
+  try {
+    writeRuntimeState(runtimeStatePath, {
+      ...payload,
+      startedAt: trackedState?.startedAt || new Date().toISOString()
+    });
+  } catch {
+    // Port discovery still lets stop/find logic work even if the state file cannot be refreshed.
+  }
+}
+
 function clearRuntimeState(runtimeStatePath, expectedPid) {
   if (existsSync(runtimeStatePath)) {
     if (expectedPid) {
@@ -851,6 +948,42 @@ function findListeningPidForPort(port) {
   }
 
   return Number(firstLine);
+}
+
+function getStartupWaitMs(trackedState) {
+  if (!trackedState?.startedAt) {
+    return 0;
+  }
+
+  const startedAtMs = Date.parse(trackedState.startedAt);
+
+  if (!Number.isFinite(startedAtMs)) {
+    return 0;
+  }
+
+  return Math.max(0, startupGracePeriodMs - (Date.now() - startedAtMs));
+}
+
+async function waitForListeningPid(port, timeoutMs) {
+  if (timeoutMs <= 0) {
+    return findListeningPidForPort(port);
+  }
+
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const pid = findListeningPidForPort(port);
+
+    if (pid) {
+      return pid;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, stopPollIntervalMs);
+    });
+  }
+
+  return findListeningPidForPort(port);
 }
 
 async function waitForProcessExit(pid, timeoutMs) {

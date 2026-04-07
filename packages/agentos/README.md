@@ -14,6 +14,8 @@ agentos
 
 The `agentos` command starts the local AgentOS Mission Control server and prints the local URL.
 
+If you pass `--open` and AgentOS is already listening on the selected port, the CLI opens the existing instance instead of failing.
+
 Optional flags:
 
 ```bash
@@ -35,7 +37,7 @@ AGENTOS_OPEN=1
 
 `agentos doctor` prints the effective URL, bundle status, Node.js compatibility, OpenClaw detection, and browser auto-open support.
 
-`agentos stop` sends `SIGTERM` to the tracked AgentOS server on the selected port. Use `--force` only if the process refuses to stop cleanly.
+`agentos stop` sends `SIGTERM` to the AgentOS server listening on the selected port. If the runtime state is stale and no process is listening there, the CLI clears that stale state automatically.
 
 `agentos uninstall` removes a release-installer copy. If the package was installed with `pnpm` or `npm`, remove it with your package manager instead.
 
