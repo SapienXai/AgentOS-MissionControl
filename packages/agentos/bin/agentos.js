@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import os from "node:os";
 import path from "node:path";
@@ -19,9 +20,14 @@ const defaultInstallRoot = path.join(os.homedir(), ".agentos");
 const defaultBinDir = path.join(os.homedir(), ".local", "bin");
 const runtimeInstallRoot = resolveRuntimeInstallRoot();
 const runtimeStateDir = path.join(runtimeInstallRoot, "run");
+const updateCacheDir = path.join(runtimeInstallRoot, "cache");
+const updateCachePath = path.join(updateCacheDir, "update-check.json");
 const stopPollIntervalMs = 100;
 const stopTimeoutMs = 5_000;
 const startupGracePeriodMs = 15_000;
+const updateCacheTtlMs = 24 * 60 * 60 * 1000;
+const updateWarningCooldownMs = 24 * 60 * 60 * 1000;
+const updateRequestTimeoutMs = 5_000;
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -49,6 +55,16 @@ async function main() {
 
   if (firstArg === "doctor") {
     runDoctor();
+    return;
+  }
+
+  if (firstArg === "update") {
+    if (args[1] === "--help" || args[1] === "-h" || args[1] === "help") {
+      printUpdateHelp();
+      return;
+    }
+
+    await runUpdate(args.slice(1));
     return;
   }
 
@@ -163,13 +179,22 @@ async function startServer(rawArgs) {
   child.stdout.on("data", relayStdout);
   child.stderr.on("data", relayStderr);
 
+  schedulePassiveUpdateNotice();
+
   let cleanedUp = false;
+  const shutdownState = {
+    forceTimer: null,
+    parentSignal: null
+  };
   const cleanup = () => {
     if (cleanedUp) {
       return;
     }
 
     cleanedUp = true;
+    if (shutdownState.forceTimer) {
+      clearTimeout(shutdownState.forceTimer);
+    }
     process.off("SIGINT", forwardSignal);
     process.off("SIGTERM", forwardSignal);
     process.off("SIGQUIT", forwardSignal);
@@ -177,9 +202,28 @@ async function startServer(rawArgs) {
   };
 
   const forwardSignal = (signal) => {
-    if (!child.killed) {
-      child.kill(signal);
+    if (shutdownState.parentSignal) {
+      if (sendSignalToChild(child, "SIGKILL")) {
+        console.warn("Force stopping AgentOS...");
+      }
+      return;
     }
+
+    shutdownState.parentSignal = signal;
+
+    if (signal === "SIGINT") {
+      process.stdout.write("\nStopping AgentOS... Press Ctrl+C again to force quit.\n");
+    } else {
+      console.log(`Stopping AgentOS after ${signal}...`);
+    }
+
+    sendSignalToChild(child, "SIGTERM");
+    shutdownState.forceTimer = setTimeout(() => {
+      if (sendSignalToChild(child, "SIGKILL")) {
+        console.warn("AgentOS did not stop in time. Sending SIGKILL...");
+      }
+    }, stopTimeoutMs);
+    shutdownState.forceTimer.unref?.();
   };
 
   process.on("SIGINT", forwardSignal);
@@ -194,6 +238,11 @@ async function startServer(rawArgs) {
 
   child.on("exit", (code, signal) => {
     cleanup();
+
+    if (shutdownState.parentSignal) {
+      process.kill(process.pid, shutdownState.parentSignal);
+      return;
+    }
 
     if (signal) {
       process.kill(process.pid, signal);
@@ -265,6 +314,73 @@ function runDoctor() {
   if (!checks.every((check) => check.ok || check.label === "OpenClaw" || check.label === "Browser opener")) {
     process.exitCode = 1;
   }
+}
+
+async function runUpdate(rawArgs) {
+  const options = parseUpdateArgs(rawArgs);
+  const install = inspectInstallation();
+
+  if (install.kind === "package-manager") {
+    if (options.check) {
+      const status = await getUpdateStatus({
+        install,
+        forceRefresh: true,
+        timeoutMs: updateRequestTimeoutMs,
+        fallbackToCache: false
+      });
+
+      if (!status.ok) {
+        console.error(status.errorMessage);
+        process.exitCode = 1;
+        return;
+      }
+
+      printUpdateStatus(status, {
+        includeInstallInstructions: true
+      });
+      process.exitCode = status.updateAvailable ? 1 : 0;
+      return;
+    }
+
+    printPackageManagerUpdateGuidance();
+    return;
+  }
+
+  if (install.kind === "source") {
+    console.log("This AgentOS copy looks like a source checkout, not a release installation.");
+    console.log(`Update it with git pull from: ${findRepoRoot()}`);
+    return;
+  }
+
+  const status = await getUpdateStatus({
+    install,
+    forceRefresh: true,
+    timeoutMs: updateRequestTimeoutMs,
+    fallbackToCache: false
+  });
+
+  if (!status.ok) {
+    console.error(status.errorMessage);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (options.check) {
+    printUpdateStatus(status, {
+      includeInstallInstructions: true
+    });
+    process.exitCode = status.updateAvailable ? 1 : 0;
+    return;
+  }
+
+  if (!status.updateAvailable) {
+    console.log(`AgentOS is already up to date (${status.currentVersion}).`);
+    return;
+  }
+
+  await installReleaseUpdate(status);
+  clearUpdateCache();
+  console.log(`Updated AgentOS to ${status.latestVersion}. Restart AgentOS to use the new version.`);
 }
 
 async function runStop(rawArgs) {
@@ -416,6 +532,23 @@ function parseStopArgs(rawArgs) {
   return options;
 }
 
+function parseUpdateArgs(rawArgs) {
+  const options = {
+    check: false
+  };
+
+  for (const arg of rawArgs) {
+    if (arg === "--check") {
+      options.check = true;
+      continue;
+    }
+
+    throw new Error(`Unknown argument: ${arg}`);
+  }
+
+  return options;
+}
+
 function parseUninstallArgs(rawArgs) {
   const options = {
     yes: false
@@ -510,6 +643,43 @@ function detectBrowserOpener() {
   };
 }
 
+function schedulePassiveUpdateNotice() {
+  const install = inspectInstallation();
+
+  if (install.kind === "source") {
+    return;
+  }
+
+  const cachedStatus = readCachedUpdateStatus(install);
+  const normalizedCachedStatus = cachedStatus ? buildUpdateStatusFromCache(cachedStatus, install) : null;
+
+  if (normalizedCachedStatus?.updateAvailable && shouldNotifyCachedUpdate(normalizedCachedStatus)) {
+    printPassiveUpdateWarning(normalizedCachedStatus);
+    markUpdateNotified(normalizedCachedStatus);
+    return;
+  }
+
+  if (cachedStatus && isUpdateCacheFresh(cachedStatus)) {
+    return;
+  }
+
+  void getUpdateStatus({
+    install,
+    forceRefresh: true,
+    timeoutMs: 2_500,
+    fallbackToCache: true
+  })
+    .then((status) => {
+      if (!status.ok || !status.updateAvailable || !shouldNotifyCachedUpdate(status)) {
+        return;
+      }
+
+      printPassiveUpdateWarning(status);
+      markUpdateNotified(status);
+    })
+    .catch(() => {});
+}
+
 async function detectExistingServer(options, trackedState, runtimeStatePath) {
   const listeningPid = findListeningPidForPort(options.port);
 
@@ -576,6 +746,7 @@ function printHelp() {
 Usage:
   agentos
   agentos start --port 3000 --host 127.0.0.1 --open
+  agentos update [--check]
   agentos stop --port 3000 [--force]
   agentos doctor
   agentos uninstall [--yes]
@@ -633,6 +804,57 @@ function createRelay(target, options, url, browserOpener, browserState) {
   };
 }
 
+function printUpdateStatus(status, options = {}) {
+  if (status.updateAvailable) {
+    console.log(`Update available: ${status.currentVersion} -> ${status.latestVersion}.`);
+
+    if (options.includeInstallInstructions) {
+      if (status.install.kind === "release") {
+        console.log('Run "agentos update" to install it.');
+      } else if (status.install.kind === "package-manager") {
+        printPackageManagerUpdateGuidance();
+      }
+    }
+
+    return;
+  }
+
+  console.log(`AgentOS is already up to date (${status.currentVersion}).`);
+}
+
+function printPassiveUpdateWarning(status) {
+  if (status.install.kind === "package-manager") {
+    console.warn(`Update available: ${status.currentVersion} -> ${status.latestVersion}.`);
+    printPackageManagerUpdateGuidance();
+    return;
+  }
+
+  console.warn(`Update available: ${status.currentVersion} -> ${status.latestVersion}. Run "agentos update".`);
+}
+
+function printPackageManagerUpdateGuidance() {
+  console.log("This AgentOS install appears to come from a package manager.");
+  console.log("Update it with one of:");
+  console.log("  pnpm add -g @sapienx/agentos@latest");
+  console.log("  npm install -g @sapienx/agentos@latest");
+}
+
+function printUpdateHelp() {
+  console.log(`Update AgentOS.
+
+Usage:
+  agentos update
+  agentos update --check
+
+Options:
+  --check   Check for a newer version without installing it
+
+Notes:
+  - Release installs can update themselves with this command.
+  - Package manager installs are redirected to pnpm or npm.
+`);
+}
+
 function openBrowser(url, browserOpener) {
   const browser = spawn(browserOpener.command, [...browserOpener.args, url], {
     detached: true,
@@ -644,6 +866,419 @@ function openBrowser(url, browserOpener) {
   });
 
   browser.unref();
+}
+
+function shouldNotifyCachedUpdate(status) {
+  if (status.latestVersion !== status.cachedNotifiedVersion) {
+    return true;
+  }
+
+  if (!status.cachedNotifiedAt) {
+    return true;
+  }
+
+  return Date.now() - Date.parse(status.cachedNotifiedAt) >= updateWarningCooldownMs;
+}
+
+function isUpdateCacheFresh(status) {
+  if (!status.cachedCheckedAt) {
+    return false;
+  }
+
+  const checkedAtMs = Date.parse(status.cachedCheckedAt);
+
+  if (!Number.isFinite(checkedAtMs)) {
+    return false;
+  }
+
+  return Date.now() - checkedAtMs < updateCacheTtlMs;
+}
+
+function markUpdateNotified(status) {
+  writeUpdateCache({
+    ...status,
+    cachedNotifiedVersion: status.latestVersion,
+    cachedNotifiedAt: new Date().toISOString()
+  });
+}
+
+function clearUpdateCache() {
+  rmSync(updateCachePath, {
+    force: true
+  });
+}
+
+function readCachedUpdateStatus(install) {
+  if (!existsSync(updateCachePath)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(readFileSync(updateCachePath, "utf8"));
+
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+
+    if (
+      payload.installKind !== install.kind ||
+      payload.currentVersion !== packageJson.version ||
+      payload.sourceId !== getUpdateSourceId(install)
+    ) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function writeUpdateCache(payload) {
+  mkdirSync(updateCacheDir, {
+    recursive: true
+  });
+
+  writeFileSync(updateCachePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+async function getUpdateStatus({ install, forceRefresh, timeoutMs, fallbackToCache }) {
+  try {
+    const cache = readCachedUpdateStatus(install);
+
+    if (!forceRefresh && cache && isUpdateCacheFresh(cache)) {
+      return buildUpdateStatusFromCache(cache, install);
+    }
+
+    const latestVersionInfo = await fetchLatestVersionInfo(install, timeoutMs);
+    const updateAvailable = compareVersions(latestVersionInfo.latestVersion, packageJson.version) > 0;
+    const status = {
+      ok: true,
+      install,
+      installKind: install.kind,
+      currentVersion: packageJson.version,
+      latestVersion: latestVersionInfo.latestVersion,
+      downloadBaseUrl: latestVersionInfo.downloadBaseUrl || null,
+      updateAvailable,
+      sourceId: getUpdateSourceId(install),
+      cachedCheckedAt: new Date().toISOString(),
+      cachedNotifiedVersion: cache?.cachedNotifiedVersion || null,
+      cachedNotifiedAt: cache?.cachedNotifiedAt || null
+    };
+
+    writeUpdateCache(status);
+    return status;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const cache = readCachedUpdateStatus(install);
+
+    if (fallbackToCache && cache) {
+      return {
+        ...buildUpdateStatusFromCache(cache, install),
+        ok: true
+      };
+    }
+
+    return {
+      ok: false,
+      errorMessage: `Unable to check for updates: ${message}`
+    };
+  }
+}
+
+function buildUpdateStatusFromCache(cache, install) {
+  const updateAvailable = compareVersions(cache.latestVersion, packageJson.version) > 0;
+
+  return {
+    ok: true,
+    install,
+    currentVersion: packageJson.version,
+    latestVersion: cache.latestVersion,
+    downloadBaseUrl: cache.downloadBaseUrl || null,
+    installKind: install.kind,
+    updateAvailable,
+    sourceId: getUpdateSourceId(install),
+    cachedCheckedAt: cache.cachedCheckedAt || null,
+    cachedNotifiedVersion: cache.cachedNotifiedVersion || null,
+    cachedNotifiedAt: cache.cachedNotifiedAt || null
+  };
+}
+
+function getUpdateSourceId(install) {
+  if (install.kind === "release") {
+    return `github:${process.env.AGENTOS_REPO || "SapienXai/AgentOS"}`;
+  }
+
+  if (install.kind === "package-manager") {
+    return `npm:${packageJson.name}`;
+  }
+
+  return "source";
+}
+
+async function fetchLatestVersionInfo(install, timeoutMs) {
+  if (install.kind === "release") {
+    return fetchGitHubLatestVersion(timeoutMs);
+  }
+
+  if (install.kind === "package-manager") {
+    return fetchNpmLatestVersion(timeoutMs);
+  }
+
+  throw new Error("Update checks are not supported for source checkouts.");
+}
+
+async function fetchGitHubLatestVersion(timeoutMs) {
+  const repo = process.env.AGENTOS_REPO || "SapienXai/AgentOS";
+  const response = await fetchJsonWithTimeout(`https://api.github.com/repos/${repo}/releases/latest`, timeoutMs, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "AgentOS"
+    }
+  });
+
+  const tagName = typeof response.tag_name === "string" ? response.tag_name : "";
+  const latestVersion = normalizeVersion(tagName);
+
+  if (!latestVersion) {
+    throw new Error("GitHub release metadata did not include a valid version.");
+  }
+
+  return {
+    latestVersion,
+    downloadBaseUrl: `https://github.com/${repo}/releases/download/agentos-v${latestVersion}`
+  };
+}
+
+async function fetchNpmLatestVersion(timeoutMs) {
+  const response = await fetchJsonWithTimeout(`https://registry.npmjs.org/${encodeURIComponent(packageJson.name)}/latest`, timeoutMs, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "AgentOS"
+    }
+  });
+
+  const latestVersion = normalizeVersion(response.version);
+
+  if (!latestVersion) {
+    throw new Error("npm registry metadata did not include a valid version.");
+  }
+
+  return {
+    latestVersion,
+    downloadBaseUrl: null
+  };
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}.`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeVersion(value) {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+
+  const match = value.trim().match(/(?:agentos-v|v)?(\d+)\.(\d+)\.(\d+)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  return `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`;
+}
+
+function compareVersions(a, b) {
+  const left = parseVersion(a);
+  const right = parseVersion(b);
+
+  if (!left || !right) {
+    return 0;
+  }
+
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+
+  return left.patch - right.patch;
+}
+
+function parseVersion(value) {
+  const normalized = normalizeVersion(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const parts = normalized.split(".").map(Number);
+
+  return {
+    major: parts[0],
+    minor: parts[1],
+    patch: parts[2]
+  };
+}
+
+async function installReleaseUpdate(status) {
+  const installRoot = path.dirname(packageRoot);
+  const artifactName = `agentos-${getAssetPlatform()}-${getAssetArch()}.tgz`;
+  const checksumName = `${artifactName}.sha256`;
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), "agentos-update-"));
+
+  try {
+    const artifactPath = path.join(tempDir, artifactName);
+    const checksumPath = path.join(tempDir, checksumName);
+    const stageDir = path.join(tempDir, "stage");
+
+    await downloadFileToPath(`${status.downloadBaseUrl}/${artifactName}`, artifactPath);
+
+    try {
+      await downloadFileToPath(`${status.downloadBaseUrl}/${checksumName}`, checksumPath);
+      verifyChecksumFile(checksumPath, artifactPath);
+    } catch {
+      console.warn("No checksum file found; skipping SHA-256 verification.");
+    }
+
+    mkdirSync(stageDir, {
+      recursive: true
+    });
+
+    const extractResult = spawnSync("tar", ["-xzf", artifactPath, "-C", stageDir], {
+      encoding: "utf8"
+    });
+
+    if (extractResult.error || extractResult.status !== 0) {
+      throw new Error(`Failed to extract update archive: ${extractResult.stderr || extractResult.error?.message || "tar failed"}`);
+    }
+
+    const stagedPackagePath = path.join(stageDir, "package");
+
+    if (!existsSync(stagedPackagePath)) {
+      throw new Error("Update archive did not contain a package directory.");
+    }
+
+    const backupPackagePath = `${packageRoot}.previous-${Date.now()}`;
+
+    renameSync(packageRoot, backupPackagePath);
+
+    try {
+      renameSync(stagedPackagePath, packageRoot);
+    } catch (error) {
+      renameSync(backupPackagePath, packageRoot);
+      throw error;
+    }
+
+    rmSync(backupPackagePath, {
+      recursive: true,
+      force: true
+    });
+  } finally {
+    rmSync(tempDir, {
+      recursive: true,
+      force: true
+    });
+  }
+}
+
+function verifyChecksumFile(checksumPath, artifactPath) {
+  const checksumLine = readFileSync(checksumPath, "utf8").trim();
+
+  if (!checksumLine) {
+    throw new Error(`Checksum file is empty: ${checksumPath}`);
+  }
+
+  const parts = checksumLine.split(/\s+/);
+  const expectedHash = parts[0];
+  const expectedName = parts[parts.length - 1];
+  const actualName = path.basename(artifactPath);
+
+  if (expectedName !== actualName) {
+    throw new Error(`Checksum file does not match ${actualName}.`);
+  }
+
+  const actualHash = createHash("sha256").update(readFileSync(artifactPath)).digest("hex");
+
+  if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
+    throw new Error(`SHA-256 verification failed for ${artifactPath}.`);
+  }
+}
+
+async function downloadFileToPath(url, targetPath) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "AgentOS"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Download failed with status ${response.status}.`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  writeFileSync(targetPath, Buffer.from(arrayBuffer));
+}
+
+function getAssetPlatform() {
+  if (process.platform === "darwin") {
+    return "darwin";
+  }
+
+  if (process.platform === "win32") {
+    return "win32";
+  }
+
+  return "linux";
+}
+
+function getAssetArch() {
+  if (process.arch === "arm64") {
+    return "arm64";
+  }
+
+  return "x64";
+}
+
+function sendSignalToChild(child, signal) {
+  if (!isChildProcessActive(child)) {
+    return false;
+  }
+
+  try {
+    child.kill(signal);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function isChildProcessActive(child) {
+  return Boolean(child.pid) && child.exitCode === null && child.signalCode === null;
 }
 
 function resolveCommandPath(command) {
