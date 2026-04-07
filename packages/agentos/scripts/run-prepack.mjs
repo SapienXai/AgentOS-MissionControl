@@ -8,10 +8,11 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(packageDir, "..", "..");
 const require = createRequire(import.meta.url);
+const windowsPreloadPath = path.join(scriptDir, "windows-readdir-workaround.cjs");
 
 const env = sanitizePathEnv(process.env);
 
-await runCommand(process.execPath, [resolveNextCliPath(), "build", "--webpack"], {
+await runCommand(process.execPath, resolveBuildArgs(), {
   cwd: repoRoot,
   env
 });
@@ -25,6 +26,16 @@ function resolveNextCliPath() {
   return require.resolve("next/dist/bin/next", {
     paths: [repoRoot]
   });
+}
+
+function resolveBuildArgs() {
+  const args = [resolveNextCliPath(), "build", "--webpack"];
+
+  if (process.platform === "win32") {
+    args.unshift("--require", windowsPreloadPath);
+  }
+
+  return args;
 }
 
 function sanitizePathEnv(sourceEnv) {
