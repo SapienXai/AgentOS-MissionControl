@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,12 +41,10 @@ import {
   type AgentHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
 import { syncWorkspaceAgentChannelBindings } from "@/lib/openclaw/channel-bindings";
-import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {
-  id: string;
   workspaceId: string;
   modelId: string;
   name: string;
@@ -76,27 +75,20 @@ export function CreateAgentDialog({
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"basics" | "advanced">("basics");
   const [isSaving, setIsSaving] = useState(false);
-  const [hasCustomId, setHasCustomId] = useState(false);
+  const isSubmittingRef = useRef(false);
+  const [expandedPreset, setExpandedPreset] = useState<AgentPreset | null>(null);
   const [draft, setDraft] = useState<AgentDraft>(() =>
     buildAgentDraft(defaultWorkspaceId ?? snapshot.workspaces[0]?.id ?? "")
   );
   const selectedWorkspace =
     snapshot.workspaces.find((workspace) => workspace.id === draft.workspaceId) ?? snapshot.workspaces[0] ?? null;
-  const suggestedAgentId = buildScopedAgentId(
+  const currentPresetMeta = getAgentPresetMeta(draft.policy.preset);
+  const generatedAgentId = buildUniqueAgentId(
+    snapshot.agents,
     selectedWorkspace?.slug,
-    draft.name || getAgentPresetMeta(draft.policy.preset).defaultName
+    draft.name || currentPresetMeta.defaultName
   );
-  const normalizedAgentId = slugify(draft.id);
-  const existingAgentCollision =
-    normalizedAgentId.length > 0
-      ? snapshot.agents.find((agent) => agent.id === normalizedAgentId) ?? null
-      : null;
-  const collisionWorkspaceLabel = existingAgentCollision
-    ? snapshot.workspaces.find((workspace) => workspace.id === existingAgentCollision.workspaceId)?.name ??
-      existingAgentCollision.workspacePath
-    : null;
-  const canSubmit =
-    Boolean(normalizedAgentId && draft.workspaceId) && !isSaving && existingAgentCollision === null;
+  const canSubmit = Boolean(generatedAgentId && selectedWorkspace) && !isSaving;
 
   useEffect(() => {
     setIsMounted(true);
@@ -106,30 +98,16 @@ export function CreateAgentDialog({
     if (!open) {
       setDraft(buildAgentDraft(defaultWorkspaceId ?? snapshot.workspaces[0]?.id ?? ""));
       setActiveTab("basics");
-      setHasCustomId(false);
+      setExpandedPreset(null);
     }
   }, [open, defaultWorkspaceId, snapshot.workspaces]);
 
-  useEffect(() => {
-    if (!open || hasCustomId || !suggestedAgentId) {
-      return;
-    }
-
-    setDraft((current) =>
-      current.id === suggestedAgentId
-        ? current
-        : {
-            ...current,
-            id: suggestedAgentId
-          }
-    );
-  }, [open, hasCustomId, suggestedAgentId]);
-
   const submitCreateAgent = async () => {
-    if (!normalizedAgentId || existingAgentCollision) {
+    if (isSubmittingRef.current || !generatedAgentId || !selectedWorkspace) {
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsSaving(true);
     let succeeded = false;
     let createdAgentId: string | null = null;
@@ -142,7 +120,7 @@ export function CreateAgentDialog({
         },
         body: JSON.stringify({
           ...draft,
-          id: normalizedAgentId
+          id: generatedAgentId
         })
       });
 
@@ -172,6 +150,7 @@ export function CreateAgentDialog({
       });
     } finally {
       setIsSaving(false);
+      isSubmittingRef.current = false;
     }
 
     if (succeeded && createdAgentId) {
@@ -190,74 +169,71 @@ export function CreateAgentDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Create a new OpenClaw agent</DialogTitle>
-          <DialogDescription>
-            This creates a real isolated agent bound to an existing workspace with a preset policy.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="overflow-hidden sm:max-w-4xl">
+        <div className="flex max-h-[90vh] min-w-0 flex-col gap-4 overflow-y-auto overflow-x-hidden p-6">
+          <DialogHeader>
+            <DialogTitle>Create a new OpenClaw agent</DialogTitle>
+            <DialogDescription>
+              This creates a real isolated agent bound to an existing workspace with a preset policy.
+            </DialogDescription>
+          </DialogHeader>
 
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "basics" | "advanced")}>
-          <TabsList className="h-10 rounded-[18px] p-0.5">
-            <TabsTrigger value="basics" className="h-9 rounded-[15px] px-3 text-[12px]">
-              Basics
-            </TabsTrigger>
-            <TabsTrigger value="advanced" className="h-9 rounded-[15px] px-3 text-[12px]">
-              Advanced
-            </TabsTrigger>
-          </TabsList>
+          <Tabs className="min-w-0" value={activeTab} onValueChange={(value) => setActiveTab(value as "basics" | "advanced")}>
+            <TabsList className="h-10 rounded-[18px] p-0.5">
+              <TabsTrigger value="basics" className="h-9 rounded-[15px] px-3 text-[12px]">
+                Basics
+              </TabsTrigger>
+              <TabsTrigger value="advanced" className="h-9 rounded-[15px] px-3 text-[12px]">
+                Advanced
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="basics" className="space-y-4">
+            <TabsContent value="basics" className="min-w-0 space-y-4">
             <div className="space-y-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {AGENT_PRESET_OPTIONS.map((option) => (
-                  <AgentPresetCard
-                    key={option.value}
-                    label={option.label}
-                    description={option.description}
-                    active={draft.policy.preset === option.value}
-                    badgeVariant={getAgentPresetMeta(option.value).badgeVariant}
-                    onClick={() => setDraft((current) => applyAgentPreset(current, option.value))}
-                  />
-                ))}
+              <div className="flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Agent preset</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    Scroll sideways to compare the role, tools, skills, and default policy for each preset.
+                  </p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                    Tap a card to expand or collapse details.
+                  </p>
+                </div>
+                <Badge variant="muted" className="shrink-0 gap-1">
+                  <ChevronLeft className="h-3 w-3" />
+                  <ChevronRight className="h-3 w-3" />
+                  Scroll
+                </Badge>
+              </div>
+              <div className="relative w-full max-w-full overflow-hidden">
+                <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-slate-950 via-slate-950/85 to-transparent" />
+                <div className="mission-scroll flex min-w-0 max-w-full gap-2.5 overflow-x-auto pb-2 pr-10 snap-x snap-mandatory">
+                  {AGENT_PRESET_OPTIONS.map((option) => (
+                    <AgentPresetCard
+                      key={option.value}
+                      preset={option.value}
+                      meta={getAgentPresetMeta(option.value)}
+                      active={draft.policy.preset === option.value}
+                      expanded={expandedPreset === option.value}
+                      onClick={() => {
+                        setDraft((current) => applyAgentPreset(current, option.value));
+                        setExpandedPreset((current) => (current === option.value ? null : option.value));
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                  <span>Drag or scroll to browse presets</span>
+                  <span className="inline-flex items-center gap-1">
+                    More to the right
+                    <ChevronRight className="h-3 w-3" />
+                  </span>
+                </div>
               </div>
             </div>
 
-            <AgentPolicySummary policy={draft.policy} heartbeat={draft.heartbeat} />
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="Agent id" htmlFor="create-agent-id">
-                <Input
-                  id="create-agent-id"
-                  value={draft.id}
-                  onChange={(event) => {
-                    const nextValue = event.target.value;
-                    const nextNormalizedValue = slugify(nextValue);
-
-                    setHasCustomId(Boolean(nextNormalizedValue) && nextNormalizedValue !== suggestedAgentId);
-                    setDraft((current) => ({
-                      ...current,
-                      id: nextValue
-                    }));
-                  }}
-                  placeholder={suggestedAgentId || "workspace-agent"}
-                />
-                <p
-                  className={cn(
-                    "text-[12px]",
-                    existingAgentCollision ? "text-rose-300" : "text-slate-500"
-                  )}
-                >
-                  {existingAgentCollision
-                    ? `ID "${normalizedAgentId}" is already used by ${formatAgentDisplayName(existingAgentCollision)} in ${collisionWorkspaceLabel}.`
-                    : normalizedAgentId && normalizedAgentId !== draft.id.trim()
-                      ? `Saved as ${normalizedAgentId}. Suggested workspace-scoped id: ${suggestedAgentId}.`
-                      : `Workspace-scoped id: ${suggestedAgentId}.`}
-                </p>
-              </FormField>
-
+            <div className="space-y-4">
               <FormField label="Display name" htmlFor="create-agent-name">
                 <Input
                   id="create-agent-name"
@@ -317,12 +293,23 @@ export function CreateAgentDialog({
               </FormField>
             </div>
 
+              <div className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
+                No need to enter an Agent id. OpenClaw will generate it automatically from the selected workspace and
+                display name.
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                <span className="uppercase tracking-[0.18em]">Current id</span>
+                <code className="max-w-full break-all rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-slate-200">
+                  {generatedAgentId}
+                </code>
+              </div>
+            </div>
+
             <div className="rounded-[18px] border border-white/10 bg-white/[0.03] p-4 text-sm leading-6 text-slate-400">
               Routing, identity customisation, and policy overrides live in Advanced.
             </div>
-          </TabsContent>
+            </TabsContent>
 
-          <TabsContent value="advanced" className="space-y-4">
+            <TabsContent value="advanced" className="min-w-0 space-y-4">
             <ChannelBindingPicker
               snapshot={snapshot}
               workspaceId={draft.workspaceId}
@@ -514,20 +501,18 @@ export function CreateAgentDialog({
                 />
               </div>
             </div>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+          </Tabs>
 
-        <DialogFooter>
-          <Button variant="secondary" onClick={() => setOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            onClick={submitCreateAgent}
-            disabled={!canSubmit}
-          >
-            {isSaving ? "Creating..." : "Create agent"}
-          </Button>
-        </DialogFooter>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={submitCreateAgent} disabled={!canSubmit}>
+              {isSaving ? "Creating..." : "Create agent"}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -553,66 +538,158 @@ function FormField({
 }
 
 function AgentPresetCard({
-  label,
-  description,
+  preset,
+  meta,
   active,
-  badgeVariant,
+  expanded,
   onClick
 }: {
-  label: string;
-  description: string;
+  preset: AgentPreset;
+  meta: ReturnType<typeof getAgentPresetMeta>;
   active: boolean;
-  badgeVariant: "default" | "muted" | "success" | "warning";
+  expanded: boolean;
   onClick: () => void;
 }) {
+  const policy = resolveAgentPolicy(preset);
+  const heartbeat = defaultHeartbeatForPreset(preset);
+  const isExpanded = expanded;
+
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
+      aria-expanded={isExpanded}
       className={cn(
-        "rounded-[20px] border p-3 text-left transition-colors",
-        active ? "border-cyan-300/30 bg-cyan-400/10" : "border-white/10 bg-white/[0.03]"
+        "flex h-full min-w-0 shrink-0 flex-col rounded-[20px] border p-3 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 snap-start",
+        isExpanded ? "w-[16rem] sm:w-[17rem]" : "w-[11rem] sm:w-[12rem]",
+        active
+          ? "border-cyan-300/30 bg-cyan-400/10 shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
+          : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
       )}
+      data-expanded={isExpanded ? "true" : "false"}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-white">{label}</p>
-          <p className="text-[11px] leading-4 text-slate-400">{description}</p>
+      <div className="flex h-full flex-col gap-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[11px]">
+                {meta.defaultEmoji}
+              </span>
+              <p className="truncate text-[13px] font-medium text-white">{meta.label}</p>
+            </div>
+            <p
+              className={cn(
+                "text-[11px] leading-4 text-slate-400",
+                isExpanded ? "line-clamp-none" : "line-clamp-2"
+              )}
+            >
+              {meta.description}
+            </p>
+          </div>
+          <Badge variant={meta.badgeVariant} className="shrink-0 px-2 py-1 text-[9px] normal-case tracking-normal">
+            {active ? "selected" : isExpanded ? "open" : "preset"}
+          </Badge>
         </div>
-        <Badge variant={badgeVariant}>{active ? "selected" : "preset"}</Badge>
+
+        {isExpanded ? (
+          <div className="space-y-3 border-t border-white/10 pt-3">
+            <PresetChipGroup title="Tools" tone="cyan" items={meta.tools} />
+            <PresetChipGroup title="Skills" tone="amber" items={meta.skills} />
+
+            <div className="space-y-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
+              <div className="flex flex-wrap gap-1.5">
+                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                  {formatAgentMissingToolBehaviorLabel(policy.missingToolBehavior)}
+                </Badge>
+                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                  {formatAgentInstallScopeLabel(policy.installScope)}
+                </Badge>
+                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                  {formatAgentFileAccessLabel(policy.fileAccess)}
+                </Badge>
+                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                  Network {formatAgentNetworkAccessLabel(policy.networkAccess)}
+                </Badge>
+                <Badge
+                  variant={heartbeat.enabled ? "success" : "muted"}
+                  className="px-2 py-1 text-[9px] normal-case tracking-normal"
+                >
+                  Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Click again to collapse</p>
+              <Badge variant="muted" className="gap-1 px-2 py-1 text-[9px] normal-case tracking-normal">
+                <ChevronUp className="h-3 w-3" />
+                Collapse
+              </Badge>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-auto space-y-2">
+            <p className="text-[10px] leading-4 text-slate-500">
+              {meta.tools.length} tools · {meta.skills.length} skills · Network{" "}
+              {formatAgentNetworkAccessLabel(policy.networkAccess)}
+            </p>
+            <div className="flex items-center justify-between gap-2">
+              <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
+              </Badge>
+              <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
+                Details
+                <ChevronDown className="h-3 w-3" />
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </button>
   );
 }
 
-function AgentPolicySummary({
-  policy,
-  heartbeat
+function PresetChipGroup({
+  title,
+  tone,
+  items
 }: {
-  policy: AgentPolicy;
-  heartbeat: AgentHeartbeatDraft;
+  title: string;
+  tone: "cyan" | "amber";
+  items: string[];
 }) {
-  const presetMeta = getAgentPresetMeta(policy.preset);
-
   return (
-    <div className="rounded-[20px] border border-white/10 bg-slate-950/50 p-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-white">{presetMeta.label}</p>
-          <p className="mt-1 text-xs leading-5 text-slate-400">{presetMeta.description}</p>
-        </div>
-        <Badge variant={presetMeta.badgeVariant}>{presetMeta.label}</Badge>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Badge variant="muted">{formatAgentMissingToolBehaviorLabel(policy.missingToolBehavior)}</Badge>
-        <Badge variant="muted">{formatAgentInstallScopeLabel(policy.installScope)}</Badge>
-        <Badge variant="muted">{formatAgentFileAccessLabel(policy.fileAccess)}</Badge>
-        <Badge variant="muted">Network {formatAgentNetworkAccessLabel(policy.networkAccess)}</Badge>
-        <Badge variant={heartbeat.enabled ? "success" : "muted"}>
-          Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
-        </Badge>
+    <div>
+      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{title}</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {items.map((item) => (
+          <PresetChip key={item} tone={tone} label={item} />
+        ))}
       </div>
     </div>
+  );
+}
+
+function PresetChip({
+  label,
+  tone
+}: {
+  label: string;
+  tone: "cyan" | "amber";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-1 text-[9px] font-medium leading-none tracking-normal",
+        tone === "cyan"
+          ? "border-cyan-300/20 bg-cyan-400/10 text-cyan-50"
+          : "border-amber-300/20 bg-amber-400/10 text-amber-50"
+      )}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -653,7 +730,6 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
   const heartbeat = resolveHeartbeatDraft(policy.preset, seed.heartbeat);
 
   return {
-    id: seed.id ?? "",
     workspaceId,
     modelId: seed.modelId ?? "",
     name: seed.name ?? presetMeta.defaultName,
@@ -668,6 +744,30 @@ function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): A
       )
     )
   };
+}
+
+function buildUniqueAgentId(agents: MissionControlSnapshot["agents"], workspaceSlug: string | undefined, agentName: string) {
+  const baseId = buildScopedAgentId(workspaceSlug, agentName);
+
+  if (!baseId) {
+    return "";
+  }
+
+  const existingAgentIds = new Set(agents.map((agent) => agent.id));
+
+  if (!existingAgentIds.has(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}-${suffix}`;
+
+  while (existingAgentIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}-${suffix}`;
+  }
+
+  return candidate;
 }
 
 function buildScopedAgentId(workspaceSlug: string | undefined, agentName: string) {

@@ -3243,6 +3243,7 @@ export async function createAgent(input: AgentCreateInput) {
     theme,
     enabled: true,
     skillId: policySkillId,
+    toolIds: presetMeta.tools,
     modelId: normalizeOptionalValue(input.modelId),
     isPrimary: false,
     policy,

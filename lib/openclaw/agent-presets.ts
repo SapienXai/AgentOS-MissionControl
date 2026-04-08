@@ -20,6 +20,8 @@ type PresetMeta = {
   defaultEmoji: string;
   defaultTheme: string;
   badgeVariant: "default" | "muted" | "success" | "warning";
+  tools: string[];
+  skills: string[];
 };
 
 export const DEFAULT_AGENT_PRESET: AgentPreset = "worker";
@@ -27,43 +29,53 @@ export const DEFAULT_AGENT_PRESET: AgentPreset = "worker";
 const PRESET_META: Record<AgentPreset, PresetMeta> = {
   worker: {
     label: "Worker",
-    description: "Delivers code, docs, research, review, or analysis without mutating the system.",
+    description: "Default execution agent for code changes, docs, research, and review work. Best when the task stays inside the workspace and does not need system-level changes.",
     defaultName: "Worker",
     defaultEmoji: "🛠️",
     defaultTheme: "slate",
-    badgeVariant: "default"
+    badgeVariant: "default",
+    tools: ["exec", "read", "write", "edit", "apply_patch"],
+    skills: ["Builder", "Reviewer", "Tester"]
   },
   setup: {
     label: "Setup / Operator",
-    description: "Prepares the environment, installs dependencies, and unblocks other agents.",
+    description: "Bootstraps environments, handles installs, and unblocks the workspace so other agents can move faster.",
     defaultName: "Setup Operator",
     defaultEmoji: "🧰",
     defaultTheme: "amber",
-    badgeVariant: "warning"
+    badgeVariant: "warning",
+    tools: ["exec", "process", "gateway", "read", "write"],
+    skills: ["Builder", "Ops", "Learner"]
   },
   browser: {
     label: "Browser",
-    description: "Captures browser evidence, screenshots, and user-path validation inside the workspace.",
+    description: "Captures browser evidence, screenshots, and user-path validation for UI-heavy work.",
     defaultName: "Browser Agent",
     defaultEmoji: "🌐",
     defaultTheme: "blue",
-    badgeVariant: "success"
+    badgeVariant: "success",
+    tools: ["browser", "web_search", "web_fetch", "image"],
+    skills: ["Browser", "Tester", "Researcher"]
   },
   monitoring: {
     label: "Monitoring",
-    description: "Periodically checks workspace health, drift, and blockers, then leaves triage handoffs.",
+    description: "Runs on a watch cycle, checks health and drift, and leaves concise triage handoffs.",
     defaultName: "Monitoring Agent",
     defaultEmoji: "🛰️",
     defaultTheme: "teal",
-    badgeVariant: "warning"
+    badgeVariant: "warning",
+    tools: ["cron", "gateway", "sessions_list", "message", "web_fetch"],
+    skills: ["Analyst", "Reviewer", "Learner"]
   },
   custom: {
     label: "Custom",
-    description: "Starts from a safe default policy but leaves room for manual overrides.",
+    description: "Starts from the safe baseline and lets you fine-tune identity, policy, and operating style by hand.",
     defaultName: "Custom Agent",
     defaultEmoji: "🧩",
     defaultTheme: "violet",
-    badgeVariant: "muted"
+    badgeVariant: "muted",
+    tools: ["exec", "read", "edit", "message"],
+    skills: ["Researcher", "Builder", "Analyst"]
   }
 };
 
@@ -246,6 +258,19 @@ export function isAgentNetworkAccess(value: unknown): value is AgentNetworkAcces
 
 export function formatAgentPresetLabel(value: AgentPreset) {
   return PRESET_META[value].label;
+}
+
+export function formatCapabilityLabel(value: string) {
+  if (value === "fs.workspaceOnly") {
+    return "Workspace only";
+  }
+
+  return value
+    .replace(/^agent-policy-/, "")
+    .replace(/^project-/, "")
+    .replace(/[._-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 export function formatAgentMissingToolBehaviorLabel(value: AgentMissingToolBehavior) {

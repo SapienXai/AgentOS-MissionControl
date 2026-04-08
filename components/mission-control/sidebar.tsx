@@ -46,6 +46,7 @@ import {
   formatAgentInstallScopeLabel,
   formatAgentMissingToolBehaviorLabel,
   formatAgentNetworkAccessLabel,
+  formatCapabilityLabel,
   formatAgentPresetLabel,
   getAgentPresetMeta,
   resolveAgentPolicy
@@ -876,52 +877,151 @@ export function MissionSidebar({
 
                       {visibleAgents.map((agent) => {
                         const agentLabel = formatAgentDisplayName(agent);
+                        const presetMeta = getAgentPresetMeta(agent.policy.preset);
+                        const actualSkills = agent.skills.length > 0 ? agent.skills : presetMeta.skills;
+                        const actualTools = agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
+                        const heartbeatLabel = agent.heartbeat.enabled
+                          ? agent.heartbeat.every ??
+                            (typeof agent.heartbeat.everyMs === "number"
+                              ? `${Math.round(agent.heartbeat.everyMs / 1000)}s`
+                              : null)
+                          : null;
+                        const visibleSkillLabels = actualSkills.slice(0, 2);
+                        const visibleToolLabels = (actualTools.length > 0 ? actualTools : presetMeta.tools).slice(0, 2);
+                        const remainingSkillCount = Math.max(actualSkills.length - visibleSkillLabels.length, 0);
+                        const remainingToolCount = Math.max(
+                          (actualTools.length > 0 ? actualTools : presetMeta.tools).length - visibleToolLabels.length,
+                          0
+                        );
+                        const badgeVariant = presetMeta.badgeVariant;
 
                         return (
-                        <div
-                          key={agent.id}
-                          className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-3.5"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-[13px] font-medium text-white">
-                                {agent.identity.emoji ? `${agent.identity.emoji} ` : ""}
-                                {agentLabel}
-                              </p>
-                              <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                                {agent.id}
-                              </p>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <Badge variant={getAgentPresetMeta(agent.policy.preset).badgeVariant}>
+                          <div
+                            key={agent.id}
+                            className="rounded-[18px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(8,13,24,0.84))] p-3.5"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-medium text-white">
+                                  {agent.identity.emoji ? `${agent.identity.emoji} ` : ""}
+                                  {agentLabel}
+                                </p>
+                                <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                                  {agent.id}
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <Badge variant={badgeVariant}>{formatAgentPresetLabel(agent.policy.preset)}</Badge>
+                                  <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
+                                    {agent.status}
+                                  </Badge>
+                                </div>
+                              </div>
+                              <AgentActionMenu
+                                agentName={agentLabel}
+                                onEdit={() => openEditAgent(agent)}
+                                onDelete={() => openDeleteAgent(agent)}
+                              />
+                            </div>
+
+                            <div className="mt-3 flex items-center gap-2">
+                              <div className="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                                <span className="truncate">
+                                  {agent.modelId === "unassigned" ? "default model" : formatModelLabel(agent.modelId)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 space-y-2 rounded-[16px] border border-white/[0.06] bg-white/[0.03] p-3">
+                              <div className="flex flex-wrap gap-1.5">
+                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                  Skills {actualSkills.length}
+                                </Badge>
+                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                  Tools {(actualTools.length > 0 ? actualTools : presetMeta.tools).length}
+                                </Badge>
+                                <Badge variant={badgeVariant} className="px-2 py-1 text-[9px] normal-case tracking-normal">
                                   {formatAgentPresetLabel(agent.policy.preset)}
                                 </Badge>
-                                <Badge variant={agent.status === "engaged" ? "default" : "muted"}>
-                                  {agent.status}
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {visibleSkillLabels.map((skill) => (
+                                    <Badge
+                                      key={skill}
+                                      variant="muted"
+                                      className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
+                                    >
+                                      {formatCapabilityLabel(skill)}
+                                    </Badge>
+                                  ))}
+                                  {remainingSkillCount > 0 ? (
+                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
+                                      +{remainingSkillCount}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {visibleToolLabels.length > 0 ? (
+                                    visibleToolLabels.map((tool) => (
+                                      <Badge
+                                        key={tool}
+                                        variant="warning"
+                                        className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
+                                      >
+                                        {formatCapabilityLabel(tool)}
+                                      </Badge>
+                                    ))
+                                  ) : (
+                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
+                                      No explicit tools
+                                    </Badge>
+                                  )}
+                                  {remainingToolCount > 0 ? (
+                                    <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
+                                      +{remainingToolCount}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                    Missing {formatAgentMissingToolBehaviorLabel(agent.policy.missingToolBehavior)}
+                                  </Badge>
+                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                    Install {formatAgentInstallScopeLabel(agent.policy.installScope)}
+                                  </Badge>
+                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                    File {formatAgentFileAccessLabel(agent.policy.fileAccess)}
+                                  </Badge>
+                                  <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                    Network {formatAgentNetworkAccessLabel(agent.policy.networkAccess)}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-1.5">
+                                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                                  Heartbeat {agent.heartbeat.enabled ? (heartbeatLabel ? `On · ${heartbeatLabel}` : "On") : "Off"}
                                 </Badge>
                               </div>
                             </div>
-                            <AgentActionMenu
-                              agentName={agentLabel}
-                              onEdit={() => openEditAgent(agent)}
-                              onDelete={() => openDeleteAgent(agent)}
-                            />
-                          </div>
 
-                          <div className="mt-3 flex items-center gap-2">
-                            <div className="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                              <span className="truncate">
-                                {agent.modelId === "unassigned" ? "default model" : formatModelLabel(agent.modelId)}
-                              </span>
-                            </div>
+                            {!activeWorkspaceId ? (
+                              <p className="mt-2 truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                                {snapshot.workspaces.find((workspace) => workspace.id === agent.workspaceId)?.name ||
+                                  "Workspace"}
+                              </p>
+                            ) : null}
                           </div>
-
-                          {!activeWorkspaceId ? (
-                            <p className="mt-2 truncate text-[10px] uppercase tracking-[0.18em] text-slate-500">
-                              {snapshot.workspaces.find((workspace) => workspace.id === agent.workspaceId)?.name ||
-                                "Workspace"}
-                            </p>
-                          ) : null}
-                        </div>
                         );
                       })}
                     </div>

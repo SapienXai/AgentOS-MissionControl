@@ -15,7 +15,9 @@ import {
   formatAgentInstallScopeLabel,
   formatAgentMissingToolBehaviorLabel,
   formatAgentNetworkAccessLabel,
-  formatAgentPresetLabel
+  formatAgentPresetLabel,
+  formatCapabilityLabel,
+  getAgentPresetMeta
 } from "@/lib/openclaw/agent-presets";
 import { formatAgentDisplayName, formatModelLabel, formatRelativeTime } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
@@ -105,17 +107,16 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         ? "bg-emerald-300"
         : data.agent.status === "ready"
           ? "bg-amber-200"
-          : data.agent.status === "offline"
-            ? "bg-rose-300"
+      : data.agent.status === "offline"
+        ? "bg-rose-300"
           : "bg-slate-500";
-  const declaredTools = data.agent.tools;
+  const presetMeta = getAgentPresetMeta(data.agent.policy.preset);
+  const declaredTools = data.agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
   const observedTools = data.agent.observedTools ?? [];
-  const declaredToolCount = declaredTools.length;
+  const displayedSkills = data.agent.skills.length > 0 ? data.agent.skills : presetMeta.skills;
+  const displayedTools = declaredTools.length > 0 ? declaredTools : presetMeta.tools;
+  const declaredToolCount = displayedTools.length;
   const observedToolCount = observedTools.length;
-  const displayToolCount = new Set([
-    ...declaredTools.filter((tool) => tool !== "fs.workspaceOnly"),
-    ...observedTools
-  ]).size;
   const inspectAgentSection = (focus: AgentDetailFocus) => {
     data.onInspect?.(data.agent.id, focus);
   };
@@ -136,9 +137,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           ? "warning"
           : data.agent.status === "offline"
             ? "danger"
-            : "muted";
+      : "muted";
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
-  const skillCount = data.agent.skills.length;
+  const skillCount = displayedSkills.length;
   const telegramTetherCount = data.telegramTetherCount ?? 0;
   const hasTelegramTether = data.agent.isDefault || telegramTetherCount > 0;
   const heartbeatLabel = data.agent.heartbeat.enabled
@@ -155,10 +156,10 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const metaLabel = `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${
     data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"
   } · Last seen ${lastSeenLabel}`;
-  const visibleSkills = data.agent.skills.slice(0, 4);
-  const visibleDeclaredTools = declaredTools.slice(0, 3);
+  const visibleSkills = displayedSkills.slice(0, 4);
+  const visibleDeclaredTools = displayedTools.slice(0, 3);
   const visibleObservedTools = observedTools.slice(0, 3);
-  const remainingSkills = Math.max(data.agent.skills.length - visibleSkills.length, 0);
+  const remainingSkills = Math.max(displayedSkills.length - visibleSkills.length, 0);
   const remainingDeclaredTools = Math.max(declaredToolCount - visibleDeclaredTools.length, 0);
   const remainingObservedTools = Math.max(observedToolCount - visibleObservedTools.length, 0);
 
@@ -378,7 +379,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
             />
             <AgentStatTile
               label="Tools"
-              value={displayToolCount}
+              value={declaredToolCount}
               ariaLabel={`Open tools for ${agentLabel}`}
               onClick={() => configureAgentCapabilities("tools")}
             />
@@ -446,8 +447,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               </p>
             </div>
             <p className="ml-auto min-w-0 truncate text-[8px] leading-none text-slate-400">
-              {skillCount} skill{skillCount === 1 ? "" : "s"} · {displayToolCount} tool
-              {displayToolCount === 1 ? "" : "s"} · policy
+              {skillCount} skill{skillCount === 1 ? "" : "s"} · {declaredToolCount} tool
+              {declaredToolCount === 1 ? "" : "s"} · {formatAgentPresetLabel(data.agent.policy.preset)} policy
             </p>
             <div className="shrink-0 rounded-full border border-white/[0.08] bg-white/[0.04] p-0.5 text-slate-400 transition-colors group-hover:border-white/[0.12] group-hover:text-slate-200">
               <ChevronDown className={cn("h-2.5 w-2.5 transition-transform duration-200", drawerOpen && "rotate-180")} />
@@ -466,15 +467,30 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="px-2.5 py-2">
-                  <ScrollArea className="h-[100px] w-full pr-2">
+                  <ScrollArea className="h-[116px] w-full pr-2">
                     <div className="space-y-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                          Skills {displayedSkills.length}
+                        </Badge>
+                        <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                          Tools {declaredToolCount}
+                        </Badge>
+                        <Badge
+                          variant={presetMeta.badgeVariant}
+                          className="px-2 py-1 text-[9px] normal-case tracking-normal"
+                        >
+                          {formatAgentPresetLabel(data.agent.policy.preset)}
+                        </Badge>
+                      </div>
+
                       <div>
-                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Capabilities</p>
+                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
                         <div className="flex flex-wrap gap-1">
                           {visibleSkills.length > 0 ? (
                             visibleSkills.map((skill) => (
                               <Badge key={skill} variant="muted" className="max-w-full truncate text-[10px]">
-                                {skill}
+                                {formatCapabilityLabel(skill)}
                               </Badge>
                             ))
                           ) : (
@@ -491,12 +507,12 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                       </div>
 
                       <div>
-                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Declared tools</p>
+                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Tools</p>
                         <div className="flex flex-wrap gap-1">
                           {visibleDeclaredTools.length > 0 ? (
                             visibleDeclaredTools.map((tool) => (
                               <Badge key={tool} variant="warning" className="max-w-full truncate text-[10px]">
-                                {tool}
+                                {formatCapabilityLabel(tool)}
                               </Badge>
                             ))
                           ) : (
@@ -519,7 +535,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                             {visibleObservedTools.length > 0 ? (
                               visibleObservedTools.map((tool) => (
                                 <Badge key={tool} variant="default" className="max-w-full truncate text-[10px]">
-                                  {tool}
+                                  {formatCapabilityLabel(tool)}
                                 </Badge>
                               ))
                             ) : (
@@ -536,14 +552,22 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                         </div>
                       ) : null}
 
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <AgentDrawerRow label="File" value={formatAgentFileAccessLabel(data.agent.policy.fileAccess)} />
-                        <AgentDrawerRow label="Network" value={formatAgentNetworkAccessLabel(data.agent.policy.networkAccess)} />
-                        <AgentDrawerRow label="Install" value={formatAgentInstallScopeLabel(data.agent.policy.installScope)} />
-                        <AgentDrawerRow
-                          label="Missing"
-                          value={formatAgentMissingToolBehaviorLabel(data.agent.policy.missingToolBehavior)}
-                        />
+                      <div>
+                        <p className="mb-1 text-[8px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                            Missing {formatAgentMissingToolBehaviorLabel(data.agent.policy.missingToolBehavior)}
+                          </Badge>
+                          <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                            File {formatAgentFileAccessLabel(data.agent.policy.fileAccess)}
+                          </Badge>
+                          <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                            Network {formatAgentNetworkAccessLabel(data.agent.policy.networkAccess)}
+                          </Badge>
+                          <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
+                            Install {formatAgentInstallScopeLabel(data.agent.policy.installScope)}
+                          </Badge>
+                        </div>
                       </div>
 
                       <AgentDrawerRow
