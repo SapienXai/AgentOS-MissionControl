@@ -16,7 +16,7 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
+import { formatAgentPresetLabel, getAgentPresetMeta } from "@/lib/openclaw/agent-presets";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
   type CapabilityCatalogResponse,
@@ -69,9 +69,14 @@ export function AgentCapabilityEditorDialog({
   const editorKind = initialFocus === "tools" ? "tools" : "skills";
   const isSkillsEditor = editorKind === "skills";
   const isToolsEditor = editorKind === "tools";
+  const presetMeta = agent ? getAgentPresetMeta(agent.policy.preset) : null;
 
   const declaredSkills = normalizeCapabilityValues(agent?.skills ?? []);
   const declaredTools = normalizeCapabilityValues((agent?.tools ?? []).filter((tool) => tool !== "fs.workspaceOnly"));
+  const effectiveSkills =
+    declaredSkills.length > 0 ? declaredSkills : normalizeCapabilityValues(presetMeta?.skillIds ?? []);
+  const effectiveTools =
+    declaredTools.length > 0 ? declaredTools : normalizeCapabilityValues(presetMeta?.tools ?? []);
   const lockedTools = agent?.tools.includes("fs.workspaceOnly") ? ["fs.workspaceOnly"] : [];
   const observedTools = normalizeCapabilityValues(agent?.observedTools ?? []);
   const workspaceSkillIds = normalizeCapabilityValues(workspace?.bootstrap.localSkillIds ?? []);
@@ -95,8 +100,15 @@ export function AgentCapabilityEditorDialog({
       return;
     }
 
-    const nextSkills = normalizeCapabilityValues(currentAgent.skills ?? []);
-    const nextTools = normalizeCapabilityValues((currentAgent.tools ?? []).filter((tool) => tool !== "fs.workspaceOnly"));
+    const currentPresetMeta = getAgentPresetMeta(currentAgent.policy.preset);
+    const nextSkills = normalizeCapabilityValues(
+      currentAgent.skills.length > 0 ? currentAgent.skills : currentPresetMeta.skillIds
+    );
+    const nextTools = normalizeCapabilityValues(
+      currentAgent.tools.filter((tool) => tool !== "fs.workspaceOnly").length > 0
+        ? currentAgent.tools.filter((tool) => tool !== "fs.workspaceOnly")
+        : currentPresetMeta.tools
+    );
 
     setDraftSkills(nextSkills);
     setDraftTools(nextTools);
@@ -251,15 +263,17 @@ export function AgentCapabilityEditorDialog({
     return null;
   }
 
+  const baselineSkills = isSkillsEditor ? effectiveSkills : declaredSkills;
+  const baselineTools = isToolsEditor ? effectiveTools : declaredTools;
   const nextSkills = isSkillsEditor ? normalizeCapabilityValues(draftSkills) : declaredSkills;
   const nextTools = isToolsEditor ? normalizeCapabilityValues(draftTools) : declaredTools;
   const hasChanges =
-    !areCapabilityListsEqual(nextSkills, declaredSkills) || !areCapabilityListsEqual(nextTools, declaredTools);
+    !areCapabilityListsEqual(nextSkills, baselineSkills) || !areCapabilityListsEqual(nextTools, baselineTools);
   const headerBadgeClassName =
     "h-5 border-white/[0.08] px-2 py-0 text-[10px] font-normal tracking-[0.06em] normal-case";
 
   const saveCapabilities = async () => {
-    if (areCapabilityListsEqual(nextSkills, declaredSkills) && areCapabilityListsEqual(nextTools, declaredTools)) {
+    if (areCapabilityListsEqual(nextSkills, baselineSkills) && areCapabilityListsEqual(nextTools, baselineTools)) {
       onOpenChange(false);
       return;
     }
@@ -320,8 +334,8 @@ export function AgentCapabilityEditorDialog({
             <DialogTitle className="text-[0.95rem]">{`Edit ${isSkillsEditor ? "skills" : "tools"} · ${formatAgentDisplayName(agent)}`}</DialogTitle>
             <DialogDescription className="text-[12px] leading-5 text-slate-400">
               {isSkillsEditor
-                ? "Select from OpenClaw and workspace skills or add a custom value."
-                : "Select from built-in tools, plugin tools, or add a custom value."}
+                ? "Current skills are shown at the top. Click × to remove them, then add more below."
+                : "Current tools are shown at the top. Click × to remove them, then add more below."}
             </DialogDescription>
             <div className="flex flex-wrap gap-1.5 pt-1">
               <Badge variant="muted" className={headerBadgeClassName}>
@@ -392,8 +406,13 @@ export function AgentCapabilityEditorDialog({
                 catalogError={capabilityCatalogError}
                 helperLabel={
                   isSkillsEditor
-                    ? "Workspace skills and OpenClaw skills are shown first."
-                    : "Built-ins, plugins, and groups are shown first. Observed tools are read-only."
+                    ? "Workspace skills and OpenClaw skills are shown first in Available to add."
+                    : "Built-ins, plugins, and groups are shown first in Available to add. Observed tools are read-only."
+                }
+                currentHintLabel={
+                  isSkillsEditor
+                    ? "Click × on a current skill to remove it."
+                    : "Click × on a current tool to remove it."
                 }
                 highlight={true}
                 customActionLabel={isSkillsEditor ? "Add custom skill" : "Add custom tool"}

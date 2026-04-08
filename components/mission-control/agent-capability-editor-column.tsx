@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent, RefObject } from "react";
 
-import { Lock, Plus } from "lucide-react";
+import { Lock, Plus, X } from "lucide-react";
 
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ type AgentCapabilityEditorColumnProps = {
   loading: boolean;
   catalogError: string | null;
   helperLabel: string;
+  currentHintLabel: string;
   highlight: boolean;
   customActionLabel: string;
 };
@@ -50,6 +51,7 @@ export function AgentCapabilityEditorColumn({
   loading,
   catalogError,
   helperLabel,
+  currentHintLabel,
   highlight,
   customActionLabel
 }: AgentCapabilityEditorColumnProps) {
@@ -67,6 +69,8 @@ export function AgentCapabilityEditorColumn({
         };
 
   const hasLocked = lockedValues.length > 0;
+  const lockedValueSet = new Set(lockedValues);
+  const selectedSectionLabel = `Current ${title.toLowerCase()}`;
 
   return (
     <div
@@ -82,37 +86,54 @@ export function AgentCapabilityEditorColumn({
       </div>
 
       <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5">
-          {selectedValues.length > 0 ? (
-            selectedValues.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={cn(
-                  "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-                  toneClasses.chip,
-                  toneClasses.chipHover
-                )}
-                onClick={() => {
-                  if (lockedValues.includes(value)) {
-                    return;
-                  }
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{selectedSectionLabel}</p>
+              <p className="text-[10px] leading-4 text-slate-400">{currentHintLabel}</p>
+            </div>
+            <Badge variant="muted">{selectedValues.length} current</Badge>
+          </div>
 
-                  onRemove(value);
-                }}
-                title={lockedValues.includes(value) ? `Locked by policy: ${value}` : `Remove ${value}`}
-              >
-                <span className="max-w-full truncate">{value}</span>
-                {lockedValues.includes(value) ? (
-                  <Lock className="h-3 w-3 text-white/70" />
-                ) : (
-                  <span className="text-white/70">×</span>
-                )}
-              </button>
-            ))
-          ) : (
-            <Badge variant="muted">{selectedEmptyLabel}</Badge>
-          )}
+          <div className="flex flex-wrap gap-1.5">
+            {selectedValues.length > 0 ? (
+              selectedValues.map((value) => {
+                const isLocked = lockedValueSet.has(value);
+
+                return (
+                  <div
+                    key={value}
+                    className={cn(
+                      "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors",
+                      toneClasses.chip,
+                      toneClasses.chipHover,
+                      isLocked && "cursor-not-allowed pr-2.5"
+                    )}
+                    title={isLocked ? `Managed by policy: ${value}` : value}
+                  >
+                    <span className="max-w-full truncate">{value}</span>
+                    {isLocked ? (
+                      <span className="inline-flex items-center gap-1 text-white/70">
+                        <Lock className="h-3 w-3" />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${value}`}
+                        title={`Remove ${value}`}
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white/70 transition-colors hover:border-white/20 hover:bg-white/20 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 focus-visible:ring-offset-0"
+                        onClick={() => onRemove(value)}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <Badge variant="muted">{selectedEmptyLabel}</Badge>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -137,13 +158,20 @@ export function AgentCapabilityEditorColumn({
           </Button>
         </div>
 
-        <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
-          <CapabilityOptionList
-            kind={title === "Skills" ? "skill" : "tool"}
-            options={suggestions}
-            onPick={onPick}
-            emptyLabel={emptySuggestionLabel}
-          />
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Available to add</p>
+            <Badge variant="muted">{suggestions.length}</Badge>
+          </div>
+
+          <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
+            <CapabilityOptionList
+              kind={title === "Skills" ? "skill" : "tool"}
+              options={suggestions}
+              onPick={onPick}
+              emptyLabel={emptySuggestionLabel}
+            />
+          </div>
         </div>
 
         {hasLocked ? (

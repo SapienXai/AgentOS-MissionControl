@@ -30,6 +30,7 @@ import {
   formatAgentInstallScopeLabel,
   formatAgentMissingToolBehaviorLabel,
   formatAgentNetworkAccessLabel,
+  formatCapabilityLabel,
   getAgentPresetMeta,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
@@ -595,7 +596,7 @@ function AgentPresetCard({
         {isExpanded ? (
           <div className="space-y-3 border-t border-white/10 pt-3">
             <PresetChipGroup title="Tools" tone="cyan" items={meta.tools} />
-            <PresetChipGroup title="Skills" tone="amber" items={meta.skills} />
+            <PresetChipGroup title="Skills" tone="amber" items={meta.skillIds} />
 
             <div className="space-y-2">
               <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
@@ -632,7 +633,7 @@ function AgentPresetCard({
         ) : (
           <div className="mt-auto space-y-2">
             <p className="text-[10px] leading-4 text-slate-500">
-              {meta.tools.length} tools · {meta.skills.length} skills · Network{" "}
+              {meta.tools.length} tools · {meta.skillIds.length} skills · Network{" "}
               {formatAgentNetworkAccessLabel(policy.networkAccess)}
             </p>
             <div className="flex items-center justify-between gap-2">
@@ -665,7 +666,7 @@ function PresetChipGroup({
       <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{title}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {items.map((item) => (
-          <PresetChip key={item} tone={tone} label={item} />
+          <PresetChip key={item} tone={tone} label={formatCapabilityLabel(item)} />
         ))}
       </div>
     </div>

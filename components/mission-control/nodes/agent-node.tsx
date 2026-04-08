@@ -111,11 +111,12 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         ? "bg-rose-300"
           : "bg-slate-500";
   const presetMeta = getAgentPresetMeta(data.agent.policy.preset);
+  const declaredSkills = data.agent.skills;
   const declaredTools = data.agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
+  const effectiveSkills = declaredSkills.length > 0 ? declaredSkills : presetMeta.skillIds;
+  const effectiveTools = declaredTools.length > 0 ? declaredTools : presetMeta.tools;
   const observedTools = data.agent.observedTools ?? [];
-  const displayedSkills = data.agent.skills.length > 0 ? data.agent.skills : presetMeta.skills;
-  const displayedTools = declaredTools.length > 0 ? declaredTools : presetMeta.tools;
-  const declaredToolCount = displayedTools.length;
+  const declaredToolCount = effectiveTools.length;
   const observedToolCount = observedTools.length;
   const inspectAgentSection = (focus: AgentDetailFocus) => {
     data.onInspect?.(data.agent.id, focus);
@@ -139,7 +140,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
             ? "danger"
       : "muted";
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
-  const skillCount = displayedSkills.length;
+  const skillCount = effectiveSkills.length;
   const telegramTetherCount = data.telegramTetherCount ?? 0;
   const hasTelegramTether = data.agent.isDefault || telegramTetherCount > 0;
   const heartbeatLabel = data.agent.heartbeat.enabled
@@ -156,11 +157,11 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const metaLabel = `${formatAgentFileAccessLabel(data.agent.policy.fileAccess)} · Heartbeat ${
     data.agent.heartbeat.enabled ? heartbeatLabel ?? "on" : "off"
   } · Last seen ${lastSeenLabel}`;
-  const visibleSkills = displayedSkills.slice(0, 4);
-  const visibleDeclaredTools = displayedTools.slice(0, 3);
+  const visibleSkills = effectiveSkills.slice(0, 4);
+  const visibleDeclaredTools = effectiveTools.slice(0, 3);
   const visibleObservedTools = observedTools.slice(0, 3);
-  const remainingSkills = Math.max(displayedSkills.length - visibleSkills.length, 0);
-  const remainingDeclaredTools = Math.max(declaredToolCount - visibleDeclaredTools.length, 0);
+  const remainingSkills = Math.max(effectiveSkills.length - visibleSkills.length, 0);
+  const remainingDeclaredTools = Math.max(effectiveTools.length - visibleDeclaredTools.length, 0);
   const remainingObservedTools = Math.max(observedToolCount - visibleObservedTools.length, 0);
 
   useEffect(() => {
@@ -471,7 +472,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
                     <div className="space-y-2">
                       <div className="flex flex-wrap gap-1.5">
                         <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                          Skills {displayedSkills.length}
+                          Skills {skillCount}
                         </Badge>
                         <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
                           Tools {declaredToolCount}

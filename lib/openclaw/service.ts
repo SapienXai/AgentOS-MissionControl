@@ -12,6 +12,9 @@ import { createFallbackSnapshot } from "@/lib/openclaw/fallback";
 import {
   DEFAULT_AGENT_PRESET,
   formatAgentPresetLabel,
+  formatCapabilityLabel,
+  filterKnownOpenClawSkillIds,
+  filterKnownOpenClawToolIds,
   getAgentPresetMeta,
   inferAgentPresetFromContext,
   isAgentFileAccess,
@@ -3174,6 +3177,8 @@ export async function createAgent(input: AgentCreateInput) {
 
   const policy = resolveAgentPolicy(input.policy?.preset ?? DEFAULT_AGENT_PRESET, input.policy);
   const presetMeta = getAgentPresetMeta(policy.preset);
+  const presetSkillIds = filterKnownOpenClawSkillIds(presetMeta.skillIds);
+  const presetToolIds = filterKnownOpenClawToolIds(presetMeta.tools);
   const displayName = normalizeOptionalValue(input.name) ?? presetMeta.defaultName;
   const emoji = normalizeOptionalValue(input.emoji) ?? presetMeta.defaultEmoji;
   const theme = normalizeOptionalValue(input.theme) ?? presetMeta.defaultTheme;
@@ -3207,6 +3212,9 @@ export async function createAgent(input: AgentCreateInput) {
     setupAgentId,
     snapshot
   });
+  for (const skillId of presetSkillIds) {
+    await ensureWorkspaceSkillMarkdown(resolvedWorkspacePath, skillId);
+  }
 
   const configEntry = await upsertAgentConfigEntry(
     agentId,
@@ -3215,7 +3223,7 @@ export async function createAgent(input: AgentCreateInput) {
       name: displayName,
       model: normalizeOptionalValue(input.modelId),
       heartbeat,
-      skills: [policySkillId],
+      skills: uniqueStrings([...presetSkillIds, policySkillId]),
       tools:
         policy.fileAccess === "workspace-only"
           ? {
@@ -3242,8 +3250,8 @@ export async function createAgent(input: AgentCreateInput) {
     emoji,
     theme,
     enabled: true,
-    skillId: policySkillId,
-    toolIds: presetMeta.tools,
+    skillId: presetSkillIds[0] ?? policySkillId,
+    toolIds: presetToolIds,
     modelId: normalizeOptionalValue(input.modelId),
     isPrimary: false,
     policy,
@@ -3290,6 +3298,9 @@ export async function updateAgent(input: AgentUpdateInput) {
   }
 
   const policy = resolveAgentPolicy(input.policy?.preset ?? agent.policy.preset, input.policy ?? agent.policy);
+  const presetMeta = getAgentPresetMeta(policy.preset);
+  const presetSkillIds = filterKnownOpenClawSkillIds(presetMeta.skillIds);
+  const presetToolIds = filterKnownOpenClawToolIds(presetMeta.tools);
   const currentName = normalizeOptionalValue(agent.name);
   const currentEmoji = normalizeOptionalValue(agent.identity.emoji);
   const currentTheme = normalizeOptionalValue(agent.identity.theme);
@@ -3310,8 +3321,19 @@ export async function updateAgent(input: AgentUpdateInput) {
     setupAgentId,
     snapshot
   });
+  const currentDeclaredSkills = filterAgentPolicySkills(agent.skills);
+  const currentDeclaredTools = normalizeDeclaredAgentTools(agent.tools);
+  const shouldResetSkills = policy.preset !== agent.policy.preset || currentDeclaredSkills.length === 0;
+  const shouldResetTools = policy.preset !== agent.policy.preset || currentDeclaredTools.length === 0;
   const nextDeclaredSkills =
-    input.skills === undefined ? agent.skills : filterAgentPolicySkills(input.skills);
+    input.skills === undefined
+      ? shouldResetSkills
+        ? presetSkillIds
+        : currentDeclaredSkills
+      : filterKnownOpenClawSkillIds(filterAgentPolicySkills(input.skills));
+  for (const skillId of nextDeclaredSkills) {
+    await ensureWorkspaceSkillMarkdown(resolvedWorkspacePath, skillId);
+  }
 
   const configEntry = await upsertAgentConfigEntry(
     agentId,
@@ -3333,7 +3355,11 @@ export async function updateAgent(input: AgentUpdateInput) {
     snapshot
   );
   const nextDeclaredTools =
-    input.tools === undefined ? undefined : normalizeDeclaredAgentTools(input.tools);
+    input.tools === undefined
+      ? shouldResetTools
+        ? presetToolIds
+        : undefined
+      : normalizeDeclaredAgentTools(input.tools);
 
   await applyAgentIdentity(agentId, resolvedWorkspacePath, {
     name: normalizeOptionalValue(input.name) ?? configEntry.name,
@@ -3352,6 +3378,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     isPrimary: agent.isDefault,
     policy,
     channelIds: input.channelIds ?? [],
+    skillId: nextDeclaredSkills[0] ?? policySkillId,
     toolIds: nextDeclaredTools
   });
 
@@ -5851,6 +5878,21 @@ async function ensureAgentPolicySkill(params: {
     `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, team, coordination)}\n`
   );
   return skillId;
+}
+
+async function ensureWorkspaceSkillMarkdown(workspacePath: string, skillId: string) {
+  const [knownSkillId] = filterKnownOpenClawSkillIds([skillId]);
+
+  if (!knownSkillId) {
+    return;
+  }
+
+  const skillPath = path.join(workspacePath, "skills", skillId);
+  await mkdir(skillPath, { recursive: true });
+  await writeTextFileIfMissing(
+    path.join(skillPath, "SKILL.md"),
+    `${renderSkillMarkdown(knownSkillId, formatCapabilityLabel(knownSkillId))}\n`
+  );
 }
 
 async function ensureTelegramDelegationHelper(workspacePath: string) {

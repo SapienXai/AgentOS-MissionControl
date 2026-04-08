@@ -6,6 +6,7 @@ import type {
   AgentPolicy,
   AgentPreset
 } from "@/lib/openclaw/types";
+import { OPENCLAW_BUILTIN_TOOL_CATALOG } from "@/lib/openclaw/tool-catalog";
 
 type Option<T extends string> = {
   value: T;
@@ -21,10 +22,24 @@ type PresetMeta = {
   defaultTheme: string;
   badgeVariant: "default" | "muted" | "success" | "warning";
   tools: string[];
-  skills: string[];
+  skillIds: string[];
 };
 
 export const DEFAULT_AGENT_PRESET: AgentPreset = "worker";
+
+const OPENCLAW_SKILL_ID_SET = new Set([
+  "project-builder",
+  "project-reviewer",
+  "project-tester",
+  "project-learner",
+  "project-browser",
+  "project-researcher",
+  "project-strategist",
+  "project-writer",
+  "project-analyst"
+]);
+
+const OPENCLAW_TOOL_ID_SET = new Set(OPENCLAW_BUILTIN_TOOL_CATALOG.map((entry) => entry.name));
 
 const PRESET_META: Record<AgentPreset, PresetMeta> = {
   worker: {
@@ -35,7 +50,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "slate",
     badgeVariant: "default",
     tools: ["exec", "read", "write", "edit", "apply_patch"],
-    skills: ["Builder", "Reviewer", "Tester"]
+    skillIds: ["project-builder", "project-reviewer", "project-tester"]
   },
   setup: {
     label: "Setup / Operator",
@@ -45,7 +60,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "amber",
     badgeVariant: "warning",
     tools: ["exec", "process", "gateway", "read", "write"],
-    skills: ["Builder", "Ops", "Learner"]
+    skillIds: ["project-builder", "project-analyst", "project-learner"]
   },
   browser: {
     label: "Browser",
@@ -55,7 +70,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "blue",
     badgeVariant: "success",
     tools: ["browser", "web_search", "web_fetch", "image"],
-    skills: ["Browser", "Tester", "Researcher"]
+    skillIds: ["project-browser", "project-tester", "project-researcher"]
   },
   monitoring: {
     label: "Monitoring",
@@ -65,7 +80,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "teal",
     badgeVariant: "warning",
     tools: ["cron", "gateway", "sessions_list", "message", "web_fetch"],
-    skills: ["Analyst", "Reviewer", "Learner"]
+    skillIds: ["project-analyst", "project-reviewer", "project-learner"]
   },
   custom: {
     label: "Custom",
@@ -75,7 +90,7 @@ const PRESET_META: Record<AgentPreset, PresetMeta> = {
     defaultTheme: "violet",
     badgeVariant: "muted",
     tools: ["exec", "read", "edit", "message"],
-    skills: ["Researcher", "Builder", "Analyst"]
+    skillIds: ["project-researcher", "project-builder", "project-analyst"]
   }
 };
 
@@ -191,6 +206,14 @@ export function getAgentPresetMeta(preset: AgentPreset) {
   return PRESET_META[preset];
 }
 
+export function filterKnownOpenClawSkillIds(skillIds: string[]) {
+  return uniqueStrings(skillIds.filter((skillId) => OPENCLAW_SKILL_ID_SET.has(skillId)));
+}
+
+export function filterKnownOpenClawToolIds(toolIds: string[]) {
+  return uniqueStrings(toolIds.filter((toolId) => OPENCLAW_TOOL_ID_SET.has(toolId)));
+}
+
 export function resolveAgentPolicy(
   preset: AgentPreset = DEFAULT_AGENT_PRESET,
   overrides?: Partial<AgentPolicy> | null
@@ -271,6 +294,10 @@ export function formatCapabilityLabel(value: string) {
     .replace(/[._-]+/g, " ")
     .trim()
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 export function formatAgentMissingToolBehaviorLabel(value: AgentMissingToolBehavior) {

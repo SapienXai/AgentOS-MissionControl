@@ -878,8 +878,10 @@ export function MissionSidebar({
                       {visibleAgents.map((agent) => {
                         const agentLabel = formatAgentDisplayName(agent);
                         const presetMeta = getAgentPresetMeta(agent.policy.preset);
-                        const actualSkills = agent.skills.length > 0 ? agent.skills : presetMeta.skills;
-                        const actualTools = agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
+                        const declaredSkills = agent.skills;
+                        const declaredTools = agent.tools.filter((tool) => tool !== "fs.workspaceOnly");
+                        const actualSkills = declaredSkills.length > 0 ? declaredSkills : presetMeta.skillIds;
+                        const actualTools = declaredTools.length > 0 ? declaredTools : presetMeta.tools;
                         const heartbeatLabel = agent.heartbeat.enabled
                           ? agent.heartbeat.every ??
                             (typeof agent.heartbeat.everyMs === "number"
@@ -887,12 +889,9 @@ export function MissionSidebar({
                               : null)
                           : null;
                         const visibleSkillLabels = actualSkills.slice(0, 2);
-                        const visibleToolLabels = (actualTools.length > 0 ? actualTools : presetMeta.tools).slice(0, 2);
+                        const visibleToolLabels = actualTools.slice(0, 2);
                         const remainingSkillCount = Math.max(actualSkills.length - visibleSkillLabels.length, 0);
-                        const remainingToolCount = Math.max(
-                          (actualTools.length > 0 ? actualTools : presetMeta.tools).length - visibleToolLabels.length,
-                          0
-                        );
+                        const remainingToolCount = Math.max(actualTools.length - visibleToolLabels.length, 0);
                         const badgeVariant = presetMeta.badgeVariant;
 
                         return (
@@ -937,7 +936,7 @@ export function MissionSidebar({
                                   Skills {actualSkills.length}
                                 </Badge>
                                 <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                                  Tools {(actualTools.length > 0 ? actualTools : presetMeta.tools).length}
+                                  Tools {actualTools.length}
                                 </Badge>
                                 <Badge variant={badgeVariant} className="px-2 py-1 text-[9px] normal-case tracking-normal">
                                   {formatAgentPresetLabel(agent.policy.preset)}
@@ -947,20 +946,28 @@ export function MissionSidebar({
                               <div className="space-y-1.5">
                                 <p className="text-[8px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
                                 <div className="flex flex-wrap gap-1">
-                                  {visibleSkillLabels.map((skill) => (
-                                    <Badge
-                                      key={skill}
-                                      variant="muted"
-                                      className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
-                                    >
-                                      {formatCapabilityLabel(skill)}
-                                    </Badge>
-                                  ))}
-                                  {remainingSkillCount > 0 ? (
+                                  {visibleSkillLabels.length > 0 ? (
+                                    <>
+                                      {visibleSkillLabels.map((skill) => (
+                                        <Badge
+                                          key={skill}
+                                          variant="muted"
+                                          className="max-w-full truncate px-2 py-1 text-[10px] normal-case tracking-normal"
+                                        >
+                                          {formatCapabilityLabel(skill)}
+                                        </Badge>
+                                      ))}
+                                      {remainingSkillCount > 0 ? (
+                                        <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
+                                          +{remainingSkillCount}
+                                        </Badge>
+                                      ) : null}
+                                    </>
+                                  ) : (
                                     <Badge variant="muted" className="px-2 py-1 text-[10px] normal-case tracking-normal">
-                                      +{remainingSkillCount}
+                                      No explicit skills
                                     </Badge>
-                                  ) : null}
+                                  )}
                                 </div>
                               </div>
 

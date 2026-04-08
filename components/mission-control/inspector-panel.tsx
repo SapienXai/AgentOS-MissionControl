@@ -862,6 +862,8 @@ function AgentContent({
   const declaredTools = (agent?.tools ?? []).filter((tool) => tool !== "fs.workspaceOnly");
   const lockedTools = agent?.tools.includes("fs.workspaceOnly") ? ["fs.workspaceOnly"] : [];
   const policyMeta = agent ? getAgentPresetMeta(agent.policy.preset) : null;
+  const effectiveSkills = declaredSkills.length > 0 ? declaredSkills : policyMeta?.skillIds ?? [];
+  const effectiveTools = declaredTools.length > 0 ? declaredTools : policyMeta?.tools ?? [];
   const policyRows = agent
     ? [
         {
@@ -977,11 +979,11 @@ function AgentContent({
           >
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Skills</p>
-              <Badge variant="muted">{declaredSkills.length} configured</Badge>
+              <Badge variant="muted">{effectiveSkills.length} active</Badge>
             </div>
             <InspectorTagGroup
-              emptyLabel="No explicit skills"
-              items={declaredSkills}
+              emptyLabel="No skills available"
+              items={effectiveSkills}
               emptyVariant="muted"
               itemVariant="muted"
             />
@@ -1004,13 +1006,13 @@ function AgentContent({
                     policy locked
                   </Badge>
                 ) : null}
-                <Badge variant="muted">{declaredTools.length} configured</Badge>
+                <Badge variant="muted">{effectiveTools.length} active</Badge>
               </div>
             </div>
             <div className="space-y-3">
               <InspectorTagGroup
-                emptyLabel="No explicit tools configured"
-                items={declaredTools}
+                emptyLabel="No tools available"
+                items={effectiveTools}
                 emptyVariant="muted"
                 itemVariant="warning"
               />
