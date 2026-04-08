@@ -26,7 +26,6 @@ import {
   formatSkillSourceLabel,
   formatToolSourceLabel,
   normalizeCapabilityValues,
-  splitCapabilityInput,
   updateSnapshotAgentCapabilities
 } from "@/lib/openclaw/capability-editor";
 import { OPENCLAW_BUILTIN_TOOL_CATALOG, OPENCLAW_TOOL_GROUP_CATALOG } from "@/lib/openclaw/tool-catalog";
@@ -357,18 +356,6 @@ export function AgentCapabilityEditorDialog({
                     setDraftTools((current) => current.filter((entry) => entry !== value));
                   }
                 }}
-                onAddCustom={() => {
-                  const additions = splitCapabilityInput(isSkillsEditor ? skillInput : toolInput);
-                  if (additions.length > 0) {
-                    if (isSkillsEditor) {
-                      setDraftSkills((current) => normalizeCapabilityValues([...current, ...additions]));
-                      setSkillInput("");
-                    } else {
-                      setDraftTools((current) => normalizeCapabilityValues([...current, ...additions]));
-                      setToolInput("");
-                    }
-                  }
-                }}
                 onPick={(value) => {
                   if (isSkillsEditor) {
                     setDraftSkills((current) => normalizeCapabilityValues([...current, value]));
@@ -401,7 +388,6 @@ export function AgentCapabilityEditorDialog({
                     : "Click × on a current tool to remove it."
                 }
                 highlight={true}
-                customActionLabel={isSkillsEditor ? "Add custom skill" : "Add custom tool"}
               />
             </div>
 

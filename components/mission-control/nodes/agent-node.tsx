@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
-import { ChevronDown, MessageCircle, MoreHorizontal, UserPlus } from "lucide-react";
+import { ChevronDown, LocateFixed, MessageCircle, MoreHorizontal } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import type { AgentDetailFocus, AgentNodeData } from "@/components/mission-control/canvas-types";
@@ -411,8 +411,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               className={cn(
                 "nodrag nopan inline-flex h-10 items-center justify-center gap-1.5 rounded-full border px-3.5 text-[12px] transition-colors",
                 data.focused
-                  ? "border-amber-200/40 bg-[linear-gradient(180deg,rgba(252,211,77,0.96),rgba(217,119,6,0.9))] text-slate-950 shadow-[0_12px_26px_rgba(217,119,6,0.28)]"
-                  : "border-amber-200/35 bg-[linear-gradient(180deg,rgba(251,191,36,0.94),rgba(217,119,6,0.88))] text-slate-950 shadow-[0_12px_26px_rgba(217,119,6,0.24)]"
+                  ? "border-amber-200/45 bg-[linear-gradient(180deg,rgba(252,211,77,0.96),rgba(217,119,6,0.9))] text-slate-950 shadow-[0_12px_30px_rgba(245,158,11,0.38)]"
+                  : "border-amber-300/20 bg-[linear-gradient(180deg,rgba(251,191,36,0.18),rgba(217,119,6,0.28))] text-amber-50 shadow-[0_10px_24px_rgba(245,158,11,0.18)] hover:border-amber-200/30 hover:text-white"
               )}
               onClick={(event) => {
                 event.stopPropagation();
@@ -420,8 +420,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              <UserPlus className="h-3.5 w-3.5" />
-              <span>{data.focused ? "Following" : "Follow +"}</span>
+              <LocateFixed className="h-3.5 w-3.5" />
+              <span>{data.focused ? "Focused" : "Focus"}</span>
             </button>
           </div>
         </div>

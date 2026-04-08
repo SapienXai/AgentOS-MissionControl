@@ -2,10 +2,9 @@
 
 import { useState, type KeyboardEvent, type RefObject } from "react";
 
-import { Lock, Plus, X } from "lucide-react";
+import { Lock, X } from "lucide-react";
 
 import { Badge, type BadgeProps } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type CapabilityOption } from "@/lib/openclaw/capability-editor";
 import { cn } from "@/lib/utils";
@@ -23,7 +22,6 @@ type AgentCapabilityEditorColumnProps = {
   inputValue: string;
   onInputValueChange: (value: string) => void;
   onRemove: (value: string) => void;
-  onAddCustom: () => void;
   onPick: (value: string) => void;
   suggestions: CapabilityOption[];
   emptySuggestionLabel: string;
@@ -32,7 +30,6 @@ type AgentCapabilityEditorColumnProps = {
   helperLabel: string;
   currentHintLabel: string;
   highlight: boolean;
-  customActionLabel: string;
 };
 
 export function AgentCapabilityEditorColumn({
@@ -46,7 +43,6 @@ export function AgentCapabilityEditorColumn({
   inputValue,
   onInputValueChange,
   onRemove,
-  onAddCustom,
   onPick,
   suggestions,
   emptySuggestionLabel,
@@ -54,8 +50,7 @@ export function AgentCapabilityEditorColumn({
   catalogError,
   helperLabel,
   currentHintLabel,
-  highlight,
-  customActionLabel
+  highlight
 }: AgentCapabilityEditorColumnProps) {
   const toneClasses =
     selectedTone === "cyan"
@@ -139,26 +134,15 @@ export function AgentCapabilityEditorColumn({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div>
           <Input
             ref={inputRef}
             value={inputValue}
             onChange={(event) => onInputValueChange(event.target.value)}
-            onKeyDown={(event) => handleCapabilityInputKeyDown(event, inputValue, onAddCustom, suggestions, onPick)}
+            onKeyDown={(event) => handleCapabilityInputKeyDown(event, suggestions, onPick)}
             placeholder={title === "Skills" ? "Search OpenClaw or workspace skills" : "Search built-in tools or plugin tools"}
             className="h-8 flex-1 rounded-xl border-white/10 bg-white/5 px-3 text-[12px]"
           />
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onAddCustom}
-            disabled={!inputValue.trim()}
-            className="h-8 rounded-xl px-3 text-[11px]"
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            {customActionLabel}
-          </Button>
         </div>
 
         <div className="space-y-2">
@@ -330,8 +314,6 @@ function getCapabilityBadgeVariant(option: CapabilityOption): BadgeProps["varian
 
 function handleCapabilityInputKeyDown(
   event: KeyboardEvent<HTMLInputElement>,
-  inputValue: string,
-  onAddCustom: () => void,
   suggestions: CapabilityOption[],
   onPick: (value: string) => void
 ) {
@@ -344,10 +326,5 @@ function handleCapabilityInputKeyDown(
 
   if (firstSuggestion) {
     onPick(firstSuggestion.value);
-    return;
-  }
-
-  if (inputValue.trim()) {
-    onAddCustom();
   }
 }
