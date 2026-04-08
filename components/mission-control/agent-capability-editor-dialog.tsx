@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
@@ -238,11 +237,11 @@ export function AgentCapabilityEditorDialog({
   );
 
   const skillSuggestions = useMemo(
-    () => filterCapabilityOptions(skillOptions, skillInput, draftSkills),
+    () => filterCapabilityOptions(skillOptions, skillInput, draftSkills, Number.POSITIVE_INFINITY),
     [draftSkills, skillInput, skillOptions]
   );
   const toolSuggestions = useMemo(
-    () => filterCapabilityOptions(toolOptions, toolInput, draftTools),
+    () => filterCapabilityOptions(toolOptions, toolInput, draftTools, Number.POSITIVE_INFINITY),
     [draftTools, toolInput, toolOptions]
   );
 
@@ -330,24 +329,11 @@ export function AgentCapabilityEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(680px,calc(100vw-1.5rem))] max-h-[calc(100dvh-1.5rem)] overflow-hidden rounded-[24px] border-white/10 bg-[linear-gradient(180deg,rgba(7,10,18,0.98),rgba(4,7,14,0.98))] p-0">
         <div className="flex max-h-[calc(100dvh-1.5rem)] min-h-0 flex-col">
-          <DialogHeader className="border-b border-white/[0.08] px-4 py-3">
+          <DialogHeader className="border-b border-white/[0.08] px-4 py-2.5">
             <DialogTitle className="text-[0.95rem]">{`Edit ${isSkillsEditor ? "skills" : "tools"} · ${formatAgentDisplayName(agent)}`}</DialogTitle>
-            <DialogDescription className="text-[12px] leading-5 text-slate-400">
-              {isSkillsEditor
-                ? "Current skills are shown at the top. Click × to remove them, then add more below."
-                : "Current tools are shown at the top. Click × to remove them, then add more below."}
-            </DialogDescription>
-            <div className="flex flex-wrap gap-1.5 pt-1">
+            <div className="flex flex-wrap gap-1 pt-0.5">
               <Badge variant="muted" className={headerBadgeClassName}>
                 {formatAgentPresetLabel(agent.policy.preset)}
-              </Badge>
-              {agent.identity.source ? (
-                <Badge variant="muted" className={headerBadgeClassName}>
-                  {agent.identity.source}
-                </Badge>
-              ) : null}
-              <Badge variant="muted" className={headerBadgeClassName}>
-                {agent.id}
               </Badge>
             </div>
           </DialogHeader>

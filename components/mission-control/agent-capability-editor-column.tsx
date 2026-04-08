@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent, RefObject } from "react";
+import { useState, type KeyboardEvent, type RefObject } from "react";
 
 import { Lock, Plus, X } from "lucide-react";
 
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type CapabilityOption } from "@/lib/openclaw/capability-editor";
 import { cn } from "@/lib/utils";
+
+const INITIAL_SUGGESTION_COUNT = 8;
 
 type AgentCapabilityEditorColumnProps = {
   title: string;
@@ -71,6 +73,7 @@ export function AgentCapabilityEditorColumn({
   const hasLocked = lockedValues.length > 0;
   const lockedValueSet = new Set(lockedValues);
   const selectedSectionLabel = `Current ${title.toLowerCase()}`;
+  const suggestionPanelKey = `${title}:${inputValue}:${suggestions.length}:${suggestions[0]?.value ?? ""}`;
 
   return (
     <div
@@ -159,19 +162,13 @@ export function AgentCapabilityEditorColumn({
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Available to add</p>
-            <Badge variant="muted">{suggestions.length}</Badge>
-          </div>
-
-          <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
-            <CapabilityOptionList
-              kind={title === "Skills" ? "skill" : "tool"}
-              options={suggestions}
-              onPick={onPick}
-              emptyLabel={emptySuggestionLabel}
-            />
-          </div>
+          <CapabilitySuggestionPanel
+            key={suggestionPanelKey}
+            kind={title === "Skills" ? "skill" : "tool"}
+            suggestions={suggestions}
+            onPick={onPick}
+            emptyLabel={emptySuggestionLabel}
+          />
         </div>
 
         {hasLocked ? (
@@ -211,6 +208,55 @@ export function AgentCapabilityEditorColumn({
   );
 }
 
+function CapabilitySuggestionPanel({
+  kind,
+  suggestions,
+  onPick,
+  emptyLabel
+}: {
+  kind: CapabilityOption["kind"];
+  suggestions: CapabilityOption[];
+  onPick: (value: string) => void;
+  emptyLabel: string;
+}) {
+  const [visibleSuggestionCount, setVisibleSuggestionCount] = useState(INITIAL_SUGGESTION_COUNT);
+  const visibleSuggestions = suggestions.slice(0, visibleSuggestionCount);
+  const remainingSuggestionCount = Math.max(suggestions.length - visibleSuggestions.length, 0);
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Available to add</p>
+        <Badge variant="muted">{suggestions.length} total</Badge>
+      </div>
+
+      <div className="max-h-[280px] space-y-1.5 overflow-y-auto pr-1">
+        <div className="space-y-1.5">
+          <CapabilityOptionList
+            kind={kind}
+            options={visibleSuggestions}
+            onPick={onPick}
+            emptyLabel={emptyLabel}
+          />
+
+          {remainingSuggestionCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setVisibleSuggestionCount((current) => current + INITIAL_SUGGESTION_COUNT)}
+              className="group flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300/20 bg-cyan-400/[0.04] px-3 py-2 text-[11px] text-cyan-100 transition-colors hover:border-cyan-200/35 hover:bg-cyan-400/[0.08] hover:text-white"
+            >
+              <span className="uppercase tracking-[0.18em]">Load more</span>
+              <Badge variant="muted" className="h-5 px-2 py-0 text-[10px]">
+                +{remainingSuggestionCount}
+              </Badge>
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CapabilityOptionList({
   kind,
   options,
@@ -246,7 +292,12 @@ function CapabilityOptionList({
             </div>
             <p className="line-clamp-2 text-[11px] leading-4 text-slate-400">{option.description}</p>
           </div>
-          <Badge variant={getCapabilityBadgeVariant(option)}>{option.sourceLabel}</Badge>
+          <Badge
+            variant={getCapabilityBadgeVariant(option)}
+            className="shrink-0 h-4 max-w-[132px] px-1.5 py-0 text-[8px] font-medium tracking-[0.08em] normal-case"
+          >
+            <span className="truncate">{option.sourceLabel}</span>
+          </Badge>
         </button>
       ))}
     </div>
