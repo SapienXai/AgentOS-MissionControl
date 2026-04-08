@@ -69,7 +69,8 @@ const edgeTypes = {
   simplebezier: MissionConnectionEdge
 };
 const justCreatedTaskDurationMs = 12000;
-const nodePositionsStorageKey = "mission-control-node-positions";
+const nodePositionsStorageKey = "mission-control-node-positions:v2";
+const legacyNodePositionsStorageKey = "mission-control-node-positions";
 const telegramModuleSpringStiffness = 220;
 const telegramModuleSpringDamping = 20;
 const telegramModuleSettlingThreshold = 0.35;
@@ -139,10 +140,16 @@ export function MissionCanvas({
   const hasHydratedPersistedNodePositionsRef = useRef(false);
   const skipNextPersistRef = useRef(false);
   const shouldMergePositionsRef = useRef(false);
+  const lastCanvasScopeKeyRef = useRef<string | null>(null);
   const lastComposerViewportResetNonceRef = useRef(composerViewportResetNonce);
   const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const [justCreatedTaskIds, setJustCreatedTaskIds] = useState<string[]>([]);
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  const canvasScopeKey = focusedAgentId
+    ? `focus:${focusedAgentId}`
+    : activeWorkspaceId
+      ? `workspace:${activeWorkspaceId}`
+      : "all";
   const initialGraph = buildCanvasGraph(
     snapshot,
     relativeTimeReferenceMs,
@@ -174,7 +181,7 @@ export function MissionCanvas({
   const telegramSpringVelocitiesRef = useRef<Map<string, SpringVelocity>>(new Map());
 
   useEffect(() => {
-    const persistedPositions = readPersistedNodePositions();
+    const persistedPositions = readPersistedNodePositions(canvasScopeKey);
     persistedNodePositionsRef.current = persistedPositions;
     hasHydratedPersistedNodePositionsRef.current = true;
     skipNextPersistRef.current = true;
@@ -221,7 +228,7 @@ export function MissionCanvas({
         };
       })
     );
-  }, [setNodes]);
+  }, [canvasScopeKey, setNodes]);
 
   useEffect(() => {
     const nextGraph = buildCanvasGraph(
@@ -250,8 +257,11 @@ export function MissionCanvas({
       onInspectTask,
       persistedNodePositionsRef.current
     );
+    const scopeChanged = lastCanvasScopeKeyRef.current !== canvasScopeKey;
+    lastCanvasScopeKeyRef.current = canvasScopeKey;
+
     setNodes((previousNodes) => {
-      if (!shouldMergePositionsRef.current && hasHydratedPersistedNodePositionsRef.current) {
+      if (scopeChanged || (!shouldMergePositionsRef.current && hasHydratedPersistedNodePositionsRef.current)) {
         shouldMergePositionsRef.current = true;
         return nextGraph.nodes;
       }
@@ -283,6 +293,7 @@ export function MissionCanvas({
     onAbortTask,
     onInspectTask,
     relativeTimeReferenceMs,
+    canvasScopeKey,
     setEdges,
     setNodes
   ]);
@@ -556,8 +567,8 @@ export function MissionCanvas({
     }
 
     persistedNodePositionsRef.current = mergedPositions;
-    writeToLocalStorage(nodePositionsStorageKey, JSON.stringify(mergedPositions));
-  }, [nodes]);
+    writeToLocalStorage(getNodePositionsStorageKey(canvasScopeKey), JSON.stringify(mergedPositions));
+  }, [canvasScopeKey, nodes]);
 
   return (
     <div ref={containerRef} className={cn("h-full w-full", className)}>
@@ -659,6 +670,8 @@ function buildCanvasGraph(
   const contentNodes: Array<AgentCanvasNode | TaskCanvasNode> = [];
   const telegramModuleNodes: TelegramModuleCanvasNode[] = [];
   const graphTasks: TaskRecord[] = [];
+  let rowTopY = 42;
+  let rowMaxHeight = 0;
 
   visibleWorkspaces.forEach((workspace, workspaceIndex) => {
     const workspaceAgents = isFocusMode
@@ -685,8 +698,9 @@ function buildCanvasGraph(
       workspaceToggleTasks.every((task) =>
         isTaskHidden(task, safeHiddenRuntimeIds, safeHiddenTaskKeys, safeLockedTaskKeys)
       );
-    const groupX = (workspaceIndex % 2) * 1160 + 44;
-    const groupY = Math.floor(workspaceIndex / 2) * 920 + 42;
+    const workspaceColumn = workspaceIndex % 2;
+    const groupX = workspaceColumn * 1160 + 44;
+    const groupY = rowTopY;
     const agentX = groupX + 52;
     const taskX = groupX + 390;
     let laneY = groupY + 118;
@@ -800,6 +814,8 @@ function buildCanvasGraph(
     });
 
     if (!isFocusMode) {
+      const workspaceHeight = Math.max(laneY - groupY + 112, 700);
+
       workspaceNodes.push({
         id: workspace.id,
         type: "workspace",
@@ -808,7 +824,7 @@ function buildCanvasGraph(
         zIndex: 0,
         style: {
           width: 1060,
-          height: Math.max(laneY - groupY + 112, 700)
+          height: workspaceHeight
         },
         selectable: true,
         selected: false,
@@ -821,6 +837,13 @@ function buildCanvasGraph(
             workspaceToggleTasks.length > 0 ? () => onToggleWorkspaceTaskCards(workspace.id) : undefined
         }
       });
+
+      rowMaxHeight = Math.max(rowMaxHeight, workspaceHeight);
+
+      if (workspaceColumn === 1 || workspaceIndex === visibleWorkspaces.length - 1) {
+        rowTopY += rowMaxHeight + 80;
+        rowMaxHeight = 0;
+      }
     }
   });
 
@@ -1193,36 +1216,20 @@ function markTaskAsJustCreated(
   creationTimeoutsRef.current.set(taskId, timeoutId);
 }
 
-function readPersistedNodePositions() {
-  const raw = readFromLocalStorage(nodePositionsStorageKey);
-
-  if (!raw) {
-    return {} as PersistedNodePositionMap;
+function readPersistedNodePositions(scopeKey: string) {
+  const scopedRaw = readFromLocalStorage(getNodePositionsStorageKey(scopeKey));
+  if (scopedRaw !== null) {
+    return parsePersistedNodePositions(scopedRaw);
   }
 
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-
-    if (!parsed || typeof parsed !== "object") {
-      return {} as PersistedNodePositionMap;
+  if (scopeKey !== "all") {
+    const legacyRaw = readFromLocalStorage(legacyNodePositionsStorageKey);
+    if (legacyRaw !== null) {
+      return parsePersistedNodePositions(legacyRaw);
     }
-
-    const entries = Object.entries(parsed as Record<string, unknown>).filter(([key, value]) => {
-      return (
-        !isTelegramModulePersistedPositionKey(key) &&
-        typeof value === "object" &&
-        value !== null &&
-        typeof (value as PersistedNodePosition).x === "number" &&
-        Number.isFinite((value as PersistedNodePosition).x) &&
-        typeof (value as PersistedNodePosition).y === "number" &&
-        Number.isFinite((value as PersistedNodePosition).y)
-      );
-    });
-
-    return Object.fromEntries(entries) as PersistedNodePositionMap;
-  } catch {
-    return {} as PersistedNodePositionMap;
   }
+
+  return {} as PersistedNodePositionMap;
 }
 
 function extractPersistedNodePositions(nodes: CanvasNode[]) {
@@ -1258,6 +1265,36 @@ function arePersistedNodePositionsEqual(
     const target = right[key];
     return target && target.x === value.x && target.y === value.y;
   });
+}
+
+function parsePersistedNodePositions(raw: string) {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+
+    if (!parsed || typeof parsed !== "object") {
+      return {} as PersistedNodePositionMap;
+    }
+
+    const entries = Object.entries(parsed as Record<string, unknown>).filter(([key, value]) => {
+      return (
+        !isTelegramModulePersistedPositionKey(key) &&
+        typeof value === "object" &&
+        value !== null &&
+        typeof (value as PersistedNodePosition).x === "number" &&
+        Number.isFinite((value as PersistedNodePosition).x) &&
+        typeof (value as PersistedNodePosition).y === "number" &&
+        Number.isFinite((value as PersistedNodePosition).y)
+      );
+    });
+
+    return Object.fromEntries(entries) as PersistedNodePositionMap;
+  } catch {
+    return {} as PersistedNodePositionMap;
+  }
+}
+
+function getNodePositionsStorageKey(scopeKey: string) {
+  return `${nodePositionsStorageKey}:${scopeKey}`;
 }
 
 function resolvePersistedPosition(

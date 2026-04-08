@@ -179,8 +179,9 @@ export function MissionSidebar({
         }),
     [snapshot.agents, activeWorkspaceId]
   );
-  const activeWorkspace =
-    snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? snapshot.workspaces[0] ?? null;
+  const selectedWorkspace = activeWorkspaceId
+    ? snapshot.workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null
+    : null;
   const availableModels = useMemo(
     () => snapshot.models.filter((model) => model.available !== false && !model.missing),
     [snapshot.models]
@@ -442,7 +443,12 @@ export function MissionSidebar({
       setIsDeleteWorkspaceOpen(false);
       setWorkspaceDeleteTarget(null);
       setWorkspaceDeleteConfirmText("");
-      onSelectWorkspace(activeWorkspaceId === workspaceDeleteTarget.id ? null : activeWorkspaceId);
+      const nextWorkspaceId =
+        activeWorkspaceId === workspaceDeleteTarget.id
+          ? snapshot.workspaces.find((workspace) => workspace.id !== workspaceDeleteTarget.id)?.id ?? null
+          : activeWorkspaceId;
+
+      onSelectWorkspace(nextWorkspaceId);
       deletedWorkspacePath = result.workspacePath || workspaceDeleteTarget.path;
       succeeded = true;
     } catch (error) {
@@ -707,27 +713,49 @@ export function MissionSidebar({
                       <OverviewTile label="Runs" value={String(snapshot.runtimes.length)} />
                     </div>
 
-                    {activeWorkspace ? (
+                    {selectedWorkspace ? (
                       <div className="rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(6,10,18,0.88))] p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate font-display text-[15px] text-white">{activeWorkspace.name}</p>
+                            <p className="truncate font-display text-[15px] text-white">{selectedWorkspace.name}</p>
                             <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
-                              {activeWorkspace.slug}
+                              {selectedWorkspace.slug}
                             </p>
                           </div>
-                          <Badge variant="muted">{activeWorkspace.health}</Badge>
+                          <Badge variant="muted">{selectedWorkspace.health}</Badge>
                         </div>
 
                         <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
-                          <span>{activeWorkspace.agentIds.length} agents</span>
-                          <span>{activeWorkspace.modelIds.length} models</span>
-                          <span>{activeWorkspace.activeRuntimeIds.length} runs</span>
+                          <span>{selectedWorkspace.agentIds.length} agents</span>
+                          <span>{selectedWorkspace.modelIds.length} models</span>
+                          <span>{selectedWorkspace.activeRuntimeIds.length} runs</span>
                         </div>
 
-                        <p className="mt-3 text-[12px] text-slate-400">{sidebarPathLabel(activeWorkspace.path)}</p>
+                        <p className="mt-3 text-[12px] text-slate-400">{sidebarPathLabel(selectedWorkspace.path)}</p>
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="rounded-[22px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.9),rgba(6,10,18,0.88))] p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-display text-[15px] text-white">All workspaces</p>
+                            <p className="mt-1 truncate text-[10px] uppercase tracking-[0.22em] text-slate-500">
+                              {snapshot.workspaces.length} workspaces
+                            </p>
+                          </div>
+                          <Badge variant="muted">{snapshot.agents.length} agents</Badge>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                          <span>{snapshot.workspaces.length} workspaces</span>
+                          <span>{snapshot.agents.length} agents</span>
+                          <span>{snapshot.runtimes.length} runs</span>
+                        </div>
+
+                        <p className="mt-3 text-[12px] text-slate-400">
+                          Showing every workspace in its own canvas area.
+                        </p>
+                      </div>
+                    )}
                   </>
                 ) : null}
 
@@ -739,10 +767,11 @@ export function MissionSidebar({
                       detail="Select, rename, or remove real OpenClaw workspaces."
                       action={
                         <Button
-                          variant="ghost"
+                          variant={activeWorkspaceId === null ? "secondary" : "ghost"}
                           size="sm"
                           className="h-8 rounded-full px-3 text-[11px]"
                           onClick={() => onSelectWorkspace(null)}
+                          aria-pressed={activeWorkspaceId === null}
                         >
                           All
                         </Button>
@@ -765,7 +794,7 @@ export function MissionSidebar({
                           >
                             <button
                               type="button"
-                              onClick={() => onSelectWorkspace(selected ? null : workspace.id)}
+                              onClick={() => onSelectWorkspace(workspace.id)}
                               className="w-full text-left"
                             >
                               <div className="flex items-start justify-between gap-3">
@@ -839,7 +868,9 @@ export function MissionSidebar({
                     <div className="space-y-3">
                       {visibleAgents.length === 0 ? (
                         <div className="rounded-[18px] border border-white/[0.08] bg-white/[0.03] px-3.5 py-3 text-[12px] text-slate-400">
-                          No agents are attached to this workspace yet.
+                          {activeWorkspaceId
+                            ? "No agents are attached to this workspace yet."
+                            : "No agents are attached to any workspace yet."}
                         </div>
                       ) : null}
 
@@ -1103,31 +1134,30 @@ export function MissionSidebar({
 
                   </>
                 ) : null}
-              </div>
+                </div>
 
-              <div className="shrink-0 border-t border-white/[0.08] p-4">
-                <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
-                      <Workflow className="h-4 w-4" />
+                <div className="shrink-0 border-t border-white/[0.08] p-4">
+                  <div className="rounded-[22px] border border-cyan-300/10 bg-[linear-gradient(180deg,rgba(7,22,31,0.95),rgba(5,13,22,0.95))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.22)]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/[0.12] text-cyan-200">
+                        <Workflow className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-display text-[15px] text-white">
+                          {selectedWorkspace?.name || "All workspaces"}
+                        </p>
+                        <p className="mt-1 text-[12px] text-slate-400">
+                          {selectedWorkspace
+                            ? `${selectedWorkspace.agentIds.length} agents · ${selectedWorkspace.activeRuntimeIds.length} runs`
+                            : `${snapshot.workspaces.length} workspaces · ${snapshot.agents.length} agents · ${snapshot.runtimes.length} runs`}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate font-display text-[15px] text-white">
-                        {activeWorkspace?.name || "No active workspace"}
-                      </p>
-                      <p className="mt-1 text-[12px] text-slate-400">
-                        {activeWorkspace
-                          ? `${activeWorkspace.agentIds.length} agents · ${activeWorkspace.activeRuntimeIds.length} runs`
-                          : `${snapshot.agents.length} agents · ${snapshot.runtimes.length} runs`}
-                      </p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      </div>
-
       <Dialog open={isDeleteWorkspaceOpen} onOpenChange={setIsDeleteWorkspaceOpen}>
         <DialogContent>
           <DialogHeader>
