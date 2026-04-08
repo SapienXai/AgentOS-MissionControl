@@ -186,25 +186,29 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         isAttentionActive && "border-cyan-200/[0.54] shadow-[0_24px_56px_rgba(34,211,238,0.22)]"
       )}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_36%),radial-gradient(circle_at_84%_18%,rgba(16,185,129,0.08),transparent_28%)]" />
-      <div className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full bg-[linear-gradient(180deg,rgba(125,211,252,0.9),rgba(34,211,238,0.14))]" />
-      <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-cyan-200/10" />
-      <div className="pointer-events-none absolute right-2 top-2 h-10 w-10 rounded-full bg-cyan-300/10 blur-xl" />
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[24px]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_36%),radial-gradient(circle_at_84%_18%,rgba(16,185,129,0.08),transparent_28%)]" />
+        <div className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full bg-[linear-gradient(180deg,rgba(125,211,252,0.9),rgba(34,211,238,0.14))]" />
+        <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-cyan-200/10" />
+        <div className="pointer-events-none absolute right-2 top-2 h-10 w-10 rounded-full bg-cyan-300/10 blur-xl" />
+      </div>
+
       {hasTelegramTether ? (
         <Handle
           type="source"
           id="source-telegram"
           position={Position.Top}
-          style={{ left: 14, top: -4 }}
-          className="!h-2.5 !w-2.5 !border-0 !bg-cyan-200/90 shadow-[0_0_16px_rgba(34,211,238,0.52)]"
+          style={{ left: 14, top: 6 }}
+          className="!z-30 !h-2.5 !w-2.5 !border-0 !bg-cyan-200/90 shadow-[0_0_16px_rgba(34,211,238,0.52)]"
         />
       ) : null}
+
       {isAttentionActive ? (
         <>
           <div aria-hidden="true" className="agent-node__composer-glow pointer-events-none absolute inset-[-1px] z-0 rounded-[25px]" />
           <svg
             aria-hidden="true"
-            className="agent-node__composer-svg pointer-events-none absolute inset-[-1px] z-0 h-[calc(100%+2px)] w-[calc(100%+2px)] overflow-visible"
+            className="agent-node__composer-svg pointer-events-none absolute inset-[-1px] z-20 h-[calc(100%+2px)] w-[calc(100%+2px)] overflow-hidden rounded-[25px]"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
           >
@@ -257,7 +261,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           type="source"
           id="source-right"
           position={Position.Right}
-          className="!h-2.5 !w-2.5 !border-0 !bg-cyan-300/90 shadow-[0_0_14px_rgba(103,232,249,0.42)]"
+          className="!z-30 !h-2.5 !w-2.5 !border-0 !bg-cyan-300/90 shadow-[0_0_14px_rgba(103,232,249,0.42)]"
         />
 
         <div className="relative rounded-t-[24px]">
@@ -291,7 +295,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
               className="pointer-events-none absolute -bottom-2 right-5 h-12 w-12 rounded-full bg-cyan-300/14 blur-2xl"
             />
 
-            <div className="absolute inset-x-0 bottom-0 z-20 p-3.5">
+            <div className="absolute inset-x-0 bottom-0 z-30 p-3.5">
               <div className="max-w-[86%]">
                 <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] text-white/65">
                   <StatusDot tone={dotTone} pulse={data.agent.status === "engaged" || data.agent.status === "monitoring"} />
