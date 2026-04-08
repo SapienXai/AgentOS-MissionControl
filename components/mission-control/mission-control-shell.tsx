@@ -1794,7 +1794,6 @@ export function MissionControlShell({
               }
 
               setAgentActionRequest(null);
-              setFocusedAgentId(agent.id);
               setActiveWorkspaceId(agent.workspaceId);
               selectNode(agentId, "chat");
               setIsInspectorOpen(true);
