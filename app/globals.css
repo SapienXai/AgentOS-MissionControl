@@ -193,14 +193,6 @@
     radial-gradient(circle, rgba(185, 145, 114, 0.24) 1.7px, transparent 2px);
 }
 
-.mission-shell--light .workspace-node__slug {
-  color: #d9c8bb;
-}
-
-.mission-shell--light .workspace-node__path {
-  color: #7b6455;
-}
-
 .mission-shell {
   --workspace-chip-border: rgba(255, 255, 255, 0.06);
   --workspace-chip-border-hover: rgba(255, 255, 255, 0.12);
@@ -233,6 +225,140 @@
   --mission-edge-glow-active: rgba(201, 166, 123, 0.34);
   --mission-edge-arrow: rgba(109, 74, 50, 0.96);
   --mission-edge-packet: rgba(112, 77, 55, 0.96);
+}
+
+.workspace-node {
+  --workspace-node-text: rgba(244, 247, 252, 0.96);
+  --workspace-node-text-muted: rgba(184, 194, 214, 0.76);
+  --workspace-node-text-soft: rgba(160, 173, 193, 0.72);
+  --workspace-node-surface-top: rgba(9, 14, 24, 0.94);
+  --workspace-node-surface-bottom: rgba(4, 8, 15, 0.95);
+  --workspace-node-accent-wash: rgba(var(--workspace-accent-rgb), 0.16);
+  --workspace-node-accent-spot: rgba(var(--workspace-accent-rgb), 0.08);
+  --workspace-node-border: rgba(var(--workspace-accent-rgb), 0.24);
+  --workspace-node-border-selected: rgba(var(--workspace-accent-rgb), 0.46);
+  --workspace-node-shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
+  --workspace-node-shadow-selected: 0 0 0 1px rgba(var(--workspace-accent-rgb), 0.14), 0 24px 64px rgba(0, 0, 0, 0.36), 0 0 0 10px rgba(var(--workspace-accent-rgb), 0.05);
+  --workspace-node-header-bg: linear-gradient(180deg, rgba(7, 12, 22, 0.92), rgba(4, 8, 15, 0.96));
+  --workspace-node-header-border: rgba(var(--workspace-accent-rgb), 0.28);
+  --workspace-node-header-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+  --workspace-node-header-icon-bg: rgba(var(--workspace-accent-rgb), 0.12);
+  --workspace-node-header-icon-border: rgba(var(--workspace-accent-rgb), 0.24);
+  --workspace-node-header-icon-color: rgb(var(--workspace-accent-rgb));
+  --workspace-chip-border: rgba(var(--workspace-accent-rgb), 0.24);
+  --workspace-chip-border-hover: rgba(var(--workspace-accent-rgb), 0.38);
+  --workspace-chip-bg: rgba(var(--workspace-accent-rgb), 0.16);
+  --workspace-chip-bg-hover: rgba(var(--workspace-accent-rgb), 0.24);
+  --workspace-chip-text: var(--workspace-node-text);
+  --workspace-chip-text-hover: rgba(255, 255, 255, 0.98);
+  --workspace-chip-shadow: 0 10px 18px rgba(var(--workspace-accent-rgb), 0.08);
+  --workspace-chip-focus: rgba(var(--workspace-accent-rgb), 0.38);
+  color: var(--workspace-node-text);
+  border-color: var(--workspace-node-border);
+  background:
+    linear-gradient(180deg, var(--workspace-node-surface-top), var(--workspace-node-surface-bottom)),
+    radial-gradient(circle at 16% 0%, var(--workspace-node-accent-wash), transparent 36%),
+    radial-gradient(circle at 86% 8%, var(--workspace-node-accent-spot), transparent 28%);
+  box-shadow: var(--workspace-node-shadow);
+}
+
+.workspace-node::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 16% 0%, rgba(var(--workspace-accent-rgb), 0.2), transparent 34%),
+    radial-gradient(circle at 86% 6%, rgba(var(--workspace-accent-rgb), 0.1), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 18%);
+  opacity: 0.96;
+}
+
+.workspace-node::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  border-radius: 28px;
+  border: 1px solid var(--workspace-node-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  opacity: 0.9;
+}
+
+.workspace-node--selected {
+  --workspace-node-border: var(--workspace-node-border-selected);
+  --workspace-chip-border: rgba(var(--workspace-accent-rgb), 0.34);
+  --workspace-chip-border-hover: rgba(var(--workspace-accent-rgb), 0.5);
+  --workspace-chip-bg: rgba(var(--workspace-accent-rgb), 0.22);
+  --workspace-chip-bg-hover: rgba(var(--workspace-accent-rgb), 0.3);
+  --workspace-node-shadow: var(--workspace-node-shadow-selected);
+}
+
+.workspace-node__header {
+  border: 1px solid var(--workspace-node-header-border);
+  background: var(--workspace-node-header-bg);
+  box-shadow: var(--workspace-node-header-shadow);
+}
+
+.workspace-node__header-icon {
+  border: 1px solid var(--workspace-node-header-icon-border);
+  background: var(--workspace-node-header-icon-bg);
+  color: var(--workspace-node-header-icon-color);
+  box-shadow: 0 10px 18px rgba(var(--workspace-accent-rgb), 0.08);
+}
+
+.workspace-node__title {
+  color: var(--workspace-node-text);
+}
+
+.workspace-node__slug {
+  color: var(--workspace-node-text-muted);
+}
+
+.workspace-node__path {
+  color: var(--workspace-node-text-soft);
+}
+
+.mission-shell--light .workspace-node {
+  --workspace-node-text: #4f3d31;
+  --workspace-node-text-muted: #6f5a4f;
+  --workspace-node-text-soft: #857062;
+  --workspace-node-surface-top: rgba(255, 255, 255, 0.96);
+  --workspace-node-surface-bottom: rgba(247, 241, 234, 0.95);
+  --workspace-node-accent-wash: rgba(var(--workspace-accent-rgb), 0.12);
+  --workspace-node-accent-spot: rgba(var(--workspace-accent-rgb), 0.06);
+  --workspace-node-border: rgba(var(--workspace-accent-rgb), 0.22);
+  --workspace-node-border-selected: rgba(var(--workspace-accent-rgb), 0.38);
+  --workspace-node-shadow: 0 18px 36px rgba(82, 60, 46, 0.08);
+  --workspace-node-shadow-selected: 0 0 0 1px rgba(var(--workspace-accent-rgb), 0.12), 0 18px 42px rgba(82, 60, 46, 0.1), 0 0 0 10px rgba(var(--workspace-accent-rgb), 0.04);
+  --workspace-node-header-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 242, 235, 0.96));
+  --workspace-node-header-border: rgba(var(--workspace-accent-rgb), 0.22);
+  --workspace-node-header-shadow: 0 12px 22px rgba(161, 125, 101, 0.08);
+  --workspace-node-header-icon-bg: rgba(var(--workspace-accent-rgb), 0.12);
+  --workspace-node-header-icon-border: rgba(var(--workspace-accent-rgb), 0.22);
+  --workspace-node-header-icon-color: rgb(var(--workspace-accent-rgb));
+  --workspace-chip-border: rgba(var(--workspace-accent-rgb), 0.22);
+  --workspace-chip-border-hover: rgba(var(--workspace-accent-rgb), 0.34);
+  --workspace-chip-bg: rgba(var(--workspace-accent-rgb), 0.1);
+  --workspace-chip-bg-hover: rgba(var(--workspace-accent-rgb), 0.16);
+  --workspace-chip-text: #4f3d31;
+  --workspace-chip-text-hover: #3d2e25;
+  --workspace-chip-shadow: 0 12px 22px rgba(161, 125, 101, 0.1);
+  --workspace-chip-focus: rgba(var(--workspace-accent-rgb), 0.28);
+}
+
+.mission-shell--light .workspace-node::before {
+  background:
+    radial-gradient(circle at 16% 0%, rgba(var(--workspace-accent-rgb), 0.16), transparent 34%),
+    radial-gradient(circle at 86% 6%, rgba(var(--workspace-accent-rgb), 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3), transparent 16%);
+  opacity: 0.92;
+}
+
+.mission-shell--light .workspace-node::after {
+  border-color: rgba(var(--workspace-accent-rgb), 0.22);
+  opacity: 0.96;
 }
 
 .workspace-node__chip {
@@ -474,21 +600,6 @@
 .mission-shell--light .workspace-node__health[data-health="offline"] {
   border-color: rgba(175, 122, 132, 0.34);
   background: rgba(191, 136, 146, 0.22);
-}
-
-.workspace-node::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  pointer-events: none;
-  border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  opacity: 0.72;
-}
-
-.mission-shell--light .workspace-node::after {
-  border-color: rgba(185, 145, 114, 0.28);
-  opacity: 0.9;
 }
 
 .react-flow__renderer {

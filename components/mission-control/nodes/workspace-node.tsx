@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 import type { WorkspaceNodeData } from "@/components/mission-control/canvas-types";
 import { Badge } from "@/components/ui/badge";
 import { compactPath } from "@/lib/openclaw/presenters";
+import { getWorkspaceNodeStyle } from "@/lib/openclaw/workspace-colors";
 import { cn } from "@/lib/utils";
 
 type WorkspaceFlowNode = Node<WorkspaceNodeData, "workspace">;
@@ -16,27 +17,30 @@ export function WorkspaceNode({ data, selected }: NodeProps<WorkspaceFlowNode>) 
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
+      style={getWorkspaceNodeStyle(data.workspace.id)}
       className={cn(
-        "workspace-node h-full rounded-[26px] border border-white/[0.04] bg-[linear-gradient(180deg,rgba(4,11,22,0.18),rgba(4,9,18,0.06))] p-3 text-white backdrop-blur-[2px]",
-        data.emphasis ? "opacity-100" : "opacity-75",
-        selected && "border-cyan-300/[0.16]"
+        "workspace-node relative isolate h-full overflow-hidden rounded-[26px] border p-3 backdrop-blur-xl",
+        data.emphasis ? "opacity-100" : "opacity-[0.92]",
+        selected && "workspace-node--selected"
       )}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0 space-y-1.5">
-          <div className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-slate-950/75 px-2.5 py-1.5 shadow-[0_14px_28px_rgba(0,0,0,0.2)]">
-            <div className="rounded-full border border-white/10 bg-white/[0.06] p-1.5">
-              <FolderKanban className="h-3 w-3 text-cyan-200" />
+          <div className="workspace-node__header inline-flex items-center gap-2 rounded-full px-2.5 py-1.5">
+            <div className="workspace-node__header-icon rounded-full p-1.5">
+              <FolderKanban className="h-3 w-3" />
             </div>
             <div>
-              <p className="font-display text-[12px] tracking-[0.04em] text-white">{data.workspace.name}</p>
-              <p className="workspace-node__slug text-[9px] uppercase tracking-[0.22em] text-slate-500">
+              <p className="workspace-node__title font-display text-[12px] tracking-[0.04em]">
+                {data.workspace.name}
+              </p>
+              <p className="workspace-node__slug text-[9px] uppercase tracking-[0.22em]">
                 {data.workspace.slug}
               </p>
             </div>
           </div>
 
-          <p className="workspace-node__path max-w-[300px] truncate pl-1 text-[9px] uppercase tracking-[0.16em] text-slate-600">
+          <p className="workspace-node__path max-w-[300px] truncate pl-1 text-[9px] uppercase tracking-[0.16em]">
             {compactPath(data.workspace.path)}
           </p>
         </div>
