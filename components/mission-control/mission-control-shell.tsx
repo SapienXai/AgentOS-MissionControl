@@ -318,7 +318,6 @@ export function MissionControlShell({
         return;
       }
 
-      setFocusedAgentId(agent.id);
       setActiveWorkspaceId(agent.workspaceId);
       setIsInspectorOpen(true);
       selectNode(agent.id, "overview", focus);
@@ -334,7 +333,6 @@ export function MissionControlShell({
         return;
       }
 
-      setFocusedAgentId(agent.id);
       setActiveWorkspaceId(agent.workspaceId);
       selectNode(agent.id);
       setCapabilityEditorRequest({
@@ -1796,7 +1794,7 @@ export function MissionControlShell({
               }
 
               setAgentActionRequest(null);
-              setFocusedAgentId(null);
+              setFocusedAgentId(agent.id);
               setActiveWorkspaceId(agent.workspaceId);
               selectNode(agentId, "chat");
               setIsInspectorOpen(true);
