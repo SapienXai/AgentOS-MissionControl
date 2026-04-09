@@ -186,7 +186,7 @@ export async function POST(request: Request) {
         type: "done",
         ok: true,
         phase: "ready",
-        message: "A usable default model is ready. Entering Mission Control...",
+        message: "A usable default model is ready. Choose your next step.",
         exitCode: 0,
         stdout: aggregatedStdout,
         stderr: aggregatedStderr,

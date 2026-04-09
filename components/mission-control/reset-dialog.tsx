@@ -69,7 +69,7 @@ export function ResetDialog({
     target === "full-uninstall" ? "Full Uninstall" : "Reset Mission Control";
   const description =
     target === "full-uninstall"
-      ? "Remove Mission Control state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS packages."
+      ? "Remove Mission Control state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS CLI installs."
       : "Remove Mission Control-managed workspaces, attached agents, planner state, and browser state.";
   const dangerButtonClassName =
     surfaceTheme === "light"
@@ -285,7 +285,7 @@ export function ResetDialog({
                   )}
                 >
                   <p className={cn("text-xs uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500")}>
-                    Package cleanup
+                    CLI cleanup
                   </p>
                   <div className="mt-3 space-y-2">
                     {preview.packageActions.map((action) => (
@@ -319,7 +319,7 @@ export function ResetDialog({
                           {action.reason || "No extra detail."}
                         </p>
                         <p className={cn("mt-1 whitespace-pre-wrap break-all font-mono text-[11px]", surfaceTheme === "light" ? "text-[#7e6555]" : "text-slate-500")}>
-                          {action.command || "Automatic package removal is not available."}
+                          {action.command || "Automatic cleanup is not available."}
                         </p>
                       </div>
                     ))}

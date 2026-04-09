@@ -62,6 +62,7 @@ export function OpenClawOnboarding({
   onRunModelRefresh,
   onRunModelSetDefault,
   onOpenAddModels,
+  onOpenWorkspaceCreate,
   onContinueToModels,
   onBackToSystem,
   onDismiss,
@@ -85,6 +86,7 @@ export function OpenClawOnboarding({
   onRunModelRefresh: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: () => void;
+  onOpenWorkspaceCreate: () => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
   onDismiss: () => void;
@@ -92,6 +94,12 @@ export function OpenClawOnboarding({
 }) {
   const systemReady = isOpenClawSystemReady(snapshot);
   const modelReady = isOpenClawMissionReady(snapshot);
+  const workspaceCount = snapshot.workspaces.length;
+  const hasWorkspaces = workspaceCount > 0;
+  const defaultModelLabel =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    "Ready";
   const wizardSteps = buildWizardSteps(stage, systemReady, modelReady);
   const systemSteps = buildSystemSteps(snapshot, systemPhase);
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
@@ -100,6 +108,13 @@ export function OpenClawOnboarding({
   );
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
+  const heroTitle = modelReady ? "OpenClaw is ready." : "Bring your local OpenClaw online.";
+  const heroDescription = modelReady
+    ? "Choose your first action below."
+    : stage === "system"
+      ? "Set up the system, then pick a default model."
+      : "Pick the default model and verify readiness.";
+  const topBadgeLabel = modelReady ? "Launchpad" : "Welcome";
   const stageStatusCopy =
     stageRun.statusMessage ||
     stageRun.resultMessage ||
@@ -154,7 +169,7 @@ export function OpenClawOnboarding({
             )}
           >
             <Sparkles className="h-2 w-2" />
-            Welcome
+            {topBadgeLabel}
           </span>
           <span
             className={cn(
@@ -181,7 +196,7 @@ export function OpenClawOnboarding({
               surfaceTheme === "light" ? "text-[#33251c]" : "text-white"
             )}
           >
-            Bring your local OpenClaw online.
+            {heroTitle}
           </h1>
           <p
             className={cn(
@@ -189,7 +204,7 @@ export function OpenClawOnboarding({
               surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-300"
             )}
           >
-            Set up the system, then pick a default model.
+            {heroDescription}
           </p>
         </div>
 
@@ -243,7 +258,13 @@ export function OpenClawOnboarding({
           ))}
         </div>
 
-        {stage === "system" ? (
+        {modelReady ? (
+          <LaunchpadStage
+            surfaceTheme={surfaceTheme}
+            workspaceCount={workspaceCount}
+            defaultModelLabel={defaultModelLabel}
+          />
+        ) : stage === "system" ? (
           <SystemStage
             steps={systemSteps}
             surfaceTheme={surfaceTheme}
@@ -284,7 +305,18 @@ export function OpenClawOnboarding({
           )}
         >
           <div className="flex flex-wrap items-center gap-2">
-            {stage === "models" ? (
+            {modelReady ? (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-[8px] uppercase tracking-[0.16em]",
+                  surfaceTheme === "light"
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+                )}
+              >
+                Setup complete
+              </span>
+            ) : stage === "models" ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -298,7 +330,7 @@ export function OpenClawOnboarding({
               </Button>
             ) : null}
 
-            {canDismiss ? (
+            {canDismiss && !modelReady ? (
               <button
                 type="button"
                 onClick={onDismiss}
@@ -313,76 +345,105 @@ export function OpenClawOnboarding({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {stage === "models" && !modelReady ? (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={onRunModelAutoSetup}
-                disabled={modelRun.runState === "running"}
-                className={secondaryActionClassName(surfaceTheme)}
-              >
-                {modelRun.runState === "running" ? (
-                  <>
-                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    Working...
-                  </>
-                ) : (
-                  "Auto configure"
-                )}
-              </Button>
-            ) : null}
-
-            <Button
-              type="button"
-              onClick={() => {
-                if (stage === "system") {
-                  if (systemReady && modelReady) {
-                    onDismiss();
-                    return;
-                  }
-
-                  if (systemReady) {
-                    onContinueToModels();
-                    return;
-                  }
-
-                  onRunSystemSetup();
-                  return;
-                }
-
-                if (modelReady) {
-                  onDismiss();
-                  return;
-                }
-
-                if (primaryAction.kind === "set-default") {
-                  onRunModelSetDefault();
-                  return;
-                }
-
-                onRunModelAutoSetup();
-              }}
-              disabled={stageRun.runState === "running"}
-              className={cn(
-                "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
-                surfaceTheme === "light"
-                  ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                  : "bg-white text-slate-950 hover:bg-white/92"
-              )}
-            >
-              {stageRun.runState === "running" ? (
-                <>
-                  <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
-                  Working...
-                </>
-              ) : (
-                <>
-                  {primaryAction.label}
+            {modelReady ? (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={hasWorkspaces ? onOpenWorkspaceCreate : onDismiss}
+                  className={secondaryActionClassName(surfaceTheme)}
+                >
+                  {hasWorkspaces ? "Create workspace" : "Skip to dashboard"}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}
+                  className={cn(
+                    "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
+                    surfaceTheme === "light"
+                      ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                      : "bg-white text-slate-950 hover:bg-white/92"
+                  )}
+                >
+                  {hasWorkspaces ? "Enter Mission Control" : "Create first workspace"}
                   <ArrowRight className="ml-1.5 h-3 w-3" />
-                </>
-              )}
-            </Button>
+                </Button>
+              </>
+            ) : (
+              <>
+                {stage === "models" && !modelReady ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={onRunModelAutoSetup}
+                    disabled={modelRun.runState === "running"}
+                    className={secondaryActionClassName(surfaceTheme)}
+                  >
+                    {modelRun.runState === "running" ? (
+                      <>
+                        <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        Working...
+                      </>
+                    ) : (
+                      "Auto configure"
+                    )}
+                  </Button>
+                ) : null}
+
+                <Button
+                  type="button"
+                  onClick={() => {
+                    if (stage === "system") {
+                      if (systemReady && modelReady) {
+                        onDismiss();
+                        return;
+                      }
+
+                      if (systemReady) {
+                        onContinueToModels();
+                        return;
+                      }
+
+                      onRunSystemSetup();
+                      return;
+                    }
+
+                    if (modelReady) {
+                      onDismiss();
+                      return;
+                    }
+
+                    if (primaryAction.kind === "set-default") {
+                      onRunModelSetDefault();
+                      return;
+                    }
+
+                    onRunModelAutoSetup();
+                  }}
+                  disabled={stageRun.runState === "running"}
+                  className={cn(
+                    "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
+                    surfaceTheme === "light"
+                      ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                      : "bg-white text-slate-950 hover:bg-white/92"
+                  )}
+                >
+                  {stageRun.runState === "running" ? (
+                    <>
+                      <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
+                      Working...
+                    </>
+                  ) : (
+                    <>
+                      {primaryAction.label}
+                      <ArrowRight className="ml-1.5 h-3 w-3" />
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </motion.div>
@@ -775,6 +836,173 @@ function ModelStage({
         run={run}
       />
     </>
+  );
+}
+
+function LaunchpadStage({
+  surfaceTheme,
+  workspaceCount,
+  defaultModelLabel
+}: {
+  surfaceTheme: SurfaceTheme;
+  workspaceCount: number;
+  defaultModelLabel: string;
+}) {
+  const hasWorkspaces = workspaceCount > 0;
+  const launchSummary = hasWorkspaces
+    ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use Mission Control to inspect them or create another workspace for a new mission.`
+    : "No workspace exists yet. Create one first so the live system has a place to keep context and deliverables.";
+
+  return (
+    <>
+      <div
+        className={cn(
+          "mt-3 rounded-[16px] border px-3 py-3",
+          surfaceTheme === "light"
+            ? "border-emerald-200/80 bg-[linear-gradient(180deg,rgba(240,250,245,0.95),rgba(248,244,236,0.95))]"
+            : "border-emerald-300/15 bg-[linear-gradient(180deg,rgba(9,18,19,0.96),rgba(7,11,18,0.94))]"
+        )}
+      >
+        <div className="flex items-start gap-2.5">
+          <span
+            className={cn(
+              "mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
+              surfaceTheme === "light"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
+            )}
+          >
+            <Check className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "text-[7px] uppercase tracking-[0.18em]",
+                surfaceTheme === "light" ? "text-emerald-700/75" : "text-emerald-200/75"
+              )}
+            >
+              Launchpad
+            </p>
+            <h2
+              className={cn(
+                "mt-1 text-[13px] font-medium",
+                surfaceTheme === "light" ? "text-[#2d2118]" : "text-white"
+              )}
+            >
+              OpenClaw is ready.
+            </h2>
+            <p
+              className={cn(
+                "mt-1 text-[10px] leading-[0.95rem]",
+                surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
+              )}
+            >
+              {launchSummary}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+          <LaunchpadMetric
+            surfaceTheme={surfaceTheme}
+            label="System"
+            value="Online"
+            detail="CLI, gateway, and runtime access verified"
+          />
+          <LaunchpadMetric
+            surfaceTheme={surfaceTheme}
+            label="Default model"
+            value={defaultModelLabel}
+            detail="Usable model route selected"
+          />
+          <LaunchpadMetric
+            surfaceTheme={surfaceTheme}
+            label="Runtime"
+            value="Smoke test passed"
+            detail="A live agent turn was verified"
+          />
+          <LaunchpadMetric
+            surfaceTheme={surfaceTheme}
+            label="Workspaces"
+            value={String(workspaceCount)}
+            detail={hasWorkspaces ? "Ready for mission planning" : "Create one to begin"}
+          />
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "mt-2.5 rounded-[12px] border px-2.5 py-2",
+          surfaceTheme === "light" ? "border-[#e5d5c9] bg-[#fffaf6]" : "border-white/8 bg-[rgba(255,255,255,0.02)]"
+        )}
+      >
+        <p
+          className={cn(
+            "text-[7px] uppercase tracking-[0.16em]",
+            surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+          )}
+        >
+          Next step
+        </p>
+        <p
+          className={cn(
+            "mt-1 text-[11px] leading-[1rem]",
+            surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
+          )}
+        >
+          {hasWorkspaces
+            ? "Open Mission Control to inspect the live graph, or create another workspace if you want a separate mission lane."
+            : "Create the first workspace now. That is the shortest path from a ready system to a real mission."}
+        </p>
+      </div>
+    </>
+  );
+}
+
+function LaunchpadMetric({
+  surfaceTheme,
+  label,
+  value,
+  detail
+}: {
+  surfaceTheme: SurfaceTheme;
+  label: string;
+  value: string;
+  detail: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-[12px] border px-2.5 py-2",
+        surfaceTheme === "light" ? "border-[#e6d7cb] bg-white" : "border-white/10 bg-white/[0.03]"
+      )}
+    >
+      <p
+        className={cn(
+          "text-[7px] uppercase tracking-[0.16em]",
+          surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+        )}
+      >
+        {label}
+      </p>
+      <p
+        title={value}
+        className={cn(
+          "mt-1 truncate text-[10px]",
+          surfaceTheme === "light" ? "text-[#33251c]" : "text-white"
+        )}
+      >
+        {value}
+      </p>
+      <p
+        className={cn(
+          "mt-0.5 text-[8px] leading-[0.85rem]",
+          surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+        )}
+      >
+        {detail}
+      </p>
+    </div>
   );
 }
 

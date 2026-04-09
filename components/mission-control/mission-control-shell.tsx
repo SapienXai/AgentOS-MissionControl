@@ -234,7 +234,6 @@ export function MissionControlShell({
   const settingsRef = useRef<HTMLDivElement | null>(null);
   const canvasNodeInteractionActiveRef = useRef(false);
   const pendingComposerBlurRef = useRef(false);
-  const onboardingSuccessTimeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
   const activeRuntimeCount = snapshot.runtimes.filter(
     (runtime) =>
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
@@ -697,26 +696,18 @@ export function MissionControlShell({
   }, [isOpenClawSystemReady]);
 
   useEffect(() => {
-    if (onboardingSuccessTimeoutRef.current) {
-      globalThis.clearTimeout(onboardingSuccessTimeoutRef.current);
-      onboardingSuccessTimeoutRef.current = null;
-    }
-
     if (isOpenClawReady) {
       if (onboardingRunState !== "idle" || modelOnboardingRunState !== "idle") {
         setOnboardingRunState("success");
         setOnboardingPhase("ready");
         setOnboardingStatusMessage(null);
-        setOnboardingResultMessage("OpenClaw and a usable default model are ready. Entering Mission Control...");
+        setOnboardingResultMessage("OpenClaw and a usable default model are ready. Choose your next step.");
         setModelOnboardingRunState("success");
         setModelOnboardingPhase("ready");
         setModelOnboardingStatusMessage(null);
-        setModelOnboardingResultMessage("A usable default model is ready.");
+        setModelOnboardingResultMessage("A usable default model is ready. Choose your next step.");
         setOnboardingStage("models");
         setShowOnboardingReadyState(true);
-        onboardingSuccessTimeoutRef.current = globalThis.setTimeout(() => {
-          setShowOnboardingReadyState(false);
-        }, 1100);
       } else {
         setShowOnboardingReadyState(false);
       }
@@ -725,14 +716,6 @@ export function MissionControlShell({
 
     setShowOnboardingReadyState(false);
   }, [isOpenClawReady, onboardingRunState, modelOnboardingRunState]);
-
-  useEffect(() => {
-    return () => {
-      if (onboardingSuccessTimeoutRef.current) {
-        globalThis.clearTimeout(onboardingSuccessTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const resetUpdateDialogState = () => {
     if (updateRunState === "running") {
@@ -2194,6 +2177,10 @@ export function MissionControlShell({
             onOpenAddModels={openAddModelsDialog}
             onContinueToModels={() => setOnboardingStage("models")}
             onBackToSystem={() => setOnboardingStage("system")}
+            onOpenWorkspaceCreate={() => {
+              dismissOnboarding();
+              openWorkspaceWizard("basic");
+            }}
             onDismiss={dismissOnboarding}
             canDismiss={
               !showOnboardingReadyState &&

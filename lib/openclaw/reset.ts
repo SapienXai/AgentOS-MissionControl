@@ -1,7 +1,7 @@
 import "server-only";
 
 import { execFile, spawn } from "node:child_process";
-import { readdir, rm, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -150,7 +150,7 @@ export async function executeReset(
       await emit({
         type: "status",
         phase: "package-removal",
-        message: "Scheduling package removal for OpenClaw and AgentOS..."
+        message: "Scheduling CLI cleanup for OpenClaw and AgentOS..."
       });
 
       backgroundLogPath = await scheduleBackgroundPackageRemoval(scheduledCommands);
@@ -161,7 +161,7 @@ export async function executeReset(
     } else {
       await emit({
         type: "log",
-        text: "No supported global package installations were detected for automatic removal."
+        text: "No supported OpenClaw or AgentOS installs were detected for automatic cleanup."
       });
     }
   }
@@ -181,7 +181,7 @@ export async function executeReset(
       target === "mission-control"
         ? "Mission Control reset completed."
         : backgroundLogPath
-          ? "Full uninstall started. Final package cleanup is running in the background."
+          ? "Full uninstall started. Final CLI cleanup is running in the background."
           : "Full uninstall completed for Mission Control and OpenClaw state.",
     snapshot,
     backgroundLogPath
@@ -293,7 +293,7 @@ function buildResetWarnings(
 
   if (target === "full-uninstall" && packageActions.some((action) => !action.detected)) {
     warnings.push(
-      "Some global package installs were not detected on supported package managers. Those may need manual removal."
+      "Some OpenClaw or AgentOS installs were not detected for automatic cleanup. Those may need manual removal."
     );
   }
 
@@ -434,9 +434,27 @@ async function detectPackageActions(
     });
   }
 
-  actions.push(await detectGlobalPackageAction("@sapienx/agentos", preferredManagers));
+  actions.push(await detectAgentOsCleanupAction(preferredManagers));
 
   return actions;
+}
+
+async function detectAgentOsCleanupAction(
+  preferredManagers: string[]
+): Promise<ResetPreviewPackageAction> {
+  const globalPackageAction = await detectGlobalPackageAction("@sapienx/agentos", preferredManagers);
+
+  if (globalPackageAction.detected) {
+    return globalPackageAction;
+  }
+
+  const releaseAction = await detectAgentOsReleaseAction();
+
+  if (releaseAction) {
+    return releaseAction;
+  }
+
+  return globalPackageAction;
 }
 
 async function detectGlobalPackageAction(
@@ -473,6 +491,41 @@ async function detectGlobalPackageAction(
     command: null,
     detected: false,
     reason: "Not detected on supported global package managers."
+  };
+}
+
+async function detectAgentOsReleaseAction(): Promise<ResetPreviewPackageAction | null> {
+  const defaultScriptPath = path.join(os.homedir(), ".agentos", "package", "bin", "agentos.js");
+
+  if (await pathExists(defaultScriptPath)) {
+    return {
+      packageName: "@sapienx/agentos",
+      manager: null,
+      command: buildAgentOsReleaseUninstallCommand(defaultScriptPath),
+      detected: true,
+      reason: `Detected AgentOS release install at ${path.dirname(path.dirname(defaultScriptPath))}.`
+    };
+  }
+
+  const commandPath = await resolveCommandPath("agentos");
+
+  if (!commandPath) {
+    return null;
+  }
+
+  const launcherContents = await readTextFileIfExists(commandPath);
+  const releaseScriptPath = inferAgentOsReleaseScriptPath(launcherContents);
+
+  if (!releaseScriptPath || !(await pathExists(releaseScriptPath))) {
+    return null;
+  }
+
+  return {
+    packageName: "@sapienx/agentos",
+    manager: null,
+    command: buildAgentOsReleaseUninstallCommand(releaseScriptPath),
+    detected: true,
+    reason: `Detected AgentOS release launcher at ${commandPath}.`
   };
 }
 
@@ -525,6 +578,30 @@ async function canRunCommand(command: string) {
   }
 }
 
+async function resolveCommandPath(command: string) {
+  try {
+    const locator = process.platform === "win32" ? "where" : "which";
+    const { stdout } = await execFileAsync(locator, [command], {
+      cwd: process.cwd(),
+      timeout: 10000,
+      maxBuffer: 512 * 1024
+    });
+    const firstMatch = stdout
+      .toString()
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .find(Boolean);
+
+    return firstMatch || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildAgentOsReleaseUninstallCommand(scriptPath: string) {
+  return `node ${quoteShellArg(scriptPath)} uninstall --yes`;
+}
+
 function buildPackageRemovalCommand(manager: string, packageName: string) {
   const quotedPackageName = quoteShellArg(packageName);
 
@@ -539,16 +616,54 @@ function buildPackageRemovalCommand(manager: string, packageName: string) {
   return `${manager} uninstall -g ${quotedPackageName}`;
 }
 
+async function readTextFileIfExists(targetPath: string) {
+  try {
+    return await readFile(targetPath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function inferAgentOsReleaseScriptPath(launcherContents: string | null) {
+  if (!launcherContents) {
+    return null;
+  }
+
+  const normalized = launcherContents.replaceAll("\\", "/");
+  const quotedMatch = normalized.match(/["']([^"'\r\n]*\/package\/bin\/agentos\.js)["']/i);
+  const bareMatch = normalized.match(/(?:^|[\s(])([^"'()\r\n]*\/package\/bin\/agentos\.js)(?:$|[\s)])/i);
+  const candidate = quotedMatch?.[1] ?? bareMatch?.[1];
+
+  if (!candidate) {
+    return null;
+  }
+
+  if (candidate.includes("/node_modules/") || candidate.includes("/.pnpm/")) {
+    return null;
+  }
+
+  return path.normalize(candidate);
+}
+
 async function scheduleBackgroundPackageRemoval(commands: string[]) {
   const timestamp = Date.now();
   const scriptPath = path.join(os.tmpdir(), `agentos-full-uninstall-${timestamp}.sh`);
   const logPath = path.join(os.tmpdir(), `agentos-full-uninstall-${timestamp}.log`);
+  const commandLines = commands.flatMap((command) => [
+    `printf 'Running: %s\\n' ${quoteShellArg(command)}`,
+    `if ${command}; then`,
+    `  printf 'Completed: %s\\n' ${quoteShellArg(command)}`,
+    "else",
+    "  status=$?",
+    `  printf 'Failed (exit %s): %s\\n' \"$status\" ${quoteShellArg(command)}`,
+    "fi"
+  ]);
   const scriptContents = [
     "#!/bin/sh",
     `exec >>${quoteShellArg(logPath)} 2>&1`,
     "sleep 1",
-    "set -eu",
-    ...commands,
+    "set -u",
+    ...commandLines,
     `rm -f ${quoteShellArg(scriptPath)}`
   ].join("\n");
 
