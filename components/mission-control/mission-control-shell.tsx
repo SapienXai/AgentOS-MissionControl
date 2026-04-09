@@ -482,6 +482,44 @@ export function MissionControlShell({
   }, [snapshot.workspaces, activeWorkspaceId, pendingWorkspaceOpenId]);
 
   useEffect(() => {
+    if (optimisticMissionTasks.length === 0) {
+      return;
+    }
+
+    const replacements = optimisticMissionTasks
+      .map((entry) => ({
+        entry,
+        replacement: findReplacementTaskForOptimisticTask(snapshot.tasks, entry)
+      }))
+      .filter((entry): entry is { entry: OptimisticMissionTask; replacement: TaskRecord } => Boolean(entry.replacement));
+
+    if (replacements.length === 0) {
+      return;
+    }
+
+    const replacementByRequestId = new Map(replacements.map(({ entry, replacement }) => [entry.requestId, replacement]));
+
+    setOptimisticMissionTasks((current) =>
+      current.filter((entry) => !replacementByRequestId.has(entry.requestId))
+    );
+
+    const selectedOptimisticTask = optimisticMissionTasks.find((entry) => entry.task.id === selectedNodeId);
+    const nextSelectedTask = selectedOptimisticTask
+      ? replacementByRequestId.get(selectedOptimisticTask.requestId) ?? null
+      : null;
+
+    if (!nextSelectedTask) {
+      return;
+    }
+
+    setSelectedNodeId(nextSelectedTask.id);
+
+    if (nextSelectedTask.workspaceId) {
+      setActiveWorkspaceId(nextSelectedTask.workspaceId);
+    }
+  }, [optimisticMissionTasks, selectedNodeId, snapshot.tasks]);
+
+  useEffect(() => {
     if (!selectedNodeId) {
       return;
     }
@@ -3713,10 +3751,7 @@ function mergeSnapshotWithOptimisticTasks(
   }
 
   const visibleOptimisticTasks = optimisticMissionTasks
-    .filter(
-      (entry) =>
-        !entry.dispatchId || !snapshot.tasks.some((task) => task.dispatchId === entry.dispatchId)
-    )
+    .filter((entry) => !findReplacementTaskForOptimisticTask(snapshot.tasks, entry))
     .map((entry) => entry.task);
 
   if (visibleOptimisticTasks.length === 0) {
@@ -3727,6 +3762,23 @@ function mergeSnapshotWithOptimisticTasks(
     ...snapshot,
     tasks: [...visibleOptimisticTasks, ...snapshot.tasks]
   };
+}
+
+function findReplacementTaskForOptimisticTask(
+  tasks: TaskRecord[],
+  optimisticTask: OptimisticMissionTask
+) {
+  return tasks.find((task) => matchesOptimisticTaskReplacement(task, optimisticTask)) ?? null;
+}
+
+function matchesOptimisticTaskReplacement(task: TaskRecord, optimisticTask: OptimisticMissionTask) {
+  const dispatchId = optimisticTask.dispatchId?.trim();
+
+  if (!dispatchId) {
+    return false;
+  }
+
+  return task.dispatchId === dispatchId || task.key === `dispatch:${dispatchId}`;
 }
 
 function createOptimisticMissionTaskRecord(

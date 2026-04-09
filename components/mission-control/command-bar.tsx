@@ -107,6 +107,7 @@ export function CommandBar({
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [isDesktopLayout, setIsDesktopLayout] = useState(false);
   const [isDockHovered, setIsDockHovered] = useState(false);
+  const [isCompactAfterSubmit, setIsCompactAfterSubmit] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [composeSuggestion, setComposeSuggestion] = useState<ComposerSuggestion | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -134,14 +135,20 @@ export function CommandBar({
   const dynamicPlaceholder = selectedAgentLabel ? `Compose for ${selectedAgentLabel}...` : "Compose a mission...";
   const inlineSuggestions = buildInlineSuggestions();
   const showSuggestions = inlineSuggestions.length > 0;
-  const isDesktopCollapsed =
-    isDesktopLayout &&
-    !isDockHovered &&
+  const shouldForceCollapsedComposer =
+    isCompactAfterSubmit &&
     !isComposerActive &&
     !isAdvancedOpen &&
-    !isSubmitting &&
     mission.trim().length === 0 &&
     composeSuggestion === null;
+  const isDesktopCollapsed =
+    isDesktopLayout &&
+    (!isDockHovered || isSubmitting) &&
+    !isComposerActive &&
+    !isAdvancedOpen &&
+    mission.trim().length === 0 &&
+    composeSuggestion === null;
+  const shouldRenderCollapsedComposer = shouldForceCollapsedComposer || isDesktopCollapsed;
 
   useEffect(() => {
     const selectionScope = `${activeWorkspaceId ?? "all"}:${selectedNodeId ?? "none"}:${availableAgents.map((agent) => agent.id).join(",")}`;
@@ -288,21 +295,38 @@ export function CommandBar({
   }, [composeIntent, mission, activeWorkspaceId, effectiveTargetAgentId, targetWorkspace?.id]);
 
   const handleTargetAgentChange = (value: string) => {
+    setIsCompactAfterSubmit(false);
     setTargetAgentId(value);
     onTargetAgentSelect?.(value);
   };
 
   const submitMission = async (payload: MissionSubmission) => {
+    const submittedMission = payload.mission.trim();
+
+    if (!submittedMission) {
+      return;
+    }
+
+    const previousComposeSuggestion = composeSuggestion;
+    const previousAdvancedOpen = isAdvancedOpen;
     setIsSubmitting(true);
+    setIsCompactAfterSubmit(true);
     const resolvedAgentId = payload.agentId || effectiveTargetAgentId;
     const submittedAt = Date.now();
     const requestId = globalThis.crypto?.randomUUID?.() || `dispatch:${submittedAt}`;
     const abortController = new AbortController();
 
+    skipDraftSaveRef.current = true;
+    setMission("");
+    setComposeSuggestion(null);
+    setIsAdvancedOpen(false);
+    setIsDockHovered(false);
+    onComposerActiveChange?.(false);
+
     if (resolvedAgentId) {
       onMissionDispatchStart({
         requestId,
-        mission: payload.mission.trim(),
+        mission: submittedMission,
         agentId: resolvedAgentId,
         workspaceId: targetWorkspace?.id ?? activeWorkspaceId ?? null,
         submittedAt,
@@ -311,14 +335,16 @@ export function CommandBar({
     }
 
     try {
-      const submittedMission = payload.mission.trim();
       const response = await fetch("/api/mission", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
         signal: abortController.signal,
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          ...payload,
+          mission: submittedMission
+        })
       });
 
       const result = (await response.json()) as MissionResponse & { error?: string };
@@ -328,10 +354,6 @@ export function CommandBar({
       }
 
       onMissionResponse(result, { requestId });
-      setMission("");
-      setComposeSuggestion(null);
-      setIsAdvancedOpen(false);
-      skipDraftSaveRef.current = true;
 
       if (draftScopeKey && typeof globalThis.localStorage !== "undefined") {
         globalThis.localStorage.removeItem(draftScopeKey);
@@ -373,6 +395,16 @@ export function CommandBar({
         requestId,
         error instanceof Error ? error.message : "Unknown mission error."
       );
+      setMission(submittedMission);
+      setComposeSuggestion(previousComposeSuggestion);
+      setIsAdvancedOpen(previousAdvancedOpen);
+      setIsCompactAfterSubmit(false);
+      setIsDockHovered(true);
+      onComposerActiveChange?.(true);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(submittedMission.length, submittedMission.length);
+      });
       toast.error("Mission dispatch failed.", {
         description: error instanceof Error ? error.message : "Unknown mission error."
       });
@@ -388,6 +420,8 @@ export function CommandBar({
       thinking?: ThinkingLevel;
     } = {}
   ) => {
+    setIsCompactAfterSubmit(false);
+
     if (options.thinking) {
       setThinking(options.thinking);
     }
@@ -404,6 +438,7 @@ export function CommandBar({
   };
 
   const clearCurrentDraft = () => {
+    setIsCompactAfterSubmit(false);
     setMission("");
     setThinking("medium");
     setComposeSuggestion(null);
@@ -418,26 +453,36 @@ export function CommandBar({
     <div
       className={cn("mx-auto w-full transition-[width] duration-300", isDesktopCollapsed && "lg:w-[360px]")}
       onMouseEnter={() => {
-        if (isDesktopLayout) {
+        if (isDesktopLayout && !isSubmitting) {
           setIsDockHovered(true);
         }
       }}
       onMouseLeave={() => {
-        if (isDesktopLayout) {
+        if (isDesktopLayout && !isSubmitting) {
           setIsDockHovered(false);
         }
       }}
     >
       <AnimatePresence initial={false} mode="wait">
-        {isDesktopCollapsed ? (
+        {shouldRenderCollapsedComposer ? (
           <motion.button
             key="collapsed"
             type="button"
             initial={{ opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
-            onFocus={() => setIsDockHovered(true)}
+            disabled={isSubmitting}
+            onFocus={() => {
+              if (!isSubmitting) {
+                setIsDockHovered(true);
+              }
+            }}
             onClick={() => {
+              if (isSubmitting) {
+                return;
+              }
+
+              setIsCompactAfterSubmit(false);
               setIsDockHovered(true);
               requestAnimationFrame(() => {
                 textareaRef.current?.focus();
@@ -450,11 +495,15 @@ export function CommandBar({
                 {selectedAgentLabel || "No agent"}
               </span>
               <p className="min-w-0 flex-1 truncate text-[13px] text-[#f6eee5]/58">
-                {dynamicPlaceholder}
+                {isSubmitting ? "Creating task..." : dynamicPlaceholder}
               </p>
               <span className="inline-flex h-8 items-center rounded-full bg-white px-3 text-[12px] font-medium text-slate-950">
-                <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
-                Create task
+                {isSubmitting ? (
+                  <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <SendHorizontal className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {isSubmitting ? "Creating" : "Create task"}
               </span>
             </div>
           </motion.button>
@@ -511,7 +560,10 @@ export function CommandBar({
                 isComposerActive &&
                   "border-white/[0.14] bg-[linear-gradient(180deg,rgba(24,34,50,0.94),rgba(12,18,30,0.92))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
               )}
-              onFocusCapture={() => onComposerActiveChange?.(true)}
+              onFocusCapture={() => {
+                setIsCompactAfterSubmit(false);
+                onComposerActiveChange?.(true);
+              }}
               onBlurCapture={(event) => {
                 const nextTarget = event.relatedTarget;
                 if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
@@ -569,7 +621,10 @@ export function CommandBar({
                 <Textarea
                   ref={textareaRef}
                   value={mission}
-                  onChange={(event) => setMission(event.target.value)}
+                  onChange={(event) => {
+                    setIsCompactAfterSubmit(false);
+                    setMission(event.target.value);
+                  }}
                   onKeyDown={async (event) => {
                     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
                       event.preventDefault();

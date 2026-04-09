@@ -17,7 +17,7 @@ import {
   Sparkles
 } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { TaskNodeData } from "@/components/mission-control/canvas-types";
 import { InteractiveContent } from "@/components/mission-control/interactive-content";
@@ -36,47 +36,96 @@ import { cn } from "@/lib/utils";
 type TaskFlowNode = Node<TaskNodeData, "task">;
 
 export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
-  const bootstrapStage =
-    typeof data.task.metadata.bootstrapStage === "string" ? data.task.metadata.bootstrapStage : null;
-  const dispatchSubmittedAt =
-    typeof data.task.metadata.dispatchSubmittedAt === "string"
-      ? data.task.metadata.dispatchSubmittedAt
-      : null;
-  const isPendingCreation = Boolean(data.pendingCreation);
-  const isJustCreated = Boolean(data.justCreated);
-  const isAborted = isTaskAborted(data.task);
-  const isAbortable = isTaskAbortable(data.task);
-  const tone = isAborted ? "text-rose-200" : toneForRuntimeStatus(data.task.status);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const badgeVariant = isPendingCreation
-    ? "warning"
-    : isAborted
-      ? "danger"
-      : badgeVariantForRuntimeStatus(data.task.status);
-  const badgeLabel = resolveTaskBadgeLabel(bootstrapStage, data.task.status, isPendingCreation, isAborted);
-  const footerLabel = resolveTaskFooterLabel(bootstrapStage, data.task.liveRunCount, isAborted);
-  
-  const optimisticEvents = Array.isArray(data.task.metadata.optimisticEvents) 
-    ? data.task.metadata.optimisticEvents 
+  const [expanded, setExpanded] = useState(false);
+  const baseBootstrapStage =
+    typeof data.task.metadata.bootstrapStage === "string" ? data.task.metadata.bootstrapStage : null;
+  const shouldStreamFeed =
+    expanded ||
+    selected ||
+    Boolean(data.pendingCreation || isPendingTaskBootstrapStage(baseBootstrapStage)) ||
+    data.task.status === "running" ||
+    data.task.liveRunCount > 0;
+
+  const optimisticEvents = Array.isArray(data.task.metadata.optimisticEvents)
+    ? data.task.metadata.optimisticEvents
     : [];
+  const optimisticFeed = useMemo(
+    () => optimisticEvents.filter(isTaskFeedEvent),
+    [optimisticEvents]
+  );
   const latestOptimisticEvent =
     optimisticEvents.length > 0 && isTaskFeedEvent(optimisticEvents[optimisticEvents.length - 1])
       ? optimisticEvents[optimisticEvents.length - 1]
       : null;
+  const { feed, detail, loading, error } = useTaskFeed(data.task.id, shouldStreamFeed, {
+    dispatchId: data.task.dispatchId,
+    optimisticFeed
+  });
+  const visibleFeed = useMemo(
+    () => feed.filter((event) => !isRunnerLogTaskEvent(event)),
+    [feed]
+  );
+  const displayTask = detail?.task ?? data.task;
+  const integrity = detail?.integrity ?? null;
+  const bootstrapStage =
+    typeof displayTask.metadata.bootstrapStage === "string" ? displayTask.metadata.bootstrapStage : null;
+  const dispatchSubmittedAt =
+    typeof displayTask.metadata.dispatchSubmittedAt === "string"
+      ? displayTask.metadata.dispatchSubmittedAt
+      : null;
+  const isPendingCreation = detail
+    ? isPendingTaskBootstrapStage(bootstrapStage)
+    : Boolean(data.pendingCreation || isPendingTaskBootstrapStage(bootstrapStage));
+  const isJustCreated = Boolean(data.justCreated);
+  const isAborted = isTaskAborted(displayTask);
+  const isAbortable = isTaskAbortable(displayTask);
+  const missingFinalResponse = Boolean(
+    integrity?.issues.some((issue) => issue.id === "missing-final-response")
+  );
+  const completedNeedsReview = Boolean(
+    displayTask.status === "completed" &&
+      integrity &&
+      (integrity.status === "warning" || integrity.status === "error")
+  );
   const bootstrapElapsedLabel = isPendingCreation
     ? formatElapsedFromIso(dispatchSubmittedAt, data.relativeTimeReferenceMs)
     : null;
-  const [expanded, setExpanded] = useState(false);
-  const { feed, loading, error } = useTaskFeed(data.task.id, expanded);
-  const latestFeedEvent = feed[feed.length - 1] ?? latestOptimisticEvent ?? null;
+  const tone = isAborted
+    ? "text-rose-200"
+    : completedNeedsReview
+      ? "text-amber-200"
+      : toneForRuntimeStatus(displayTask.status);
+  const badgeVariant = isPendingCreation
+    ? "warning"
+      : isAborted
+      ? "danger"
+      : completedNeedsReview
+        ? "warning"
+      : badgeVariantForRuntimeStatus(displayTask.status);
+  const badgeLabel = missingFinalResponse
+    ? "no result"
+    : completedNeedsReview
+      ? "needs review"
+      : resolveTaskBadgeLabel(bootstrapStage, displayTask.status, isPendingCreation, isAborted);
+  const footerLabel = missingFinalResponse
+    ? "completed without a final answer"
+    : resolveTaskFooterLabel(bootstrapStage, displayTask.liveRunCount, isAborted);
+  const latestFeedEvent = visibleFeed[visibleFeed.length - 1] ?? latestOptimisticEvent ?? null;
   const activityLabel = latestFeedEvent?.title || footerLabel;
   const activitySummary =
     compactMissionText(latestFeedEvent?.detail, 88) ||
     (isPendingCreation
       ? [footerLabel, bootstrapElapsedLabel ? `${bootstrapElapsedLabel} elapsed` : null].filter(Boolean).join(" · ")
-      : compactMissionText(data.task.subtitle, 72) || footerLabel);
-  const feedButtonCount = feed.length > 0 ? String(feed.length) : undefined;
+      : compactMissionText(displayTask.subtitle, 72) || footerLabel);
+  const promptText = readTaskPromptText(displayTask);
+  const resultPreview = missingFinalResponse
+    ? "No final answer was captured from OpenClaw for this task."
+    : readTaskResultPreview(displayTask);
+  const sessionCount = readTaskSessionCount(displayTask);
+  const turnCount = readTaskTurnCount(displayTask);
+  const feedButtonCount = visibleFeed.length > 0 ? String(visibleFeed.length) : undefined;
   const feedPanelId = `task-feed-${data.task.id}`;
 
   useEffect(() => {
@@ -125,7 +174,8 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         isPendingCreation && "border-cyan-300/30 shadow-[0_24px_54px_rgba(34,211,238,0.2)]",
         isJustCreated && "border-cyan-200/40 shadow-[0_24px_56px_rgba(125,211,252,0.18)]",
         isAborted && "border-rose-300/30 shadow-[0_24px_54px_rgba(244,63,94,0.14)]",
-        data.task.status === "completed" &&
+        displayTask.status === "completed" &&
+          !completedNeedsReview &&
           !isAborted &&
           !isPendingCreation &&
           !isJustCreated &&
@@ -239,20 +289,20 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             <ClipboardList className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="line-clamp-1 font-display text-[1rem] leading-5 text-white">
-              {compactMissionText(data.task.title || data.task.mission, 44) || data.task.title}
+            <p className="line-clamp-2 font-display text-[1rem] leading-5 text-white">
+              {compactMissionText(promptText, 96) || promptText}
             </p>
             <p className="mt-0.5 truncate text-[10px] uppercase tracking-[0.16em] text-slate-500">
-              {data.task.primaryAgentName || "OpenClaw"}
+              {displayTask.primaryAgentName || "OpenClaw"}
             </p>
           </div>
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {data.task.warningCount > 0 ? (
+        {displayTask.warningCount > 0 ? (
           <Badge variant="warning">
-            {data.task.warningCount} review{data.task.warningCount === 1 ? "" : "s"}
+            {displayTask.warningCount} review{displayTask.warningCount === 1 ? "" : "s"}
           </Badge>
         ) : null}
         {isJustCreated ? (
@@ -261,14 +311,17 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             new
           </Badge>
         ) : null}
+        <Badge variant="muted">{sessionCount} session{sessionCount === 1 ? "" : "s"}</Badge>
+        <Badge variant="muted">{turnCount} turn{turnCount === 1 ? "" : "s"}</Badge>
         <span className={cn("text-[9px] uppercase tracking-[0.18em]", tone)}>
-          {formatTokens(data.task.tokenUsage?.total)} tokens
+          {formatTokens(displayTask.tokenUsage?.total)} tokens
         </span>
       </div>
 
       <div className="mt-3 rounded-[16px] border border-amber-300/12 bg-amber-400/[0.04] px-3 py-2.5">
-        <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-100">
-          {compactMissionText(data.task.subtitle, 72) || data.task.subtitle}
+        <p className="text-[9px] uppercase tracking-[0.18em] text-slate-500">Latest result</p>
+        <p className="mt-1 line-clamp-3 text-[12.5px] leading-5 text-slate-100">
+          {compactMissionText(resultPreview, 168) || resultPreview}
         </p>
       </div>
 
@@ -289,14 +342,14 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
         />
         <TaskQuickAction
           icon={FolderOpenDot}
-          label="Runs"
-          value={String(data.task.runtimeCount)}
+          label="Turns"
+          value={String(turnCount)}
           onClick={() => data.onInspect?.(data.task, "overview")}
         />
         <TaskQuickAction
           icon={Sparkles}
           label="Files"
-          value={String(data.task.artifactCount)}
+          value={String(displayTask.artifactCount)}
           onClick={() => data.onInspect?.(data.task, "files")}
         />
       </div>
@@ -337,19 +390,19 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           >
             <div className="pt-2.5">
               <ScrollArea className="h-[164px] w-full pr-3">
-                {loading && feed.length === 0 ? (
+                {loading && visibleFeed.length === 0 ? (
                   <div className="py-4 text-center text-[10px] text-slate-500">
                     Connecting to feed...
                   </div>
-                ) : error && feed.length === 0 ? (
+                ) : error && visibleFeed.length === 0 ? (
                   <div className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[10px] leading-5 text-amber-100">
                     {error}
                   </div>
-                ) : feed.length === 0 ? (
+                ) : visibleFeed.length === 0 ? (
                   <div className="py-4 text-center text-[10px] text-slate-500">No events yet.</div>
                 ) : (
                   <div className="flex flex-col gap-2.5">
-                    {feed.map((event) => (
+                    {visibleFeed.map((event) => (
                       <div key={event.id} className="group/item relative pl-3">
                         <div
                           className={cn(
@@ -423,6 +476,16 @@ function resolveTaskBadgeLabel(
   }
 }
 
+function isPendingTaskBootstrapStage(bootstrapStage: string | null) {
+  return (
+    bootstrapStage === "submitting" ||
+    bootstrapStage === "accepted" ||
+    bootstrapStage === "waiting-for-heartbeat" ||
+    bootstrapStage === "waiting-for-runtime" ||
+    bootstrapStage === "runtime-observed"
+  );
+}
+
 function resolveTaskFooterLabel(bootstrapStage: string | null, liveRunCount: number, isAborted: boolean) {
   if (isAborted) {
     return "dispatch aborted";
@@ -444,6 +507,35 @@ function resolveTaskFooterLabel(bootstrapStage: string | null, liveRunCount: num
     default:
       return liveRunCount > 0 ? `${liveRunCount} live run${liveRunCount === 1 ? "" : "s"}` : "no live runs right now";
   }
+}
+
+function readTaskPromptText(task: TaskFlowNode["data"]["task"]) {
+  return task.mission?.trim() || task.title.trim() || "Untitled task";
+}
+
+function readTaskResultPreview(task: TaskFlowNode["data"]["task"]) {
+  const resultPreview =
+    typeof task.metadata.resultPreview === "string" ? task.metadata.resultPreview.trim() : "";
+
+  if (resultPreview) {
+    return resultPreview;
+  }
+
+  return task.subtitle.trim() || "Waiting for the first OpenClaw update.";
+}
+
+function readTaskSessionCount(task: TaskFlowNode["data"]["task"]) {
+  const metadataCount = task.metadata.sessionCount;
+  return typeof metadataCount === "number" && Number.isFinite(metadataCount)
+    ? metadataCount
+    : task.sessionIds.length;
+}
+
+function readTaskTurnCount(task: TaskFlowNode["data"]["task"]) {
+  const metadataCount = task.metadata.turnCount;
+  return typeof metadataCount === "number" && Number.isFinite(metadataCount)
+    ? metadataCount
+    : task.runtimeCount;
 }
 
 function formatElapsedFromIso(value: string | null, referenceTimeMs: number) {
@@ -546,6 +638,10 @@ function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
     typeof (value as TaskFeedEvent).title === "string" &&
     typeof (value as TaskFeedEvent).detail === "string"
   );
+}
+
+function isRunnerLogTaskEvent(event: TaskFeedEvent) {
+  return event.id.startsWith("runner-log:");
 }
 
 function TaskMenuButton({

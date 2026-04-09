@@ -166,42 +166,112 @@ function collectEmails(text: string) {
 }
 
 function collectFileReferences(text: string, explicitPath?: string | null, explicitLabel?: string | null) {
-  const found = new Map<string, FileReference>();
+  const found: FileReference[] = [];
+  const alias = createFileReferenceAlias(explicitPath, explicitLabel);
+
+  const addReference = (pathValue: string, labelValue?: string | null) => {
+    const normalizedPath = resolveDetectedFileReference(pathValue, alias);
+    const normalizedLabel = normalizeDetectedFileReference(labelValue || pathValue);
+
+    if (!normalizedPath || !normalizedLabel) {
+      return;
+    }
+
+    if (
+      found.some(
+        (reference) =>
+          normalizeDetectedFileReference(reference.path) === normalizedPath ||
+          normalizeDetectedFileReference(reference.label) === normalizedLabel
+      )
+    ) {
+      return;
+    }
+
+    found.push({
+      path: normalizedPath,
+      label: normalizedLabel
+    });
+  };
 
   if (explicitPath) {
-    found.set(explicitPath, {
-      path: explicitPath,
-      label: explicitLabel || explicitPath
-    });
+    addReference(explicitPath, explicitLabel || explicitPath);
   }
 
   for (const match of text.matchAll(BACKTICK_PATH_PATTERN)) {
-    const value = match[1]?.trim();
+    const value = normalizeDetectedFileReference(match[1]);
 
-    if (!value || found.has(value)) {
+    if (!value) {
       continue;
     }
 
-    found.set(value, {
-      path: value,
-      label: value
-    });
+    addReference(value, value);
   }
 
   for (const match of text.matchAll(KNOWN_RELATIVE_PATH_PATTERN)) {
-    const value = match[1]?.trim();
+    const value = normalizeDetectedFileReference(match[1]);
 
-    if (!value || found.has(value)) {
+    if (!value) {
       continue;
     }
 
-    found.set(value, {
-      path: value,
-      label: value
-    });
+    addReference(value, value);
   }
 
-  return [...found.values()];
+  return found;
+}
+
+function normalizeDetectedFileReference(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.replace(/[.,:;]+$/g, "");
+}
+
+function createFileReferenceAlias(pathValue?: string | null, labelValue?: string | null) {
+  const normalizedPath = normalizeDetectedFileReference(pathValue);
+  const normalizedLabel = normalizeDetectedFileReference(labelValue);
+
+  if (!normalizedPath || !normalizedLabel || !normalizedPath.startsWith("/")) {
+    return null;
+  }
+
+  return {
+    path: normalizedPath.replace(/\/+$/, ""),
+    label: normalizedLabel.replace(/\/+$/, "")
+  };
+}
+
+function resolveDetectedFileReference(value: string | null | undefined, alias: { path: string; label: string } | null) {
+  const normalized = normalizeDetectedFileReference(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.startsWith("/") || !alias) {
+    return normalized;
+  }
+
+  if (normalized === alias.label) {
+    return alias.path;
+  }
+
+  const aliasPrefix = `${alias.label}/`;
+
+  if (!normalized.startsWith(aliasPrefix)) {
+    return normalized;
+  }
+
+  const suffix = normalized.slice(aliasPrefix.length).replace(/^\/+/, "");
+
+  if (!suffix) {
+    return alias.path;
+  }
+
+  return `${alias.path}/${suffix}`;
 }
 
 function summarizeUrl(value: string) {

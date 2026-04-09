@@ -112,6 +112,8 @@ function InspectorPanelContent({
     selectedWorkspace || selectedAgent || selectedTask || selectedRuntime || selectedModel || null;
   const selectedRuntimeId = selectedRuntime?.id ?? null;
   const selectedTaskId = selectedTask?.id ?? null;
+  const selectedTaskDispatchId =
+    selectedTask && typeof selectedTask.dispatchId === "string" ? selectedTask.dispatchId : null;
   const [runtimeOutput, setRuntimeOutput] = useState<RuntimeOutputRecord | null>(null);
   const [runtimeOutputError, setRuntimeOutputError] = useState<{
     runtimeId: string;
@@ -131,12 +133,19 @@ function InspectorPanelContent({
   const resolvedRuntimeOutputError =
     runtimeOutputError?.runtimeId === selectedRuntimeId ? runtimeOutputError.message : null;
   const resolvedTaskDetail =
-    taskDetail && taskDetail.task.id === selectedTaskId ? taskDetail : null;
+    taskDetail &&
+    (taskDetail.task.id === selectedTaskId ||
+      (selectedTaskDispatchId &&
+        typeof taskDetail.task.dispatchId === "string" &&
+        taskDetail.task.dispatchId === selectedTaskDispatchId))
+      ? taskDetail
+      : null;
   const resolvedTaskDetailError =
     taskDetailError?.taskId === selectedTaskId ? taskDetailError.message : null;
-  const effectiveTaskDetail = optimisticTaskDetail ?? resolvedTaskDetail;
+  const effectiveTaskDetail = resolvedTaskDetail ?? optimisticTaskDetail;
+  const canStreamTaskDetail = Boolean(selectedTaskId) && (!isOptimisticTask || Boolean(selectedTaskDispatchId));
   const taskDetailLoading =
-    Boolean(selectedTaskId) && !isOptimisticTask && !effectiveTaskDetail && !resolvedTaskDetailError;
+    canStreamTaskDetail && !resolvedTaskDetail && !resolvedTaskDetailError;
   const runtimeOutputLoading =
     Boolean(selectedRuntimeId) && !resolvedRuntimeOutput && !resolvedRuntimeOutputError;
   const showChatTab = Boolean(selectedAgent);
@@ -216,11 +225,17 @@ function InspectorPanelContent({
   }, [selectedRuntimeId]);
 
   useEffect(() => {
-    if (!selectedTaskId || isOptimisticTask) {
+    if (!selectedTaskId || !canStreamTaskDetail) {
       return;
     }
 
-    const source = new EventSource(`/api/tasks/${encodeURIComponent(selectedTaskId)}/stream`);
+    const searchParams = new URLSearchParams();
+    if (selectedTaskDispatchId) {
+      searchParams.set("dispatchId", selectedTaskDispatchId);
+    }
+    const source = new EventSource(
+      `/api/tasks/${encodeURIComponent(selectedTaskId)}/stream${searchParams.size > 0 ? `?${searchParams.toString()}` : ""}`
+    );
 
     const handleTask = (event: MessageEvent<string>) => {
       try {
@@ -276,7 +291,7 @@ function InspectorPanelContent({
       source.removeEventListener("task-error", handleTaskError as EventListener);
       source.close();
     };
-  }, [selectedTaskId, isOptimisticTask]);
+  }, [selectedTaskId, canStreamTaskDetail, selectedTaskDispatchId]);
 
   return (
     <div className="panel-surface panel-glow flex h-full flex-row-reverse overflow-hidden rounded-none border border-r-0 border-white/[0.08] bg-[#04070e]/88 shadow-[0_28px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
@@ -1342,22 +1357,37 @@ function TaskContent({
   }
 
   const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
+  const originalPrompt = readTaskPromptText(selectedTask);
+  const routedPrompt = readTaskRoutedPrompt(selectedTask);
+  const routedPromptChanged = taskPromptsDiffer(originalPrompt, routedPrompt);
+  const latestOutput = readTaskResultPreview(selectedTask);
+  const sessionCount = readTaskSummaryCount(selectedTask.metadata.sessionCount, selectedTask.sessionIds.length);
+  const turnCount = readTaskSummaryCount(selectedTask.metadata.turnCount, runs.length);
+  const runnerLogs = readTaskRunnerLogEvents(taskDetail?.liveFeed ?? []);
+  const runnerLogFile = readTaskRunnerLogFile(runnerLogs);
 
   return (
     <>
       <InfoCard icon={FolderGit2} title="Mission" value={isAborted ? "aborted" : selectedTask.status}>
-        <p className="line-clamp-1 text-sm text-white">
-          {compactMissionText(selectedTask.mission || selectedTask.title, 80) || selectedTask.title}
-        </p>
-        <p className="line-clamp-1 text-[12.5px] leading-5 text-slate-400">
-          {compactMissionText(selectedTask.subtitle, 110) || selectedTask.subtitle}
-        </p>
+        <TaskTextPanel label="Original prompt" text={originalPrompt} />
+        <TaskTextPanel
+          label="Sent to OpenClaw"
+          text={routedPromptChanged ? routedPrompt : "Same as original prompt."}
+          subtle={!routedPromptChanged}
+        />
+        <TaskTextPanel
+          label="Latest task output"
+          text={latestOutput || "Waiting for the first OpenClaw update."}
+          subtle={!latestOutput}
+        />
         <InspectorMetricGrid
           items={[
+            { label: "Sessions", value: String(sessionCount) },
+            { label: "Turns", value: String(turnCount) },
             { label: "Runs", value: String(selectedTask.runtimeCount) },
-            { label: "Feed", value: String(selectedTask.updateCount) },
             { label: "Files", value: String(selectedTask.artifactCount) },
-            { label: "Live", value: String(selectedTask.liveRunCount) }
+            { label: "Live", value: String(selectedTask.liveRunCount) },
+            { label: "Tools", value: String(integrity.toolNames.length) }
           ]}
         />
         {onAbortTask && (canAbortTask || isAborted) ? (
@@ -1396,6 +1426,49 @@ function TaskContent({
       </InfoCard>
 
       <TaskIntegrityCard task={selectedTask} integrity={integrity} />
+
+      <InfoCard icon={TerminalSquare} title="Runner logs" value={String(runnerLogs.length)}>
+        {runnerLogFile ? (
+          <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+            <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">Log file</p>
+            <div className="mt-2">
+              <InteractiveContent
+                text={runnerLogFile.displayPath}
+                className="text-[12.5px] leading-5 text-slate-100"
+                filePath={runnerLogFile.path}
+                displayPath={runnerLogFile.displayPath}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">
+              Only meaningful runner diagnostics are shown here. OpenClaw bootstrap debug noise is hidden.
+            </p>
+          </div>
+        ) : null}
+        {runnerLogs.length === 0 ? (
+          <p>No meaningful dispatch runner diagnostics have been captured for this task yet.</p>
+        ) : (
+          <div className="max-h-[300px] space-y-2 overflow-y-auto pr-1">
+            {runnerLogs.map((event) => (
+              <div
+                key={event.id}
+                className="rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2.5"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Badge variant={taskFeedBadgeVariant(event.kind, event.isError)}>{event.title}</Badge>
+                  </div>
+                  <span className="shrink-0 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+                    {formatRelativeTime(new Date(event.timestamp).getTime())}
+                  </span>
+                </div>
+                <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-slate-100">
+                  {event.detail}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </InfoCard>
 
       <InfoCard icon={TerminalSquare} title="Runs" value={String(runs.length)}>
         {runs.length === 0 ? <p>No OpenClaw runs have been grouped into this task yet.</p> : null}
@@ -1441,25 +1514,31 @@ function TaskIntegrityCard({
   integrity: TaskDetailRecord["integrity"];
 }) {
   const isAborted = isTaskAborted(task);
+  const isOptimisticPending = Boolean(task.metadata.optimistic) && !isAborted && task.status !== "stalled";
+  const missingFinalResponseIssue = integrity.issues.find((issue) => issue.id === "missing-final-response");
   const partialFinalResponseIssue = integrity.issues.find((issue) => issue.id === "partial-final-response");
   const summary =
     isAborted
       ? "This task was aborted by an operator. Captured evidence may be incomplete."
-      : integrity.status === "verified"
-      ? "Mission Control found a matching transcript and the captured result looks internally consistent."
-      : integrity.sessionMismatch
-        ? "The linked transcript belongs to a different mission or stale session, so this completion cannot be trusted yet."
-        : integrity.issues.some((issue) => issue.id === "empty-output-dir")
-          ? "The task is marked completed, but the expected deliverables are missing from the output folder."
-      : integrity.status === "error"
-        ? "The captured evidence does not line up with the requested mission."
-        : "Mission Control recovered partial evidence, but this result still needs operator review.";
+      : isOptimisticPending
+        ? "OpenClaw accepted this task. Session, tool, and file evidence will appear here as soon as the first runtime reports in."
+        : missingFinalResponseIssue
+          ? missingFinalResponseIssue.detail
+        : integrity.status === "verified"
+          ? "Mission Control found a matching transcript and the captured result looks internally consistent."
+          : integrity.sessionMismatch
+            ? "The linked transcript belongs to a different mission or stale session, so this completion cannot be trusted yet."
+            : integrity.issues.some((issue) => issue.id === "empty-output-dir")
+              ? "The task is marked completed, but the expected deliverables are missing from the output folder."
+              : integrity.status === "error"
+                ? "The captured evidence does not line up with the requested mission."
+                : "Mission Control recovered partial evidence, but this result still needs operator review.";
 
   return (
     <InfoCard
       icon={Radar}
       title="Result integrity"
-      value={isAborted ? "aborted" : task.status === "stalled" ? "stalled" : integrity.status}
+      value={isAborted ? "aborted" : task.status === "stalled" ? "stalled" : isOptimisticPending ? "pending" : integrity.status}
     >
       <p>{summary}</p>
       <InspectorMetricGrid
@@ -1592,10 +1671,11 @@ function TaskFeedContent({
   }
 
   const liveFeed = taskDetail?.liveFeed ?? [];
+  const visibleLiveFeed = liveFeed.filter((event) => !isRunnerLogTaskEvent(event));
   const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
 
   return (
-    <InfoCard icon={TerminalSquare} title="Live feed" value={String(liveFeed.length)}>
+    <InfoCard icon={TerminalSquare} title="Live feed" value={String(visibleLiveFeed.length)}>
       {taskDetailError ? (
         <p className="rounded-[12px] border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[12px] leading-5 text-amber-100">
           {taskDetailError}
@@ -1606,9 +1686,9 @@ function TaskFeedContent({
           {integrity.issues[0]?.detail}
         </p>
       ) : null}
-      {liveFeed.length === 0 ? <p>No streamed task events have arrived yet.</p> : null}
+      {visibleLiveFeed.length === 0 ? <p>No streamed task events have arrived yet.</p> : null}
       <div className="space-y-2">
-        {liveFeed.map((event) => (
+        {visibleLiveFeed.map((event) => (
           <div
             key={event.id}
             className="rounded-[14px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2.5"
@@ -1701,6 +1781,7 @@ function createOptimisticTaskDetail(task: MissionControlSnapshot["tasks"][number
 function createOptimisticTaskIntegrity(
   task: MissionControlSnapshot["tasks"][number]
 ): TaskDetailRecord["integrity"] {
+  const isOptimisticPending = Boolean(task.metadata.optimistic) && !isTaskAborted(task) && task.status !== "stalled";
   const issues: TaskDetailRecord["integrity"]["issues"] =
     isTaskAborted(task)
       ? [
@@ -1720,24 +1801,17 @@ function createOptimisticTaskIntegrity(
             detail: task.subtitle
           }
         ]
-      : task.metadata.optimistic
-        ? [
-            {
-              id: "pending-evidence",
-              severity: "warning" as const,
-              title: "Waiting for runtime evidence",
-              detail: "Mission Control will attach transcript, tool, and file evidence after the first runtime is observed."
-            }
-          ]
-        : [];
+      : [];
 
   return {
     status:
       issues.some((issue) => issue.severity === "error")
         ? "error"
-        : issues.length > 0
+        : isOptimisticPending
           ? "warning"
-          : "verified",
+          : issues.length > 0
+            ? "warning"
+            : "verified",
     outputDir:
       typeof task.metadata.outputDir === "string" && task.metadata.outputDir.trim().length > 0
         ? task.metadata.outputDir
@@ -1772,6 +1846,55 @@ function readOptimisticTaskFeed(task: MissionControlSnapshot["tasks"][number]) {
     .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
 }
 
+function readTaskPromptText(task: MissionControlSnapshot["tasks"][number]) {
+  return task.mission?.trim() || task.title.trim() || "Untitled task";
+}
+
+function readTaskRoutedPrompt(task: MissionControlSnapshot["tasks"][number]) {
+  const routedPrompt =
+    typeof task.metadata.routedMission === "string" ? task.metadata.routedMission.trim() : "";
+
+  return routedPrompt || readTaskPromptText(task);
+}
+
+function readTaskResultPreview(task: MissionControlSnapshot["tasks"][number]) {
+  const resultPreview =
+    typeof task.metadata.resultPreview === "string" ? task.metadata.resultPreview.trim() : "";
+
+  return resultPreview || task.subtitle.trim() || "";
+}
+
+function readTaskSummaryCount(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function taskPromptsDiffer(left: string, right: string) {
+  return normalizeTaskComparisonText(left) !== normalizeTaskComparisonText(right);
+}
+
+function normalizeTaskComparisonText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function readTaskRunnerLogEvents(feed: TaskFeedEvent[]) {
+  return feed
+    .filter((event) => isRunnerLogTaskEvent(event))
+    .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
+}
+
+function readTaskRunnerLogFile(events: TaskFeedEvent[]) {
+  for (const event of events) {
+    if (typeof event.filePath === "string" && typeof event.displayPath === "string") {
+      return {
+        path: event.filePath,
+        displayPath: event.displayPath
+      };
+    }
+  }
+
+  return null;
+}
+
 function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
   return (
     typeof value === "object" &&
@@ -1782,6 +1905,10 @@ function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
     typeof (value as TaskFeedEvent).title === "string" &&
     typeof (value as TaskFeedEvent).detail === "string"
   );
+}
+
+function isRunnerLogTaskEvent(event: TaskFeedEvent) {
+  return event.id.startsWith("runner-log:");
 }
 
 function resolveTaskDispatchStatus(task: MissionControlSnapshot["tasks"][number]) {
@@ -2148,6 +2275,28 @@ function InfoCard({
       </div>
       <div className="mt-3 space-y-1.5 text-[12.5px] leading-5 text-slate-300">{children}</div>
     </section>
+  );
+}
+
+function TaskTextPanel({
+  label,
+  text,
+  subtle = false
+}: {
+  label: string;
+  text: string;
+  subtle?: boolean;
+}) {
+  return (
+    <div className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <div className="mt-2">
+        <InteractiveContent
+          text={text}
+          className={cn("text-[12.5px] leading-5", subtle ? "text-slate-400" : "text-slate-100")}
+        />
+      </div>
+    </div>
   );
 }
 

@@ -223,6 +223,18 @@ const missionDispatchQueuedStallMs = 30_000;
 const missionDispatchHeartbeatStallMs = 90_000;
 const missionDispatchRetentionMs = 3 * 24 * 60 * 60 * 1000;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+const missionDispatchRunnerDiagnosticJsonKeys = new Set([
+  "cause",
+  "code",
+  "details",
+  "error",
+  "message",
+  "reason",
+  "stack",
+  "stderr",
+  "stdout",
+  "warning"
+]);
 type MutableAgentConfigEntry = AgentConfigPayload[number] & Record<string, unknown>;
 type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
@@ -252,6 +264,12 @@ type MissionDispatchObservation = {
   runtimeId: string | null;
   observedAt: string | null;
 };
+type MissionDispatchRunnerLogEntry = {
+  id: string;
+  timestamp: string;
+  stream: "status" | "stdout" | "stderr";
+  text: string;
+};
 type MissionDispatchRecord = {
   id: string;
   status: MissionDispatchStatus;
@@ -273,6 +291,7 @@ type MissionDispatchRecord = {
     startedAt: string | null;
     finishedAt: string | null;
     lastHeartbeatAt: string | null;
+    logPath: string | null;
   };
   observation: MissionDispatchObservation;
   result: MissionCommandPayload | null;
@@ -356,9 +375,14 @@ type PresencePayload = Array<{
 }>;
 
 type MissionCommandPayload = {
-  runId: string;
-  status: string;
-  summary: string;
+  runId?: string;
+  status?: string;
+  summary?: string;
+  payloads?: Array<{
+    text: string;
+    mediaUrl: string | null;
+  }>;
+  meta?: Record<string, unknown>;
   result?: {
     payloads?: Array<{
       text: string;
@@ -1037,7 +1061,10 @@ function buildTaskRecord(
     resolveRuntimeMissionText(primaryRuntime) ||
     sortedRuntimes.map((runtime) => resolveRuntimeMissionText(runtime)).find(Boolean) ||
     null;
+  const routedMission = resolveTaskRoutedMission(sortedRuntimes);
+  const resultPreview = resolveTaskResultPreview(sortedRuntimes);
   const subtitle =
+    resultPreview ||
     signalRuntimes
       .map((runtime) => runtime.subtitle?.trim())
       .find((value): value is string => Boolean(value)) ||
@@ -1063,6 +1090,7 @@ function buildTaskRecord(
   const runIds = uniqueStrings(
     sortedRuntimes.flatMap((runtime) => (runtime.runId ? [runtime.runId] : []))
   );
+  const turnCount = countTaskTurns(sortedRuntimes);
   const primaryAgentId = primaryRuntime?.agentId || agentIds[0];
   const primaryAgentName = primaryAgentId ? agentNameById.get(primaryAgentId) ?? null : null;
   const latestRuntime = sortedRuntimes[0] ?? null;
@@ -1093,6 +1121,10 @@ function buildTaskRecord(
     tokenUsage,
     metadata: {
       mission,
+      routedMission,
+      resultPreview,
+      turnCount,
+      sessionCount: sessionIds.length,
       primaryRuntimeSource: primaryRuntime?.source ?? null,
       bootstrapStage:
         typeof primaryRuntime?.metadata.bootstrapStage === "string"
@@ -1179,36 +1211,70 @@ function isDirectChatPrompt(text: string) {
 }
 
 function buildDispatchIdBySessionKey(runtimes: RuntimeRecord[]) {
-  const dispatchIdBySessionKey = new Map<string, string>();
+  const dispatchIdBySessionKey = new Map<
+    string,
+    Array<{
+      dispatchId: string;
+      submittedAt: number | null;
+    }>
+  >();
 
   for (const runtime of runtimes) {
     const sessionId = runtime.sessionId?.trim();
     const dispatchId =
       typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+    const dispatchSubmittedAt =
+      typeof runtime.metadata.dispatchSubmittedAt === "string"
+        ? Date.parse(runtime.metadata.dispatchSubmittedAt)
+        : Number.NaN;
 
     if (!sessionId || !dispatchId) {
       continue;
     }
 
-    // Even when the dispatch runtime is synthetic, it still represents the
-    // authoritative dispatch/session pair for that mission. Keep the session
-    // pinned to the dispatch so the raw session placeholder does not become a
-    // separate task card.
-    dispatchIdBySessionKey.set(`${runtime.agentId ?? "unknown"}:${sessionId}`, dispatchId);
+    const sessionKey = `${runtime.agentId ?? "unknown"}:${sessionId}`;
+    const entries = dispatchIdBySessionKey.get(sessionKey) ?? [];
+
+    if (!entries.some((entry) => entry.dispatchId === dispatchId)) {
+      entries.push({
+        dispatchId,
+        submittedAt: Number.isNaN(dispatchSubmittedAt) ? null : dispatchSubmittedAt
+      });
+      entries.sort(
+        (left, right) =>
+          (left.submittedAt ?? Number.NEGATIVE_INFINITY) - (right.submittedAt ?? Number.NEGATIVE_INFINITY)
+      );
+      dispatchIdBySessionKey.set(sessionKey, entries);
+    }
   }
 
   return dispatchIdBySessionKey;
 }
 
-function resolveTaskGroupKey(runtime: RuntimeRecord, dispatchIdBySessionKey: Map<string, string>) {
+function resolveTaskGroupKey(
+  runtime: RuntimeRecord,
+  dispatchIdBySessionKey: Map<
+    string,
+    Array<{
+      dispatchId: string;
+      submittedAt: number | null;
+    }>
+  >
+) {
   const taskId = runtime.taskId?.trim();
   const dispatchId =
     typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
   const mission = resolveRuntimeMissionText(runtime);
   const sessionId = runtime.sessionId?.trim();
-  const sessionDispatchId = sessionId
-    ? dispatchIdBySessionKey.get(`${runtime.agentId ?? "unknown"}:${sessionId}`)?.trim() ?? ""
-    : "";
+  const sessionDispatchEntries = sessionId
+    ? dispatchIdBySessionKey.get(`${runtime.agentId ?? "unknown"}:${sessionId}`) ?? []
+    : [];
+  const runtimeUpdatedAt = runtime.updatedAt ?? 0;
+  const sessionDispatchId =
+    sessionDispatchEntries
+      .filter((entry) => entry.submittedAt === null || runtimeUpdatedAt >= entry.submittedAt - 1500)
+      .sort((left, right) => (right.submittedAt ?? Number.NEGATIVE_INFINITY) - (left.submittedAt ?? Number.NEGATIVE_INFINITY))[0]
+      ?.dispatchId ?? "";
 
   if (dispatchId) {
     return `dispatch:${dispatchId}`;
@@ -1303,6 +1369,67 @@ function resolveDispatchId(runtimes: RuntimeRecord[]) {
   return undefined;
 }
 
+function resolveTaskRoutedMission(runtimes: RuntimeRecord[]) {
+  for (const runtime of runtimes) {
+    const routedMission =
+      typeof runtime.metadata.routedMission === "string" ? runtime.metadata.routedMission.trim() : "";
+
+    if (routedMission) {
+      return routedMission;
+    }
+  }
+
+  return null;
+}
+
+function resolveTaskResultPreview(runtimes: RuntimeRecord[]) {
+  const orderedCandidates = [
+    ...runtimes.filter((runtime) => typeof runtime.metadata.turnId === "string"),
+    ...runtimes.filter((runtime) => runtime.metadata.recoveredFromObservation === true),
+    ...runtimes.filter(
+      (runtime) =>
+        !isBootstrapOnlyTaskRuntime(runtime) &&
+        (runtime.status === "completed" || runtime.status === "stalled" || runtime.status === "cancelled")
+    ),
+    ...runtimes.filter((runtime) => !isBootstrapOnlyTaskRuntime(runtime))
+  ];
+  const seenRuntimeIds = new Set<string>();
+
+  for (const runtime of orderedCandidates) {
+    if (seenRuntimeIds.has(runtime.id)) {
+      continue;
+    }
+
+    seenRuntimeIds.add(runtime.id);
+
+    const subtitle = runtime.subtitle?.trim();
+    if (subtitle) {
+      return subtitle;
+    }
+  }
+
+  return null;
+}
+
+function countTaskTurns(runtimes: RuntimeRecord[]) {
+  return runtimes.filter(
+    (runtime) =>
+      typeof runtime.metadata.turnId === "string" || runtime.metadata.recoveredFromObservation === true
+  ).length;
+}
+
+function isBootstrapOnlyTaskRuntime(runtime: RuntimeRecord) {
+  const bootstrapStage =
+    typeof runtime.metadata.bootstrapStage === "string" ? runtime.metadata.bootstrapStage : null;
+
+  return (
+    bootstrapStage === "accepted" ||
+    bootstrapStage === "waiting-for-heartbeat" ||
+    bootstrapStage === "waiting-for-runtime" ||
+    bootstrapStage === "runtime-observed"
+  );
+}
+
 function aggregateRuntimeTokenUsage(runtimes: RuntimeRecord[]) {
   const relevant = runtimes.filter((runtime) => runtime.tokenUsage);
 
@@ -1369,7 +1496,7 @@ function inferCreatedFilesFromText(value: string | null | undefined) {
   for (const match of matches) {
     const pathValue = (match[1] || "").trim();
 
-    if (!pathValue) {
+    if (!pathValue || !looksLikeArtifactFilePath(pathValue)) {
       continue;
     }
 
@@ -1380,6 +1507,18 @@ function inferCreatedFilesFromText(value: string | null | undefined) {
   }
 
   return dedupeCreatedFiles(createdFiles);
+}
+
+function looksLikeArtifactFilePath(pathValue: string) {
+  const normalized = pathValue.trim().replace(/[`'")\],;]+$/g, "");
+
+  if (!normalized || normalized.endsWith("/")) {
+    return false;
+  }
+
+  const basename = path.posix.basename(normalized);
+
+  return basename.includes(".");
 }
 
 function extractWarningsFromRuntimeMetadata(runtime: RuntimeRecord) {
@@ -1479,10 +1618,10 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
       status: "passed",
       checkedAt: new Date().toISOString(),
       agentId,
-      runId: payload.runId,
+      runId: payload.runId ?? null,
       summary:
         payload.summary ||
-        payload.result?.payloads?.[0]?.text ||
+        extractMissionCommandPayloads(payload)[0]?.text ||
         "Mission Control verified a real OpenClaw turn.",
       error: null
     };
@@ -1692,9 +1831,10 @@ export async function abortMissionTask(
 
 function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDispatchRecord {
   const now = new Date().toISOString();
+  const dispatchId = `dispatch-${randomUUID()}`;
 
   return {
-    id: `dispatch-${randomUUID()}`,
+    id: dispatchId,
     status: "queued",
     agentId: payload.agentId,
     sessionId: randomUUID(),
@@ -1713,7 +1853,8 @@ function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDi
       childPid: null,
       startedAt: null,
       finishedAt: null,
-      lastHeartbeatAt: null
+      lastHeartbeatAt: null,
+      logPath: missionDispatchRunnerLogPath(dispatchId)
     },
     observation: {
       runtimeId: null,
@@ -1726,6 +1867,10 @@ function createMissionDispatchRecord(payload: MissionDispatchPayload): MissionDi
 
 function missionDispatchRecordPath(dispatchId: string) {
   return path.join(missionDispatchesRootPath, `${dispatchId}.json`);
+}
+
+function missionDispatchRunnerLogPath(dispatchId: string) {
+  return path.join(missionDispatchesRootPath, `${dispatchId}.log.jsonl`);
 }
 
 async function writeMissionDispatchRecord(record: MissionDispatchRecord) {
@@ -2005,7 +2150,10 @@ async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord
   try {
     const raw = await readFile(transcriptPath, "utf8");
     const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
-    const turns = extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? undefined);
+    const turns = filterTranscriptTurnsForRuntime(
+      transcriptRuntime,
+      extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? undefined)
+    );
 
     if (turns.length === 0) {
       return null;
@@ -2038,6 +2186,9 @@ async function readMissionDispatchRecords() {
 
           if (shouldPruneMissionDispatchRecord(record, nowMs)) {
             await rm(filePath, { force: true });
+            if (record.runner.logPath) {
+              await rm(record.runner.logPath, { force: true });
+            }
             return null;
           }
 
@@ -2097,7 +2248,8 @@ async function readMissionDispatchRecord(filePath: string) {
         childPid: typeof parsed.runner?.childPid === "number" ? parsed.runner.childPid : null,
         startedAt: typeof parsed.runner?.startedAt === "string" ? parsed.runner.startedAt : null,
         finishedAt: typeof parsed.runner?.finishedAt === "string" ? parsed.runner.finishedAt : null,
-        lastHeartbeatAt: typeof parsed.runner?.lastHeartbeatAt === "string" ? parsed.runner.lastHeartbeatAt : null
+        lastHeartbeatAt: typeof parsed.runner?.lastHeartbeatAt === "string" ? parsed.runner.lastHeartbeatAt : null,
+        logPath: typeof parsed.runner?.logPath === "string" ? parsed.runner.logPath : missionDispatchRunnerLogPath(parsed.id)
       },
       observation: {
         runtimeId: typeof parsed.observation?.runtimeId === "string" ? parsed.observation.runtimeId : null,
@@ -2203,16 +2355,16 @@ function scoreMissionDispatchRuntimeMatch(
     return null;
   }
 
+  if (options.observedRuntimeId && runtime.id === options.observedRuntimeId) {
+    return 10_000;
+  }
+
   if (
     options.effectiveStatus === "completed" ||
     options.effectiveStatus === "stalled" ||
     options.effectiveStatus === "cancelled"
   ) {
     return runtimeDispatchId === record.id ? 500 : null;
-  }
-
-  if (options.observedRuntimeId && runtime.id === options.observedRuntimeId) {
-    return 10_000;
   }
 
   if (options.sessionId && runtime.sessionId !== options.sessionId) {
@@ -2271,7 +2423,8 @@ function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, record: Miss
       dispatchRunnerStartedAt: record.runner.startedAt,
       dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
       dispatchObservedAt: record.observation.observedAt,
-      mission: runtimeMission ? runtime.metadata.mission : record.mission
+      mission: runtimeMission ? runtime.metadata.mission : record.mission,
+      routedMission: record.routedMission
     }
   };
 }
@@ -2468,7 +2621,7 @@ function resolveMissionDispatchSubtitle(
 }
 
 function extractMissionDispatchAgentMeta(record: MissionDispatchRecord) {
-  const meta = record.result?.result?.meta;
+  const meta = extractMissionCommandMeta(record.result);
 
   if (!meta || typeof meta !== "object") {
     return null;
@@ -2566,8 +2719,9 @@ function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
 }
 
 function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
-  const text =
-    record.result?.result?.payloads?.find((payload) => payload.text.trim().length > 0)?.text.trim() ?? null;
+  const text = extractMissionCommandPayloads(record.result)
+    .find((payload) => payload.text.trim().length > 0)
+    ?.text.trim() ?? null;
   return isPlaceholderMissionResponseText(text) ? null : text;
 }
 
@@ -2632,6 +2786,104 @@ function resolveMissionDispatchCompletionDetail(record: MissionDispatchRecord) {
   return "Dispatch runner finished.";
 }
 
+function reconcileTaskRecordWithDispatchRecord(task: TaskRecord, record: MissionDispatchRecord): TaskRecord {
+  const status = resolveMissionDispatchRuntimeStatus(record, Date.now());
+  const bootstrapStage = resolveMissionDispatchBootstrapStage(record, status);
+  const updatedAt = Date.parse(record.updatedAt);
+  const subtitle =
+    status === "completed" || status === "cancelled"
+      ? summarizeText(resolveMissionDispatchCompletionDetail(record), 90)
+      : resolveMissionDispatchSubtitle(record, status);
+
+  return {
+    ...task,
+    dispatchId: record.id,
+    status,
+    subtitle,
+    updatedAt: Number.isNaN(updatedAt) ? task.updatedAt : updatedAt,
+    ageMs: Number.isNaN(updatedAt) ? task.ageMs : Math.max(Date.now() - updatedAt, 0),
+    liveRunCount: status === "running" || status === "queued" ? Math.max(task.liveRunCount, 1) : 0,
+    warningCount:
+      status === "stalled" || status === "cancelled"
+        ? Math.max(task.warningCount, 1)
+        : task.warningCount,
+    metadata: {
+      ...task.metadata,
+      bootstrapStage,
+      dispatchStatus: record.status,
+      dispatchSubmittedAt: record.submittedAt,
+      dispatchRunnerStartedAt: record.runner.startedAt,
+      dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
+      dispatchObservedAt: record.observation.observedAt,
+      outputDir: record.outputDir,
+      outputDirRelative: record.outputDirRelative
+    }
+  };
+}
+
+function resolveMissionDispatchOutputFile(record: MissionDispatchRecord): RuntimeCreatedFile | null {
+  const outputDir = normalizeOptionalValue(record.outputDir);
+  const outputDirRelative = normalizeOptionalValue(record.outputDirRelative);
+  const textCandidates = [
+    resolveMissionDispatchSummary(record),
+    resolveMissionDispatchResultText(record)
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  for (const text of textCandidates) {
+    for (const file of inferCreatedFilesFromText(text)) {
+      const resolvedPath = resolveArtifactPathAgainstOutputDir(file.path, outputDir, outputDirRelative);
+
+      if (!resolvedPath) {
+        continue;
+      }
+
+      return {
+        path: resolvedPath,
+        displayPath: file.displayPath
+      };
+    }
+  }
+
+  return null;
+}
+
+function resolveArtifactPathAgainstOutputDir(
+  detectedPath: string | null | undefined,
+  outputDir?: string | null,
+  outputDirRelative?: string | null
+) {
+  const normalizedDetectedPath = normalizeOptionalValue(detectedPath);
+  const normalizedOutputDir = normalizeOptionalValue(outputDir);
+  const normalizedOutputDirRelative = normalizeOptionalValue(outputDirRelative);
+
+  if (!normalizedDetectedPath) {
+    return null;
+  }
+
+  if (path.isAbsolute(normalizedDetectedPath)) {
+    return normalizedDetectedPath;
+  }
+
+  if (!normalizedOutputDir || !normalizedOutputDirRelative) {
+    return normalizedDetectedPath;
+  }
+
+  const normalizedDirLabel = normalizedOutputDirRelative.replace(/\/+$/, "");
+  const normalizedFileLabel = normalizedDetectedPath.replace(/\/+$/, "");
+
+  if (normalizedFileLabel === normalizedDirLabel) {
+    return normalizedOutputDir;
+  }
+
+  const prefix = `${normalizedDirLabel}/`;
+
+  if (!normalizedFileLabel.startsWith(prefix)) {
+    return normalizedDetectedPath;
+  }
+
+  return path.join(normalizedOutputDir, normalizedFileLabel.slice(prefix.length));
+}
+
 function createMissionDispatchResultFromRuntimeOutput(
   runtime: RuntimeRecord,
   output: RuntimeOutputRecord
@@ -2670,13 +2922,49 @@ function normalizeMissionThinking(value: unknown): NonNullable<MissionSubmission
 }
 
 function isMissionCommandPayload(value: unknown): value is MissionCommandPayload {
+  const payloads = extractMissionCommandPayloads(value);
+  const meta = extractMissionCommandMeta(value);
+
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as MissionCommandPayload).runId === "string" &&
-    typeof (value as MissionCommandPayload).status === "string" &&
-    typeof (value as MissionCommandPayload).summary === "string"
+    (typeof (value as MissionCommandPayload).runId === "string" ||
+      typeof (value as MissionCommandPayload).status === "string" ||
+      typeof (value as MissionCommandPayload).summary === "string" ||
+      payloads.length > 0 ||
+      Boolean(meta))
   );
+}
+
+function extractMissionCommandPayloads(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return [] as Array<{
+      text: string;
+      mediaUrl: string | null;
+    }>;
+  }
+
+  const payload = value as MissionCommandPayload;
+  const candidates = Array.isArray(payload.result?.payloads)
+    ? payload.result?.payloads
+    : Array.isArray(payload.payloads)
+      ? payload.payloads
+      : [];
+
+  return candidates.filter(
+    (entry): entry is { text: string; mediaUrl: string | null } =>
+      Boolean(entry) && typeof entry.text === "string"
+  );
+}
+
+function extractMissionCommandMeta(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const payload = value as MissionCommandPayload;
+  const meta = payload.result?.meta ?? payload.meta;
+  return meta && typeof meta === "object" ? meta : null;
 }
 
 async function mapSessionToRuntimes(
@@ -2746,16 +3034,39 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
   return getRuntimeOutputForResolvedRuntime(runtime, snapshot);
 }
 
-export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
+export async function getTaskDetail(
+  taskId: string,
+  options: {
+    dispatchId?: string | null;
+  } = {}
+): Promise<TaskDetailRecord> {
   let snapshot = await getMissionControlSnapshot({ includeHidden: true });
   let task = snapshot.tasks.find((entry) => entry.id === taskId);
+
+  if (!task && options.dispatchId) {
+    task = snapshot.tasks.find((entry) => entry.dispatchId === options.dispatchId);
+  }
 
   if (!task) {
     snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
     task = snapshot.tasks.find((entry) => entry.id === taskId);
+
+    if (!task && options.dispatchId) {
+      task = snapshot.tasks.find((entry) => entry.dispatchId === options.dispatchId);
+    }
   }
 
   if (!task) {
+    const dispatchId = typeof options.dispatchId === "string" ? options.dispatchId.trim() : "";
+
+    if (dispatchId) {
+      const dispatchRecord = await readMissionDispatchRecordById(dispatchId);
+
+      if (dispatchRecord) {
+        return buildTaskDetailFromDispatchRecord(dispatchRecord, snapshot);
+      }
+    }
+
     throw new Error("Task was not found in the current OpenClaw snapshot.");
   }
 
@@ -2778,7 +3089,73 @@ export async function getTaskDetail(taskId: string): Promise<TaskDetailRecord> {
     )
   );
   const dispatchRecord = task.dispatchId ? await readMissionDispatchRecordById(task.dispatchId) : null;
-  const bootstrapFeed = buildMissionDispatchFeed(task, dispatchRecord, snapshot);
+  const reconciledTask = dispatchRecord ? reconcileTaskRecordWithDispatchRecord(task, dispatchRecord) : task;
+  const bootstrapFeed = await buildMissionDispatchFeed(reconciledTask, dispatchRecord, snapshot);
+  const runtimeFeed = buildTaskFeed(reconciledTask, runs, outputByRuntimeId, snapshot);
+  const integrity = await buildTaskIntegrityRecord({
+    task: reconciledTask,
+    runs,
+    outputs,
+    createdFiles,
+    dispatchRecord,
+    snapshot
+  });
+
+  return {
+    task: reconciledTask,
+    runs,
+    outputs,
+    liveFeed: mergeTaskFeedEvents(bootstrapFeed, runtimeFeed),
+    createdFiles,
+    warnings,
+    integrity
+  };
+}
+
+async function buildTaskDetailFromDispatchRecord(
+  dispatchRecord: MissionDispatchRecord,
+  snapshot: MissionControlSnapshot
+): Promise<TaskDetailRecord> {
+  const agentNameById = new Map(snapshot.agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]));
+  const dispatchRuntimes = snapshot.runtimes
+    .filter((runtime) => {
+      const runtimeDispatchId =
+        typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+
+      if (runtimeDispatchId === dispatchRecord.id) {
+        return true;
+      }
+
+      const dispatchSessionId = extractMissionDispatchSessionId(dispatchRecord);
+      return Boolean(
+        dispatchSessionId &&
+          runtime.sessionId === dispatchSessionId &&
+          runtime.agentId === dispatchRecord.agentId &&
+          !isDirectChatRuntime(runtime)
+      );
+    })
+    .sort(sortRuntimesByUpdatedAtDesc);
+  const fallbackRuntime =
+    dispatchRuntimes[0] ??
+    (await buildObservedMissionDispatchRuntime(dispatchRecord)) ??
+    createMissionDispatchRuntime(dispatchRecord, Date.now());
+  const runs = dispatchRuntimes.length > 0 ? dispatchRuntimes : [fallbackRuntime];
+  const task = buildTaskRecord(`dispatch:${dispatchRecord.id}`, runs, agentNameById);
+  const outputs = await Promise.all(
+    runs.map((runtime) => getRuntimeOutputForResolvedRuntime(runtime, snapshot))
+  );
+  const outputByRuntimeId = new Map(outputs.map((output) => [output.runtimeId, output]));
+  const createdFiles = dedupeCreatedFiles(
+    outputs.flatMap((output) => output.createdFiles).concat(
+      runs.flatMap((runtime) => extractCreatedFilesFromRuntimeMetadata(runtime))
+    )
+  );
+  const warnings = uniqueStrings(
+    outputs.flatMap((output) => output.warnings).concat(
+      runs.flatMap((runtime) => extractWarningsFromRuntimeMetadata(runtime))
+    )
+  );
+  const bootstrapFeed = await buildMissionDispatchFeed(task, dispatchRecord, snapshot);
   const runtimeFeed = buildTaskFeed(task, runs, outputByRuntimeId, snapshot);
   const integrity = await buildTaskIntegrityRecord({
     task,
@@ -2850,6 +3227,7 @@ async function buildTaskIntegrityRecord(input: {
 
   if (
     task.status === "completed" &&
+    expectsFileArtifact &&
     dispatchRecord?.outputDir &&
     outputDirInspection.exists &&
     outputDirInspection.fileCount === 0 &&
@@ -2857,11 +3235,9 @@ async function buildTaskIntegrityRecord(input: {
   ) {
     issues.push({
       id: "empty-output-dir",
-      severity: expectsFileArtifact ? "error" : "warning",
+      severity: "error",
       title: "Deliverables folder is empty",
-      detail: expectsFileArtifact
-        ? "The task asked for a file deliverable, but the assigned deliverables folder does not contain any files."
-        : "The task is marked completed, but the assigned deliverables folder does not contain any files."
+      detail: "The task asked for a file deliverable, but the assigned deliverables folder does not contain any files."
     });
   }
 
@@ -3034,10 +3410,11 @@ async function readMissionDispatchTranscriptTurns(
 
   try {
     const raw = await readFile(transcriptPath, "utf8");
-    return extractTranscriptTurns(
-      raw,
-      buildMissionDispatchTranscriptRuntime(record, sessionId),
-      record.workspacePath ?? agent?.workspacePath
+    const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
+
+    return filterTranscriptTurnsForRuntime(
+      transcriptRuntime,
+      extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? agent?.workspacePath)
     );
   } catch {
     return [] as TranscriptTurn[];
@@ -7058,6 +7435,49 @@ async function resolveRuntimeTranscriptPath(
     }
   }
 
+  const aliasedTranscriptPath = await resolveRuntimeTranscriptPathFromSessionCatalog(
+    agentId,
+    sessionId,
+    workspacePath
+  );
+
+  if (aliasedTranscriptPath) {
+    return aliasedTranscriptPath;
+  }
+
+  return null;
+}
+
+async function resolveRuntimeTranscriptPathFromSessionCatalog(
+  agentId: string,
+  sessionId: string,
+  workspacePath?: string
+) {
+  const catalogCandidates = [
+    path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", "sessions.json"),
+    workspacePath
+      ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", "sessions.json")
+      : null
+  ].filter(Boolean) as string[];
+
+  for (const catalogPath of catalogCandidates) {
+    try {
+      const raw = await readFile(catalogPath, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, { sessionId?: string; sessionFile?: string }>;
+
+      for (const entry of Object.values(parsed)) {
+        if (!entry || entry.sessionId !== sessionId || typeof entry.sessionFile !== "string") {
+          continue;
+        }
+
+        await access(entry.sessionFile);
+        return entry.sessionFile;
+      }
+    } catch {
+      continue;
+    }
+  }
+
   return null;
 }
 
@@ -7246,7 +7666,7 @@ function buildTaskFeed(
     .slice(-36);
 }
 
-function buildMissionDispatchFeed(
+async function buildMissionDispatchFeed(
   task: TaskRecord,
   record: MissionDispatchRecord | null,
   snapshot: MissionControlSnapshot
@@ -7258,6 +7678,14 @@ function buildMissionDispatchFeed(
   const agentName = formatAgentDisplayName(
     snapshot.agents.find((agent) => agent.id === task.primaryAgentId) ?? { name: "OpenClaw" }
   );
+  const runnerLogs = await readMissionDispatchRunnerLogs(record);
+  const runnerLogFile =
+    record.runner.logPath && record.runner.logPath.trim()
+      ? {
+          path: record.runner.logPath,
+          displayPath: path.basename(record.runner.logPath)
+        }
+      : null;
   const events: TaskFeedEvent[] = [
     enrichTaskFeedEvent(
       {
@@ -7335,6 +7763,7 @@ function buildMissionDispatchFeed(
 
   if (record.status === "completed") {
     const completionSummary = resolveMissionDispatchSummary(record) || resolveMissionDispatchResultText(record);
+    const outputFile = resolveMissionDispatchOutputFile(record);
     events.push(
       enrichTaskFeedEvent(
         {
@@ -7347,12 +7776,13 @@ function buildMissionDispatchFeed(
         {
           urlSources: [completionSummary, resolveMissionDispatchCompletionDetail(record), record.outputDirRelative],
           file:
-            record.outputDir && record.outputDirRelative
+            outputFile ??
+            (record.outputDir && record.outputDirRelative
               ? {
                   path: record.outputDir,
                   displayPath: record.outputDirRelative
                 }
-              : null
+              : null)
         }
       )
     );
@@ -7434,6 +7864,31 @@ function buildMissionDispatchFeed(
     );
   }
 
+  for (const entry of runnerLogs) {
+    const presentation = presentMissionDispatchRunnerLogEntry(entry);
+
+    if (!presentation) {
+      continue;
+    }
+
+    events.push(
+      enrichTaskFeedEvent(
+        {
+          id: entry.id,
+          kind: presentation.kind,
+          timestamp: entry.timestamp,
+          title: presentation.title,
+          detail: summarizeText(presentation.detail, 220),
+          agentId: task.primaryAgentId,
+          isError: presentation.isError
+        },
+        {
+          file: runnerLogFile
+        }
+      )
+    );
+  }
+
   return events;
 }
 
@@ -7447,6 +7902,214 @@ function mergeTaskFeedEvents(...feeds: TaskFeedEvent[][]) {
   return [...deduped.values()]
     .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
     .slice(-48);
+}
+
+async function readMissionDispatchRunnerLogs(record: MissionDispatchRecord, limit = 18) {
+  const logPath = record.runner.logPath?.trim();
+
+  if (!logPath) {
+    return [] as MissionDispatchRunnerLogEntry[];
+  }
+
+  try {
+    const raw = await readFile(logPath, "utf8");
+
+    return raw
+      .split(/\r?\n/)
+      .map((line) => parseMissionDispatchRunnerLogEntry(line))
+      .filter((entry): entry is MissionDispatchRunnerLogEntry => Boolean(entry))
+      .map((entry) => normalizeMissionDispatchRunnerLogEntry(entry))
+      .filter((entry): entry is MissionDispatchRunnerLogEntry => Boolean(entry))
+      .slice(-limit);
+  } catch {
+    return [] as MissionDispatchRunnerLogEntry[];
+  }
+}
+
+function parseMissionDispatchRunnerLogEntry(raw: string) {
+  const line = raw.trim();
+
+  if (!line) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(line) as Partial<MissionDispatchRunnerLogEntry>;
+
+    if (
+      !parsed ||
+      typeof parsed.id !== "string" ||
+      typeof parsed.timestamp !== "string" ||
+      typeof parsed.text !== "string" ||
+      !isMissionDispatchRunnerLogStream(parsed.stream)
+    ) {
+      return null;
+    }
+
+    return {
+      id: parsed.id,
+      timestamp: parsed.timestamp,
+      stream: parsed.stream,
+      text: parsed.text
+    } satisfies MissionDispatchRunnerLogEntry;
+  } catch {
+    return null;
+  }
+}
+
+function isMissionDispatchRunnerLogStream(
+  value: unknown
+): value is MissionDispatchRunnerLogEntry["stream"] {
+  return value === "status" || value === "stdout" || value === "stderr";
+}
+
+function normalizeMissionDispatchRunnerLogEntry(entry: MissionDispatchRunnerLogEntry) {
+  const text = normalizeMissionDispatchRunnerLogText(entry.text);
+
+  if (!text) {
+    return null;
+  }
+
+  return {
+    ...entry,
+    text
+  } satisfies MissionDispatchRunnerLogEntry;
+}
+
+function normalizeMissionDispatchRunnerLogText(text: string) {
+  const normalized = text.trim();
+
+  if (!normalized || shouldHideMissionDispatchRunnerLogText(normalized)) {
+    return null;
+  }
+
+  const quotedPropertyMatch = normalized.match(/^"([^"]+)"\s*:\s*(.+?)(,)?$/);
+
+  if (quotedPropertyMatch) {
+    const [, key, rawValue] = quotedPropertyMatch;
+
+    if (!missionDispatchRunnerDiagnosticJsonKeys.has(key.toLowerCase())) {
+      return null;
+    }
+
+    return `${formatMissionDispatchRunnerLogKey(key)}: ${decodeMissionDispatchRunnerLogValue(rawValue)}`;
+  }
+
+  const barePropertyMatch = normalized.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.+)$/);
+
+  if (barePropertyMatch && missionDispatchRunnerDiagnosticJsonKeys.has(barePropertyMatch[1].toLowerCase())) {
+    return `${formatMissionDispatchRunnerLogKey(barePropertyMatch[1])}: ${decodeMissionDispatchRunnerLogValue(
+      barePropertyMatch[2]
+    )}`;
+  }
+
+  return normalized;
+}
+
+function shouldHideMissionDispatchRunnerLogText(text: string) {
+  if (/^[\[\]{}(),]+$/.test(text)) {
+    return true;
+  }
+
+  const quotedPropertyMatch = text.match(/^"([^"]+)"\s*:\s*(.+?)(,)?$/);
+
+  if (quotedPropertyMatch) {
+    return !missionDispatchRunnerDiagnosticJsonKeys.has(quotedPropertyMatch[1].toLowerCase());
+  }
+
+  const barePropertyMatch = text.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.+)$/);
+
+  if (barePropertyMatch) {
+    return false;
+  }
+
+  return false;
+}
+
+function formatMissionDispatchRunnerLogKey(key: string) {
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function decodeMissionDispatchRunnerLogValue(value: string) {
+  const normalized = value.trim().replace(/,$/, "");
+
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(normalized) as unknown;
+
+    if (typeof parsed === "string") {
+      return parsed;
+    }
+
+    if (typeof parsed === "number" || typeof parsed === "boolean") {
+      return String(parsed);
+    }
+  } catch {}
+
+  return normalized.replace(/^"(.*)"$/, "$1");
+}
+
+function presentMissionDispatchRunnerLogEntry(entry: MissionDispatchRunnerLogEntry): {
+  kind: TaskFeedEvent["kind"];
+  title: string;
+  detail: string;
+  isError: boolean;
+} | null {
+  const detail = normalizeMissionDispatchRunnerLogText(entry.text);
+
+  if (!detail) {
+    return null;
+  }
+
+  if (entry.stream === "status") {
+    return {
+      kind: "status",
+      title: "Dispatch runner",
+      detail,
+      isError: false
+    };
+  }
+
+  if (entry.stream === "stdout") {
+    return {
+      kind: "status",
+      title: "Runner output",
+      detail,
+      isError: false
+    };
+  }
+
+  const isError = isMissionDispatchRunnerErrorText(detail);
+
+  return {
+    kind: isError ? "warning" : "status",
+    title: isError ? "Runner warning" : "Runner note",
+    detail,
+    isError
+  };
+}
+
+function isMissionDispatchRunnerErrorText(text: string) {
+  const normalized = text.trim().toLowerCase();
+
+  if (!normalized) {
+    return false;
+  }
+
+  if (
+    normalized.includes("exited successfully") ||
+    normalized.includes("booted for agent") ||
+    normalized.includes("launched openclaw agent process")
+  ) {
+    return false;
+  }
+
+  return /(aborted|denied|enoent|eacces|error|exception|failed|failure|invalid|killed|not found|panic|refused|stalled|timeout|timed out|traceback)/i.test(
+    text
+  );
 }
 
 function enrichTaskFeedEvent(
@@ -7506,7 +8169,7 @@ function timestampFromUnix(value: number | null | undefined) {
 }
 
 function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?: string): RuntimeOutputRecord {
-  const turns = extractTranscriptTurns(raw, runtime, workspacePath);
+  const turns = filterTranscriptTurnsForRuntime(runtime, extractTranscriptTurns(raw, runtime, workspacePath));
 
   if (runtime.source === "turn") {
     const turnId = typeof runtime.metadata.turnId === "string" ? runtime.metadata.turnId : null;
@@ -7537,6 +8200,22 @@ function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?:
     warnings: [],
     warningSummary: null
   };
+}
+
+function filterTranscriptTurnsForRuntime(runtime: RuntimeRecord, turns: TranscriptTurn[]) {
+  const dispatchSubmittedAt =
+    typeof runtime.metadata.dispatchSubmittedAt === "string"
+      ? Date.parse(runtime.metadata.dispatchSubmittedAt)
+      : Number.NaN;
+
+  if (Number.isNaN(dispatchSubmittedAt)) {
+    return turns;
+  }
+
+  return turns.filter((turn) => {
+    const updatedAt = Date.parse(turn.updatedAt || turn.timestamp);
+    return !Number.isNaN(updatedAt) && updatedAt >= dispatchSubmittedAt - 1500;
+  });
 }
 
 function resolveRuntimeMissionTurn(runtime: RuntimeRecord, turns: TranscriptTurn[]) {

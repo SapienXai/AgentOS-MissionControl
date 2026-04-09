@@ -155,7 +155,8 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const agentLabel = formatAgentDisplayName(data.agent);
   const chatUnreadCount = useAgentChatUnreadCount(data.agent.id, Boolean(data.chatOpen));
   const hasUnreadChat = chatUnreadCount > 0 && !data.chatOpen;
-  const isAttentionActive = selected || data.composerFocused;
+  const activeTaskCount = Math.max(0, Number(data.activeTaskCount ?? 0));
+  const isAttentionActive = selected || data.composerFocused || data.taskFocused;
   const dotTone =
     data.agent.status === "engaged"
       ? "bg-cyan-300"
@@ -417,6 +418,13 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         <div className="px-3.5 pt-3.5 pb-3.5">
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge variant={statusBadgeVariant}>{data.agent.status}</Badge>
+            {data.taskFocused ? (
+              <Badge variant="default">Working now</Badge>
+            ) : activeTaskCount > 0 ? (
+              <Badge variant="success">
+                {activeTaskCount} live task{activeTaskCount === 1 ? "" : "s"}
+              </Badge>
+            ) : null}
             <Badge variant="muted" className="max-w-[150px] truncate">
               {formatModelLabel(data.agent.modelId)}
             </Badge>

@@ -57,6 +57,10 @@ type SpringVelocity = {
   x: number;
   y: number;
 };
+type FocusTaskAnchor = {
+  taskId: string;
+  agentId: string | null;
+};
 const emptyPersistedNodePositions: PersistedNodePositionMap = {};
 
 const nodeTypes = {
@@ -146,7 +150,7 @@ export function MissionCanvas({
   const lastComposerViewportResetNonceRef = useRef(composerViewportResetNonce);
   const relativeTimeReferenceMs = resolveRelativeTimeReferenceMs(snapshot.generatedAt);
   const [justCreatedTaskIds, setJustCreatedTaskIds] = useState<string[]>([]);
-  const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  const [focusTaskAnchor, setFocusTaskAnchor] = useState<FocusTaskAnchor | null>(null);
   const canvasScopeKey = focusedAgentId
     ? `focus:${focusedAgentId}`
     : activeWorkspaceId
@@ -157,6 +161,7 @@ export function MissionCanvas({
     relativeTimeReferenceMs,
     activeWorkspaceId,
     focusedAgentId,
+    selectedNodeId,
     activeChatAgentId,
     composerTargetAgentId,
     isComposerActive,
@@ -239,6 +244,7 @@ export function MissionCanvas({
       relativeTimeReferenceMs,
       activeWorkspaceId,
       focusedAgentId,
+      selectedNodeId,
       activeChatAgentId,
       composerTargetAgentId,
       isComposerActive,
@@ -277,6 +283,7 @@ export function MissionCanvas({
     snapshot,
     activeWorkspaceId,
     focusedAgentId,
+    selectedNodeId,
     activeChatAgentId,
     composerTargetAgentId,
     isComposerActive,
@@ -476,9 +483,10 @@ export function MissionCanvas({
     handledDispatchIdsRef.current.add(recentDispatchId);
     markTaskAsJustCreated(
       resolvedTask.id,
+      resolveTaskOwnerId(resolvedTask),
       setJustCreatedTaskIds,
       creationTimeoutsRef,
-      setFocusTaskId
+      setFocusTaskAnchor
     );
     onSelectNode(resolvedTask.id);
   }, [snapshot.tasks, recentDispatchId, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys, onSelectNode]);
@@ -495,19 +503,34 @@ export function MissionCanvas({
   }, []);
 
   useEffect(() => {
-    if (!focusTaskId || !reactFlowRef.current) {
+    if (!focusTaskAnchor || !reactFlowRef.current) {
       return;
     }
 
-    const targetNode = nodes.find((node) => node.id === focusTaskId);
+    const targetNode = nodes.find((node) => node.id === focusTaskAnchor.taskId);
 
     if (!targetNode) {
       return;
     }
 
+    const agentNode =
+      focusTaskAnchor.agentId !== null
+        ? nodes.find((node) => node.type === "agent" && node.id === focusTaskAnchor.agentId)
+        : null;
+    const targetCenterX = targetNode.position.x + (targetNode.width ?? 272) / 2;
+    const targetCenterY = targetNode.position.y + (targetNode.height ?? 204) / 2;
+    const centerX =
+      agentNode && agentNode.type === "agent"
+        ? (targetCenterX + agentNode.position.x + (agentNode.width ?? 272) / 2) / 2
+        : targetCenterX;
+    const centerY =
+      agentNode && agentNode.type === "agent"
+        ? (targetCenterY + agentNode.position.y + (agentNode.height ?? 220) / 2) / 2
+        : targetCenterY;
+
     reactFlowRef.current.setCenter(
-      targetNode.position.x + (targetNode.width ?? 272) / 2,
-      targetNode.position.y + (targetNode.height ?? 204) / 2,
+      centerX,
+      centerY,
       {
         zoom: Math.max(reactFlowRef.current.getZoom(), 0.88),
         duration: 650
@@ -515,11 +538,13 @@ export function MissionCanvas({
     );
 
     const timeoutId = setTimeout(() => {
-      setFocusTaskId((current) => (current === focusTaskId ? null : current));
+      setFocusTaskAnchor((current) =>
+        current?.taskId === focusTaskAnchor.taskId ? null : current
+      );
     }, 900);
 
     return () => clearTimeout(timeoutId);
-  }, [focusTaskId, nodes]);
+  }, [focusTaskAnchor, nodes]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -634,6 +659,7 @@ function buildCanvasGraph(
   relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
   focusedAgentId: string | null,
+  selectedNodeId: string | null,
   activeChatAgentId: string | null,
   composerTargetAgentId: string | null,
   isComposerActive: boolean,
@@ -662,6 +688,10 @@ function buildCanvasGraph(
   const focusedAgent = focusedAgentId
     ? snapshot.agents.find((agent) => agent.id === focusedAgentId)
     : null;
+  const selectedTask = selectedNodeId
+    ? snapshot.tasks.find((task) => task.id === selectedNodeId) ?? null
+    : null;
+  const selectedTaskAgentId = selectedTask ? resolveTaskOwnerId(selectedTask) : null;
   const isFocusMode = focusedAgent !== null;
   const focusWorkspaceId = focusedAgent?.workspaceId ?? null;
   const visibleWorkspaces = isFocusMode
@@ -717,6 +747,9 @@ function buildCanvasGraph(
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
       const agentY = laneY + agentIndex * 4;
       const isComposerHighlightedAgent = isComposerActive && composerTargetAgentId === agent.id;
+      const hasJustCreatedTask = agentTasks.some((task) => justCreatedTaskIds.includes(task.id));
+      const isTaskFocusedAgent = selectedTaskAgentId === agent.id || hasJustCreatedTask;
+      const activeTaskCount = agentTasks.filter((task) => isLiveTask(task)).length;
       const isAgentChatOpen = activeChatAgentId === agent.id;
       const agentPosition = resolvePersistedPosition(
         toPersistedAgentPositionKey(agent),
@@ -732,13 +765,15 @@ function buildCanvasGraph(
         type: "agent",
         draggable: true,
         position: agentPosition,
-        zIndex: isComposerHighlightedAgent ? 55 : 10,
+        zIndex: isComposerHighlightedAgent ? 55 : isTaskFocusedAgent ? 48 : activeTaskCount > 0 ? 24 : 10,
         selected: false,
         data: {
           agent,
           emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
           focused: focusedAgentId === agent.id,
           composerFocused: isComposerHighlightedAgent,
+          taskFocused: isTaskFocusedAgent,
+          activeTaskCount,
           chatOpen: isAgentChatOpen,
           relativeTimeReferenceMs,
           telegramTetherCount: telegramTether.channelCount,
@@ -763,7 +798,7 @@ function buildCanvasGraph(
           width: 64,
           height: 64,
           position: telegramModulePosition,
-          zIndex: isComposerHighlightedAgent ? 55 : 18,
+          zIndex: isComposerHighlightedAgent ? 55 : isTaskFocusedAgent ? 48 : 18,
           selected: false,
           data: {
             agent,
@@ -859,7 +894,14 @@ function buildCanvasGraph(
   return {
     nodes,
     edges: [
-      ...buildEdgesForNodes(graphTasks, nodes, composerTargetAgentId, isComposerActive),
+      ...buildEdgesForNodes(
+        graphTasks,
+        nodes,
+        selectedNodeId,
+        justCreatedTaskIds,
+        composerTargetAgentId,
+        isComposerActive
+      ),
       ...buildTelegramTetherEdges(nodes, composerTargetAgentId, isComposerActive)
     ]
   };
@@ -868,6 +910,8 @@ function buildCanvasGraph(
 function buildEdgesForNodes(
   tasks: TaskRecord[],
   nodes: CanvasNode[],
+  selectedNodeId: string | null,
+  justCreatedTaskIds: string[],
   composerTargetAgentId: string | null,
   isComposerActive: boolean
 ) {
@@ -875,11 +919,13 @@ function buildEdgesForNodes(
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   for (const task of tasks) {
-    if (!task.primaryAgentId) {
+    const ownerAgentId = resolveTaskOwnerId(task);
+
+    if (!ownerAgentId) {
       continue;
     }
 
-    const source = nodesById.get(task.primaryAgentId);
+    const source = nodesById.get(ownerAgentId);
     const target = nodesById.get(task.id);
 
     if (!source || !target) {
@@ -887,24 +933,31 @@ function buildEdgesForNodes(
     }
 
     edges.push({
-      id: `edge:${task.primaryAgentId}:${task.id}`,
-      source: task.primaryAgentId,
+      id: `edge:${ownerAgentId}:${task.id}`,
+      source: ownerAgentId,
       target: task.id,
       sourceHandle: "source-right",
       targetHandle: "target-left",
       type: "simplebezier",
       zIndex: 4,
-      animated: task.status === "running" || (isComposerActive && task.primaryAgentId === composerTargetAgentId),
+      animated:
+        isLiveTask(task) ||
+        task.id === selectedNodeId ||
+        justCreatedTaskIds.includes(task.id) ||
+        (isComposerActive && ownerAgentId === composerTargetAgentId),
       data: {
-        composerFocused: isComposerActive && task.primaryAgentId === composerTargetAgentId
+        composerFocused: isComposerActive && ownerAgentId === composerTargetAgentId,
+        taskFocused: task.id === selectedNodeId || justCreatedTaskIds.includes(task.id)
       },
       style: {
         strokeWidth:
-          task.status === "running" && isComposerActive && task.primaryAgentId === composerTargetAgentId
+          isLiveTask(task) && isComposerActive && ownerAgentId === composerTargetAgentId
             ? 3.05
-            : task.status === "running"
+            : isLiveTask(task)
               ? 2.95
-              : isComposerActive && task.primaryAgentId === composerTargetAgentId
+              : task.id === selectedNodeId || justCreatedTaskIds.includes(task.id)
+                ? 2.82
+              : isComposerActive && ownerAgentId === composerTargetAgentId
                 ? 2.8
                 : 2.25
       }
@@ -984,6 +1037,10 @@ function isTaskHidden(
 
 function resolveTaskOwnerId(task: TaskRecord) {
   return task.primaryAgentId || task.agentIds[0] || null;
+}
+
+function isLiveTask(task: TaskRecord) {
+  return task.status === "queued" || task.status === "running";
 }
 
 function buildTelegramTetherSummary(
@@ -1150,7 +1207,12 @@ function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]
   });
 }
 
-function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null, composerTargetAgentId: string | null, isComposerActive: boolean) {
+function resolveNodeZIndex(
+  node: CanvasNode,
+  selectedNodeId: string | null,
+  composerTargetAgentId: string | null,
+  isComposerActive: boolean
+) {
   if (node.type === "workspace") {
     return 0;
   }
@@ -1166,6 +1228,14 @@ function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null, comp
 
     if (isComposerActive && composerTargetAgentId === node.id) {
       return 55;
+    }
+
+    if (node.data.taskFocused) {
+      return 48;
+    }
+
+    if ((node.data.activeTaskCount ?? 0) > 0) {
+      return 24;
     }
 
     return 10;
@@ -1204,12 +1274,16 @@ function resolveNodeZIndex(node: CanvasNode, selectedNodeId: string | null, comp
 
 function markTaskAsJustCreated(
   taskId: string,
+  agentId: string | null,
   setJustCreatedTaskIds: Dispatch<SetStateAction<string[]>>,
   creationTimeoutsRef: MutableRefObject<Map<string, ReturnType<typeof setTimeout>>>,
-  setFocusTaskId: Dispatch<SetStateAction<string | null>>
+  setFocusTaskAnchor: Dispatch<SetStateAction<FocusTaskAnchor | null>>
 ) {
   setJustCreatedTaskIds((current) => (current.includes(taskId) ? current : [...current, taskId]));
-  setFocusTaskId(taskId);
+  setFocusTaskAnchor({
+    taskId,
+    agentId
+  });
 
   const existingTimeout = creationTimeoutsRef.current.get(taskId);
   if (existingTimeout) {

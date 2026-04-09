@@ -1,11 +1,23 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const recordPath = process.argv[2];
 const heartbeatIntervalMs = 15_000;
+const runnerDiagnosticJsonKeys = new Set([
+  "cause",
+  "code",
+  "details",
+  "error",
+  "message",
+  "reason",
+  "stack",
+  "stderr",
+  "stdout",
+  "warning"
+]);
 
 if (!recordPath) {
   process.exit(1);
@@ -21,6 +33,10 @@ async function main() {
   const openClawBin = process.env.OPENCLAW_BIN || "openclaw";
   const startedAt = new Date().toISOString();
   const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId.trim() : null;
+  const runnerLogPath = resolveRunnerLogPath(record);
+  let logWriteQueue = Promise.resolve();
+  let stdoutLineBuffer = "";
+  let stderrLineBuffer = "";
 
   await mutateRecord((current) => ({
     ...current,
@@ -31,9 +47,15 @@ async function main() {
       ...(current.runner || {}),
       pid: process.pid,
       startedAt,
-      lastHeartbeatAt: startedAt
+      lastHeartbeatAt: startedAt,
+      logPath: runnerLogPath
     }
   }));
+  await enqueueRunnerStatus(
+    sessionId
+      ? `Dispatch runner booted for agent ${record.agentId} on session ${sessionId}.`
+      : `Dispatch runner booted for agent ${record.agentId}.`
+  );
 
   const child = spawn(
     openClawBin,
@@ -67,9 +89,13 @@ async function main() {
       pid: process.pid,
       childPid: child.pid ?? latest.runner?.childPid ?? null,
       startedAt: latest.runner?.startedAt || startedAt,
-      lastHeartbeatAt: startedAt
+      lastHeartbeatAt: startedAt,
+      logPath: latest.runner?.logPath || runnerLogPath
     }
   }));
+  await enqueueRunnerStatus(
+    `Launched OpenClaw agent process${child.pid ? ` (pid ${child.pid})` : ""}.`
+  );
 
   const currentAfterSpawn = await readRecord();
   if (currentAfterSpawn && typeof currentAfterSpawn.status === "string" && currentAfterSpawn.status !== "running") {
@@ -89,14 +115,19 @@ async function main() {
   }, heartbeatIntervalMs);
 
   child.stdout.on("data", (chunk) => {
-    stdout += chunk.toString();
+    const text = chunk.toString();
+    stdout += text;
+    void consumeRunnerStream("stdout", text);
   });
 
   child.stderr.on("data", (chunk) => {
-    stderr += chunk.toString();
+    const text = chunk.toString();
+    stderr += text;
+    void consumeRunnerStream("stderr", text);
   });
 
   child.on("error", (error) => {
+    void enqueueRunnerStatus(`OpenClaw process error: ${error.message}`);
     void finalize({
       status: "stalled",
       result: null,
@@ -106,6 +137,7 @@ async function main() {
 
   child.on("close", (code) => {
     void (async () => {
+      await flushBufferedRunnerOutput();
       const current = await readRecord();
 
       if (current && typeof current.status === "string" && current.status !== "running") {
@@ -118,6 +150,7 @@ async function main() {
       const payload = tryParseMissionPayload(stdout || stderr);
 
       if (code === 0 && payload && !isFailurePayload(payload)) {
+        await enqueueRunnerStatus("OpenClaw exited successfully and returned a mission payload.");
         void finalize({
           status: "completed",
           result: payload,
@@ -126,6 +159,11 @@ async function main() {
         return;
       }
 
+      await enqueueRunnerStatus(
+        code === 0
+          ? "OpenClaw exited successfully but did not return a usable mission payload."
+          : `OpenClaw exited with code ${typeof code === "number" ? code : "unknown"}.`
+      );
       void finalize({
         status: "stalled",
         result: payload,
@@ -175,6 +213,7 @@ async function main() {
 
     settled = true;
     clearInterval(heartbeat);
+    await flushBufferedRunnerOutput();
     const finishedAt = new Date().toISOString();
 
     await mutateRecord((current) => ({
@@ -188,11 +227,84 @@ async function main() {
         pid: process.pid,
         startedAt: current.runner?.startedAt || startedAt,
         finishedAt,
-        lastHeartbeatAt: finishedAt
+        lastHeartbeatAt: finishedAt,
+        logPath: current.runner?.logPath || runnerLogPath
       }
     }));
 
+    await logWriteQueue;
     process.exit(0);
+  }
+
+  function enqueueRunnerStatus(text) {
+    return enqueueRunnerLog("status", text);
+  }
+
+  function enqueueRunnerLog(stream, text) {
+    const normalized = normalizeRunnerLogText(text);
+
+    if (!normalized) {
+      return Promise.resolve();
+    }
+
+    const entry = {
+      id: `runner-log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      stream,
+      text: normalized
+    };
+
+    logWriteQueue = logWriteQueue
+      .then(() => appendRunnerLogEntry(runnerLogPath, entry))
+      .catch(() => undefined);
+
+    return logWriteQueue;
+  }
+
+  async function consumeRunnerStream(stream, chunk) {
+    if (stream === "stdout") {
+      stdoutLineBuffer += chunk;
+    } else {
+      stderrLineBuffer += chunk;
+    }
+
+    const buffer = stream === "stdout" ? stdoutLineBuffer : stderrLineBuffer;
+    const lines = buffer.split(/\r?\n/);
+    const remainder = lines.pop() ?? "";
+
+    if (stream === "stdout") {
+      stdoutLineBuffer = remainder;
+    } else {
+      stderrLineBuffer = remainder;
+    }
+
+    for (const line of lines) {
+      const normalized = normalizeRunnerLogText(line);
+
+      if (!normalized || shouldSkipRunnerLogLine(stream, normalized)) {
+        continue;
+      }
+
+      await enqueueRunnerLog(stream, normalized);
+    }
+  }
+
+  async function flushBufferedRunnerOutput() {
+    for (const [stream, pending] of [
+      ["stdout", stdoutLineBuffer],
+      ["stderr", stderrLineBuffer]
+    ]) {
+      const normalized = normalizeRunnerLogText(pending);
+
+      if (!normalized || shouldSkipRunnerLogLine(stream, normalized)) {
+        continue;
+      }
+
+      await enqueueRunnerLog(stream, normalized);
+    }
+
+    stdoutLineBuffer = "";
+    stderrLineBuffer = "";
   }
 }
 
@@ -217,6 +329,57 @@ async function writeJsonAtomic(targetPath, value) {
   await mkdir(path.dirname(targetPath), { recursive: true });
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tempPath, targetPath);
+}
+
+async function appendRunnerLogEntry(targetPath, entry) {
+  await mkdir(path.dirname(targetPath), { recursive: true });
+  await appendFile(targetPath, `${JSON.stringify(entry)}\n`, "utf8");
+}
+
+function resolveRunnerLogPath(record) {
+  const existingPath = record?.runner?.logPath;
+  return typeof existingPath === "string" && existingPath.trim() ? existingPath.trim() : `${recordPath}.log.jsonl`;
+}
+
+function normalizeRunnerLogText(value) {
+  return String(value || "")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, 400);
+}
+
+function shouldSkipRunnerLogLine(stream, text) {
+  if (stream === "stdout" && Boolean(tryParseMissionPayload(text))) {
+    return true;
+  }
+
+  return isIgnorableRunnerLogLine(text);
+}
+
+function isIgnorableRunnerLogLine(text) {
+  const normalized = String(text || "").trim();
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (/^[\[\]{}(),]+$/.test(normalized)) {
+    return true;
+  }
+
+  const quotedPropertyMatch = normalized.match(/^"([^"]+)"\s*:\s*(.+?)(,)?$/);
+
+  if (quotedPropertyMatch) {
+    return !runnerDiagnosticJsonKeys.has(quotedPropertyMatch[1].toLowerCase());
+  }
+
+  const barePropertyMatch = normalized.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.+)$/);
+
+  if (barePropertyMatch) {
+    return false;
+  }
+
+  return false;
 }
 
 function tryParseMissionPayload(text) {
@@ -276,18 +439,26 @@ function extractFailureMessage(stderr, stdout) {
 
 main().catch(async (error) => {
   try {
+    const failedAt = new Date().toISOString();
     await mutateRecord((current) => ({
       ...current,
       status: "stalled",
-      updatedAt: new Date().toISOString(),
+      updatedAt: failedAt,
       error: error instanceof Error ? error.message : "Mission dispatch runner failed unexpectedly.",
       runner: {
         ...(current.runner || {}),
         pid: process.pid,
-        finishedAt: new Date().toISOString(),
-        lastHeartbeatAt: new Date().toISOString()
+        finishedAt: failedAt,
+        lastHeartbeatAt: failedAt,
+        logPath: current.runner?.logPath || `${recordPath}.log.jsonl`
       }
     }));
+    await appendRunnerLogEntry(`${recordPath}.log.jsonl`, {
+      id: `runner-log:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: failedAt,
+      stream: "status",
+      text: error instanceof Error ? error.message : "Mission dispatch runner failed unexpectedly."
+    });
   } catch {}
 
   process.exit(1);

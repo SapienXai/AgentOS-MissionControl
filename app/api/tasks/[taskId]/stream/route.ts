@@ -12,6 +12,7 @@ export async function GET(
 ) {
   const { taskId: rawTaskId } = await context.params;
   const taskId = decodeURIComponent(rawTaskId);
+  const dispatchId = new URL(request.url).searchParams.get("dispatchId");
   let interval: ReturnType<typeof setInterval> | undefined;
   let closed = false;
   let taskRequest: Promise<void> | null = null;
@@ -73,7 +74,7 @@ export async function GET(
 
         taskRequest = (async () => {
           try {
-            const detail = await getTaskDetail(taskId);
+            const detail = await getTaskDetail(taskId, { dispatchId });
             sendEvent("task", { type: "task", detail });
           } catch (error) {
             sendEvent("task-error", {

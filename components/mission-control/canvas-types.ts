@@ -21,6 +21,8 @@ export type AgentNodeData = Record<string, unknown> & {
   emphasis: boolean;
   focused?: boolean;
   composerFocused?: boolean;
+  taskFocused?: boolean;
+  activeTaskCount?: number;
   chatOpen?: boolean;
   relativeTimeReferenceMs: number;
   telegramTetherCount?: number;
@@ -73,5 +75,6 @@ export type ModelNodeData = Record<string, unknown> & {
 
 export type MissionEdgeData = {
   composerFocused?: boolean;
+  taskFocused?: boolean;
   telegramTether?: boolean;
 };

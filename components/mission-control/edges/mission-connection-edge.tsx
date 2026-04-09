@@ -33,10 +33,11 @@ export function MissionConnectionEdge({
   });
 
   const composerFocused = Boolean(data?.composerFocused);
+  const taskFocused = Boolean(data?.taskFocused);
   const telegramTether = Boolean(data?.telegramTether);
-  const edgeActive = Boolean(animated) || composerFocused;
+  const edgeActive = Boolean(animated) || composerFocused || taskFocused;
   const strokeWidth = resolveStrokeWidth(style?.strokeWidth, edgeActive);
-  const glowStrokeWidth = strokeWidth + (telegramTether ? 3.6 : composerFocused ? 5 : 4);
+  const glowStrokeWidth = strokeWidth + (telegramTether ? 3.6 : composerFocused ? 5 : taskFocused ? 4.6 : 4);
   const motionPathId = `mission-edge-motion-${sanitizeDomId(id)}`;
   const packetSpecs = telegramTether
     ? composerFocused
@@ -50,7 +51,7 @@ export function MissionConnectionEdge({
             { size: 2.1, halo: 4.4, duration: 3.05, delay: 0.72, alpha: 0.84 }
           ]
         : []
-    : composerFocused
+    : composerFocused || taskFocused
       ? [
           { size: 5.2, halo: 9.2, duration: 1.95, delay: 0, alpha: 1 },
           { size: 3.8, halo: 7.2, duration: 2.3, delay: 0.58, alpha: 0.92 },

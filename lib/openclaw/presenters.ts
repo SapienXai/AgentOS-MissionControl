@@ -41,7 +41,7 @@ export function formatContextWindow(value: number | null | undefined) {
 
 export function formatTokens(value: number | null | undefined) {
   if (typeof value !== "number") {
-    return "0";
+    return "n/a";
   }
 
   if (value >= 1000) {
