@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
 import { ChevronDown, LocateFixed, MessageCircle, MoreHorizontal } from "lucide-react";
@@ -10,6 +10,14 @@ import type { AgentDetailFocus, AgentNodeData } from "@/components/mission-contr
 import { StatusDot } from "@/components/mission-control/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  agentChatLastSeenStoragePrefix,
+  agentChatMessageStoragePrefix,
+  agentChatStateEventName,
+  readAgentChatLastSeenAt,
+  readAgentChatMessages,
+  resolveAgentChatUnreadCount
+} from "@/components/mission-control/agent-chat-storage";
 import {
   formatAgentFileAccessLabel,
   formatAgentInstallScopeLabel,
@@ -93,12 +101,60 @@ function AnimatedAgentName({ label }: { label: string }) {
   );
 }
 
+function useAgentChatUnreadCount(agentId: string, chatOpen: boolean) {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (chatOpen) {
+        return () => {};
+      }
+
+      const handleChatStateChange = (event: Event) => {
+        const detail = (event as CustomEvent<{ agentId?: string }>).detail;
+
+        if (!detail || detail.agentId === agentId) {
+          onStoreChange();
+        }
+      };
+
+      const handleStorage = (event: StorageEvent) => {
+        if (
+          event.key &&
+          (event.key.startsWith(agentChatMessageStoragePrefix) ||
+            event.key.startsWith(agentChatLastSeenStoragePrefix))
+        ) {
+          onStoreChange();
+        }
+      };
+
+      window.addEventListener(agentChatStateEventName, handleChatStateChange as EventListener);
+      window.addEventListener("storage", handleStorage);
+
+      return () => {
+        window.removeEventListener(agentChatStateEventName, handleChatStateChange as EventListener);
+        window.removeEventListener("storage", handleStorage);
+      };
+    },
+    () => {
+      if (chatOpen) {
+        return 0;
+      }
+
+      const messages = readAgentChatMessages(agentId);
+      const lastSeenAt = readAgentChatLastSeenAt(agentId);
+      return resolveAgentChatUnreadCount(messages, lastSeenAt);
+    },
+    () => 0
+  );
+}
+
 export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const drawerPanelId = `agent-drawer-${data.agent.id}`;
   const agentLabel = formatAgentDisplayName(data.agent);
+  const chatUnreadCount = useAgentChatUnreadCount(data.agent.id, Boolean(data.chatOpen));
+  const hasUnreadChat = chatUnreadCount > 0 && !data.chatOpen;
   const isAttentionActive = selected || data.composerFocused;
   const dotTone =
     data.agent.status === "engaged"
@@ -395,13 +451,31 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               type="button"
-              className="nodrag nopan inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3.5 text-[12px] text-slate-200 transition-colors hover:bg-white/[0.08] hover:text-white"
+              aria-label={
+                hasUnreadChat
+                  ? `${chatUnreadCount} unread message${chatUnreadCount === 1 ? "" : "s"} for ${agentLabel}`
+                  : `Message ${agentLabel}`
+              }
+              title={
+                hasUnreadChat
+                  ? `${chatUnreadCount} unread message${chatUnreadCount === 1 ? "" : "s"}`
+                  : `Message ${agentLabel}`
+              }
+              className="nodrag nopan relative inline-flex h-10 items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.05] px-3.5 text-[12px] text-slate-200 transition-colors hover:bg-white/[0.08] hover:text-white"
               onClick={(event) => {
                 event.stopPropagation();
                 data.onMessage?.(data.agent.id);
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
+              {hasUnreadChat ? (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex min-h-4 min-w-4 items-center justify-center rounded-full border border-[#05070d] bg-rose-400 px-1 text-[9px] font-semibold leading-none text-white shadow-[0_0_0_2px_rgba(255,255,255,0.03),0_0_16px_rgba(251,113,133,0.42)]"
+                >
+                  {chatUnreadCount > 9 ? "9+" : chatUnreadCount}
+                </span>
+              ) : null}
               <MessageCircle className="h-3.5 w-3.5" />
               <span>Message</span>
             </button>

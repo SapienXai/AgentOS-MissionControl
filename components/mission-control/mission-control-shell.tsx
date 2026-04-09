@@ -206,6 +206,8 @@ export function MissionControlShell({
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
+  const activeChatAgentId =
+    isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
     () => mergeSnapshotWithOptimisticTasks(snapshot, optimisticMissionTasks),
     [snapshot, optimisticMissionTasks]
@@ -1742,6 +1744,7 @@ export function MissionControlShell({
             selectedNodeId={selectedNodeId}
             focusedAgentId={focusedAgentId}
             composerTargetAgentId={composerTargetAgentId}
+            activeChatAgentId={activeChatAgentId}
             isComposerActive={isComposerActive}
             composerViewportResetNonce={composerViewportResetNonce}
             recentDispatchId={recentDispatchId}

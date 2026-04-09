@@ -8,59 +8,20 @@ import { AnimatePresence, motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
+import {
+  markAgentChatAsSeen,
+  maxAgentChatMessages,
+  readAgentChatMessages,
+  type AgentChatMessage,
+  writeAgentChatMessages
+} from "@/components/mission-control/agent-chat-storage";
 import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import { MISSION_CONTROL_ACTION_TAG } from "@/lib/openclaw/chat-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
-type ChatRole = "user" | "assistant" | "system";
-type ChatMessage = {
-  id: string;
-  role: ChatRole;
-  text: string;
-  createdAt: number;
-  status?: "sending" | "sent" | "error";
-  runId?: string | null;
-};
-
-const chatStoragePrefix = "mission-control-agent-chat:v1";
-const maxStoredMessages = 60;
-
-function storageKey(agentId: string) {
-  return `${chatStoragePrefix}:${agentId}`;
-}
-
-function readChat(agentId: string): ChatMessage[] {
-  try {
-    const raw = globalThis.localStorage?.getItem(storageKey(agentId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((entry): entry is ChatMessage => {
-        return (
-          typeof entry === "object" &&
-          entry !== null &&
-          (entry.role === "user" || entry.role === "assistant" || entry.role === "system") &&
-          typeof entry.id === "string" &&
-          typeof entry.text === "string" &&
-          typeof entry.createdAt === "number"
-        );
-      })
-      .slice(-maxStoredMessages);
-  } catch {
-    return [];
-  }
-}
-
-function writeChat(agentId: string, messages: ChatMessage[]) {
-  try {
-    globalThis.localStorage?.setItem(storageKey(agentId), JSON.stringify(messages.slice(-maxStoredMessages)));
-  } catch {
-    // Ignore storage failures.
-  }
-}
+type ChatMessage = AgentChatMessage;
 
 function hasPendingReply(messages: ChatMessage[]) {
   return messages.some((entry) => entry.role === "user" && entry.status === "sending");
@@ -279,7 +240,7 @@ export function AgentChatDrawer({
 
   useEffect(() => {
     clearRevealTimer();
-    setMessages(readChat(agent.id));
+    setMessages(readAgentChatMessages(agent.id));
     setDraft("");
     setIsSending(false);
     setIsAgentTyping(false);
@@ -288,6 +249,10 @@ export function AgentChatDrawer({
     requestAnimationFrame(() => textareaRef.current?.focus());
     return () => clearRevealTimer();
   }, [agent.id]);
+
+  useEffect(() => {
+    markAgentChatAsSeen(agent.id, messages);
+  }, [agent.id, messages]);
 
   useEffect(() => {
     if (!listRef.current) return;
@@ -332,9 +297,9 @@ export function AgentChatDrawer({
       status: "sending"
     };
 
-    const nextHistory = [...messages, userMessage].slice(-maxStoredMessages);
+    const nextHistory = [...messages, userMessage].slice(-maxAgentChatMessages);
     setMessages(nextHistory);
-    writeChat(agent.id, nextHistory);
+    writeAgentChatMessages(agent.id, nextHistory);
     setDraft("");
 
     const payload = {
@@ -372,7 +337,7 @@ export function AgentChatDrawer({
       const finalized: ChatMessage[] = nextHistory
         .map((entry): ChatMessage => (entry.id === userMessage.id ? { ...entry, status: "sent" as const } : entry))
         .concat(assistantMessage)
-        .slice(-maxStoredMessages);
+        .slice(-maxAgentChatMessages);
 
       const renamedTo = readRenamedAgent(result.meta);
 
@@ -381,7 +346,7 @@ export function AgentChatDrawer({
       }
 
       setMessages(finalized);
-      writeChat(agent.id, finalized);
+      writeAgentChatMessages(agent.id, finalized);
       setIsSending(false);
       setIsAgentTyping(false);
       startAssistantReveal(assistantMessage.id, assistantMessage.text);
@@ -392,9 +357,9 @@ export function AgentChatDrawer({
 
       const finalized: ChatMessage[] = nextHistory
         .map((entry): ChatMessage => (entry.id === userMessage.id ? { ...entry, status: "error" as const } : entry))
-        .slice(-maxStoredMessages);
+        .slice(-maxAgentChatMessages);
       setMessages(finalized);
-      writeChat(agent.id, finalized);
+      writeAgentChatMessages(agent.id, finalized);
       setIsAgentTyping(false);
     } finally {
       setIsSending(false);

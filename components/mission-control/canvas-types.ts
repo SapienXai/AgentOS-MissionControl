@@ -21,6 +21,7 @@ export type AgentNodeData = Record<string, unknown> & {
   emphasis: boolean;
   focused?: boolean;
   composerFocused?: boolean;
+  chatOpen?: boolean;
   relativeTimeReferenceMs: number;
   telegramTetherCount?: number;
   onMessage?: (agentId: string) => void;

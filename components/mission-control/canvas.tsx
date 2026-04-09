@@ -80,6 +80,7 @@ export function MissionCanvas({
   activeWorkspaceId,
   selectedNodeId,
   focusedAgentId,
+  activeChatAgentId,
   composerTargetAgentId,
   isComposerActive,
   composerViewportResetNonce,
@@ -108,6 +109,7 @@ export function MissionCanvas({
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   focusedAgentId: string | null;
+  activeChatAgentId: string | null;
   composerTargetAgentId: string | null;
   isComposerActive: boolean;
   composerViewportResetNonce: number;
@@ -155,6 +157,7 @@ export function MissionCanvas({
     relativeTimeReferenceMs,
     activeWorkspaceId,
     focusedAgentId,
+    activeChatAgentId,
     composerTargetAgentId,
     isComposerActive,
     justCreatedTaskIds,
@@ -236,6 +239,7 @@ export function MissionCanvas({
       relativeTimeReferenceMs,
       activeWorkspaceId,
       focusedAgentId,
+      activeChatAgentId,
       composerTargetAgentId,
       isComposerActive,
       justCreatedTaskIds,
@@ -273,6 +277,7 @@ export function MissionCanvas({
     snapshot,
     activeWorkspaceId,
     focusedAgentId,
+    activeChatAgentId,
     composerTargetAgentId,
     isComposerActive,
     justCreatedTaskIds,
@@ -629,6 +634,7 @@ function buildCanvasGraph(
   relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
   focusedAgentId: string | null,
+  activeChatAgentId: string | null,
   composerTargetAgentId: string | null,
   isComposerActive: boolean,
   justCreatedTaskIds: string[],
@@ -711,6 +717,7 @@ function buildCanvasGraph(
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
       const agentY = laneY + agentIndex * 4;
       const isComposerHighlightedAgent = isComposerActive && composerTargetAgentId === agent.id;
+      const isAgentChatOpen = activeChatAgentId === agent.id;
       const agentPosition = resolvePersistedPosition(
         toPersistedAgentPositionKey(agent),
         { x: agentX, y: agentY },
@@ -732,6 +739,7 @@ function buildCanvasGraph(
           emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
           focused: focusedAgentId === agent.id,
           composerFocused: isComposerHighlightedAgent,
+          chatOpen: isAgentChatOpen,
           relativeTimeReferenceMs,
           telegramTetherCount: telegramTether.channelCount,
           onMessage: onMessageAgent,
