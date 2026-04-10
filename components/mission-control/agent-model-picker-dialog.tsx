@@ -9,7 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
-import { formatModelProviderLabel, normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
+import {
+  formatModelProviderLabel,
+  getModelProviderDescriptor,
+  isAddModelsProviderId
+} from "@/lib/openclaw/model-provider-registry";
 import { formatAgentDisplayName, formatContextWindow, formatModelLabel } from "@/lib/openclaw/presenters";
 import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
@@ -164,12 +168,7 @@ export function AgentModelPickerDialog({
   };
 
   const handleOpenAddModels = () => {
-    const provider =
-      resolveProviderForModel(selectedModel) ??
-      resolveProviderForModel(currentModel) ??
-      resolveProviderForModelId(selectedModelId || currentModelId);
-
-    onOpenAddModels(provider);
+    onOpenAddModels(null);
     onOpenChange(false);
   };
 
@@ -201,7 +200,18 @@ export function AgentModelPickerDialog({
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Badge variant={currentModelSelectable ? "default" : "muted"} className="max-w-full truncate px-2 py-0.5 text-[9px] tracking-[0.12em]">
+                <Badge
+                  variant={
+                    currentModel
+                      ? currentModelSelectable
+                        ? "default"
+                        : currentModel.missing
+                          ? "danger"
+                          : "warning"
+                      : "muted"
+                  }
+                  className="max-w-full truncate px-2 py-0.5 text-[9px] tracking-[0.12em]"
+                >
                   {currentModel?.name || (currentModelId ? currentModelId : "OpenClaw default")}
                 </Badge>
                 <p className="text-[11px] leading-5 text-slate-400">
@@ -212,6 +222,11 @@ export function AgentModelPickerDialog({
                       : "No model is assigned yet."}
                 </p>
               </div>
+              {currentModel && !currentModelSelectable ? (
+                <p className="mt-2 text-[11px] leading-5 text-amber-100/85">
+                  {resolveModelSetupHint(currentModel)}
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-[20px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-3">
@@ -282,13 +297,18 @@ export function AgentModelPickerDialog({
                             <p className="mt-0.5 truncate text-[9px] uppercase tracking-[0.16em] text-slate-500">
                               {formatModelLabel(model.id)}
                             </p>
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-[9px] text-slate-400">
-                              <span>{formatModelProviderLabel(model.provider)}</span>
-                              {model.input ? <span>{model.input}</span> : null}
-                              {model.contextWindow ? <span>{Intl.NumberFormat().format(model.contextWindow)} ctx</span> : null}
-                            </div>
-                          </div>
-                        </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5 text-[9px] text-slate-400">
+                      <span>{formatModelProviderLabel(model.provider)}</span>
+                      {model.input ? <span>{model.input}</span> : null}
+                      {model.contextWindow ? <span>{Intl.NumberFormat().format(model.contextWindow)} ctx</span> : null}
+                    </div>
+                    {!selectable ? (
+                      <p className="mt-1 text-[9px] leading-4 text-amber-100/85">
+                        {resolveModelSetupHint(model)}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
 
                         <div className="shrink-0">
                           <Badge variant={getModelStatusVariant(model)} className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
@@ -318,7 +338,7 @@ export function AgentModelPickerDialog({
                   {selectedModel
                     ? selectedModelSelectable
                       ? `${formatModelProviderLabel(selectedModel.provider)} · ${formatContextWindow(selectedModel.contextWindow)} ctx`
-                      : "This model is not ready for assignment."
+                      : resolveModelSetupHint(selectedModel)
                     : "Pick a model above, then save the assignment."
                   }
                 </p>
@@ -379,6 +399,42 @@ function isSelectableModel(model: AgentModelRecord) {
   return !model.missing && model.available !== false;
 }
 
+function resolveModelSetupHint(model: AgentModelRecord) {
+  const descriptor = isAddModelsProviderId(model.provider)
+    ? getModelProviderDescriptor(model.provider)
+    : null;
+
+  if (model.missing) {
+    if (descriptor?.connectKind === "local") {
+      return `${descriptor.shortLabel} is installed, but this model is not pulled locally yet.`;
+    }
+
+    return descriptor
+      ? `${descriptor.shortLabel} does not have this model available yet. Open Add Models > Providers to connect or refresh it.`
+      : "This model is not available yet.";
+  }
+
+  if (model.available === false) {
+    if (descriptor?.connectKind === "apiKey") {
+      return `Connect your ${descriptor.shortLabel} API key in Add Models > Providers to use this model.`;
+    }
+
+    if (descriptor?.connectKind === "oauth") {
+      return `Connect your ${descriptor.shortLabel} account in Add Models > Providers to use this model.`;
+    }
+
+    if (descriptor?.connectKind === "local") {
+      return `Pull this model locally with Ollama, then refresh the list.`;
+    }
+
+    return descriptor
+      ? `Open Add Models > Providers to finish setup for ${descriptor.shortLabel}.`
+      : "Open Add Models > Providers to finish setup.";
+  }
+
+  return "This model is not ready for assignment.";
+}
+
 function resolveModelStatusLabel(model: AgentModelRecord) {
   if (model.missing) {
     return "Missing";
@@ -409,23 +465,6 @@ function getModelStatusVariant(model: AgentModelRecord) {
   }
 
   return "muted";
-}
-
-function resolveProviderForModel(model: AgentModelRecord | null) {
-  if (!model) {
-    return null;
-  }
-
-  return resolveProviderForModelId(model.id);
-}
-
-function resolveProviderForModelId(modelId: string | null | undefined) {
-  const normalized = modelId?.trim();
-  if (!normalized) {
-    return null;
-  }
-
-  return normalizeAddModelsProviderId(normalized.split("/")[0] ?? null);
 }
 
 function updateSnapshotAgentModel(

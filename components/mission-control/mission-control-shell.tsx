@@ -1432,9 +1432,9 @@ export function MissionControlShell({
     setIsAddModelsDialogOpen(true);
   };
 
-  const openAddModelsFromModelPicker = (provider?: AddModelsProviderId | null) => {
+  const openAddModelsFromModelPicker = () => {
     setAgentModelRequest(null);
-    openAddModelsDialog(provider);
+    openAddModelsDialog(null);
   };
 
   const checkForUpdates = async () => {
