@@ -40,9 +40,10 @@ export function ChannelBindingPicker({
       <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm font-medium text-white">Channel participation</p>
+            <p className="text-sm font-medium text-white">Surface participation</p>
             <p className="mt-1 text-xs leading-5 text-slate-400">
-              Add Telegram channels from the workspace screen first. Primary agents speak publicly; selected agents assist internally.
+              Connect workspace surfaces first. Primary agents own the surface; selected agents assist behind the
+              scenes.
             </p>
           </div>
         </div>
@@ -54,9 +55,9 @@ export function ChannelBindingPicker({
     <div className="rounded-[20px] border border-white/10 bg-white/[0.03] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-white">Channel participation</p>
+          <p className="text-sm font-medium text-white">Surface participation</p>
           <p className="mt-1 text-xs leading-5 text-slate-400">
-            Primary agents speak on Telegram. Selected channels let this agent assist the primary internally.
+            Primary agents own the surface. Selected surfaces let this agent assist the owner internally.
           </p>
         </div>
       </div>
@@ -64,7 +65,7 @@ export function ChannelBindingPicker({
       {isSaving ? (
         <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/[0.08] px-3 py-1.5 text-[11px] text-cyan-50">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>Applying channel changes...</span>
+          <span>Applying surface changes...</span>
         </div>
       ) : null}
 
@@ -85,13 +86,13 @@ export function ChannelBindingPicker({
               )}
             >
               <div className="min-w-0">
-              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <p className="truncate text-sm font-medium text-white">{channel.name}</p>
                   <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
                     {channel.type}
                   </Badge>
                   {isPrimaryForAgent ? (
-                    <Badge className="h-5 rounded-full px-2 text-[10px]">Primary voice</Badge>
+                    <Badge className="h-5 rounded-full px-2 text-[10px]">Owner</Badge>
                   ) : selected ? (
                     <Badge className="h-5 rounded-full px-2 text-[10px]">Assistant</Badge>
                   ) : null}
@@ -103,7 +104,7 @@ export function ChannelBindingPicker({
                 </div>
                 <p className="mt-1 truncate text-[11px] text-slate-400">
                   {channel.id}
-                  {primaryAgentName ? ` · primary ${primaryAgentName}` : ""}
+                  {primaryAgentName ? ` · owner ${primaryAgentName}` : ""}
                 </p>
               </div>
 
@@ -121,7 +122,7 @@ export function ChannelBindingPicker({
                   )
                 }
               >
-                {selected ? (isPrimaryForAgent ? "Primary" : "Remove") : "Assist"}
+                {selected ? (isPrimaryForAgent ? "Owner" : "Remove") : "Assist"}
               </Button>
             </div>
           );

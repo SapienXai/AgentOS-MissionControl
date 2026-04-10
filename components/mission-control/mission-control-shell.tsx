@@ -487,7 +487,11 @@ export function MissionControlShell({
     }
   }, []);
 
-  const openWorkspaceChannels = useCallback(() => {
+  const openWorkspaceChannels = useCallback((workspaceId?: string) => {
+    if (workspaceId) {
+      setActiveWorkspaceId(workspaceId);
+    }
+
     setIsWorkspaceChannelsOpen(true);
   }, []);
 
@@ -1848,6 +1852,7 @@ export function MissionControlShell({
             onConfigureAgentModel={handleConfigureAgentModel}
             onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
             onInspectAgentDetail={handleInspectAgentDetail}
+            onOpenWorkspaceChannels={openWorkspaceChannels}
             onMessageAgent={(agentId) => {
               const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
 

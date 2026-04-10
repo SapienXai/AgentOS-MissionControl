@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
-  createTelegramChannelAccount,
+  createManagedSurfaceAccount,
   disconnectWorkspaceChannel,
   deleteWorkspaceChannelEverywhere,
   getMissionControlSnapshot,
@@ -12,7 +12,7 @@ import {
   bindWorkspaceChannelAgent,
   unbindWorkspaceChannelAgent
 } from "@/lib/openclaw/service";
-import type { WorkspaceChannelGroupAssignment } from "@/lib/openclaw/types";
+import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/openclaw/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,9 +26,12 @@ const groupAssignmentSchema = z.object({
 
 const createChannelSchema = z.object({
   channelId: z.string().optional(),
-  type: z.enum(["telegram", "slack", "discord", "googlechat"]),
+  type: z.string().min(1),
   name: z.string().min(1),
+  config: z.record(z.any()).optional(),
   token: z.string().optional(),
+  botToken: z.string().optional(),
+  webhookUrl: z.string().optional(),
   primaryAgentId: z.string().nullable().optional(),
   agentId: z.string().nullable().optional(),
   groupAssignments: z.array(groupAssignmentSchema).optional()
@@ -93,17 +96,21 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
     const agentIds = input.agentId ? [input.agentId.trim()] : [];
     const groupAssignments = normalizeGroupAssignments(input.groupAssignments ?? []);
 
-    if (input.type === "telegram" && input.token && !channelId) {
-      const created = await createTelegramChannelAccount({
+    if (!channelId) {
+      const created = await createManagedSurfaceAccount({
+        provider: input.type as MissionControlSurfaceProvider,
         name: input.name,
-        token: input.token
+        config: input.config,
+        token: input.token,
+        botToken: input.botToken,
+        webhookUrl: input.webhookUrl
       });
 
       const registry = await upsertWorkspaceChannel({
         workspaceId,
         workspacePath: workspace.path,
         channelId: created.id,
-        type: "telegram",
+        type: input.type,
         name: input.name,
         primaryAgentId,
         agentIds,
@@ -114,10 +121,6 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
         account: created,
         registry
       });
-    }
-
-    if (!channelId) {
-      throw new Error("Channel id is required.");
     }
 
     const registry = await upsertWorkspaceChannel({

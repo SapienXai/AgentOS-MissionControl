@@ -1,13 +1,11 @@
-import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
+import { getModelProviderDescriptor, isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { formatOpenClawCommand, resolveOpenClawBin, runOpenClawJson } from "@/lib/openclaw/cli";
 import { getMissionControlSnapshot } from "@/lib/openclaw/service";
 import type {
@@ -23,7 +21,6 @@ import type {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const execFileAsync = promisify(execFile);
 const addModelsDocsUrl = "https://docs.openclaw.ai/cli/models";
 const openClawConfigPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
 const openClawAuthProfilesPath = path.join(
@@ -127,6 +124,16 @@ type OpenClawModelsListPayload = {
   }>;
 };
 
+type OpenClawModelScanPayload = Array<{
+  id: string;
+  name: string;
+  provider: string;
+  modelRef?: string;
+  contextLength?: number | null;
+  supportsToolsMeta?: boolean;
+  isFree?: boolean;
+}>;
+
 type OllamaState =
   | {
       installed: false;
@@ -173,21 +180,19 @@ export async function POST(request: Request) {
 async function handleProviderAction(
   input: AddModelsProviderActionRequest
 ): Promise<AddModelsProviderActionResult> {
-  const snapshot = await getMissionControlSnapshot({ force: true });
   const commandBin = await resolveOpenClawBin().catch(() => "openclaw");
 
   if (input.action === "status") {
-    const ollamaState = input.provider === "ollama" ? await readOllamaState() : null;
+    const statusContext = await readProviderConnectionContext(input.provider);
 
     return buildActionResult({
       ok: true,
       action: input.action,
       provider: input.provider,
-      message: resolveProviderStatusMessage(input.provider, snapshot, ollamaState),
-      snapshot,
-      connection: buildConnectionStatus(input.provider, snapshot, ollamaState),
+      message: resolveProviderStatusMessage(input.provider, statusContext.connection),
+      connection: statusContext.connection,
       models: [],
-      emptyState: resolveOllamaEmptyState(ollamaState),
+      emptyState: statusContext.ollamaState ? resolveOllamaEmptyState(statusContext.ollamaState) : null,
       docsUrl: addModelsDocsUrl
     });
   }
@@ -198,13 +203,14 @@ async function handleProviderAction(
     }
 
     if (input.provider === "openai-codex") {
+      const statusContext = await readProviderConnectionContext(input.provider);
+
       return buildActionResult({
         ok: true,
         action: input.action,
         provider: input.provider,
         message: "Continue in Terminal to connect your ChatGPT account, then come back to discover models.",
-        snapshot,
-        connection: buildConnectionStatus(input.provider, snapshot, null),
+        connection: statusContext.connection,
         models: [],
         manualCommand: formatOpenClawCommand(commandBin, [
           "models",
@@ -221,13 +227,14 @@ async function handleProviderAction(
     const apiKey = input.apiKey?.trim();
 
     if (!apiKey) {
+      const statusContext = await readProviderConnectionContext(input.provider);
+
       return buildActionResult({
         ok: false,
         action: input.action,
         provider: input.provider,
         message: "Enter an API key to continue.",
-        snapshot,
-        connection: buildConnectionStatus(input.provider, snapshot, null),
+        connection: statusContext.connection,
         models: [],
         docsUrl: addModelsDocsUrl
       });
@@ -236,15 +243,16 @@ async function handleProviderAction(
     validateApiKey(input.provider, apiKey);
     await persistProviderToken(input.provider, apiKey);
 
-    const refreshedSnapshot = await getMissionControlSnapshot({ force: true });
+    const snapshot = await getMissionControlSnapshot({ force: true });
+    const statusContext = await readProviderConnectionContext(input.provider);
 
     return buildActionResult({
       ok: true,
       action: input.action,
       provider: input.provider,
       message: `Connected ${getModelProviderDescriptor(input.provider).shortLabel}. Discovering available models is next.`,
-      snapshot: refreshedSnapshot,
-      connection: buildConnectionStatus(input.provider, refreshedSnapshot, null),
+      snapshot,
+      connection: statusContext.connection,
       models: [],
       docsUrl: addModelsDocsUrl
     });
@@ -256,7 +264,8 @@ async function handleProviderAction(
 
   await addModelsToConfig(input.modelIds);
   const refreshedSnapshot = await getMissionControlSnapshot({ force: true });
-  const providerModels = await readProviderCatalog(input.provider, refreshedSnapshot);
+  const statusContext = await readProviderConnectionContext(input.provider);
+  const providerModels = await readProviderCatalog(input.provider, statusContext.configuredModelIds);
 
   return buildActionResult({
     ok: true,
@@ -264,7 +273,7 @@ async function handleProviderAction(
     provider: input.provider,
     message: `Added ${input.modelIds.length} model${input.modelIds.length === 1 ? "" : "s"} to AgentOS.`,
     snapshot: refreshedSnapshot,
-    connection: buildConnectionStatus(input.provider, refreshedSnapshot, null),
+    connection: statusContext.connection,
     models: providerModels,
     docsUrl: addModelsDocsUrl
   });
@@ -273,26 +282,8 @@ async function handleProviderAction(
 async function discoverProviderModels(
   provider: AddModelsProviderId
 ): Promise<AddModelsProviderActionResult> {
-  const snapshot = await getMissionControlSnapshot({ force: true });
-  const ollamaState = provider === "ollama" ? await readOllamaState() : null;
-  const connection = buildConnectionStatus(provider, snapshot, ollamaState);
-  const emptyState = resolveOllamaEmptyState(ollamaState);
-
-  if (provider === "ollama" && emptyState) {
-    return buildActionResult({
-      ok: true,
-      action: "discover",
-      provider,
-      message: emptyState.description,
-      snapshot,
-      connection,
-      models: [],
-      emptyState,
-      docsUrl: addModelsDocsUrl
-    });
-  }
-
-  const models = await readProviderCatalog(provider, snapshot);
+  const { connection, ollamaState, configuredModelIds } = await readProviderConnectionContext(provider);
+  const models = await readProviderCatalog(provider, configuredModelIds);
 
   return buildActionResult({
     ok: true,
@@ -301,16 +292,17 @@ async function discoverProviderModels(
     message: models.length
       ? `Found ${models.length} model${models.length === 1 ? "" : "s"}.`
       : "No models were returned for this provider.",
-    snapshot,
     connection,
     models,
     emptyState:
       models.length === 0
-        ? {
-            kind: "no-models",
-            title: "No models found",
-            description: "This provider connected, but no selectable models were returned yet."
-          }
+        ? provider === "ollama"
+          ? resolveOllamaEmptyState(ollamaState)
+          : {
+              kind: "no-models",
+              title: "No models found",
+              description: "This provider connected, but no selectable models were returned yet."
+            }
         : null,
     docsUrl: addModelsDocsUrl
   });
@@ -318,9 +310,9 @@ async function discoverProviderModels(
 
 async function readProviderCatalog(
   provider: AddModelsProviderId,
-  snapshot: MissionControlSnapshot
+  configuredModelIds: Set<string>
 ): Promise<AddModelsCatalogModel[]> {
-  const payload = await runOpenClawJson<OpenClawModelsListPayload>([
+  const providerPayload = await runOpenClawJson<OpenClawModelsListPayload>([
     "models",
     "list",
     "--all",
@@ -328,10 +320,44 @@ async function readProviderCatalog(
     "--provider",
     provider
   ]);
-  const configuredModelIds = new Set(snapshot.models.map((model) => model.id));
+  const providerModels = normalizeCatalogModels(provider, providerPayload.models, configuredModelIds);
 
-  const uniqueModels = new Map<string, typeof payload.models[number]>();
-  for (const model of payload.models || []) {
+  if (providerModels.length > 0) {
+    return providerModels;
+  }
+
+  const globalPayload = await runOpenClawJson<OpenClawModelsListPayload>(["models", "list", "--all", "--json"]);
+  const globalModels = normalizeCatalogModels(provider, globalPayload.models, configuredModelIds);
+
+  if (globalModels.length > 0 || provider === "ollama") {
+    return globalModels;
+  }
+
+  const scanPayload = await runOpenClawJson<OpenClawModelScanPayload>([
+    "models",
+    "scan",
+    "--json",
+    "--yes",
+    "--no-input",
+    "--no-probe"
+  ]);
+
+  return normalizeScanModels(provider, scanPayload, configuredModelIds);
+}
+
+function normalizeCatalogModels(
+  provider: AddModelsProviderId,
+  models: OpenClawModelsListPayload["models"],
+  configuredModelIds: Set<string>
+) {
+  const uniqueModels = new Map<string, typeof models[number]>();
+  for (const model of models || []) {
+    const modelProvider = resolveProviderFromModelId(model.key);
+
+    if (modelProvider !== provider || !isAddModelsProviderId(modelProvider)) {
+      continue;
+    }
+
     if (!uniqueModels.has(model.key)) {
       uniqueModels.set(model.key, model);
     }
@@ -354,6 +380,70 @@ async function readProviderCatalog(
   }));
 }
 
+function normalizeScanModels(
+  provider: AddModelsProviderId,
+  models: OpenClawModelScanPayload,
+  configuredModelIds: Set<string>
+): AddModelsCatalogModel[] {
+  const uniqueModels = new Map<string, OpenClawModelScanPayload[number]>();
+
+  for (const candidate of models || []) {
+    const modelId = resolveDiscoveredModelId(candidate);
+    if (!modelId) {
+      continue;
+    }
+
+    const modelProvider = resolveProviderFromModelId(modelId);
+
+    if (
+      modelProvider !== provider ||
+      !isAddModelsProviderId(modelProvider) ||
+      uniqueModels.has(modelId)
+    ) {
+      continue;
+    }
+
+    uniqueModels.set(modelId, candidate);
+  }
+
+  return Array.from(uniqueModels.values()).map((candidate) => {
+    const modelId = resolveDiscoveredModelId(candidate);
+
+    return {
+      id: modelId,
+      name: candidate.name.trim(),
+      provider,
+      input: candidate.supportsToolsMeta ? "text+tools" : "text",
+      contextWindow: candidate.contextLength ?? null,
+      local: false,
+      available: true,
+      missing: false,
+      alreadyAdded: configuredModelIds.has(modelId),
+      recommended: isRecommendedModel(provider, modelId),
+      supportsTools: candidate.supportsToolsMeta === true,
+      isFree: candidate.isFree === true,
+      tags: []
+    };
+  });
+}
+
+function resolveDiscoveredModelId(candidate: OpenClawModelScanPayload[number]) {
+  const modelRef = candidate.modelRef?.trim();
+
+  if (modelRef) {
+    return modelRef;
+  }
+
+  const provider = candidate.provider.trim();
+  const id = candidate.id.trim();
+
+  if (!provider || !id) {
+    return "";
+  }
+
+  return `${provider}/${id}`;
+}
+
 function buildActionResult({
   ok,
   action,
@@ -370,7 +460,7 @@ function buildActionResult({
   action: AddModelsProviderActionResult["action"];
   provider: AddModelsProviderId;
   message: string;
-  snapshot: MissionControlSnapshot;
+  snapshot?: MissionControlSnapshot;
   connection: AddModelsProviderConnectionStatus;
   models: AddModelsCatalogModel[];
   emptyState?: AddModelsEmptyState | null;
@@ -391,52 +481,80 @@ function buildActionResult({
   };
 }
 
-function buildConnectionStatus(
-  provider: AddModelsProviderId,
-  snapshot: MissionControlSnapshot,
-  ollamaState: OllamaState | null
-): AddModelsProviderConnectionStatus {
-  const readinessProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
-    (entry) => entry.provider === provider
-  );
-  const configuredCount = snapshot.models.filter((model) => resolveProviderFromModelId(model.id) === provider).length;
-  const descriptor = getModelProviderDescriptor(provider);
+async function readProviderConnectionContext(provider: AddModelsProviderId) {
+  const [configuredModelIds, config, authProfiles] = await Promise.all([
+    readConfiguredModelIds(),
+    readJsonFile<OpenClawConfigPayload>(openClawConfigPath, {}),
+    readJsonFile<OpenClawAuthProfilesPayload>(openClawAuthProfilesPath, {
+      version: 1
+    })
+  ]);
 
   if (provider === "ollama") {
+    const ollamaState = await readOllamaState();
+
     return {
-      provider,
-      connected: Boolean(ollamaState?.installed),
-      canConnect: true,
-      needsTerminal: false,
-      detail: !ollamaState?.installed
-        ? "Ollama is not installed on this machine."
-        : ollamaState.models.length > 0
-          ? `${ollamaState.models.length} local model${ollamaState.models.length === 1 ? "" : "s"} detected.`
-          : "Ollama is installed, but no local models were found yet."
+      connection: buildOllamaConnectionStatus(ollamaState),
+      configuredModelIds,
+      ollamaState
     };
   }
 
   return {
+    connection: buildFileBasedConnectionStatus(provider, config, authProfiles, configuredModelIds),
+    configuredModelIds,
+    ollamaState: null
+  };
+}
+
+function buildOllamaConnectionStatus(ollamaState: OllamaState): AddModelsProviderConnectionStatus {
+  return {
+    provider: "ollama",
+    connected: Boolean(ollamaState.installed),
+    canConnect: true,
+    needsTerminal: false,
+    detail: !ollamaState.installed
+      ? "Ollama is not installed on this machine."
+      : ollamaState.models.length > 0
+        ? `${ollamaState.models.length} local model${ollamaState.models.length === 1 ? "" : "s"} detected.`
+        : "Ollama is installed, but no local models were found yet."
+  };
+}
+
+function buildFileBasedConnectionStatus(
+  provider: AddModelsProviderId,
+  config: OpenClawConfigPayload,
+  authProfiles: OpenClawAuthProfilesPayload,
+  configuredModelIds: Set<string>
+): AddModelsProviderConnectionStatus {
+  const descriptor = getModelProviderDescriptor(provider);
+  const configuredCount = [...configuredModelIds].filter(
+    (modelId) => resolveProviderFromModelId(modelId) === provider
+  ).length;
+  const providerAuthCount = [
+    ...Object.values(config.auth?.profiles ?? {}),
+    ...Object.values(authProfiles.profiles ?? {})
+  ].filter((entry) => entry.provider === provider).length;
+
+  return {
     provider,
-    connected: Boolean(readinessProvider?.connected || configuredCount > 0),
+    connected: providerAuthCount > 0 || configuredCount > 0,
     canConnect: true,
     needsTerminal: descriptor.connectKind === "oauth",
     detail:
-      readinessProvider?.detail ||
-      (configuredCount > 0
+      providerAuthCount > 0
         ? `${configuredCount} configured model${configuredCount === 1 ? "" : "s"} in AgentOS.`
-        : descriptor.helperText)
+        : configuredCount > 0
+          ? `${configuredCount} configured model${configuredCount === 1 ? "" : "s"} in AgentOS.`
+          : descriptor.helperText
   };
 }
 
 function resolveProviderStatusMessage(
   provider: AddModelsProviderId,
-  snapshot: MissionControlSnapshot,
-  ollamaState: OllamaState | null
+  connection: AddModelsProviderConnectionStatus
 ) {
-  const connection = buildConnectionStatus(provider, snapshot, ollamaState);
-
-  if (provider === "ollama" && !ollamaState?.installed) {
+  if (provider === "ollama" && !connection.connected) {
     return "Ollama is not available on this machine yet.";
   }
 
@@ -445,6 +563,13 @@ function resolveProviderStatusMessage(
   }
 
   return `Connect ${getModelProviderDescriptor(provider).shortLabel} to start discovering models.`;
+}
+
+async function readConfiguredModelIds() {
+  const config = await readJsonFile<OpenClawConfigPayload>(openClawConfigPath, {});
+  const modelEntries = config.agents?.defaults?.models ?? {};
+
+  return new Set(Object.keys(modelEntries));
 }
 
 function resolveOllamaEmptyState(ollamaState: OllamaState | null): AddModelsEmptyState | null {
@@ -475,28 +600,18 @@ function resolveOllamaEmptyState(ollamaState: OllamaState | null): AddModelsEmpt
 
 async function readOllamaState(): Promise<OllamaState> {
   try {
-    const result = await execFileAsync("ollama", ["list"], {
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024
-    });
-    const rows = result.stdout
-      .toString()
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const models = rows
-      .slice(1)
-      .map((line) => line.split(/\s+/)[0])
-      .filter(Boolean);
+    const models = await readProviderCatalog("ollama", new Set());
 
     return {
       installed: true,
-      models
+      models: models
+        .map((model) => (model.id.startsWith("ollama/") ? model.id.slice("ollama/".length) : model.id))
+        .filter((modelName) => modelName.length > 0)
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
 
-    if (/spawn ollama ENOENT/i.test(message) || /not found/i.test(message)) {
+    if (/ollama/i.test(message) && (/spawn/i.test(message) || /not found/i.test(message) || /enoent/i.test(message))) {
       return {
         installed: false,
         models: []

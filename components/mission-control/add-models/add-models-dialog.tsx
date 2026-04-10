@@ -19,8 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   modelProviderRegistry,
-  otherModelProviders,
-  primaryModelProviders,
   getModelProviderDescriptor,
   isAddModelsProviderId,
   normalizeAddModelsProviderId
@@ -129,19 +127,6 @@ export function AddModelsDialog({
       setIsLoadingGlobalCatalog(false);
     }
   });
-  const primeProviders = useEffectEvent(async (skipProviderId?: AddModelsProviderId | null) => {
-    const providerIds = [...primaryModelProviders, ...otherModelProviders]
-      .map((provider) => provider.id)
-      .filter((providerId) => providerId !== skipProviderId);
-
-    for (const providerId of providerIds) {
-      const result = await runStatus(providerId);
-
-      if (result?.connection.connected) {
-        await discoverProvider(providerId, true);
-      }
-    }
-  });
 
   useEffect(() => {
     if (!open) {
@@ -178,14 +163,32 @@ export function AddModelsDialog({
     } else {
       setActiveTab("providers");
     }
-
-    void primeProviders(normalizedInitialProvider);
-    void loadGlobalCatalog();
   }, [open, normalizedInitialProvider]);
+
+  useEffect(() => {
+    if (!open || activeTab !== "catalog" || globalCatalogModels.length > 0 || isLoadingGlobalCatalog) {
+      return;
+    }
+
+    void loadGlobalCatalog();
+  }, [open, activeTab, globalCatalogModels.length, isLoadingGlobalCatalog]);
 
   const activeProviderId = isAddModelsProviderId(activeProvider) ? activeProvider : null;
   const activeDraft = activeProviderId ? resolveDraft(providerDrafts[activeProviderId]) : initialDraftState();
   const activeDescriptor = activeProviderId ? getModelProviderDescriptor(activeProviderId) : null;
+  const activeConnection = activeProviderId
+    ? resolveConnectionDetail(snapshot, providerDrafts, activeProviderId)
+    : null;
+  const shouldShowDiscoveryCta = Boolean(activeProviderId && activeDescriptor);
+  const isDiscovering = activeDraft.flowState === "discovery-loading";
+  const discoveryActionLabel =
+    activeDraft.models.length > 0 ? "Refresh discovery" : "Discover models";
+  const discoveryButtonLabel = isDiscovering ? "Discovering..." : discoveryActionLabel;
+  const discoveryDescription = activeConnection?.connected
+    ? "The provider is connected. Pull the available models into this workspace before choosing one."
+    : activeDescriptor?.connectKind === "oauth"
+      ? "Use your account login first, then pull the available models into this workspace."
+      : "Connect the provider first, then pull the available models into this workspace.";
   const catalogModels = useMemo(() => {
     const configuredModelIds = new Set(snapshot.models.map((model) => model.id));
 
@@ -248,7 +251,7 @@ export function AddModelsDialog({
     for (const model of catalogModels) {
       const providerId = model.provider;
 
-      if (!selectedModelIds.has(model.id) || model.alreadyAdded || !isSelectableModel(model)) {
+      if (!selectedModelIds.has(model.id) || model.alreadyAdded) {
         continue;
       }
 
@@ -267,9 +270,15 @@ export function AddModelsDialog({
     setActiveProvider(providerId);
     setActiveTab("providers");
 
+    const draft = resolveDraft(providerDrafts[providerId]);
+
+    if (draft.loaded && draft.models.length > 0) {
+      return;
+    }
+
     const status = await runStatus(providerId);
 
-    if (status?.connection.connected) {
+    if (providerId === "ollama" && status?.connection.connected) {
       await discoverProvider(providerId, true);
     }
   }
@@ -284,7 +293,10 @@ export function AddModelsDialog({
 
     try {
       const result = await adapter.getConnectionStatus();
-      applyActionResult(providerId, result, result.emptyState ? "discovery-empty" : "idle");
+      const currentDraft = resolveDraft(providerDrafts[providerId]);
+      applyActionResult(providerId, result, result.emptyState ? "discovery-empty" : "idle", {
+        models: currentDraft.loaded && currentDraft.models.length > 0 ? currentDraft.models : result.models
+      });
       return result;
     } catch (error) {
       updateDraft(providerId, {
@@ -323,10 +335,6 @@ export function AddModelsDialog({
 
       if (result.snapshot) {
         onSnapshotChange(result.snapshot);
-      }
-
-      if (providerId !== "openai-codex" && providerId !== "ollama") {
-        await discoverProvider(providerId);
       }
     } catch (error) {
       updateDraft(providerId, {
@@ -396,7 +404,7 @@ export function AddModelsDialog({
         return false;
       }
 
-      return isSelectableModel(model) && !model.alreadyAdded;
+      return !model.alreadyAdded;
     });
 
     if (selectedModelIds.length === 0) {
@@ -636,15 +644,15 @@ export function AddModelsDialog({
                           </p>
                         </div>
                         <Badge
-                          variant={activeDraft.connection?.connected ? "success" : "muted"}
+                          variant={activeConnection?.connected ? "success" : "muted"}
                           className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]"
                         >
-                          {activeDraft.connection?.connected ? "Connected" : "Not connected"}
+                          {activeConnection?.connected ? "Connected" : "Not connected"}
                         </Badge>
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-1">
-                        {buildProgressSteps(activeProviderId, activeDraft).map((step) => (
+                        {buildProgressSteps(activeProviderId, activeDraft, activeConnection).map((step) => (
                           <div
                             key={step.label}
                             className={cn(
@@ -813,38 +821,54 @@ export function AddModelsDialog({
                         </div>
                       ) : null}
 
-                      {activeDescriptor.connectKind !== "oauth" ? (
-                        <div className="mt-3 flex flex-wrap gap-1.5">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-[10px]"
-                            disabled={activeDraft.flowState === "discovery-loading"}
-                            onClick={() => {
-                              void discoverProvider(activeProviderId);
-                            }}
-                          >
-                            {activeDraft.flowState === "discovery-loading" ? (
-                              <>
-                                <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
-                                Discovering...
-                              </>
-                            ) : (
-                              "Discover models"
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 rounded-full px-3 text-[10px]"
-                            onClick={() => {
-                              void runStatus(activeProviderId);
-                            }}
-                          >
-                            Refresh status
-                          </Button>
+                      {shouldShowDiscoveryCta ? (
+                        <div className="mt-4 rounded-[24px] border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(17,28,47,0.98),rgba(10,16,28,0.98))] p-4 shadow-[0_18px_42px_rgba(7,11,20,0.28)]">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="font-display text-[0.92rem] text-white">
+                                {isDiscovering ? "Discovering models..." : discoveryActionLabel}
+                              </p>
+                              <p className="mt-1 max-w-[520px] text-[11px] leading-[1rem] text-slate-400">
+                                {isDiscovering
+                                  ? "OpenClaw is pulling the provider catalog into this workspace."
+                                  : discoveryDescription}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="default"
+                                className="h-11 rounded-full px-5 text-[12px] font-medium"
+                                disabled={isDiscovering}
+                                onClick={() => {
+                                  void discoverProvider(activeProviderId);
+                                }}
+                              >
+                                {isDiscovering ? (
+                                  <>
+                                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                                    Discovering...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    {discoveryButtonLabel}
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-11 rounded-full px-4 text-[10px]"
+                                onClick={() => {
+                                  void runStatus(activeProviderId);
+                                }}
+                              >
+                                Refresh status
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       ) : null}
 
@@ -1076,11 +1100,15 @@ function resolveConnectionDetail(
   };
 }
 
-function buildProgressSteps(providerId: AddModelsProviderId, draft: ProviderDraft) {
+function buildProgressSteps(
+  providerId: AddModelsProviderId,
+  draft: ProviderDraft,
+  connection: AddModelsProviderConnectionStatus | null
+) {
   const connectDone =
     providerId === "ollama"
-      ? Boolean(draft.connection?.connected || draft.emptyState)
-      : Boolean(draft.connection?.connected || draft.manualCommand);
+      ? Boolean(connection?.connected || draft.emptyState)
+      : Boolean(connection?.connected || draft.manualCommand);
   const discoverDone = draft.models.length > 0 || Boolean(draft.emptyState);
   const selectDone = draft.selectedModelIds.length > 0;
   const addDone = draft.flowState === "add-success";

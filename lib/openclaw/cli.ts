@@ -13,6 +13,13 @@ let resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
 let npmGlobalPrefixPromise: Promise<string> | null = null;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
+const openClawRuntimePathCandidates = [
+  process.env.OLLAMA_BIN ? path.dirname(process.env.OLLAMA_BIN) : null,
+  "/usr/local/bin",
+  "/opt/homebrew/bin",
+  path.join(os.homedir(), ".local", "bin"),
+  path.join(os.homedir(), ".ollama", "bin")
+].filter((candidate): candidate is string => Boolean(candidate));
 
 interface CommandOptions {
   timeoutMs?: number;
@@ -64,7 +71,7 @@ export async function runOpenClawStream(
   return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(openClawBin, args, {
       cwd: process.cwd(),
-      env: process.env
+      env: buildOpenClawEnv()
     });
 
     let stdout = "";
@@ -345,6 +352,26 @@ function quoteShellSegment(value: string) {
   }
 
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildOpenClawEnv() {
+  const env = { ...process.env };
+  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+  const currentPath = env[pathKey] || "";
+  const mergedPath = Array.from(
+    new Set([
+      ...currentPath.split(path.delimiter),
+      ...openClawRuntimePathCandidates
+    ].filter(isNonEmptyString))
+  ).join(path.delimiter);
+
+  env[pathKey] = mergedPath;
+
+  if (pathKey !== "PATH") {
+    env.PATH = mergedPath;
+  }
+
+  return env;
 }
 
 async function collectOpenClawCandidates() {

@@ -1,4 +1,5 @@
 import type {
+  MissionControlSurfaceProvider,
   ModelRecord,
   OpenClawAgent,
   RuntimeRecord,
@@ -16,6 +17,16 @@ export type WorkspaceNodeData = Record<string, unknown> & {
 
 export type AgentDetailFocus = "skills" | "tools" | "sessions";
 
+export type AgentSurfaceBadge = {
+  provider: MissionControlSurfaceProvider;
+  label: string;
+  count: number;
+  roleLabel: string;
+  roleTone?: "primary" | "owner" | "delegate" | "mixed";
+  accentColor?: string | null;
+  surfaceNames?: string[];
+};
+
 export type AgentNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
   emphasis: boolean;
@@ -25,7 +36,7 @@ export type AgentNodeData = Record<string, unknown> & {
   activeTaskCount?: number;
   chatOpen?: boolean;
   relativeTimeReferenceMs: number;
-  telegramTetherCount?: number;
+  surfaceBadges?: AgentSurfaceBadge[];
   onMessage?: (agentId: string) => void;
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
@@ -33,15 +44,24 @@ export type AgentNodeData = Record<string, unknown> & {
   onConfigureModel?: (agentId: string) => void;
   onConfigureCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspect?: (agentId: string, focus: AgentDetailFocus) => void;
+  onOpenWorkspaceChannels?: (workspaceId?: string) => void;
 };
 
-export type TelegramTetherNodeData = Record<string, unknown> & {
+export type SurfaceTetherNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
   emphasis: boolean;
-  channelCount: number;
-  channelNames: string[];
-  telegramRoleLines: string[];
-  telegramRoleTone: "primary" | "owner" | "delegate" | "mixed";
+  provider: MissionControlSurfaceProvider;
+  label: string;
+  variant?: "surface" | "add";
+  anchorIndex: number;
+  anchorCount: number;
+  surfaceCount: number;
+  surfaceNames: string[];
+  roleLabel: string;
+  roleTone: "primary" | "owner" | "delegate" | "mixed";
+  accentColor?: string | null;
+  actionLabel?: string;
+  onClick?: () => void;
 };
 
 export type RuntimeNodeData = Record<string, unknown> & {
@@ -77,5 +97,6 @@ export type ModelNodeData = Record<string, unknown> & {
 export type MissionEdgeData = {
   composerFocused?: boolean;
   taskFocused?: boolean;
-  telegramTether?: boolean;
+  surfaceTether?: boolean;
+  surfaceAccentColor?: string | null;
 };

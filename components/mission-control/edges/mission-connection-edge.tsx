@@ -34,44 +34,41 @@ export function MissionConnectionEdge({
 
   const composerFocused = Boolean(data?.composerFocused);
   const taskFocused = Boolean(data?.taskFocused);
-  const telegramTether = Boolean(data?.telegramTether);
-  const edgeActive = Boolean(animated) || composerFocused || taskFocused;
+  const surfaceTether = Boolean(data?.surfaceTether);
+  const edgeActive = Boolean(animated) || composerFocused || taskFocused || surfaceTether;
   const strokeWidth = resolveStrokeWidth(style?.strokeWidth, edgeActive);
-  const glowStrokeWidth = strokeWidth + (telegramTether ? 3.6 : composerFocused ? 5 : taskFocused ? 4.6 : 4);
+  const glowStrokeWidth = strokeWidth + (composerFocused ? 5 : taskFocused ? 4.6 : surfaceTether ? 4.8 : 4);
   const motionPathId = `mission-edge-motion-${sanitizeDomId(id)}`;
-  const packetSpecs = telegramTether
-    ? composerFocused
+  const packetSpecs = composerFocused || taskFocused
+    ? [
+        { size: 5.2, halo: 9.2, duration: 1.95, delay: 0, alpha: 1 },
+        { size: 3.8, halo: 7.2, duration: 2.3, delay: 0.58, alpha: 0.92 },
+        { size: 2.8, halo: 5.8, duration: 2.05, delay: 1.12, alpha: 0.88 },
+        { size: 2.1, halo: 4.8, duration: 2.7, delay: 1.82, alpha: 0.82 }
+      ]
+    : surfaceTether
       ? [
-          { size: 3.8, halo: 7.2, duration: 2.05, delay: 0, alpha: 1 },
-          { size: 2.4, halo: 5, duration: 2.55, delay: 0.74, alpha: 0.9 }
+          { size: 4.8, halo: 8.8, duration: 2.15, delay: 0, alpha: 0.98 },
+          { size: 3.5, halo: 7.1, duration: 2.45, delay: 0.55, alpha: 0.9 },
+          { size: 2.4, halo: 5.3, duration: 2.15, delay: 1.1, alpha: 0.84 },
+          { size: 1.8, halo: 4.2, duration: 2.9, delay: 1.75, alpha: 0.76 }
         ]
       : edgeActive
-        ? [
-            { size: 3.2, halo: 6, duration: 2.5, delay: 0, alpha: 0.96 },
-            { size: 2.1, halo: 4.4, duration: 3.05, delay: 0.72, alpha: 0.84 }
-          ]
-        : []
-    : composerFocused || taskFocused
       ? [
-          { size: 5.2, halo: 9.2, duration: 1.95, delay: 0, alpha: 1 },
-          { size: 3.8, halo: 7.2, duration: 2.3, delay: 0.58, alpha: 0.92 },
-          { size: 2.8, halo: 5.8, duration: 2.05, delay: 1.12, alpha: 0.88 },
-          { size: 2.1, halo: 4.8, duration: 2.7, delay: 1.82, alpha: 0.82 }
+          { size: 4.6, halo: 8.4, duration: 2.4, delay: 0, alpha: 0.96 },
+          { size: 3.2, halo: 6.4, duration: 2.95, delay: 0.78, alpha: 0.86 },
+          { size: 2.2, halo: 5.2, duration: 2.65, delay: 1.42, alpha: 0.8 }
         ]
-      : edgeActive
-        ? [
-            { size: 4.6, halo: 8.4, duration: 2.4, delay: 0, alpha: 0.96 },
-            { size: 3.2, halo: 6.4, duration: 2.95, delay: 0.78, alpha: 0.86 },
-            { size: 2.2, halo: 5.2, duration: 2.65, delay: 1.42, alpha: 0.8 }
-          ]
-        : [];
+      : [];
+  const tetherPalette = surfaceTether ? buildSurfaceTetherPalette(data?.surfaceAccentColor) : null;
 
   const glowStyle: CSSProperties = {
     ...style,
     animation: "none",
     pointerEvents: "none",
     strokeDasharray: "none",
-    strokeWidth: glowStrokeWidth
+    strokeWidth: glowStrokeWidth,
+    ...(tetherPalette ?? {})
   };
 
   const coreStyle: CSSProperties = {
@@ -79,7 +76,8 @@ export function MissionConnectionEdge({
     animation: "none",
     pointerEvents: "none",
     strokeDasharray: "none",
-    strokeWidth
+    strokeWidth,
+    ...(tetherPalette ?? {})
   };
 
   return (
@@ -90,7 +88,7 @@ export function MissionConnectionEdge({
           "mission-edge__path mission-edge__path--glow",
           edgeActive && "mission-edge__path--animated",
           composerFocused && "mission-edge__path--composer",
-          telegramTether && "mission-edge__path--telegram-tether",
+          surfaceTether && "mission-edge__path--surface-tether",
           selected && "mission-edge__path--selected"
         )}
         interactionWidth={0}
@@ -102,11 +100,11 @@ export function MissionConnectionEdge({
           "mission-edge__path mission-edge__path--core",
           edgeActive && "mission-edge__path--animated",
           composerFocused && "mission-edge__path--composer",
-          telegramTether && "mission-edge__path--telegram-tether",
+          surfaceTether && "mission-edge__path--surface-tether",
           selected && "mission-edge__path--selected"
         )}
         interactionWidth={interactionWidth}
-        markerEnd={telegramTether ? undefined : markerEnd}
+        markerEnd={surfaceTether ? undefined : markerEnd}
         style={coreStyle}
       />
       {edgeActive ? (
@@ -165,4 +163,30 @@ function resolveStrokeWidth(strokeWidth: unknown, animated: boolean) {
 
 function sanitizeDomId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function buildSurfaceTetherPalette(color: string | null | undefined) {
+  const normalized = normalizeHexColor(color);
+  const core = normalized ?? "#7dd3fc";
+
+  return {
+    "--mission-edge-core": `${core}cc`,
+    "--mission-edge-core-active": core,
+    "--mission-edge-glow": `${core}55`,
+    "--mission-edge-glow-active": `${core}88`,
+    "--mission-edge-packet": core
+  } as CSSProperties;
+}
+
+function normalizeHexColor(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return null;
 }

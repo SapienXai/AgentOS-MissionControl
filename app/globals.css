@@ -412,6 +412,7 @@
   opacity: 0.98;
 }
 
+.mission-shell .react-flow__edge .mission-edge__path--surface-tether,
 .mission-shell .react-flow__edge .mission-edge__path--telegram-tether {
   vector-effect: non-scaling-stroke;
   shape-rendering: geometricPrecision;

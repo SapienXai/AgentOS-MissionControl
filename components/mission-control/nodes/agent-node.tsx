@@ -199,8 +199,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const modelBadgeLabel = data.agent.modelId === "unassigned" ? "default model" : formatModelLabel(data.agent.modelId);
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
   const skillCount = effectiveSkills.length;
-  const telegramTetherCount = data.telegramTetherCount ?? 0;
-  const hasTelegramTether = data.agent.isDefault || telegramTetherCount > 0;
   const heartbeatLabel = data.agent.heartbeat.enabled
     ? data.agent.heartbeat.every ??
       (typeof data.agent.heartbeat.everyMs === "number"
@@ -252,16 +250,6 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-cyan-200/10" />
         <div className="pointer-events-none absolute right-2 top-2 h-10 w-10 rounded-full bg-cyan-300/10 blur-xl" />
       </div>
-
-      {hasTelegramTether ? (
-        <Handle
-          type="source"
-          id="source-telegram"
-          position={Position.Top}
-          style={{ left: 14, top: 6 }}
-          className="!z-30 !h-2.5 !w-2.5 !border-0 !bg-cyan-200/90 shadow-[0_0_16px_rgba(34,211,238,0.52)]"
-        />
-      ) : null}
 
       {isAttentionActive ? (
         <>
@@ -323,6 +311,13 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           position={Position.Right}
           className="!z-30 !h-2.5 !w-2.5 !border-0 !bg-cyan-300/90 shadow-[0_0_14px_rgba(103,232,249,0.42)]"
         />
+        <Handle
+          type="source"
+          id="source-surface"
+          position={Position.Top}
+          style={{ left: 14, top: 6 }}
+          className="!z-30 !h-2.5 !w-2.5 !border-0 !bg-cyan-100/90 shadow-[0_0_16px_rgba(125,211,252,0.5)]"
+        />
 
         <div className="relative rounded-t-[24px]">
           <div className="relative h-[144px] overflow-hidden rounded-t-[24px] border-b border-white/[0.12] bg-[linear-gradient(180deg,rgba(14,16,20,0.98),rgba(8,10,14,0.95))]">
@@ -356,7 +351,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
             />
 
             <div className="absolute inset-x-0 bottom-0 z-30 p-3.5">
-              <div className="max-w-[86%]">
+              <div className="max-w-[80%]">
                 <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.22em] text-white/65">
                   <StatusDot tone={dotTone} pulse={data.agent.status === "engaged" || data.agent.status === "monitoring"} />
                   Agent

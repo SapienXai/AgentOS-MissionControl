@@ -1,4 +1,5 @@
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
@@ -17,8 +18,15 @@ export function getWorkspaceChannels(snapshot: MissionControlSnapshot, workspace
   return snapshot.channelRegistry.channels
     .filter((channel) => channel.workspaces.some((binding) => binding.workspaceId === workspaceId))
     .sort((left, right) => {
+      const leftKind = getSurfaceCatalogEntry(left.type).kind;
+      const rightKind = getSurfaceCatalogEntry(right.type).kind;
+
+      if (leftKind !== rightKind) {
+        return leftKind.localeCompare(rightKind);
+      }
+
       if (left.type !== right.type) {
-        return left.type.localeCompare(right.type);
+        return getSurfaceCatalogEntry(left.type).label.localeCompare(getSurfaceCatalogEntry(right.type).label);
       }
 
       return left.name.localeCompare(right.name);

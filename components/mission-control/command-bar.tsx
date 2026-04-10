@@ -94,7 +94,7 @@ export function CommandBar({
   onComposerActiveChange?: (active: boolean) => void;
   onRefresh: () => Promise<void>;
   onOpenWorkspaceCreate: () => void;
-  onOpenWorkspaceChannels: () => void;
+  onOpenWorkspaceChannels: (workspaceId?: string) => void;
   onMissionDispatchStart: (event: MissionDispatchStart) => void;
   onMissionDispatchFailure: (requestId: string, message: string) => void;
   onMissionResponse: (result: MissionResponse, context: { requestId: string }) => void;
@@ -697,10 +697,10 @@ export function CommandBar({
                       {isMounted && targetWorkspace ? (
                         <button
                           type="button"
-                          onClick={onOpenWorkspaceChannels}
+                          onClick={() => onOpenWorkspaceChannels()}
                           className="inline-flex h-8 items-center rounded-full border border-cyan-300/18 bg-cyan-400/[0.1] px-3 text-[12px] text-cyan-50 transition-all hover:border-cyan-300/28 hover:bg-cyan-400/[0.14] hover:text-white"
                         >
-                          Add Channel
+                          Manage Surfaces
                         </button>
                       ) : null}
                     </motion.div>

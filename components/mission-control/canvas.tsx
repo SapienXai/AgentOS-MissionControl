@@ -21,42 +21,38 @@ import {
 
 import type {
   AgentDetailFocus,
+  AgentSurfaceBadge,
   AgentNodeData,
   MissionEdgeData,
+  SurfaceTetherNodeData,
   TaskNodeData,
-  TelegramTetherNodeData,
   WorkspaceNodeData
 } from "@/components/mission-control/canvas-types";
 import { AgentNode } from "@/components/mission-control/nodes/agent-node";
 import { MissionConnectionEdge } from "@/components/mission-control/edges/mission-connection-edge";
+import { SurfaceTetherNode } from "@/components/mission-control/nodes/surface-tether-node";
 import { TaskNode } from "@/components/mission-control/nodes/task-node";
-import { TelegramTetherNode } from "@/components/mission-control/nodes/telegram-tether-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
+import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, OpenClawAgent, TaskRecord } from "@/lib/openclaw/types";
 import { cn } from "@/lib/utils";
 
 type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;
 type AgentCanvasNode = Node<AgentNodeData, "agent">;
+type SurfaceTetherCanvasNode = Node<SurfaceTetherNodeData, "surface-module">;
 type TaskCanvasNode = Node<TaskNodeData, "task">;
-type TelegramModuleCanvasNode = Node<TelegramTetherNodeData, "telegram-module">;
 type CanvasEdge = Edge<MissionEdgeData, "simplebezier">;
-type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | TaskCanvasNode | TelegramModuleCanvasNode;
+type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | SurfaceTetherCanvasNode | TaskCanvasNode;
 type PersistedNodePosition = {
   x: number;
   y: number;
-};
-type PersistedNodePositionMap = Record<string, PersistedNodePosition>;
-type TelegramTetherSummary = {
-  channelCount: number;
-  channelNames: string[];
-  roleLines: string[];
-  roleTone: "primary" | "owner" | "delegate" | "mixed";
 };
 type SpringVelocity = {
   x: number;
   y: number;
 };
+type PersistedNodePositionMap = Record<string, PersistedNodePosition>;
 type FocusTaskAnchor = {
   taskId: string;
   agentId: string | null;
@@ -66,8 +62,8 @@ const emptyPersistedNodePositions: PersistedNodePositionMap = {};
 const nodeTypes = {
   workspace: WorkspaceNode,
   agent: AgentNode,
-  task: TaskNode,
-  "telegram-module": TelegramTetherNode
+  "surface-module": SurfaceTetherNode,
+  task: TaskNode
 };
 const edgeTypes = {
   simplebezier: MissionConnectionEdge
@@ -75,9 +71,9 @@ const edgeTypes = {
 const justCreatedTaskDurationMs = 12000;
 const nodePositionsStorageKey = "mission-control-node-positions:v2";
 const legacyNodePositionsStorageKey = "mission-control-node-positions";
-const telegramModuleSpringStiffness = 220;
-const telegramModuleSpringDamping = 20;
-const telegramModuleSettlingThreshold = 0.35;
+const surfaceModuleSpringStiffness = 220;
+const surfaceModuleSpringDamping = 20;
+const surfaceModuleSettlingThreshold = 0.35;
 
 export function MissionCanvas({
   snapshot,
@@ -100,6 +96,7 @@ export function MissionCanvas({
   onConfigureAgentModel,
   onConfigureAgentCapabilities,
   onInspectAgentDetail,
+  onOpenWorkspaceChannels,
   onReplyTask,
   onCopyTaskPrompt,
   onHideTask,
@@ -130,6 +127,7 @@ export function MissionCanvas({
   onConfigureAgentModel?: (agentId: string) => void;
   onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspectAgentDetail?: (agentId: string, focus: AgentDetailFocus) => void;
+  onOpenWorkspaceChannels?: (workspaceId?: string) => void;
   onReplyTask: (task: TaskRecord) => void;
   onCopyTaskPrompt: (task: TaskRecord) => void;
   onHideTask: (task: TaskRecord) => void;
@@ -144,6 +142,7 @@ export function MissionCanvas({
   const reactFlowRef = useRef<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null);
   const handledDispatchIdsRef = useRef<Set<string>>(new Set());
   const creationTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const surfaceSpringVelocitiesRef = useRef<Map<string, SpringVelocity>>(new Map());
   const persistedNodePositionsRef = useRef<PersistedNodePositionMap>({});
   const hasHydratedPersistedNodePositionsRef = useRef(false);
   const skipNextPersistRef = useRef(false);
@@ -179,6 +178,7 @@ export function MissionCanvas({
     onConfigureAgentModel,
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
+    onOpenWorkspaceChannels,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -189,7 +189,6 @@ export function MissionCanvas({
   );
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initialGraph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<CanvasEdge>(initialGraph.edges);
-  const telegramSpringVelocitiesRef = useRef<Map<string, SpringVelocity>>(new Map());
 
   useEffect(() => {
     const persistedPositions = readPersistedNodePositions(canvasScopeKey);
@@ -203,22 +202,18 @@ export function MissionCanvas({
 
     setNodes((previousNodes) =>
       previousNodes.map((node) => {
-        if (node.type === "workspace") {
+        if (node.type === "workspace" || node.type === "surface-module") {
           return node;
         }
 
         const persistedKey =
           node.type === "agent"
             ? toPersistedAgentPositionKey(node.data.agent)
-            : node.type === "telegram-module"
-              ? toPersistedTelegramModulePositionKey(node.data.agent)
-              : toPersistedTaskPositionKey(node.data.task);
+            : toPersistedTaskPositionKey(node.data.task);
         const legacyPersistedKey =
           node.type === "agent"
             ? toLegacyPersistedAgentPositionKey(node.data.agent.id)
-            : node.type === "telegram-module"
-              ? undefined
-              : toLegacyPersistedTaskPositionKey(node.data.task.id);
+            : toLegacyPersistedTaskPositionKey(node.data.task.id);
         const savedPosition =
           persistedPositions[persistedKey] ||
           (legacyPersistedKey ? persistedPositions[legacyPersistedKey] : undefined);
@@ -263,6 +258,7 @@ export function MissionCanvas({
       onConfigureAgentModel,
       onConfigureAgentCapabilities,
       onInspectAgentDetail,
+      onOpenWorkspaceChannels,
       onReplyTask,
       onCopyTaskPrompt,
       onHideTask,
@@ -303,6 +299,7 @@ export function MissionCanvas({
     onConfigureAgentModel,
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
+    onOpenWorkspaceChannels,
     onReplyTask,
     onCopyTaskPrompt,
     onHideTask,
@@ -351,28 +348,25 @@ export function MissionCanvas({
         let didUpdate = false;
         const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
         const nextNodes = currentNodes.map((node) => {
-          if (node.type !== "telegram-module") {
+          if (node.type !== "surface-module") {
             return node;
           }
 
           const agentNode = nodesById.get(node.data.agent.id);
           if (!agentNode || agentNode.type !== "agent") {
-            telegramSpringVelocitiesRef.current.delete(node.id);
+            surfaceSpringVelocitiesRef.current.delete(node.id);
             return node;
           }
 
-          if (node.dragging) {
-            telegramSpringVelocitiesRef.current.delete(node.id);
-            return node;
-          }
-
-          const targetPosition = resolveTelegramModuleAnchorPosition(
+          const targetPosition = resolveSurfaceModuleAnchorPosition(
             agentNode.position,
+            node.data.anchorIndex,
+            node.data.anchorCount,
             agentNode.width ?? agentNode.measured?.width,
             agentNode.height ?? agentNode.measured?.height
           );
-          const springVelocity = telegramSpringVelocitiesRef.current.get(node.id) ?? { x: 0, y: 0 };
-          const nextPosition = stepTelegramModuleSpring(
+          const springVelocity = surfaceSpringVelocitiesRef.current.get(node.id) ?? { x: 0, y: 0 };
+          const nextPosition = stepSurfaceModuleSpring(
             node.position,
             targetPosition,
             springVelocity,
@@ -380,7 +374,7 @@ export function MissionCanvas({
           );
 
           if (nextPosition.settled) {
-            telegramSpringVelocitiesRef.current.delete(node.id);
+            surfaceSpringVelocitiesRef.current.delete(node.id);
 
             if (node.position.x === targetPosition.x && node.position.y === targetPosition.y) {
               return node;
@@ -393,7 +387,7 @@ export function MissionCanvas({
             };
           }
 
-          telegramSpringVelocitiesRef.current.set(node.id, springVelocity);
+          surfaceSpringVelocitiesRef.current.set(node.id, springVelocity);
 
           if (
             Math.abs(nextPosition.position.x - node.position.x) < 0.001 &&
@@ -628,7 +622,7 @@ export function MissionCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeClick={(_, node) => {
-          if (node.type === "telegram-module") {
+          if (node.type === "surface-module") {
             return;
           }
 
@@ -680,6 +674,7 @@ function buildCanvasGraph(
   onConfigureAgentModel: ((agentId: string) => void) | undefined,
   onConfigureAgentCapabilities: ((agentId: string, focus: "skills" | "tools") => void) | undefined,
   onInspectAgentDetail: ((agentId: string, focus: AgentDetailFocus) => void) | undefined,
+  onOpenWorkspaceChannels: ((workspaceId?: string) => void) | undefined,
   onReplyTask: (task: TaskRecord) => void,
   onCopyTaskPrompt: (task: TaskRecord) => void,
   onHideTask: (task: TaskRecord) => void,
@@ -710,7 +705,7 @@ function buildCanvasGraph(
 
   const workspaceNodes: WorkspaceCanvasNode[] = [];
   const contentNodes: Array<AgentCanvasNode | TaskCanvasNode> = [];
-  const telegramModuleNodes: TelegramModuleCanvasNode[] = [];
+  const surfaceModuleNodes: SurfaceTetherCanvasNode[] = [];
   const graphTasks: TaskRecord[] = [];
   let rowTopY = 42;
   let rowMaxHeight = 0;
@@ -757,14 +752,13 @@ function buildCanvasGraph(
       const isTaskFocusedAgent = selectedTaskAgentId === agent.id || hasJustCreatedTask;
       const activeTaskCount = agentTasks.filter((task) => isLiveTask(task)).length;
       const isAgentChatOpen = activeChatAgentId === agent.id;
+      const surfaceBadges = buildAgentSurfaceBadges(snapshot, workspace, agent);
       const agentPosition = resolvePersistedPosition(
         toPersistedAgentPositionKey(agent),
         { x: agentX, y: agentY },
         persistedNodePositions,
         toLegacyPersistedAgentPositionKey(agent.id)
       );
-      const telegramTether = buildTelegramTetherSummary(snapshot, workspace, agent);
-      const showTelegramTether = agent.isDefault || telegramTether.channelCount > 0;
 
       contentNodes.push({
         id: agent.id,
@@ -782,41 +776,73 @@ function buildCanvasGraph(
           activeTaskCount,
           chatOpen: isAgentChatOpen,
           relativeTimeReferenceMs,
-          telegramTetherCount: telegramTether.channelCount,
+          surfaceBadges,
           onMessage: onMessageAgent,
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
           onFocus: onFocusAgent,
           onConfigureModel: onConfigureAgentModel,
           onConfigureCapabilities: onConfigureAgentCapabilities,
-          onInspect: onInspectAgentDetail
+          onInspect: onInspectAgentDetail,
+          onOpenWorkspaceChannels
         }
       });
 
-      if (showTelegramTether) {
-        const telegramModuleId = toTelegramTetherNodeId(agent);
-        const telegramModulePosition = resolveTelegramModuleAnchorPosition(agentPosition);
+      surfaceModuleNodes.push({
+        id: toSurfaceActionNodeId(agent),
+        type: "surface-module",
+        draggable: false,
+        selectable: false,
+        width: 64,
+        height: 64,
+        position: resolveSurfaceActionAnchorPosition(agentPosition, surfaceBadges.length),
+        zIndex: isComposerHighlightedAgent ? 55 : isTaskFocusedAgent ? 48 : 19,
+        selected: false,
+        data: {
+          agent,
+          emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
+          provider: "surface-add" as MissionControlSurfaceProvider,
+          variant: "add",
+          label: "Add surface",
+          actionLabel: "Connect a new workspace surface",
+          anchorIndex: 0,
+          anchorCount: surfaceBadges.length + 1,
+          surfaceCount: 0,
+          surfaceNames: [],
+          roleLabel: "Connect a new workspace surface",
+          roleTone: "primary",
+          accentColor: "#7dd3fc",
+          onClick: onOpenWorkspaceChannels ? () => onOpenWorkspaceChannels(workspace.id) : undefined
+        }
+      });
 
-        telegramModuleNodes.push({
-          id: telegramModuleId,
-          type: "telegram-module",
-          draggable: true,
+      surfaceBadges.forEach((surfaceBadge, surfaceIndex) => {
+        surfaceModuleNodes.push({
+          id: toSurfaceTetherNodeId(agent, surfaceBadge.provider),
+          type: "surface-module",
+          draggable: false,
           selectable: false,
           width: 64,
           height: 64,
-          position: telegramModulePosition,
+          position: resolveSurfaceModuleAnchorPosition(agentPosition, surfaceIndex, surfaceBadges.length),
           zIndex: isComposerHighlightedAgent ? 55 : isTaskFocusedAgent ? 48 : 18,
           selected: false,
           data: {
             agent,
             emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
-            channelCount: telegramTether.channelCount,
-            channelNames: telegramTether.channelNames,
-            telegramRoleLines: telegramTether.roleLines,
-            telegramRoleTone: telegramTether.roleTone
+            provider: surfaceBadge.provider,
+            variant: "surface",
+            label: surfaceBadge.label,
+            anchorIndex: surfaceIndex + 1,
+            anchorCount: surfaceBadges.length + 1,
+            surfaceCount: surfaceBadge.count,
+            surfaceNames: surfaceBadge.surfaceNames ?? [],
+            roleLabel: surfaceBadge.roleLabel,
+            roleTone: surfaceBadge.roleTone ?? "primary",
+            accentColor: surfaceBadge.accentColor ?? null
           }
         });
-      }
+      });
 
       graphTasks.push(...agentTasks);
 
@@ -897,7 +923,7 @@ function buildCanvasGraph(
     }
   });
 
-  const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes, ...telegramModuleNodes];
+  const nodes: CanvasNode[] = [...workspaceNodes, ...contentNodes, ...surfaceModuleNodes];
   return {
     nodes,
     edges: [
@@ -909,7 +935,7 @@ function buildCanvasGraph(
         composerTargetAgentId,
         isComposerActive
       ),
-      ...buildTelegramTetherEdges(nodes, composerTargetAgentId, isComposerActive)
+      ...buildSurfaceTetherEdges(nodes, composerTargetAgentId, isComposerActive)
     ]
   };
 }
@@ -974,7 +1000,7 @@ function buildEdgesForNodes(
   return edges;
 }
 
-function buildTelegramTetherEdges(
+function buildSurfaceTetherEdges(
   nodes: CanvasNode[],
   composerTargetAgentId: string | null,
   isComposerActive: boolean
@@ -983,7 +1009,7 @@ function buildTelegramTetherEdges(
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   for (const node of nodes) {
-    if (node.type !== "telegram-module") {
+    if (node.type !== "surface-module") {
       continue;
     }
 
@@ -999,17 +1025,18 @@ function buildTelegramTetherEdges(
       id: `edge:${sourceAgentId}:${node.id}`,
       source: sourceAgentId,
       target: node.id,
-      sourceHandle: "source-telegram",
-      targetHandle: "target-telegram",
+      sourceHandle: "source-surface",
+      targetHandle: node.data.variant === "add" ? "target-surface-action" : "target-surface",
       type: "simplebezier",
       zIndex: 16,
       animated: true,
       data: {
-        telegramTether: true,
+        surfaceTether: true,
+        surfaceAccentColor: node.data.accentColor ?? null,
         composerFocused: isComposerActive && composerTargetAgentId === sourceAgentId
       },
       style: {
-        strokeWidth: isComposerActive && composerTargetAgentId === sourceAgentId ? 2.15 : 1.85
+        strokeWidth: isComposerActive && composerTargetAgentId === sourceAgentId ? 2.2 : 1.95
       }
     });
   }
@@ -1050,21 +1077,23 @@ function isLiveTask(task: TaskRecord) {
   return task.status === "queued" || task.status === "running";
 }
 
-function buildTelegramTetherSummary(
+function buildAgentSurfaceBadges(
   snapshot: MissionControlSnapshot,
   workspace: MissionControlSnapshot["workspaces"][number],
   agent: OpenClawAgent
-): TelegramTetherSummary {
-  const relatedChannelNames = new Set<string>();
-  let primaryChannelCount = 0;
-  let ownerGroupCount = 0;
-  let delegateChannelCount = 0;
+) {
+  const summaries = new Map<
+    string,
+    {
+      surfaceIds: Set<string>;
+      surfaceNames: Set<string>;
+      primaryCount: number;
+      assistantCount: number;
+      routeCount: number;
+    }
+  >();
 
   for (const channel of snapshot.channelRegistry.channels) {
-    if (channel.type !== "telegram") {
-      continue;
-    }
-
     const workspaceBinding = channel.workspaces.find((entry) => entry.workspaceId === workspace.id) ?? null;
     if (!workspaceBinding) {
       continue;
@@ -1073,115 +1102,69 @@ function buildTelegramTetherSummary(
     const enabledAssignments = workspaceBinding.groupAssignments.filter((assignment) => assignment.enabled !== false);
     const ownedAssignments = enabledAssignments.filter((assignment) => assignment.agentId === agent.id);
     const isPrimary = channel.primaryAgentId === agent.id;
-    const isDelegate = !isPrimary && workspaceBinding.agentIds.includes(agent.id);
-    const hasAnyTelegramRole = isPrimary || isDelegate || ownedAssignments.length > 0;
+    const isAssistant = !isPrimary && workspaceBinding.agentIds.includes(agent.id);
 
-    if (!hasAnyTelegramRole) {
+    if (!isPrimary && !isAssistant && ownedAssignments.length === 0) {
       continue;
     }
 
-    relatedChannelNames.add(channel.name);
-    primaryChannelCount += isPrimary ? 1 : 0;
-    delegateChannelCount += isDelegate ? 1 : 0;
-    ownerGroupCount += ownedAssignments.length;
+    const current =
+      summaries.get(channel.type) ?? {
+        surfaceIds: new Set<string>(),
+        surfaceNames: new Set<string>(),
+        primaryCount: 0,
+        assistantCount: 0,
+        routeCount: 0
+      };
+    current.surfaceIds.add(channel.id);
+    current.surfaceNames.add(channel.name);
+    current.primaryCount += isPrimary ? 1 : 0;
+    current.assistantCount += isAssistant ? 1 : 0;
+    current.routeCount += ownedAssignments.length;
+    summaries.set(channel.type, current);
   }
 
-  const roleLines: string[] = [];
+  return Array.from(summaries.entries())
+    .map(([provider, summary]) => {
+      const catalogEntry = getSurfaceCatalogEntry(provider);
+      const roleParts: string[] = [];
 
-  if (primaryChannelCount > 0) {
-    roleLines.push(
-      `Primary voice in ${primaryChannelCount} channel${primaryChannelCount === 1 ? "" : "s"}`
-    );
-  }
+      if (summary.primaryCount > 0) {
+        roleParts.push(
+          `Primary on ${summary.primaryCount} ${summary.primaryCount === 1 ? "surface" : "surfaces"}`
+        );
+      }
 
-  if (ownerGroupCount > 0) {
-    roleLines.push(`Group owner in ${ownerGroupCount} chat${ownerGroupCount === 1 ? "" : "s"}`);
-  }
+      if (summary.routeCount > 0) {
+        roleParts.push(`Owns ${summary.routeCount} ${summary.routeCount === 1 ? "route" : "routes"}`);
+      }
 
-  if (delegateChannelCount > 0) {
-    roleLines.push(
-      `Delegate in ${delegateChannelCount} channel${delegateChannelCount === 1 ? "" : "s"}`
-    );
-  }
+      if (summary.assistantCount > 0) {
+        roleParts.push(
+          `Assistant on ${summary.assistantCount} ${summary.assistantCount === 1 ? "surface" : "surfaces"}`
+        );
+      }
 
-  if (roleLines.length === 0 && agent.isDefault) {
-    roleLines.push("Default Telegram anchor");
-  }
+      const roleTone =
+        summary.primaryCount > 0 && (summary.routeCount > 0 || summary.assistantCount > 0)
+          ? "mixed"
+          : summary.primaryCount > 0
+            ? "primary"
+            : summary.routeCount > 0
+              ? "owner"
+              : "delegate";
 
-  const roleTone =
-    primaryChannelCount > 0 && (ownerGroupCount > 0 || delegateChannelCount > 0)
-      ? "mixed"
-      : primaryChannelCount > 0
-        ? "primary"
-        : ownerGroupCount > 0
-          ? "owner"
-          : delegateChannelCount > 0
-            ? "delegate"
-            : "primary";
-
-  return {
-    channelCount: relatedChannelNames.size,
-    channelNames: [...relatedChannelNames].sort((left, right) => left.localeCompare(right)),
-    roleLines,
-    roleTone
-  };
-}
-
-function resolveTelegramModuleAnchorPosition(
-  agentPosition: PersistedNodePosition,
-  agentWidth = 212,
-  agentHeight = 220
-) {
-  const horizontalOffset = Math.round(Math.max(88, agentWidth * 0.42));
-  const verticalOffset = Math.round(Math.max(34, agentHeight * 0.18));
-
-  return {
-    x: agentPosition.x - horizontalOffset,
-    y: agentPosition.y - verticalOffset
-  };
-}
-
-function stepTelegramModuleSpring(
-  currentPosition: PersistedNodePosition,
-  targetPosition: PersistedNodePosition,
-  velocity: SpringVelocity,
-  dtSeconds: number
-) {
-  const forceX =
-    (targetPosition.x - currentPosition.x) * telegramModuleSpringStiffness -
-    velocity.x * telegramModuleSpringDamping;
-  const forceY =
-    (targetPosition.y - currentPosition.y) * telegramModuleSpringStiffness -
-    velocity.y * telegramModuleSpringDamping;
-
-  velocity.x += forceX * dtSeconds;
-  velocity.y += forceY * dtSeconds;
-
-  const nextPosition = {
-    x: currentPosition.x + velocity.x * dtSeconds,
-    y: currentPosition.y + velocity.y * dtSeconds
-  };
-
-  const settled =
-    Math.abs(targetPosition.x - nextPosition.x) < telegramModuleSettlingThreshold &&
-    Math.abs(targetPosition.y - nextPosition.y) < telegramModuleSettlingThreshold &&
-    Math.abs(velocity.x) < telegramModuleSettlingThreshold &&
-    Math.abs(velocity.y) < telegramModuleSettlingThreshold;
-
-  if (settled) {
-    velocity.x = 0;
-    velocity.y = 0;
-
-    return {
-      position: targetPosition,
-      settled: true
-    };
-  }
-
-  return {
-    position: nextPosition,
-    settled: false
-  };
+      return {
+        provider,
+        label: catalogEntry.label,
+        count: summary.surfaceIds.size,
+        roleLabel: roleParts.join(" · "),
+        roleTone,
+        accentColor: catalogEntry.accentColor ?? null,
+        surfaceNames: Array.from(summary.surfaceNames).sort((left, right) => left.localeCompare(right))
+      } satisfies AgentSurfaceBadge;
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function mergeNodePositions(previousNodes: CanvasNode[], nextNodes: CanvasNode[]) {
@@ -1248,7 +1231,23 @@ function resolveNodeZIndex(
     return 10;
   }
 
-  if (node.type === "telegram-module") {
+  if (node.type === "surface-module") {
+    if (node.data.variant === "add") {
+      if (isComposerActive && composerTargetAgentId === node.data.agent.id && selectedNodeId === node.id) {
+        return 65;
+      }
+
+      if (selectedNodeId === node.id) {
+        return 60;
+      }
+
+      if (isComposerActive && composerTargetAgentId === node.data.agent.id) {
+        return 55;
+      }
+
+      return 20;
+    }
+
     if (isComposerActive && composerTargetAgentId === node.data.agent.id && selectedNodeId === node.id) {
       return 65;
     }
@@ -1335,10 +1334,6 @@ function extractPersistedNodePositions(nodes: CanvasNode[]) {
   ) as PersistedNodePositionMap;
 }
 
-function isTelegramModulePersistedPositionKey(key: string) {
-  return key.startsWith("telegram-module");
-}
-
 function arePersistedNodePositionsEqual(
   left: PersistedNodePositionMap,
   right: PersistedNodePositionMap
@@ -1364,9 +1359,8 @@ function parsePersistedNodePositions(raw: string) {
       return {} as PersistedNodePositionMap;
     }
 
-    const entries = Object.entries(parsed as Record<string, unknown>).filter(([key, value]) => {
+    const entries = Object.entries(parsed as Record<string, unknown>).filter(([, value]) => {
       return (
-        !isTelegramModulePersistedPositionKey(key) &&
         typeof value === "object" &&
         value !== null &&
         typeof (value as PersistedNodePosition).x === "number" &&
@@ -1404,14 +1398,10 @@ function resolvePersistedPosition(
 }
 
 function resolveNodePersistedPositionKey(
-  node: AgentCanvasNode | TaskCanvasNode | TelegramModuleCanvasNode
+  node: AgentCanvasNode | TaskCanvasNode
 ) {
   if (node.type === "agent") {
     return toPersistedAgentPositionKey(node.data.agent);
-  }
-
-  if (node.type === "telegram-module") {
-    return toPersistedTelegramModulePositionKey(node.data.agent);
   }
 
   return toPersistedTaskPositionKey(node.data.task);
@@ -1425,12 +1415,82 @@ function toLegacyPersistedAgentPositionKey(agentId: string) {
   return `agent:${agentId}`;
 }
 
-function toTelegramTetherNodeId(agent: OpenClawAgent) {
-  return `telegram-module-v3:${agent.workspaceId}:${agent.id}`;
+function toSurfaceTetherNodeId(agent: OpenClawAgent, provider: AgentSurfaceBadge["provider"]) {
+  return `surface-module-v1:${agent.workspaceId}:${agent.id}:${provider}`;
 }
 
-function toPersistedTelegramModulePositionKey(agent: OpenClawAgent) {
-  return toTelegramTetherNodeId(agent);
+function toSurfaceActionNodeId(agent: OpenClawAgent) {
+  return `surface-add-v1:${agent.workspaceId}:${agent.id}`;
+}
+
+function resolveSurfaceModuleAnchorPosition(
+  agentPosition: PersistedNodePosition,
+  index: number,
+  totalCount: number,
+  agentWidth = 212,
+  agentHeight = 220
+) {
+  const horizontalOffset = Math.round(Math.max(88, agentWidth * 0.42));
+  const verticalOffset = Math.round(Math.max(34, agentHeight * 0.18));
+  const rowGap = 76;
+  const groupOffset = totalCount > 1 ? ((totalCount - 1) * rowGap) / 2 : 0;
+
+  return {
+    x: agentPosition.x - horizontalOffset,
+    y: Math.round(agentPosition.y - verticalOffset - groupOffset + index * rowGap)
+  };
+}
+
+function resolveSurfaceActionAnchorPosition(
+  agentPosition: PersistedNodePosition,
+  surfaceCount: number,
+  agentWidth = 212,
+  agentHeight = 220
+) {
+  return resolveSurfaceModuleAnchorPosition(agentPosition, 0, surfaceCount + 1, agentWidth, agentHeight);
+}
+
+function stepSurfaceModuleSpring(
+  currentPosition: PersistedNodePosition,
+  targetPosition: PersistedNodePosition,
+  velocity: SpringVelocity,
+  dtSeconds: number
+) {
+  const forceX =
+    (targetPosition.x - currentPosition.x) * surfaceModuleSpringStiffness -
+    velocity.x * surfaceModuleSpringDamping;
+  const forceY =
+    (targetPosition.y - currentPosition.y) * surfaceModuleSpringStiffness -
+    velocity.y * surfaceModuleSpringDamping;
+
+  velocity.x += forceX * dtSeconds;
+  velocity.y += forceY * dtSeconds;
+
+  const nextPosition = {
+    x: currentPosition.x + velocity.x * dtSeconds,
+    y: currentPosition.y + velocity.y * dtSeconds
+  };
+
+  const settled =
+    Math.abs(targetPosition.x - nextPosition.x) < surfaceModuleSettlingThreshold &&
+    Math.abs(targetPosition.y - nextPosition.y) < surfaceModuleSettlingThreshold &&
+    Math.abs(velocity.x) < surfaceModuleSettlingThreshold &&
+    Math.abs(velocity.y) < surfaceModuleSettlingThreshold;
+
+  if (settled) {
+    velocity.x = 0;
+    velocity.y = 0;
+
+    return {
+      position: targetPosition,
+      settled: true
+    };
+  }
+
+  return {
+    position: nextPosition,
+    settled: false
+  };
 }
 
 function toPersistedTaskPositionKey(task: TaskRecord) {

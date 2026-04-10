@@ -53,14 +53,14 @@ export function GlobalModelPicker({
   const visibleModels = showAllMatches ? filteredModels : filteredModels.slice(0, visibleModelCount);
   const hasMoreModels = !showAllMatches && visibleModelCount < filteredModels.length;
   const remainingModelCount = filteredModels.length - visibleModelCount;
-  const availableSelectedCount = selectedModelIds.filter(
+  const selectedModelCount = selectedModelIds.filter(
     (modelId) => {
       const model = models.find((entry) => entry.id === modelId);
       if (!model) {
         return false;
       }
 
-      return isSelectableModel(model) && !model.alreadyAdded;
+      return !model.alreadyAdded;
     }
   ).length;
   const providerCount = new Set(models.map((model) => model.provider)).size;
@@ -108,7 +108,7 @@ export function GlobalModelPicker({
           {visibleModels.map((model) => {
             const selected = selectedModelIds.includes(model.id);
             const locked = model.alreadyAdded;
-            const selectable = isSelectableModel(model);
+            const needsSetup = !locked && (model.available === false || model.missing);
             const providerDescriptor = isAddModelsProviderId(model.provider)
               ? getModelProviderDescriptor(model.provider)
               : null;
@@ -125,21 +125,16 @@ export function GlobalModelPicker({
                     return;
                   }
 
-                  if (!selectable) {
-                    onOpenProviders(isAddModelsProviderId(model.provider) ? model.provider : null);
-                    return;
-                  }
-
                   onToggleModel(model.provider as AddModelsProviderId, model.id);
                 }}
                 className={cn(
                   "flex w-full items-start justify-between gap-2 rounded-[14px] border px-2.5 py-2 text-left transition-all",
                   locked
                     ? "cursor-not-allowed border-white/8 bg-white/[0.02] opacity-70"
-                    : !selectable
-                      ? "border-amber-300/20 bg-amber-300/[0.06] hover:border-amber-300/30 hover:bg-amber-300/[0.08]"
                     : selected
                       ? "border-cyan-300/35 bg-cyan-300/[0.08]"
+                    : needsSetup
+                      ? "border-amber-300/20 bg-amber-300/[0.06] hover:border-amber-300/30 hover:bg-amber-300/[0.08]"
                       : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
                 )}
               >
@@ -149,19 +144,19 @@ export function GlobalModelPicker({
                       "mt-0.5 flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-md border",
                       locked
                         ? "border-white/10 bg-white/[0.03] text-slate-500"
-                        : !selectable
-                          ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
                         : selected
                           ? "border-cyan-300/50 bg-cyan-300/15 text-cyan-100"
+                        : needsSetup
+                          ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
                           : "border-white/12 bg-white/[0.03] text-transparent"
                     )}
                   >
                     {locked ? (
                       <Lock className="h-2 w-2" />
-                    ) : !selectable ? (
-                      <AlertTriangle className="h-2 w-2" />
-                    ) : (
+                    ) : selected ? (
                       <Check className="h-2 w-2" />
+                    ) : (
+                      <AlertTriangle className="h-2 w-2" />
                     )}
                   </div>
 
@@ -175,7 +170,7 @@ export function GlobalModelPicker({
                       {model.input ? <span>{model.input}</span> : null}
                       {model.contextWindow ? <span>{formatContextWindow(model.contextWindow)} ctx</span> : null}
                     </div>
-                    {!selectable ? (
+                    {needsSetup ? (
                       <p className="mt-1 text-[9px] leading-4 text-amber-100/85">{setupHint}</p>
                     ) : null}
                   </div>
@@ -186,7 +181,7 @@ export function GlobalModelPicker({
                     <Badge variant="muted" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
                       Already added
                     </Badge>
-                  ) : !selectable ? (
+                  ) : needsSetup ? (
                     <Badge variant="warning" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
                       Needs setup
                     </Badge>
@@ -240,14 +235,14 @@ export function GlobalModelPicker({
 
       <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
         <p className="text-[9px] leading-4 text-slate-400">
-          {availableSelectedCount > 0
-            ? `${availableSelectedCount} model${availableSelectedCount === 1 ? "" : "s"} selected`
+          {selectedModelCount > 0
+            ? `${selectedModelCount} model${selectedModelCount === 1 ? "" : "s"} selected`
             : "Choose one or more models to add"}
         </p>
         <Button
           type="button"
           onClick={onAddSelected}
-          disabled={availableSelectedCount === 0 || isAdding}
+          disabled={selectedModelCount === 0 || isAdding}
           className="h-7 rounded-full px-2.5 text-[10px]"
         >
           {isAdding ? "Adding..." : "Add selected models"}
@@ -257,17 +252,13 @@ export function GlobalModelPicker({
   );
 }
 
-function isSelectableModel(model: AddModelsCatalogModel) {
-  return !model.alreadyAdded && model.available !== false && !model.missing;
-}
-
 function resolveSetupHint(model: AddModelsCatalogModel, providerLabel: string) {
   if (model.missing) {
-    return `${providerLabel} is configured, but this model is not available locally yet.`;
+    return `${providerLabel} is configured, but this model is not available locally yet. You can still add it now, then finish setup in Providers.`;
   }
 
   if (model.available === false) {
-    return `${providerLabel} needs a one-time setup before this model can be used. Open Providers to connect it.`;
+    return `${providerLabel} needs a one-time setup before this model can be used. You can add it now, then connect it in Add Models > Providers.`;
   }
 
   return "";

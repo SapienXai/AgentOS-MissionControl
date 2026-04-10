@@ -46,6 +46,8 @@ import {
   formatAgentDisplayName,
   stripMissionRouting
 } from "@/lib/openclaw/presenters";
+import { readOpenClawSurfaceAccounts } from "@/lib/openclaw/surface-adapters";
+import { getSurfaceKind } from "@/lib/openclaw/surface-catalog";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
@@ -66,6 +68,7 @@ import type {
   AgentHeartbeatInput,
   AgentPolicy,
   AgentStatus,
+  DiscoveredSurfaceRoute,
   OperationProgressSnapshot,
   AgentUpdateInput,
   ModelReadiness,
@@ -103,6 +106,7 @@ import type {
   WorkspaceUpdateInput,
   WorkspaceProject,
   PlannerChannelType,
+  MissionControlSurfaceProvider,
   ChannelRegistry,
   ChannelAccountRecord,
   PlannerContextSource,
@@ -628,7 +632,13 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       settings
     );
     const channelRegistry = await readChannelRegistry();
-    const channelAccounts = applyChannelAccountDisplayNames(await readChannelAccounts(), channelRegistry);
+    const channelAccounts = applyChannelAccountDisplayNames(
+      mergeMissionControlSurfaceAccounts([
+        ...(await readChannelAccounts()),
+        ...buildLegacyRegistrySurfaceAccounts(channelRegistry)
+      ]),
+      channelRegistry
+    );
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
     const profileByAgent = new Map<string, AgentBootstrapProfile>();
@@ -3881,13 +3891,13 @@ export async function upsertWorkspaceChannel(input: {
   workspaceId: string;
   workspacePath: string;
   channelId: string;
-  type: PlannerChannelType;
+  type: MissionControlSurfaceProvider;
   name: string;
   primaryAgentId?: string | null;
   agentIds?: string[];
   groupAssignments?: WorkspaceChannelGroupAssignment[];
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
 
   if (!channelId) {
     throw new Error("Channel id is required.");
@@ -3960,7 +3970,7 @@ export async function disconnectWorkspaceChannel(input: {
   workspaceId: string;
   channelId: string;
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
@@ -4000,7 +4010,7 @@ export async function disconnectWorkspaceChannel(input: {
 export async function deleteWorkspaceChannelEverywhere(input: {
   channelId: string;
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
@@ -4021,7 +4031,7 @@ export async function deleteWorkspaceChannelEverywhere(input: {
   );
   const workspacePaths = uniqueStrings(channel.workspaces.map((workspace) => workspace.workspacePath));
 
-  if (channel.type !== "internal") {
+  if (isPlannerChannelTypeValue(channel.type) && channel.type !== "internal") {
     await runOpenClaw(
       ["channels", "remove", "--channel", channel.type, "--account", channelId, "--delete"],
       { timeoutMs: 60000 }
@@ -4048,7 +4058,7 @@ export async function setWorkspaceChannelPrimary(input: {
   channelId: string;
   primaryAgentId: string | null;
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
@@ -4071,7 +4081,7 @@ export async function setWorkspaceChannelGroups(input: {
   workspaceId: string;
   groupAssignments: WorkspaceChannelGroupAssignment[];
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
@@ -4133,7 +4143,7 @@ export async function bindWorkspaceChannelAgent(input: {
   workspacePath: string;
   agentId: string;
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   const agentId = slugify(input.agentId.trim());
   if (!channelId || !agentId) {
     throw new Error("Channel id and agent id are required.");
@@ -4176,7 +4186,7 @@ export async function unbindWorkspaceChannelAgent(input: {
   workspaceId: string;
   agentId: string;
 }) {
-  const channelId = slugify(input.channelId.trim());
+  const channelId = normalizeChannelId(input.channelId);
   const agentId = slugify(input.agentId.trim());
   if (!channelId || !agentId) {
     throw new Error("Channel id and agent id are required.");
@@ -9320,33 +9330,8 @@ async function readChannelRegistry() {
 
 async function readChannelAccounts() {
   try {
-    const channels = await runOpenClawJson<Record<string, Record<string, unknown>>>([
-      "config",
-      "get",
-      "channels",
-      "--json"
-    ]);
-    const accounts: ChannelAccountRecord[] = Object.entries(channels).flatMap(([type, config]) => {
-      const records = isObjectRecord(config?.accounts) ? (config.accounts as Record<string, unknown>) : {};
-
-      return Object.entries(records).flatMap(([accountId, account]) => {
-        if (!isPlannerChannelTypeValue(type)) {
-          return [];
-        }
-
-        const accountRecord = isObjectRecord(account) ? (account as Record<string, unknown>) : {};
-
-        return [
-          {
-            id: accountId,
-            type,
-            name: typeof accountRecord.name === "string" ? accountRecord.name : accountId,
-            enabled: accountRecord.enabled !== false
-          }
-        ] satisfies ChannelAccountRecord[];
-      });
-    });
-    return dedupeChannelAccounts(accounts, channels);
+    const accounts = await readOpenClawSurfaceAccounts();
+    return dedupeChannelAccounts(accounts);
   } catch {
     return [] as ChannelAccountRecord[];
   }
@@ -9425,15 +9410,7 @@ async function readTelegramAccountBotIds() {
   }
 }
 
-function dedupeChannelAccounts(
-  accounts: ChannelAccountRecord[],
-  channels: Record<string, Record<string, unknown>>
-) {
-  const telegramConfig = isObjectRecord(channels.telegram) ? (channels.telegram as Record<string, unknown>) : null;
-  const telegramRecords = isObjectRecord(telegramConfig?.accounts)
-    ? (telegramConfig.accounts as Record<string, unknown>)
-    : {};
-  const telegramDefaultAccount = normalizeOptionalValue(telegramConfig?.defaultAccount as string | null | undefined);
+function dedupeChannelAccounts(accounts: ChannelAccountRecord[]) {
   const telegramByBot = new Map<string, ChannelAccountRecord>();
   const others: ChannelAccountRecord[] = [];
 
@@ -9443,9 +9420,10 @@ function dedupeChannelAccounts(
       continue;
     }
 
-    const record = isObjectRecord(telegramRecords[account.id]) ? (telegramRecords[account.id] as Record<string, unknown>) : null;
-    const token = normalizeOptionalValue(record?.botToken as string | null | undefined);
-    const botId = token?.split(":", 1)[0]?.trim();
+    const botId =
+      typeof account.metadata?.botId === "string" && account.metadata.botId.trim().length > 0
+        ? account.metadata.botId.trim()
+        : null;
 
     if (!botId) {
       if (!telegramByBot.has(account.id)) {
@@ -9460,8 +9438,8 @@ function dedupeChannelAccounts(
       continue;
     }
 
-    const candidateScore = scoreTelegramAccountChoice(account.id, telegramDefaultAccount);
-    const currentScore = scoreTelegramAccountChoice(current.id, telegramDefaultAccount);
+    const candidateScore = scoreTelegramAccountChoice(account.id);
+    const currentScore = scoreTelegramAccountChoice(current.id);
     if (candidateScore > currentScore) {
       telegramByBot.set(botId, account);
     }
@@ -9470,11 +9448,7 @@ function dedupeChannelAccounts(
   return [...others, ...Array.from(telegramByBot.values())];
 }
 
-function scoreTelegramAccountChoice(accountId: string, defaultAccountId: string | null | undefined) {
-  if (defaultAccountId && accountId === defaultAccountId) {
-    return 3;
-  }
-
+function scoreTelegramAccountChoice(accountId: string) {
   if (accountId !== "default") {
     return 2;
   }
@@ -9541,13 +9515,15 @@ async function reconcileTelegramRegistryAccounts(registry: ChannelRegistry) {
   });
 }
 
-async function buildTelegramAccountId(name: string) {
-  const baseSlug = slugify(name.trim()) || "telegram";
-  const baseId = `telegram-${baseSlug}`;
+type ManagedChatChannelProvider = Exclude<PlannerChannelType, "internal">;
+
+async function buildManagedSurfaceAccountId(provider: MissionControlSurfaceProvider, name: string) {
+  const baseSlug = slugify(name.trim()) || provider;
+  const baseId = `${provider}-${baseSlug}`;
   const registry = await readChannelRegistry();
   const existingIds = new Set([
-    ...registry.channels.filter((channel) => channel.type === "telegram").map((channel) => channel.id),
-    ...(await readChannelAccounts()).filter((account) => account.type === "telegram").map((account) => account.id)
+    ...registry.channels.filter((channel) => channel.type === provider).map((channel) => channel.id),
+    ...(await readChannelAccounts()).filter((account) => account.type === provider).map((account) => account.id)
   ]);
 
   if (!existingIds.has(baseId)) {
@@ -9562,12 +9538,280 @@ async function buildTelegramAccountId(name: string) {
   return `${baseId}-${index}`;
 }
 
+async function buildTelegramAccountId(name: string) {
+  return buildManagedSurfaceAccountId("telegram", name);
+}
+
 async function writeChannelRegistry(registry: ChannelRegistry) {
   await writeTextFileEnsured(channelRegistryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
 
 export async function getChannelRegistry() {
   return readChannelRegistry();
+}
+
+export async function createManagedChatChannelAccount(input: {
+  provider: ManagedChatChannelProvider;
+  name: string;
+  accountId?: string;
+  token?: string;
+  botToken?: string;
+  webhookUrl?: string;
+}) {
+  if (input.provider === "telegram") {
+    if (!input.token?.trim()) {
+      throw new Error("Telegram bot token is required.");
+    }
+
+    return createTelegramChannelAccount({
+      name: input.name,
+      token: input.token,
+      accountId: input.accountId
+    });
+  }
+
+  const accountId =
+    normalizeOptionalValue(input.accountId) ?? (await buildManagedSurfaceAccountId(input.provider, input.name));
+  const before = new Set(
+    (await readChannelAccounts())
+      .filter((account) => account.type === input.provider)
+      .map((account) => account.id)
+  );
+  const args = (() => {
+    switch (input.provider) {
+      case "discord":
+        if (!input.token?.trim()) {
+          throw new Error("Discord bot token is required.");
+        }
+        return ["channels", "add", "--channel", "discord", "--account", accountId, "--token", input.token, "--name", input.name];
+      case "slack":
+        if (!input.botToken?.trim()) {
+          throw new Error("Slack bot token is required.");
+        }
+        return [
+          "channels",
+          "add",
+          "--channel",
+          "slack",
+          "--account",
+          accountId,
+          "--bot-token",
+          input.botToken,
+          "--name",
+          input.name
+        ];
+      case "googlechat":
+        if (!input.webhookUrl?.trim()) {
+          throw new Error("Google Chat webhook URL is required.");
+        }
+        return [
+          "channels",
+          "add",
+          "--channel",
+          "googlechat",
+          "--account",
+          accountId,
+          "--webhook-url",
+          input.webhookUrl,
+          "--name",
+          input.name
+        ];
+      default:
+        throw new Error(`OpenClaw provisioning is not implemented for ${input.provider}.`);
+    }
+  })();
+
+  await runOpenClaw(args, { timeoutMs: 60000 });
+
+  const afterAccounts = (await readChannelAccounts()).filter((account) => account.type === input.provider);
+  const created =
+    afterAccounts.find((account) => account.id === accountId) ??
+    afterAccounts.find((account) => !before.has(account.id) && account.name === input.name) ??
+    afterAccounts.find((account) => !before.has(account.id)) ??
+    null;
+
+  return (
+    created ?? {
+      id: accountId,
+      type: input.provider,
+      kind: getSurfaceKind(input.provider),
+      name: input.name.trim() || accountId,
+      enabled: true
+    }
+  );
+}
+
+export async function createManagedSurfaceAccount(input: {
+  provider: MissionControlSurfaceProvider;
+  name: string;
+  accountId?: string;
+  token?: string;
+  botToken?: string;
+  webhookUrl?: string;
+  config?: Record<string, unknown>;
+}) {
+  if (isManagedChatChannelProvider(input.provider)) {
+    return createManagedChatChannelAccount({
+      provider: input.provider,
+      name: input.name,
+      accountId: input.accountId,
+      token: input.token,
+      botToken: input.botToken,
+      webhookUrl: input.webhookUrl
+    });
+  }
+
+  const provisionConfig = normalizeManagedSurfaceProvisionConfig(input.config);
+  const normalizedName = input.name.trim();
+  const accountIdentity = extractManagedSurfaceIdentity(input.provider, provisionConfig);
+  const accountId =
+    normalizeOptionalValue(input.accountId) ?? accountIdentity ?? (await buildManagedSurfaceAccountId(input.provider, input.name));
+  const configPath = getManagedSurfaceConfigPath(input.provider);
+
+  switch (input.provider) {
+    case "gmail": {
+      const account = normalizeOptionalValue(
+        (provisionConfig.account as string | null | undefined) ??
+          (provisionConfig.email as string | null | undefined) ??
+          (provisionConfig.address as string | null | undefined)
+      );
+
+      if (!account) {
+        throw new Error("Gmail account email is required.");
+      }
+
+      const gmailSetupArgs = buildGmailProvisionArgs({
+        account,
+        config: provisionConfig
+      });
+
+      await runOpenClaw(gmailSetupArgs, { timeoutMs: 60000 });
+
+      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
+        () => null
+      );
+      const currentHooksConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", "hooks", "--json"]).catch(
+        () => null
+      );
+      const currentPresetsValue = currentHooksConfig?.presets;
+      const currentPresets = Array.isArray(currentPresetsValue)
+        ? currentPresetsValue.filter((entry): entry is string => typeof entry === "string")
+        : [];
+      const nextHooksConfig = mergeManagedSurfaceConfig(currentHooksConfig, {
+        enabled: true,
+        presets: uniqueStrings([...currentPresets, "gmail"])
+      });
+
+      await runOpenClaw(["config", "set", "hooks", JSON.stringify(nextHooksConfig), "--strict-json"], {
+        timeoutMs: 60000
+      });
+
+      const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
+        enabled: true,
+        name: normalizedName || account,
+        label: normalizedName || account,
+        accountId,
+        account,
+        email: account,
+        address: account,
+        ...provisionConfig
+      });
+
+      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+        timeoutMs: 60000
+      });
+      break;
+    }
+    case "webhook": {
+      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
+        () => null
+      );
+      const token = normalizeManagedSurfaceString(provisionConfig.token);
+      if (!token) {
+        throw new Error("Webhook token is required.");
+      }
+
+      const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
+        enabled: true,
+        name: normalizedName || accountId,
+        label: normalizedName || accountId,
+        accountId,
+        token,
+        ...provisionConfig
+      });
+
+      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+        timeoutMs: 60000
+      });
+      break;
+    }
+    case "cron": {
+      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
+        () => null
+      );
+      const webhookToken = normalizeManagedSurfaceString(provisionConfig.webhookToken);
+      if (!webhookToken) {
+        throw new Error("Cron webhook token is required.");
+      }
+
+      const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
+        enabled: true,
+        name: normalizedName || accountId,
+        label: normalizedName || accountId,
+        accountId,
+        webhookToken,
+        ...provisionConfig
+      });
+
+      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+        timeoutMs: 60000
+      });
+      break;
+    }
+    case "email": {
+      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
+        () => null
+      );
+      const address = normalizeManagedSurfaceString(provisionConfig.address ?? provisionConfig.email);
+      if (!address) {
+        throw new Error("Email address is required.");
+      }
+
+      const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
+        enabled: true,
+        name: normalizedName || address,
+        label: normalizedName || address,
+        accountId,
+        address,
+        email: address,
+        ...provisionConfig
+      });
+
+      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+        timeoutMs: 60000
+      });
+      break;
+    }
+    default:
+      throw new Error(`OpenClaw provisioning is not implemented for ${input.provider}.`);
+  }
+
+  const refreshedAccounts = (await readChannelAccounts()).filter((account) => account.type === input.provider);
+  const created =
+    refreshedAccounts.find((account) => account.id === accountId) ??
+    refreshedAccounts.find((account) => account.name.trim().toLowerCase() === input.name.trim().toLowerCase()) ??
+    refreshedAccounts[0] ??
+    null;
+
+  return (
+    created ?? {
+      id: accountId,
+    type: input.provider,
+    kind: getSurfaceKind(input.provider),
+    name: normalizedName || accountId,
+    enabled: true
+  }
+  );
 }
 
 export async function createTelegramChannelAccount(input: { name: string; token: string; accountId?: string }) {
@@ -9657,6 +9901,206 @@ export async function createTelegramChannelAccount(input: { name: string; token:
     ...created,
     name: input.name.trim() || created.name
   };
+}
+
+function getManagedSurfaceConfigPath(provider: MissionControlSurfaceProvider) {
+  switch (provider) {
+    case "gmail":
+      return "hooks.gmail";
+    case "email":
+      return "email";
+    case "webhook":
+      return "hooks";
+    case "cron":
+      return "cron";
+    default:
+      throw new Error(`OpenClaw provisioning is not implemented for ${provider}.`);
+  }
+}
+
+function isManagedChatChannelProvider(provider: MissionControlSurfaceProvider): provider is ManagedChatChannelProvider {
+  return provider === "telegram" || provider === "discord" || provider === "slack" || provider === "googlechat";
+}
+
+function extractManagedSurfaceIdentity(provider: MissionControlSurfaceProvider, config: Record<string, unknown>) {
+  switch (provider) {
+    case "gmail":
+      return (
+        normalizeManagedSurfaceString(config.account) ??
+        normalizeManagedSurfaceString(config.email) ??
+        normalizeManagedSurfaceString(config.address)
+      );
+    case "email":
+      return normalizeManagedSurfaceString(config.address) ?? normalizeManagedSurfaceString(config.email);
+    case "webhook":
+      return normalizeManagedSurfaceString(config.accountId) ?? normalizeManagedSurfaceString(config.name);
+    case "cron":
+      return normalizeManagedSurfaceString(config.accountId) ?? normalizeManagedSurfaceString(config.name);
+    default:
+      return null;
+  }
+}
+
+function buildGmailProvisionArgs(input: { account: string; config: Record<string, unknown> }) {
+  const args = ["webhooks", "gmail", "setup", "--account", input.account];
+  const serveConfig = isObjectRecord(input.config.serve) ? (input.config.serve as Record<string, unknown>) : {};
+  const tailscaleConfig = isObjectRecord(input.config.tailscale) ? (input.config.tailscale as Record<string, unknown>) : {};
+
+  appendFlag(args, "--project", input.config.project);
+  appendFlag(args, "--topic", input.config.topic);
+  appendFlag(args, "--subscription", input.config.subscription);
+  appendFlag(args, "--label", input.config.label);
+  appendFlag(args, "--hook-url", input.config.hookUrl);
+  appendFlag(args, "--hook-token", input.config.hookToken);
+  appendFlag(args, "--push-token", input.config.pushToken);
+  appendFlag(args, "--bind", serveConfig.bind);
+  appendFlag(args, "--port", serveConfig.port);
+  appendFlag(args, "--path", serveConfig.path);
+  appendBooleanFlag(args, "--include-body", input.config.includeBody);
+  appendFlag(args, "--max-bytes", input.config.maxBytes);
+  appendFlag(args, "--renew-minutes", input.config.renewEveryMinutes);
+  appendFlag(args, "--tailscale", tailscaleConfig.mode);
+  appendFlag(args, "--tailscale-path", tailscaleConfig.path);
+  appendFlag(args, "--tailscale-target", tailscaleConfig.target);
+  appendFlag(args, "--push-endpoint", input.config.pushEndpoint);
+
+  return args;
+}
+
+function appendFlag(args: string[], flag: string, value: unknown) {
+  const normalized = normalizeManagedSurfaceFlagValue(value);
+  if (normalized === null) {
+    return;
+  }
+
+  args.push(flag, normalized);
+}
+
+function appendBooleanFlag(args: string[], flag: string, value: unknown) {
+  if (value === true || value === "true") {
+    args.push(flag);
+  }
+}
+
+function normalizeManagedSurfaceProvisionConfig(config?: Record<string, unknown>) {
+  const nextConfig: Record<string, unknown> = {};
+
+  if (!isObjectRecord(config)) {
+    return nextConfig;
+  }
+
+  for (const [key, value] of Object.entries(config)) {
+    assignManagedSurfaceConfigValue(nextConfig, key, normalizeManagedSurfaceConfigValue(value));
+  }
+
+  return nextConfig;
+}
+
+function mergeManagedSurfaceConfig(
+  baseConfig: Record<string, unknown> | null,
+  patch: Record<string, unknown>
+) {
+  const nextConfig = cloneManagedSurfaceConfig(baseConfig);
+
+  for (const [key, value] of Object.entries(patch)) {
+    assignManagedSurfaceConfigValue(nextConfig, key, normalizeManagedSurfaceConfigValue(value));
+  }
+
+  return nextConfig;
+}
+
+function cloneManagedSurfaceConfig(config: Record<string, unknown> | null) {
+  if (!isObjectRecord(config)) {
+    return {};
+  }
+
+  return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+}
+
+function assignManagedSurfaceConfigValue(target: Record<string, unknown>, pathValue: string, value: unknown) {
+  if (value === undefined) {
+    return;
+  }
+
+  const segments = pathValue
+    .split(".")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (segments.length === 0) {
+    return;
+  }
+
+  let cursor: Record<string, unknown> = target;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const current = cursor[segment];
+    if (!isObjectRecord(current)) {
+      cursor[segment] = {};
+    }
+
+    cursor = cursor[segment] as Record<string, unknown>;
+  }
+
+  cursor[segments[segments.length - 1]] = value;
+}
+
+function normalizeManagedSurfaceConfigValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return trimmed;
+      }
+    }
+
+    return trimmed;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeManagedSurfaceConfigValue(entry))
+      .filter((entry) => entry !== undefined);
+  }
+
+  if (isObjectRecord(value)) {
+    const nextValue: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      const normalized = normalizeManagedSurfaceConfigValue(nestedValue);
+      if (normalized !== undefined) {
+        nextValue[key] = normalized;
+      }
+    }
+    return nextValue;
+  }
+
+  return value;
+}
+
+function normalizeManagedSurfaceString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function normalizeManagedSurfaceFlagValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  const normalized = normalizeManagedSurfaceString(value);
+  return normalized ?? null;
 }
 
 async function upsertWorkspaceProjectAgentMetadata(
@@ -9885,7 +10329,7 @@ function parseWorkspaceChannelSummary(value: unknown): WorkspaceChannelSummary |
 
   return {
     id: value.id,
-    type: isPlannerChannelTypeValue(value.type) ? value.type : "internal",
+    type: isMissionControlSurfaceProviderValue(value.type) ? value.type : "internal",
     name: typeof value.name === "string" ? value.name : value.id,
     primaryAgentId: typeof value.primaryAgentId === "string" ? value.primaryAgentId : null,
     workspaces: Array.isArray(value.workspaces)
@@ -9894,6 +10338,10 @@ function parseWorkspaceChannelSummary(value: unknown): WorkspaceChannelSummary |
           .filter((entry): entry is WorkspaceChannelWorkspaceBinding => Boolean(entry))
       : []
   };
+}
+
+function isMissionControlSurfaceProviderValue(value: unknown): value is MissionControlSurfaceProvider {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelType {
@@ -9936,7 +10384,7 @@ function normalizeChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
   const channels = registry.channels
     .map((channel) => ({
       id: channel.id.trim(),
-      type: isPlannerChannelTypeValue(channel.type) ? channel.type : "internal",
+      type: isMissionControlSurfaceProviderValue(channel.type) ? channel.type : "internal",
       name: channel.name.trim() || channel.id.trim(),
       primaryAgentId: normalizeOptionalValue(channel.primaryAgentId) ?? null,
       workspaces: channel.workspaces
@@ -10031,6 +10479,54 @@ function applyChannelAccountDisplayNames(accounts: ChannelAccountRecord[], regis
   }));
 }
 
+function buildLegacyRegistrySurfaceAccounts(registry: ChannelRegistry) {
+  return registry.channels
+    .filter((channel) => channel.type !== "internal" && channel.workspaces.length > 0)
+    .map(
+      (channel) =>
+        ({
+          id: channel.id,
+          type: channel.type,
+          name: channel.name.trim() || channel.id,
+          enabled: true,
+          kind: getSurfaceKind(channel.type),
+          capabilities: [getSurfaceKind(channel.type)],
+          metadata: {
+            source: "channel-registry",
+            legacy: true
+          }
+        }) satisfies ChannelAccountRecord
+    );
+}
+
+function mergeMissionControlSurfaceAccounts(accounts: ChannelAccountRecord[]) {
+  const merged = new Map<string, ChannelAccountRecord>();
+
+  for (const account of accounts) {
+    const key = `${account.type}:${account.id}`;
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, account);
+      continue;
+    }
+
+    merged.set(key, {
+      ...existing,
+      name: existing.name || account.name,
+      enabled: existing.enabled !== false,
+      kind: existing.kind ?? account.kind,
+      capabilities: uniqueStrings([...(existing.capabilities ?? []), ...(account.capabilities ?? [])]),
+      metadata: {
+        ...(account.metadata ?? {}),
+        ...(existing.metadata ?? {})
+      }
+    });
+  }
+
+  return Array.from(merged.values());
+}
+
 function cloneChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
   return normalizeChannelRegistry({
     version: 1,
@@ -10054,12 +10550,6 @@ type ManagedTelegramRoutingCleanup = {
   removedGroupIds?: string[];
 };
 
-type DiscoveredTelegramGroup = {
-  chatId: string;
-  title: string | null;
-  lastSeen: string | null;
-};
-
 type OpenClawChannelLogsPayload = {
   lines?: Array<{
     time?: string;
@@ -10074,6 +10564,30 @@ type TelegramAllowlistConfig = Record<
     requireMention?: boolean;
   }
 >;
+
+type DiscordGuildConfig = Record<
+  string,
+  {
+    requireMention?: boolean;
+    roles?: unknown;
+    channels?: Record<string, unknown>;
+    name?: string;
+  }
+>;
+
+export async function discoverSurfaceRoutes(input: {
+  provider: MissionControlSurfaceProvider;
+  accountId?: string | null;
+}) {
+  switch (input.provider) {
+    case "telegram":
+      return discoverTelegramGroups();
+    case "discord":
+      return discoverDiscordRoutes(input.accountId);
+    default:
+      return [] as DiscoveredSurfaceRoute[];
+  }
+}
 
 export async function discoverTelegramGroups() {
   const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
@@ -10090,17 +10604,19 @@ export async function discoverTelegramGroups() {
     return await readTelegramAllowlistGroups();
   }
 
-  const discovered = new Map<string, DiscoveredTelegramGroup>();
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
 
-  const rememberGroup = (group: DiscoveredTelegramGroup) => {
-    const existing = discovered.get(group.chatId);
+  const rememberGroup = (group: DiscoveredSurfaceRoute) => {
+    const existing = discovered.get(group.routeId);
     if (!existing) {
-      discovered.set(group.chatId, group);
+      discovered.set(group.routeId, group);
       return;
     }
 
-    discovered.set(group.chatId, {
-      chatId: group.chatId,
+    discovered.set(group.routeId, {
+      routeId: group.routeId,
+      provider: "telegram",
+      kind: "group",
       title: group.title ?? existing.title,
       lastSeen: selectLatestIsoTimestamp(existing.lastSeen, group.lastSeen)
     });
@@ -10134,14 +10650,82 @@ export async function discoverTelegramGroups() {
   }
 
   for (const group of await readTelegramAllowlistGroups()) {
-    if (!discovered.has(group.chatId)) {
-      discovered.set(group.chatId, group);
+    if (!discovered.has(group.routeId)) {
+      discovered.set(group.routeId, group);
     }
   }
 
   return Array.from(discovered.values()).sort((left, right) => {
-    const leftLabel = left.title ?? left.chatId;
-    const rightLabel = right.title ?? right.chatId;
+    const leftLabel = left.title ?? left.routeId;
+    const rightLabel = right.title ?? right.routeId;
+    return leftLabel.localeCompare(rightLabel);
+  });
+}
+
+export async function discoverDiscordRoutes(accountId?: string | null) {
+  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
+    "channels",
+    "logs",
+    "--channel",
+    "discord",
+    "--json",
+    "--lines",
+    "300"
+  ]).catch(() => null);
+
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
+
+  const rememberRoute = (route: DiscoveredSurfaceRoute) => {
+    const existing = discovered.get(route.routeId);
+    if (!existing) {
+      discovered.set(route.routeId, route);
+      return;
+    }
+
+    discovered.set(route.routeId, {
+      ...existing,
+      title: route.title ?? existing.title,
+      subtitle: route.subtitle ?? existing.subtitle,
+      lastSeen: selectLatestIsoTimestamp(existing.lastSeen, route.lastSeen),
+      guildId: route.guildId ?? existing.guildId,
+      parentId: route.parentId ?? existing.parentId
+    });
+  };
+
+  for (const route of await readDiscordConfiguredRoutes()) {
+    rememberRoute(route);
+  }
+
+  for (const line of payload?.lines ?? []) {
+    const lineTime = typeof line?.time === "string" ? line.time : null;
+
+    for (const route of extractDiscordRoutesFromUnknown(line, lineTime, accountId)) {
+      rememberRoute(route);
+    }
+
+    if (typeof line?.raw === "string") {
+      try {
+        const parsed = JSON.parse(line.raw);
+        for (const route of extractDiscordRoutesFromUnknown(parsed, lineTime, accountId)) {
+          rememberRoute(route);
+        }
+      } catch {
+        for (const route of extractDiscordRoutesFromText(line.raw, lineTime, accountId)) {
+          rememberRoute(route);
+        }
+      }
+    }
+
+    if (typeof line?.message === "string") {
+      for (const route of extractDiscordRoutesFromText(line.message, lineTime, accountId)) {
+        rememberRoute(route);
+      }
+    }
+  }
+
+  return Array.from(discovered.values()).sort((left, right) => {
+    const leftLabel = left.title ?? left.routeId;
+    const rightLabel = right.title ?? right.routeId;
     return leftLabel.localeCompare(rightLabel);
   });
 }
@@ -10157,17 +10741,97 @@ async function readTelegramAllowlistGroups() {
 
     return Object.keys(groups ?? {})
       .map((chatId) => ({
-        chatId,
+        routeId: chatId,
+        provider: "telegram" as const,
+        kind: "group" as const,
         title: null,
         lastSeen: null
       }))
-      .sort((left, right) => left.chatId.localeCompare(right.chatId));
+      .sort((left, right) => left.routeId.localeCompare(right.routeId));
   } catch {
-    return [] as DiscoveredTelegramGroup[];
+    return [] as DiscoveredSurfaceRoute[];
   }
 }
 
-async function updateManagedTelegramRouting(
+async function readDiscordConfiguredRoutes() {
+  try {
+    const guilds = await runOpenClawJson<DiscordGuildConfig>([
+      "config",
+      "get",
+      "channels.discord.guilds",
+      "--json"
+    ]);
+    const routes: DiscoveredSurfaceRoute[] = [];
+
+    for (const [guildId, rawGuild] of Object.entries(guilds ?? {})) {
+      if (!normalizeDiscordId(guildId) || !isObjectRecord(rawGuild)) {
+        continue;
+      }
+
+      const guild = rawGuild as Record<string, unknown>;
+      const guildLabel = normalizeOptionalValue(guild.name as string | null | undefined) ?? guildId;
+      const roleIds = Array.isArray(guild.roles)
+        ? guild.roles
+            .filter((entry) => typeof entry === "string" || typeof entry === "number")
+            .map((entry) => String(entry).trim())
+            .filter((entry) => Boolean(normalizeDiscordId(entry)))
+        : [];
+
+      for (const roleId of roleIds) {
+        routes.push({
+          routeId: encodeDiscordRouteId({
+            kind: "role",
+            guildId,
+            targetId: roleId
+          }),
+          provider: "discord",
+          kind: "role",
+          title: `@${roleId}`,
+          subtitle: guildLabel,
+          lastSeen: null,
+          guildId
+        });
+      }
+
+      const channels = isObjectRecord(guild.channels) ? (guild.channels as Record<string, unknown>) : {};
+      for (const [channelKey, rawChannel] of Object.entries(channels)) {
+        const channelRecord = isObjectRecord(rawChannel) ? (rawChannel as Record<string, unknown>) : {};
+        const channelId =
+          normalizeDiscordId(channelKey) ??
+          normalizeDiscordId(channelRecord.id as string | number | null | undefined);
+
+        if (!channelId) {
+          continue;
+        }
+
+        const label =
+          normalizeOptionalValue(channelRecord.name as string | null | undefined) ??
+          normalizeOptionalValue(channelRecord.label as string | null | undefined) ??
+          `#${channelId}`;
+
+        routes.push({
+          routeId: encodeDiscordRouteId({
+            kind: "channel",
+            guildId,
+            targetId: channelId
+          }),
+          provider: "discord",
+          kind: "channel",
+          title: label,
+          subtitle: guildLabel,
+          lastSeen: null,
+          guildId
+        });
+      }
+    }
+
+    return routes;
+  } catch {
+    return [] as DiscoveredSurfaceRoute[];
+  }
+}
+
+async function updateManagedSurfaceRouting(
   registry: ChannelRegistry,
   cleanup: ManagedTelegramRoutingCleanup = {}
 ) {
@@ -10175,19 +10839,22 @@ async function updateManagedTelegramRouting(
     () => []
   );
 
-  const managedChannels = registry.channels.filter((channel) => channel.type === "telegram");
-  const managedAccountIds = new Set(managedChannels.map((channel) => channel.id));
-  const removedAccountIds = new Set(cleanup.removedAccountIds ?? []);
-  const managedGroupIds = new Set(
-    managedChannels.flatMap((channel) =>
-      channel.workspaces.flatMap((workspace) =>
-        workspace.groupAssignments
-          .filter((assignment) => assignment.enabled !== false)
-          .map((assignment) => assignment.chatId)
-      )
-    )
+  const managedChannels = registry.channels.filter(
+    (channel) => isPlannerChannelTypeValue(channel.type) && channel.type !== "internal"
   );
+  const removedAccountIds = new Set(cleanup.removedAccountIds ?? []);
   const removedGroupIds = new Set(cleanup.removedGroupIds ?? []);
+  const managedAccountIdsByProvider = new Map<string, Set<string>>();
+
+  for (const channel of managedChannels) {
+    const current = managedAccountIdsByProvider.get(channel.type) ?? new Set<string>();
+    current.add(channel.id);
+    managedAccountIdsByProvider.set(channel.type, current);
+  }
+
+  const managedTelegramChannels = managedChannels.filter((channel) => channel.type === "telegram");
+  const managedDiscordChannels = managedChannels.filter((channel) => channel.type === "discord");
+
   const nextBindings = [
     ...currentBindings.filter((entry) => {
       if (!isObjectRecord(entry)) {
@@ -10195,11 +10862,13 @@ async function updateManagedTelegramRouting(
       }
 
       const match = isObjectRecord(entry.match) ? entry.match : null;
-      if (!match || match.channel !== "telegram") {
+      if (!match || typeof match.channel !== "string") {
         return true;
       }
 
+      const managedAccountIds = managedAccountIdsByProvider.get(match.channel);
       if (
+        managedAccountIds &&
         typeof match.accountId === "string" &&
         (managedAccountIds.has(match.accountId) || removedAccountIds.has(match.accountId))
       ) {
@@ -10207,9 +10876,10 @@ async function updateManagedTelegramRouting(
       }
 
       if (
+        match.channel === "telegram" &&
         isObjectRecord(match.peer) &&
         typeof match.peer.id === "string" &&
-        (managedGroupIds.has(match.peer.id) || removedGroupIds.has(match.peer.id))
+        removedGroupIds.has(match.peer.id)
       ) {
         return false;
       }
@@ -10221,11 +10891,11 @@ async function updateManagedTelegramRouting(
       .map((channel) => ({
         agentId: channel.primaryAgentId as string,
         match: {
-          channel: "telegram",
+          channel: channel.type,
           accountId: channel.id
         }
       })),
-    ...managedChannels.flatMap((channel) =>
+    ...managedTelegramChannels.flatMap((channel) =>
       channel.workspaces.flatMap((workspace) =>
         workspace.groupAssignments
           .filter((assignment) => assignment.enabled !== false && assignment.agentId)
@@ -10241,8 +10911,23 @@ async function updateManagedTelegramRouting(
             }
           }))
       )
+    ),
+    ...managedDiscordChannels.flatMap((channel) =>
+      channel.workspaces.flatMap((workspace) =>
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+          .map((assignment) => buildManagedDiscordBinding(channel.id, assignment))
+          .filter((binding): binding is { agentId: string; match: Record<string, unknown> } => Boolean(binding))
+      )
     )
   ];
+
+  await runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"]);
+  await syncManagedTelegramSettings(managedTelegramChannels);
+  await syncManagedDiscordSettings(managedDiscordChannels);
+}
+
+async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[]) {
   await runOpenClaw([
     "config",
     "set",
@@ -10269,7 +10954,13 @@ async function updateManagedTelegramRouting(
   }
 
   const nextGroupsConfig = Object.fromEntries(
-    Array.from(managedGroupIds).map((chatId) => [chatId, { requireMention: true }])
+    managedChannels.flatMap((channel) =>
+      channel.workspaces.flatMap((workspace) =>
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false)
+          .map((assignment) => [assignment.chatId, { requireMention: true }] as const)
+      )
+    )
   );
 
   await runOpenClaw([
@@ -10279,8 +10970,95 @@ async function updateManagedTelegramRouting(
     JSON.stringify(nextGroupsConfig),
     "--strict-json"
   ]);
+}
 
-  await runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"]);
+async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSummary[]) {
+  if (managedChannels.length === 0) {
+    return;
+  }
+
+  const currentGuilds = await runOpenClawJson<DiscordGuildConfig>([
+    "config",
+    "get",
+    "channels.discord.guilds",
+    "--json"
+  ]).catch(() => ({}));
+  const nextGuilds: Record<string, Record<string, unknown>> = {};
+
+  for (const [guildId, rawGuild] of Object.entries(currentGuilds ?? {})) {
+    nextGuilds[guildId] = isObjectRecord(rawGuild) ? { ...(rawGuild as Record<string, unknown>) } : {};
+  }
+
+  let didChange = false;
+
+  for (const channel of managedChannels) {
+    for (const workspace of channel.workspaces) {
+      for (const assignment of workspace.groupAssignments.filter((entry) => entry.enabled !== false)) {
+        const parsed = parseDiscordRouteId(assignment.chatId);
+        if (!parsed?.guildId) {
+          continue;
+        }
+
+        const guild = nextGuilds[parsed.guildId] ?? {};
+        const roles = Array.isArray(guild.roles)
+          ? guild.roles
+              .filter((entry) => typeof entry === "string" || typeof entry === "number")
+              .map((entry) => String(entry))
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+          : [];
+        const channels = isObjectRecord(guild.channels) ? { ...(guild.channels as Record<string, unknown>) } : {};
+
+        if (guild.requireMention === undefined) {
+          guild.requireMention = true;
+          didChange = true;
+        }
+
+        if (parsed.kind === "role") {
+          if (!roles.includes(parsed.targetId)) {
+            roles.push(parsed.targetId);
+            didChange = true;
+          }
+          guild.roles = roles;
+        } else {
+          const allowedChannelIds = uniqueStrings(
+            [parsed.targetId, parsed.kind === "thread" ? parsed.parentId ?? "" : ""].filter(Boolean)
+          );
+
+          for (const allowedChannelId of allowedChannelIds) {
+            const existing = isObjectRecord(channels[allowedChannelId])
+              ? (channels[allowedChannelId] as Record<string, unknown>)
+              : {};
+            if (existing.allow !== true) {
+              existing.allow = true;
+              didChange = true;
+            }
+            if (existing.requireMention === undefined) {
+              existing.requireMention = true;
+              didChange = true;
+            }
+            channels[allowedChannelId] = existing;
+          }
+
+          guild.channels = channels;
+        }
+
+        nextGuilds[parsed.guildId] = guild;
+      }
+    }
+  }
+
+  if (!didChange) {
+    return;
+  }
+
+  await runOpenClaw([
+    "config",
+    "set",
+    "channels.discord.guilds",
+    JSON.stringify(nextGuilds),
+    "--strict-json"
+  ]);
 }
 
 function collectTelegramRelatedAgentIds(registry: ChannelRegistry) {
@@ -10398,8 +11176,8 @@ async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry,
   });
 }
 
-function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | null): DiscoveredTelegramGroup[] {
-  const discovered = new Map<string, DiscoveredTelegramGroup>();
+function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | null): DiscoveredSurfaceRoute[] {
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
   const queue: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   const seen = new Set<unknown>();
 
@@ -10441,7 +11219,9 @@ function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | nul
         normalizeOptionalValue(candidate.chatTitle as string | null | undefined) ??
         null;
       discovered.set(chatId, {
-        chatId,
+        routeId: chatId,
+        provider: "telegram",
+        kind: "group",
         title,
         lastSeen: lineTime
       });
@@ -10455,8 +11235,8 @@ function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | nul
   return Array.from(discovered.values());
 }
 
-function extractTelegramGroupsFromText(text: string, lineTime: string | null): DiscoveredTelegramGroup[] {
-  const discovered = new Map<string, DiscoveredTelegramGroup>();
+function extractTelegramGroupsFromText(text: string, lineTime: string | null): DiscoveredSurfaceRoute[] {
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
   const objectPattern = /\{[^{}]*"chatId"\s*:\s*-?\d+[^{}]*\}/g;
 
   for (const match of text.matchAll(objectPattern)) {
@@ -10464,7 +11244,7 @@ function extractTelegramGroupsFromText(text: string, lineTime: string | null): D
     try {
       const parsed = JSON.parse(fragment);
       for (const group of extractTelegramGroupsFromUnknown(parsed, lineTime)) {
-        discovered.set(group.chatId, group);
+        discovered.set(group.routeId, group);
       }
       continue;
     } catch {
@@ -10479,13 +11259,444 @@ function extractTelegramGroupsFromText(text: string, lineTime: string | null): D
 
     const titleMatch = fragment.match(/"title"\s*:\s*"([^"]+)"/);
     discovered.set(chatId, {
-      chatId,
+      routeId: chatId,
+      provider: "telegram",
+      kind: "group",
       title: titleMatch?.[1] ?? null,
       lastSeen: lineTime
     });
   }
 
   return Array.from(discovered.values());
+}
+
+type DiscordRouteId = {
+  kind: "channel" | "thread" | "role";
+  guildId: string | null;
+  targetId: string;
+  parentId?: string | null;
+};
+
+type DiscordRouteContext = {
+  accountId: string | null;
+  guildId: string | null;
+  guildName: string | null;
+  channelId: string | null;
+  channelName: string | null;
+  threadId: string | null;
+  threadName: string | null;
+};
+
+function buildManagedDiscordBinding(accountId: string, assignment: WorkspaceChannelGroupAssignment) {
+  const parsed = parseDiscordRouteId(assignment.chatId);
+  if (!parsed || !assignment.agentId) {
+    return null;
+  }
+
+  if (parsed.kind === "role") {
+    if (!parsed.guildId) {
+      return null;
+    }
+
+    return {
+      agentId: assignment.agentId,
+      match: {
+        channel: "discord",
+        accountId,
+        guildId: parsed.guildId,
+        roles: [parsed.targetId]
+      }
+    };
+  }
+
+  return {
+    agentId: assignment.agentId,
+    match: {
+      channel: "discord",
+      accountId,
+      ...(parsed.guildId ? { guildId: parsed.guildId } : {}),
+      peer: {
+        kind: parsed.kind,
+        id: parsed.targetId
+      }
+    }
+  };
+}
+
+function extractDiscordRoutesFromUnknown(
+  value: unknown,
+  lineTime: string | null,
+  accountIdFilter?: string | null
+): DiscoveredSurfaceRoute[] {
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
+  const queue: Array<{ value: unknown; depth: number; context: DiscordRouteContext }> = [
+    {
+      value,
+      depth: 0,
+      context: {
+        accountId: null,
+        guildId: null,
+        guildName: null,
+        channelId: null,
+        channelName: null,
+        threadId: null,
+        threadName: null
+      }
+    }
+  ];
+  const seen = new Set<unknown>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || current.depth > 7) {
+      continue;
+    }
+
+    const candidate = current.value;
+    if (candidate === null || candidate === undefined) {
+      continue;
+    }
+
+    if (typeof candidate !== "object") {
+      continue;
+    }
+
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        queue.push({
+          value: item,
+          depth: current.depth + 1,
+          context: current.context
+        });
+      }
+      continue;
+    }
+
+    if (!isObjectRecord(candidate)) {
+      continue;
+    }
+
+    const nextContext = mergeDiscordRouteContext(current.context, candidate);
+    if (accountIdFilter && nextContext.accountId && nextContext.accountId !== accountIdFilter) {
+      continue;
+    }
+
+    const channelRoute = createDiscoveredDiscordChannelRoute(nextContext, lineTime);
+    if (channelRoute) {
+      discovered.set(channelRoute.routeId, channelRoute);
+    }
+
+    const threadRoute = createDiscoveredDiscordThreadRoute(nextContext, lineTime);
+    if (threadRoute) {
+      discovered.set(threadRoute.routeId, threadRoute);
+    }
+
+    for (const roleRoute of extractDiscordRoleRoutes(candidate, nextContext, lineTime)) {
+      discovered.set(roleRoute.routeId, roleRoute);
+    }
+
+    for (const nested of Object.values(candidate)) {
+      queue.push({
+        value: nested,
+        depth: current.depth + 1,
+        context: nextContext
+      });
+    }
+  }
+
+  return Array.from(discovered.values());
+}
+
+function extractDiscordRoutesFromText(
+  text: string,
+  lineTime: string | null,
+  accountIdFilter?: string | null
+): DiscoveredSurfaceRoute[] {
+  const discovered = new Map<string, DiscoveredSurfaceRoute>();
+  const accountIdInText = text.match(/accountId["=:\s]+([A-Za-z0-9._-]+)/i)?.[1] ?? null;
+  if (accountIdFilter && accountIdInText && accountIdInText !== accountIdFilter) {
+    return [];
+  }
+
+  const objectPattern = /\{[^{}]*(guildId|channelId|threadId|roleIds|roles)[^{}]*\}/g;
+  for (const match of text.matchAll(objectPattern)) {
+    try {
+      const parsed = JSON.parse(match[0]);
+      for (const route of extractDiscordRoutesFromUnknown(parsed, lineTime, accountIdFilter)) {
+        discovered.set(route.routeId, route);
+      }
+    } catch {
+      // Fall back to lightweight regex extraction below.
+    }
+  }
+
+  const guildId = normalizeDiscordId(text.match(/guild(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
+  const channelId = normalizeDiscordId(text.match(/channel(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
+  const threadId = normalizeDiscordId(text.match(/thread(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
+
+  if (channelId) {
+    const route = createDiscoveredDiscordRoute({
+      kind: "channel",
+      guildId,
+      targetId: channelId,
+      title: `#${channelId}`,
+      subtitle: guildId ? `Guild ${guildId}` : null,
+      lastSeen: lineTime
+    });
+    discovered.set(route.routeId, route);
+  }
+
+  if (threadId) {
+    const route = createDiscoveredDiscordRoute({
+      kind: "thread",
+      guildId,
+      targetId: threadId,
+      parentId: channelId,
+      title: `Thread ${threadId}`,
+      subtitle: channelId ? `Channel ${channelId}` : guildId ? `Guild ${guildId}` : null,
+      lastSeen: lineTime
+    });
+    discovered.set(route.routeId, route);
+  }
+
+  if (guildId) {
+    const rolePattern = /\b(\d{5,})\b/g;
+    const rolesBlock = text.match(/roles?["=:\s]+\[([^\]]+)\]/i)?.[1] ?? "";
+    for (const match of rolesBlock.matchAll(rolePattern)) {
+      const roleId = normalizeDiscordId(match[1]);
+      if (!roleId) {
+        continue;
+      }
+
+      const route = createDiscoveredDiscordRoute({
+        kind: "role",
+        guildId,
+        targetId: roleId,
+        title: `@${roleId}`,
+        subtitle: `Guild ${guildId}`,
+        lastSeen: lineTime
+      });
+      discovered.set(route.routeId, route);
+    }
+  }
+
+  return Array.from(discovered.values());
+}
+
+function mergeDiscordRouteContext(base: DiscordRouteContext, candidate: Record<string, unknown>): DiscordRouteContext {
+  const guildRecord = isObjectRecord(candidate.guild) ? (candidate.guild as Record<string, unknown>) : null;
+  const channelRecord = isObjectRecord(candidate.channel) ? (candidate.channel as Record<string, unknown>) : null;
+  const threadRecord = isObjectRecord(candidate.thread) ? (candidate.thread as Record<string, unknown>) : null;
+  const peerRecord = isObjectRecord(candidate.peer) ? (candidate.peer as Record<string, unknown>) : null;
+
+  const explicitChannelKind = normalizeOptionalValue(candidate.kind as string | null | undefined);
+  const explicitType = normalizeOptionalValue(candidate.type as string | null | undefined);
+  const candidateId = normalizeDiscordId(candidate.id);
+
+  const channelId =
+    normalizeDiscordId(candidate.channelId) ??
+    normalizeDiscordId(candidate.channel_id) ??
+    normalizeDiscordId(channelRecord?.id) ??
+    (peerRecord?.kind === "channel" ? normalizeDiscordId(peerRecord.id) : null) ??
+    ((explicitChannelKind === "channel" || explicitType === "channel") && candidateId ? candidateId : null) ??
+    base.channelId;
+  const threadId =
+    normalizeDiscordId(candidate.threadId) ??
+    normalizeDiscordId(candidate.thread_id) ??
+    normalizeDiscordId(threadRecord?.id) ??
+    (peerRecord?.kind === "thread" ? normalizeDiscordId(peerRecord.id) : null) ??
+    ((explicitChannelKind === "thread" || explicitType === "thread") && candidateId ? candidateId : null) ??
+    base.threadId;
+
+  return {
+    accountId:
+      normalizeOptionalValue(candidate.accountId as string | null | undefined) ??
+      normalizeOptionalValue(candidate.channelAccountId as string | null | undefined) ??
+      normalizeOptionalValue(candidate.account as string | null | undefined) ??
+      base.accountId,
+    guildId:
+      normalizeDiscordId(candidate.guildId) ??
+      normalizeDiscordId(candidate.guild_id) ??
+      normalizeDiscordId(guildRecord?.id) ??
+      base.guildId,
+    guildName:
+      normalizeOptionalValue(candidate.guildName as string | null | undefined) ??
+      normalizeOptionalValue(guildRecord?.name as string | null | undefined) ??
+      base.guildName,
+    channelId,
+    channelName:
+      normalizeOptionalValue(candidate.channelName as string | null | undefined) ??
+      normalizeOptionalValue(channelRecord?.name as string | null | undefined) ??
+      ((explicitChannelKind === "channel" || explicitType === "channel")
+        ? normalizeOptionalValue(candidate.name as string | null | undefined)
+        : null) ??
+      base.channelName,
+    threadId,
+    threadName:
+      normalizeOptionalValue(candidate.threadName as string | null | undefined) ??
+      normalizeOptionalValue(threadRecord?.name as string | null | undefined) ??
+      ((explicitChannelKind === "thread" || explicitType === "thread")
+        ? normalizeOptionalValue(candidate.name as string | null | undefined)
+        : null) ??
+      base.threadName
+  };
+}
+
+function extractDiscordRoleRoutes(
+  candidate: Record<string, unknown>,
+  context: DiscordRouteContext,
+  lineTime: string | null
+) {
+  if (!context.guildId) {
+    return [] as DiscoveredSurfaceRoute[];
+  }
+
+  const routes = new Map<string, DiscoveredSurfaceRoute>();
+  const roleCollections: unknown[] = [
+    candidate.roleIds,
+    candidate.memberRoleIds,
+    candidate.roles,
+    isObjectRecord(candidate.member) ? (candidate.member as Record<string, unknown>).roles : null
+  ];
+
+  for (const collection of roleCollections) {
+    if (!Array.isArray(collection)) {
+      continue;
+    }
+
+    for (const entry of collection) {
+      const roleId =
+        normalizeDiscordId(entry) ??
+        (isObjectRecord(entry) ? normalizeDiscordId((entry as Record<string, unknown>).id) : null);
+
+      if (!roleId) {
+        continue;
+      }
+
+      const roleName = isObjectRecord(entry)
+        ? normalizeOptionalValue((entry as Record<string, unknown>).name as string | null | undefined)
+        : null;
+      const route = createDiscoveredDiscordRoute({
+        kind: "role",
+        guildId: context.guildId,
+        targetId: roleId,
+        title: roleName ? `@${roleName}` : `@${roleId}`,
+        subtitle: context.guildName ?? context.guildId,
+        lastSeen: lineTime
+      });
+      routes.set(route.routeId, route);
+    }
+  }
+
+  return Array.from(routes.values());
+}
+
+function createDiscoveredDiscordChannelRoute(context: DiscordRouteContext, lineTime: string | null) {
+  if (!context.channelId) {
+    return null;
+  }
+
+  return createDiscoveredDiscordRoute({
+    kind: "channel",
+    guildId: context.guildId,
+    targetId: context.channelId,
+    title: context.channelName ? `#${context.channelName}` : `#${context.channelId}`,
+    subtitle: context.guildName ?? context.guildId,
+    lastSeen: lineTime
+  });
+}
+
+function createDiscoveredDiscordThreadRoute(context: DiscordRouteContext, lineTime: string | null) {
+  if (!context.threadId) {
+    return null;
+  }
+
+  return createDiscoveredDiscordRoute({
+    kind: "thread",
+    guildId: context.guildId,
+    targetId: context.threadId,
+    parentId: context.channelId,
+    title: context.threadName ?? `Thread ${context.threadId}`,
+    subtitle:
+      context.channelName && context.guildName
+        ? `#${context.channelName} · ${context.guildName}`
+        : context.channelName
+          ? `#${context.channelName}`
+          : context.guildName ?? context.guildId,
+    lastSeen: lineTime
+  });
+}
+
+function createDiscoveredDiscordRoute(input: {
+  kind: "channel" | "thread" | "role";
+  guildId: string | null;
+  targetId: string;
+  parentId?: string | null;
+  title: string | null;
+  subtitle: string | null;
+  lastSeen: string | null;
+}) {
+  return {
+    routeId: encodeDiscordRouteId({
+      kind: input.kind,
+      guildId: input.guildId,
+      targetId: input.targetId,
+      parentId: input.parentId
+    }),
+    provider: "discord" as const,
+    kind: input.kind,
+    title: input.title,
+    subtitle: input.subtitle,
+    lastSeen: input.lastSeen,
+    guildId: input.guildId,
+    parentId: input.parentId ?? null
+  } satisfies DiscoveredSurfaceRoute;
+}
+
+function encodeDiscordRouteId(route: DiscordRouteId) {
+  const guildId = route.guildId ?? "_";
+  if (route.kind === "thread") {
+    return `thread:${guildId}:${route.targetId}:${route.parentId ?? "_"}`;
+  }
+
+  return `${route.kind}:${guildId}:${route.targetId}`;
+}
+
+function parseDiscordRouteId(value: string) {
+  const trimmed = value.trim();
+  const [kind, guildIdToken, targetId, parentId] = trimmed.split(":");
+
+  if (
+    (kind !== "channel" && kind !== "thread" && kind !== "role") ||
+    !normalizeDiscordId(targetId)
+  ) {
+    return null;
+  }
+
+  return {
+    kind,
+    guildId: guildIdToken && guildIdToken !== "_" ? normalizeDiscordId(guildIdToken) : null,
+    targetId: normalizeDiscordId(targetId) as string,
+    parentId: kind === "thread" ? normalizeDiscordId(parentId) : null
+  } satisfies DiscordRouteId;
+}
+
+function normalizeDiscordId(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return /^\d{5,}$/.test(trimmed) ? trimmed : null;
 }
 
 function normalizeTelegramGroupChatId(value: unknown) {
@@ -10531,7 +11742,7 @@ async function mutateChannelRegistry(
   const previousRegistry = cloneChannelRegistry(registry);
   await mutate(registry);
   await saveChannelRegistry(registry);
-  await updateManagedTelegramRouting(registry, cleanup);
+  await updateManagedSurfaceRouting(registry, cleanup);
   await syncTelegramCoordinationSkills(previousRegistry, registry);
   snapshotCache = null;
 }
@@ -11499,6 +12710,11 @@ function tokenizeVersion(value: string) {
 function normalizeOptionalValue(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeChannelId(value: string) {
+  const normalized = normalizeOptionalValue(value);
+  return normalized ?? "";
 }
 
 function slugify(value: string) {

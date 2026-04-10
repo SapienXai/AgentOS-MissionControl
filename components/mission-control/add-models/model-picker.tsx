@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Lock, Search } from "lucide-react";
+import { AlertTriangle, Check, Lock, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -158,6 +158,7 @@ function ModelList({
     <div className="max-h-[min(28vh,220px)] space-y-1 overflow-y-auto pr-1">
       {models.map((model) => {
         const selected = selectedModelIds.includes(model.id);
+        const needsSetup = !model.alreadyAdded && (model.available === false || model.missing);
 
         return (
           <button
@@ -171,6 +172,8 @@ function ModelList({
                 ? "cursor-not-allowed border-white/8 bg-white/[0.02] opacity-70"
                 : selected
                   ? "border-cyan-300/35 bg-cyan-300/[0.08]"
+                  : needsSetup
+                    ? "border-amber-300/20 bg-amber-300/[0.06] hover:border-amber-300/30 hover:bg-amber-300/[0.08]"
                   : "border-white/8 bg-white/[0.03] hover:border-white/16 hover:bg-white/[0.05]"
             )}
           >
@@ -182,10 +185,18 @@ function ModelList({
                     ? "border-white/10 bg-white/[0.03] text-slate-500"
                     : selected
                       ? "border-cyan-300/50 bg-cyan-300/15 text-cyan-100"
+                      : needsSetup
+                        ? "border-amber-300/30 bg-amber-300/10 text-amber-100"
                       : "border-white/12 bg-white/[0.03] text-transparent"
                 )}
               >
-                {model.alreadyAdded ? <Lock className="h-2 w-2" /> : <Check className="h-2 w-2" />}
+                {model.alreadyAdded ? (
+                  <Lock className="h-2 w-2" />
+                ) : selected ? (
+                  <Check className="h-2 w-2" />
+                ) : (
+                  <AlertTriangle className="h-2 w-2" />
+                )}
               </div>
               <div className="min-w-0">
                 <p className="truncate text-[11px] font-medium text-white">{model.name}</p>
@@ -197,6 +208,11 @@ function ModelList({
                   {model.contextWindow ? <span>{Intl.NumberFormat().format(model.contextWindow)} ctx</span> : null}
                   {model.isFree ? <span>free</span> : null}
                 </div>
+                {needsSetup ? (
+                  <p className="mt-1 text-[9px] leading-4 text-amber-100/85">
+                    {resolveSetupHint(model)}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -204,6 +220,10 @@ function ModelList({
               {model.alreadyAdded ? (
                 <Badge variant="muted" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
                   Already added
+                </Badge>
+              ) : needsSetup ? (
+                <Badge variant="warning" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
+                  Needs setup
                 </Badge>
               ) : model.recommended ? (
                 <Badge variant="default" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
@@ -224,4 +244,16 @@ function ModelList({
       })}
     </div>
   );
+}
+
+function resolveSetupHint(model: AddModelsCatalogModel) {
+  if (model.missing) {
+    return "This model is configured, but not available locally yet. You can still add it now, then finish setup in Providers.";
+  }
+
+  if (model.available === false) {
+    return "This model needs provider setup before it will work. You can add it now, then connect the provider in Add Models > Providers.";
+  }
+
+  return "";
 }

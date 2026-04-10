@@ -20,7 +20,11 @@ export async function GET(_request: Request, context: { params: Promise<{ worksp
       return NextResponse.json({ error: "Workspace was not found." }, { status: 404 });
     }
 
-    const groups = await discoverTelegramGroups();
+    const groups = (await discoverTelegramGroups()).map((route) => ({
+      chatId: route.routeId,
+      title: route.title ?? null,
+      lastSeen: route.lastSeen
+    }));
     return NextResponse.json({ groups });
   } catch (error) {
     return NextResponse.json(

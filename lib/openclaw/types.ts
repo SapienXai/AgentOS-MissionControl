@@ -186,7 +186,7 @@ export interface WorkspaceChannelWorkspaceBinding {
 
 export interface WorkspaceChannelSummary {
   id: string;
-  type: PlannerChannelType;
+  type: MissionControlSurfaceProvider;
   name: string;
   primaryAgentId: string | null;
   workspaces: WorkspaceChannelWorkspaceBinding[];
@@ -199,9 +199,12 @@ export interface ChannelRegistry {
 
 export interface ChannelAccountRecord {
   id: string;
-  type: PlannerChannelType;
+  type: MissionControlSurfaceProvider;
   name: string;
   enabled: boolean;
+  kind?: MissionControlSurfaceKind;
+  capabilities?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface OpenClawAgent {
@@ -421,6 +424,70 @@ export interface MissionControlSnapshot {
   relationships: RelationshipRecord[];
   missionPresets: string[];
   channelRegistry: ChannelRegistry;
+}
+
+export type MissionControlSurfaceKind = "chat" | "inbox" | "trigger";
+
+export type MissionControlBuiltInSurfaceProvider =
+  | PlannerChannelType
+  | "gmail"
+  | "email"
+  | "webhook"
+  | "cron";
+
+export type MissionControlSurfaceProvider = MissionControlBuiltInSurfaceProvider | (string & {});
+
+export interface SurfaceRouteMatch {
+  peer?: {
+    kind: "dm" | "group" | "channel" | "thread" | "topic" | "label" | "query";
+    id: string;
+  };
+  guildId?: string;
+  roles?: string[];
+  teamId?: string;
+  query?: string;
+}
+
+export interface WorkspaceSurfaceRoute {
+  id: string;
+  enabled: boolean;
+  label?: string | null;
+  match: SurfaceRouteMatch;
+  agentId: string | null;
+  assistantAgentIds: string[];
+}
+
+export interface WorkspaceSurfaceBinding {
+  workspaceId: string;
+  workspacePath: string;
+  defaultAgentId: string | null;
+  assistantAgentIds: string[];
+  routes: WorkspaceSurfaceRoute[];
+  presetId?: string | null;
+}
+
+export interface WorkspaceSurfaceOverlay {
+  id: string;
+  provider: MissionControlSurfaceProvider;
+  kind: MissionControlSurfaceKind;
+  accountId: string | null;
+  name: string;
+  workspaces: WorkspaceSurfaceBinding[];
+  ui?: {
+    pinned?: boolean;
+    accent?: string | null;
+  };
+}
+
+export interface DiscoveredSurfaceRoute {
+  routeId: string;
+  provider: MissionControlSurfaceProvider;
+  kind: "group" | "channel" | "thread" | "role" | "label" | "query" | "hook" | "job";
+  title: string | null;
+  subtitle?: string | null;
+  lastSeen: string | null;
+  guildId?: string | null;
+  parentId?: string | null;
 }
 
 export interface MissionSubmission {
