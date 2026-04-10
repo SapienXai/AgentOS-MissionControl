@@ -30,6 +30,7 @@ export type AgentNodeData = Record<string, unknown> & {
   onEdit?: (agentId: string) => void;
   onDelete?: (agentId: string) => void;
   onFocus?: (agentId: string) => void;
+  onConfigureModel?: (agentId: string) => void;
   onConfigureCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspect?: (agentId: string, focus: AgentDetailFocus) => void;
 };

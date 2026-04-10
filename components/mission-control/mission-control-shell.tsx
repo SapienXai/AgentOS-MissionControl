@@ -18,6 +18,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
+import { AgentModelPickerDialog } from "@/components/mission-control/agent-model-picker-dialog";
 import { AgentCapabilityEditorDialog } from "@/components/mission-control/agent-capability-editor-dialog";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
@@ -90,6 +91,10 @@ type CapabilityEditorRequest = {
   requestId: string;
   agentId: string;
   focus: "skills" | "tools";
+};
+type AgentModelRequest = {
+  requestId: string;
+  agentId: string;
 };
 type OptimisticMissionTask = {
   requestId: string;
@@ -205,6 +210,7 @@ export function MissionControlShell({
   const [isWorkspaceChannelsOpen, setIsWorkspaceChannelsOpen] = useState(false);
   const [isAddModelsDialogOpen, setIsAddModelsDialogOpen] = useState(false);
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
+  const [agentModelRequest, setAgentModelRequest] = useState<AgentModelRequest | null>(null);
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
@@ -344,6 +350,32 @@ export function MissionControlShell({
     },
     [selectNode, uiSnapshot.agents]
   );
+
+  const handleConfigureAgentModel = useCallback(
+    (agentId: string) => {
+      const agent = uiSnapshot.agents.find((entry) => entry.id === agentId);
+
+      if (!agent) {
+        return;
+      }
+
+      setActiveWorkspaceId(agent.workspaceId);
+      selectNode(agent.id);
+      setAgentModelRequest({
+        requestId: `model:${agentId}:${Date.now()}`,
+        agentId
+      });
+    },
+    [selectNode, uiSnapshot.agents]
+  );
+
+  const handleAgentModelPickerOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      return;
+    }
+
+    setAgentModelRequest(null);
+  }, []);
 
   const handleCapabilityEditorOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -1400,6 +1432,11 @@ export function MissionControlShell({
     setIsAddModelsDialogOpen(true);
   };
 
+  const openAddModelsFromModelPicker = (provider?: AddModelsProviderId | null) => {
+    setAgentModelRequest(null);
+    openAddModelsDialog(provider);
+  };
+
   const checkForUpdates = async () => {
     setIsCheckingForUpdates(true);
 
@@ -1808,6 +1845,7 @@ export function MissionControlShell({
               });
             }}
             onFocusAgent={handleFocusAgent}
+            onConfigureAgentModel={handleConfigureAgentModel}
             onConfigureAgentCapabilities={handleConfigureAgentCapabilities}
             onInspectAgentDetail={handleInspectAgentDetail}
             onMessageAgent={(agentId) => {
@@ -2042,6 +2080,16 @@ export function MissionControlShell({
           onOpenChange={handleCapabilityEditorOpenChange}
           onSnapshotChange={(updater) => setSnapshot(updater)}
           onRefresh={refresh}
+        />
+
+        <AgentModelPickerDialog
+          open={Boolean(agentModelRequest)}
+          agentId={agentModelRequest?.agentId ?? null}
+          snapshot={uiSnapshot}
+          onOpenChange={handleAgentModelPickerOpenChange}
+          onSnapshotChange={(updater) => setSnapshot(updater)}
+          onRefresh={refresh}
+          onOpenAddModels={openAddModelsFromModelPicker}
         />
 
         <div className="pointer-events-auto absolute bottom-[calc(env(safe-area-inset-bottom)+12px)] left-4 right-4 z-40 lg:bottom-6 lg:left-1/2 lg:right-auto lg:w-[min(800px,calc(100vw-320px))] lg:-translate-x-1/2">

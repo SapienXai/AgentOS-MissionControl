@@ -3690,6 +3690,54 @@ export async function updateAgent(input: AgentUpdateInput) {
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup" && entry.id !== agentId)?.id ??
     null;
+  const nextModelId =
+    input.modelId !== undefined
+      ? normalizeOptionalValue(input.modelId)
+      : agent.modelId === "unassigned"
+        ? undefined
+        : agent.modelId;
+  const onlyModelChanged =
+    input.modelId !== undefined &&
+    input.name === undefined &&
+    input.emoji === undefined &&
+    input.theme === undefined &&
+    input.avatar === undefined &&
+    input.policy === undefined &&
+    input.heartbeat === undefined &&
+    input.channelIds === undefined &&
+    input.skills === undefined &&
+    input.tools === undefined;
+
+  if (onlyModelChanged) {
+    // Pure model swaps do not need policy/identity/skill regeneration.
+    await upsertAgentConfigEntry(
+      agentId,
+      resolvedWorkspacePath,
+      {
+        model: nextModelId
+      },
+      snapshot
+    );
+
+    await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
+      id: agentId,
+      name: currentName ?? agent.name ?? agentId,
+      emoji: currentEmoji,
+      theme: currentTheme,
+      enabled: true,
+      modelId: nextModelId,
+      isPrimary: agent.isDefault,
+      policy
+    });
+
+    snapshotCache = null;
+
+    return {
+      agentId,
+      workspaceId: resolvedWorkspaceId
+    };
+  }
+
   const policySkillId = await ensureAgentPolicySkill({
     workspacePath: resolvedWorkspacePath,
     agentId,
@@ -3717,7 +3765,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     resolvedWorkspacePath,
     {
       name: normalizeOptionalValue(input.name),
-      model: normalizeOptionalValue(input.modelId),
+      model: nextModelId,
       heartbeat,
       skills: uniqueStrings([...nextDeclaredSkills, policySkillId]),
       tools:
@@ -3751,10 +3799,10 @@ export async function updateAgent(input: AgentUpdateInput) {
     emoji: normalizeOptionalValue(input.emoji) ?? currentEmoji,
     theme: normalizeOptionalValue(input.theme) ?? currentTheme,
     enabled: true,
-    modelId: normalizeOptionalValue(input.modelId) ?? (agent.modelId === "unassigned" ? null : agent.modelId),
+    modelId: nextModelId,
     isPrimary: agent.isDefault,
     policy,
-    channelIds: input.channelIds ?? [],
+    channelIds: input.channelIds,
     skillId: nextDeclaredSkills[0] ?? policySkillId,
     toolIds: nextDeclaredTools
   });

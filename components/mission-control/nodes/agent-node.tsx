@@ -193,9 +193,10 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         ? "success"
         : data.agent.status === "ready"
           ? "warning"
-          : data.agent.status === "offline"
-            ? "danger"
+        : data.agent.status === "offline"
+          ? "danger"
       : "muted";
+  const modelBadgeLabel = data.agent.modelId === "unassigned" ? "default model" : formatModelLabel(data.agent.modelId);
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
   const skillCount = effectiveSkills.length;
   const telegramTetherCount = data.telegramTetherCount ?? 0;
@@ -415,20 +416,35 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
           </div>
         </div>
 
-        <div className="px-3.5 pt-3.5 pb-3.5">
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge variant={statusBadgeVariant}>{data.agent.status}</Badge>
-            {data.taskFocused ? (
-              <Badge variant="default">Working now</Badge>
-            ) : activeTaskCount > 0 ? (
-              <Badge variant="success">
-                {activeTaskCount} live task{activeTaskCount === 1 ? "" : "s"}
-              </Badge>
-            ) : null}
-            <Badge variant="muted" className="max-w-[150px] truncate">
-              {formatModelLabel(data.agent.modelId)}
-            </Badge>
-          </div>
+          <div className="px-3.5 pt-3.5 pb-3.5">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <Badge variant={statusBadgeVariant}>{data.agent.status}</Badge>
+              {data.taskFocused ? (
+                <Badge variant="default">Working now</Badge>
+              ) : activeTaskCount > 0 ? (
+                <Badge variant="success">
+                  {activeTaskCount} live task{activeTaskCount === 1 ? "" : "s"}
+                </Badge>
+              ) : null}
+              <button
+                type="button"
+                aria-label={`Change model for ${agentLabel}`}
+                title={`Change model for ${agentLabel}`}
+                className="nodrag nopan group rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 focus-visible:ring-offset-0"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  data.onConfigureModel?.(data.agent.id);
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <Badge
+                  variant="muted"
+                  className="max-w-[150px] truncate transition-colors group-hover:border-cyan-300/25 group-hover:bg-cyan-300/10 group-hover:text-cyan-100"
+                >
+                  {modelBadgeLabel}
+                </Badge>
+              </button>
+            </div>
 
           <div className="mt-2.5">
             <p className="line-clamp-2 text-[12px] leading-5 text-slate-300">{purposeLabel}</p>

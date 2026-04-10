@@ -97,6 +97,7 @@ export function MissionCanvas({
   onEditAgent,
   onDeleteAgent,
   onFocusAgent,
+  onConfigureAgentModel,
   onConfigureAgentCapabilities,
   onInspectAgentDetail,
   onReplyTask,
@@ -126,6 +127,7 @@ export function MissionCanvas({
   onEditAgent: (agentId: string) => void;
   onDeleteAgent: (agentId: string) => void;
   onFocusAgent: (agentId: string) => void;
+  onConfigureAgentModel?: (agentId: string) => void;
   onConfigureAgentCapabilities?: (agentId: string, focus: "skills" | "tools") => void;
   onInspectAgentDetail?: (agentId: string, focus: AgentDetailFocus) => void;
   onReplyTask: (task: TaskRecord) => void;
@@ -174,6 +176,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onConfigureAgentModel,
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onReplyTask,
@@ -257,6 +260,7 @@ export function MissionCanvas({
       onEditAgent,
       onDeleteAgent,
       onFocusAgent,
+      onConfigureAgentModel,
       onConfigureAgentCapabilities,
       onInspectAgentDetail,
       onReplyTask,
@@ -296,6 +300,7 @@ export function MissionCanvas({
     onEditAgent,
     onDeleteAgent,
     onFocusAgent,
+    onConfigureAgentModel,
     onConfigureAgentCapabilities,
     onInspectAgentDetail,
     onReplyTask,
@@ -672,6 +677,7 @@ function buildCanvasGraph(
   onEditAgent: (agentId: string) => void,
   onDeleteAgent: (agentId: string) => void,
   onFocusAgent: (agentId: string) => void,
+  onConfigureAgentModel: ((agentId: string) => void) | undefined,
   onConfigureAgentCapabilities: ((agentId: string, focus: "skills" | "tools") => void) | undefined,
   onInspectAgentDetail: ((agentId: string, focus: AgentDetailFocus) => void) | undefined,
   onReplyTask: (task: TaskRecord) => void,
@@ -781,6 +787,7 @@ function buildCanvasGraph(
           onEdit: onEditAgent,
           onDelete: onDeleteAgent,
           onFocus: onFocusAgent,
+          onConfigureModel: onConfigureAgentModel,
           onConfigureCapabilities: onConfigureAgentCapabilities,
           onInspect: onInspectAgentDetail
         }
