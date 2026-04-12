@@ -69,7 +69,7 @@ type SessionTranscriptEntry = {
   };
 };
 
-type TranscriptTurn = {
+export type TranscriptTurn = {
   id: string;
   prompt: string;
   sessionId?: string;

@@ -3,7 +3,7 @@ import "server-only";
 import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -75,7 +75,12 @@ import {
   prepareMissionOutputPlan
 } from "@/lib/openclaw/domains/mission-routing";
 import {
-  collectTranscriptToolNames as collectTranscriptToolNamesFromTranscript,
+  buildTaskIntegrityRecord as buildTaskIntegrityRecordFromMissionDispatch
+} from "@/lib/openclaw/domains/mission-dispatch";
+import {
+  isPlaceholderMissionResponseText as isPlaceholderMissionResponseTextFromMissionDispatch
+} from "@/lib/openclaw/domains/mission-dispatch";
+import {
   extractTranscriptTurns as extractTranscriptTurnsFromTranscript,
   filterTranscriptTurnsForRuntime as filterTranscriptTurnsForRuntimeFromTranscript,
   getRuntimeOutputForResolvedRuntime as getRuntimeOutputForResolvedRuntimeFromTranscript,
@@ -153,12 +158,10 @@ import type {
   PresenceRecord,
   RelationshipRecord,
   TaskDetailRecord,
-  TaskIntegrityRecord,
   TaskFeedEvent,
   TaskRecord,
   RuntimeRecord,
   WorkspacePlan,
-  RuntimeOutputItem,
   RuntimeOutputRecord,
   RuntimeCreatedFile,
   WorkspaceAgentBlueprintInput,
@@ -297,7 +300,6 @@ const runtimeSmokeTestMessage = "Mission Control runtime smoke test. Reply with 
 const missionDispatchQueuedStallMs = 30_000;
 const missionDispatchHeartbeatStallMs = 90_000;
 const missionDispatchRetentionMs = 3 * 24 * 60 * 60 * 1000;
-const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const missionDispatchRunnerDiagnosticJsonKeys = new Set([
   "cause",
   "code",
@@ -467,69 +469,6 @@ type MissionCommandPayload = {
 };
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
-type SessionTranscriptEntry = {
-  type?: string;
-  id?: string;
-  parentId?: string | null;
-  timestamp?: string;
-  cwd?: string;
-  customType?: string;
-  data?: {
-    timestamp?: number;
-    runId?: string;
-    sessionId?: string;
-    error?: string;
-  };
-  message?: {
-    role?: "assistant" | "toolResult" | "user";
-    content?: Array<{
-      type?: string;
-      text?: string;
-      thinking?: string;
-      id?: string;
-      name?: string;
-      arguments?: Record<string, unknown>;
-    }>;
-    stopReason?: string;
-    errorMessage?: string;
-    toolCallId?: string;
-    toolName?: string;
-    isError?: boolean;
-    details?: {
-      status?: string;
-      exitCode?: number;
-      durationMs?: number;
-      aggregated?: string;
-      cwd?: string;
-    };
-    usage?: {
-      input?: number;
-      output?: number;
-      totalTokens?: number;
-      cacheRead?: number;
-    };
-  };
-};
-
-type TranscriptTurn = {
-  id: string;
-  prompt: string;
-  sessionId?: string;
-  runId?: string;
-  timestamp: string;
-  updatedAt: string;
-  items: RuntimeOutputItem[];
-  status: RuntimeRecord["status"];
-  finalText: string | null;
-  finalTimestamp: string | null;
-  stopReason: string | null;
-  errorMessage: string | null;
-  tokenUsage?: RuntimeRecord["tokenUsage"];
-  createdFiles: RuntimeCreatedFile[];
-  warnings: string[];
-  warningSummary: string | null;
-  toolNames: string[];
-};
 
 const SNAPSHOT_CACHE_TTL_MS = 10_000;
 const GATEWAY_STATUS_STALE_GRACE_MS = 60_000;
@@ -2696,6 +2635,11 @@ function extractMissionDispatchString(record: Record<string, unknown> | null, ke
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function extractMissionDispatchNumber(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function extractSessionIdFromRuntimeId(runtimeId: string | null | undefined) {
   const trimmed = runtimeId?.trim();
 
@@ -2711,11 +2655,6 @@ function extractSessionIdFromRuntimeId(runtimeId: string | null | undefined) {
   }
 
   return sessionId;
-}
-
-function extractMissionDispatchNumber(record: Record<string, unknown> | null, key: string) {
-  const value = record?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function extractMissionDispatchSessionId(record: MissionDispatchRecord) {
@@ -2773,7 +2712,7 @@ function resolveMissionDispatchSummary(record: MissionDispatchRecord) {
   return normalized === "completed" ||
     normalized === "ok" ||
     normalized === "success" ||
-    isPlaceholderMissionResponseText(summary)
+    isPlaceholderMissionResponseTextFromMissionDispatch(summary)
     ? null
     : summary;
 }
@@ -2782,7 +2721,7 @@ function resolveMissionDispatchResultText(record: MissionDispatchRecord) {
   const text = extractMissionCommandPayloads(record.result)
     .find((payload) => payload.text.trim().length > 0)
     ?.text.trim() ?? null;
-  return isPlaceholderMissionResponseText(text) ? null : text;
+  return isPlaceholderMissionResponseTextFromMissionDispatch(text) ? null : text;
 }
 
 function isPlaceholderMissionReply(value: string | null | undefined) {
@@ -3112,7 +3051,7 @@ export async function getTaskDetail(
   const reconciledTask = dispatchRecord ? reconcileTaskRecordWithDispatchRecord(task, dispatchRecord) : task;
   const bootstrapFeed = await buildMissionDispatchFeed(reconciledTask, dispatchRecord, snapshot);
   const runtimeFeed = buildTaskFeed(reconciledTask, runs, outputByRuntimeId, snapshot);
-  const integrity = await buildTaskIntegrityRecord({
+  const integrity = await buildTaskIntegrityRecordFromMissionDispatch({
     task: reconciledTask,
     runs,
     outputs,
@@ -3177,7 +3116,7 @@ async function buildTaskDetailFromDispatchRecord(
   );
   const bootstrapFeed = await buildMissionDispatchFeed(task, dispatchRecord, snapshot);
   const runtimeFeed = buildTaskFeed(task, runs, outputByRuntimeId, snapshot);
-  const integrity = await buildTaskIntegrityRecord({
+  const integrity = await buildTaskIntegrityRecordFromMissionDispatch({
     task,
     runs,
     outputs,
@@ -3195,314 +3134,6 @@ async function buildTaskDetailFromDispatchRecord(
     warnings,
     integrity
   };
-}
-
-async function buildTaskIntegrityRecord(input: {
-  task: TaskRecord;
-  runs: RuntimeRecord[];
-  outputs: RuntimeOutputRecord[];
-  createdFiles: RuntimeCreatedFile[];
-  dispatchRecord: MissionDispatchRecord | null;
-  snapshot: MissionControlSnapshot;
-}): Promise<TaskIntegrityRecord> {
-  const { task, dispatchRecord, createdFiles, snapshot } = input;
-  const outputDirInspection = await inspectMissionDispatchOutputDir(dispatchRecord?.outputDir ?? null);
-  const transcriptTurns = dispatchRecord
-    ? await readMissionDispatchTranscriptTurns(dispatchRecord, snapshot)
-    : ([] as TranscriptTurn[]);
-  const missionText = task.mission || dispatchRecord?.mission || null;
-  const matchingTranscriptTurns =
-    missionText && transcriptTurns.length > 0
-      ? transcriptTurns.filter((turn) => matchesMissionText(turn.prompt, missionText))
-      : transcriptTurns;
-  const latestMatchingTurn =
-    [...matchingTranscriptTurns].sort(
-      (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
-    )[0] ?? null;
-  const runtimeFinalText = latestMatchingTurn?.finalText?.trim() || null;
-  const dispatchResultText = dispatchRecord ? resolveMissionDispatchResultText(dispatchRecord) : null;
-  const finalResponseText = runtimeFinalText || dispatchResultText || null;
-  const finalResponseSource = runtimeFinalText ? "runtime" : dispatchResultText ? "dispatch" : "none";
-  const sessionMismatch = Boolean(dispatchRecord && transcriptTurns.length > 0 && matchingTranscriptTurns.length === 0);
-  const toolNames = collectTranscriptToolNamesFromTranscript(matchingTranscriptTurns);
-  const emails = extractEmailsFromValues([
-    finalResponseText,
-    dispatchResultText,
-    ...matchingTranscriptTurns.flatMap((turn) => turn.items.map((item) => item.text))
-  ]);
-  const issues: TaskIntegrityRecord["issues"] = [];
-  const placeholderResponse = isPlaceholderMissionResponseText(finalResponseText);
-  const expectsFileArtifact = missionRequestsFileArtifact(missionText);
-  const expectsEmailAddress = missionRequestsEmailAddress(missionText);
-  const expectsExternalLookup = missionNeedsExternalLookup(missionText);
-
-  if (dispatchRecord?.outputDir && !outputDirInspection.exists) {
-    issues.push({
-      id: "missing-output-dir",
-      severity: "warning",
-      title: "Output folder is missing",
-      detail: `The dispatch points at ${dispatchRecord.outputDirRelative || dispatchRecord.outputDir}, but that folder is not accessible now.`
-    });
-  }
-
-  if (
-    task.status === "completed" &&
-    expectsFileArtifact &&
-    dispatchRecord?.outputDir &&
-    outputDirInspection.exists &&
-    outputDirInspection.fileCount === 0 &&
-    createdFiles.length === 0
-  ) {
-    issues.push({
-      id: "empty-output-dir",
-      severity: "error",
-      title: "Deliverables folder is empty",
-      detail: "The task asked for a file deliverable, but the assigned deliverables folder does not contain any files."
-    });
-  }
-
-  if (task.status === "completed" && transcriptTurns.length === 0) {
-    issues.push({
-      id: "missing-transcript",
-      severity: "warning",
-      title: "No runtime transcript was captured",
-      detail: "Mission Control could not verify what the agent actually did because no transcript was recovered for this dispatch."
-    });
-  }
-
-  if (task.status === "cancelled") {
-    issues.push({
-      id: "task-cancelled",
-      severity: "warning",
-      title: "Task was cancelled by the operator",
-      detail:
-        dispatchRecord?.error ||
-        "The mission dispatch was stopped before completion, so the captured evidence is intentionally incomplete."
-    });
-  }
-
-  if (sessionMismatch && dispatchRecord?.agentId) {
-    issues.push({
-      id: "session-mismatch",
-      severity: "error",
-      title: "Recovered session does not match the mission",
-      detail: "The linked transcript session exists, but none of its user turns match this task mission. The dispatch likely reused or attached the wrong session."
-    });
-  }
-
-  if (task.status === "completed" && !finalResponseText) {
-    issues.push({
-      id: "missing-final-response",
-      severity: "warning",
-      title: "No final answer was captured",
-      detail: "The task completed without a final assistant response in either the runtime transcript or the dispatch payload."
-    });
-  } else if (task.status === "stalled" && finalResponseText) {
-    issues.push({
-      id: "partial-final-response",
-      severity: "warning",
-      title: "Final response came from an incomplete runtime",
-      detail:
-        "The assistant produced output, but the runtime stalled before the task completed. Treat this as the last captured response, not a verified completion."
-    });
-  } else if (task.status === "completed" && placeholderResponse && finalResponseText) {
-    issues.push({
-      id: "placeholder-final-response",
-      severity:
-        outputDirInspection.fileCount === 0 && createdFiles.length === 0 && matchingTranscriptTurns.length === 0
-          ? "error"
-          : "warning",
-      title: "Completion response looks like a placeholder",
-      detail: `The captured final response was "${finalResponseText}", which is not enough evidence that the requested work actually finished.`
-    });
-  }
-
-  if (task.status === "completed" && expectsExternalLookup && matchingTranscriptTurns.length > 0 && toolNames.length === 0) {
-    issues.push({
-      id: "missing-tool-evidence",
-      severity: "warning",
-      title: "No tool usage was recovered",
-      detail: "This mission looks like it needed external lookup or browsing, but the matching transcript turn does not show any recovered tool calls."
-    });
-  }
-
-  if (task.status === "completed" && expectsEmailAddress && emails.length === 0) {
-    issues.push({
-      id: "missing-email",
-      severity: "warning",
-      title: "Requested email address was not captured",
-      detail: "The task appears to ask for an email address, but none was detected in the final response or the matching transcript."
-    });
-  }
-
-  return {
-    status: issues.some((issue) => issue.severity === "error")
-      ? "error"
-      : issues.length > 0
-        ? "warning"
-        : "verified",
-    outputDir: dispatchRecord?.outputDir ?? null,
-    outputDirRelative: dispatchRecord?.outputDirRelative ?? null,
-    outputDirExists: outputDirInspection.exists,
-    outputFileCount: outputDirInspection.fileCount,
-    transcriptTurnCount: transcriptTurns.length,
-    matchingTranscriptTurnCount: matchingTranscriptTurns.length,
-    finalResponseText,
-    finalResponseSource,
-    dispatchSessionId: dispatchRecord ? extractMissionDispatchSessionId(dispatchRecord) : null,
-    sessionMismatch,
-    toolNames,
-    emails,
-    issues
-  };
-}
-
-async function inspectMissionDispatchOutputDir(outputDir: string | null) {
-  if (!outputDir) {
-    return {
-      exists: false,
-      fileCount: 0
-    };
-  }
-
-  try {
-    const outputStat = await stat(outputDir);
-
-    if (!outputStat.isDirectory()) {
-      return {
-        exists: true,
-        fileCount: 1
-      };
-    }
-
-    return {
-      exists: true,
-      fileCount: await countFilesInDirectory(outputDir)
-    };
-  } catch {
-    return {
-      exists: false,
-      fileCount: 0
-    };
-  }
-}
-
-async function countFilesInDirectory(directoryPath: string): Promise<number> {
-  const entries = await readdir(directoryPath, { withFileTypes: true });
-  let count = 0;
-
-  for (const entry of entries) {
-    const entryPath = path.join(directoryPath, entry.name);
-
-    if (entry.isDirectory()) {
-      count += await countFilesInDirectory(entryPath);
-      continue;
-    }
-
-    if (entry.isFile()) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
-async function readMissionDispatchTranscriptTurns(
-  record: MissionDispatchRecord,
-  snapshot: MissionControlSnapshot
-) {
-  const sessionId = extractMissionDispatchSessionId(record);
-
-  if (!sessionId) {
-    return [] as TranscriptTurn[];
-  }
-
-  const agent = snapshot.agents.find((entry) => entry.id === record.agentId);
-  const transcriptPath = await resolveRuntimeTranscriptPathFromTranscript(
-    record.agentId,
-    sessionId,
-    record.workspacePath ?? agent?.workspacePath
-  );
-
-  if (!transcriptPath) {
-    return [] as TranscriptTurn[];
-  }
-
-  try {
-    const raw = await readFile(transcriptPath, "utf8");
-    const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
-
-    return filterTranscriptTurnsForRuntimeFromTranscript(
-      transcriptRuntime,
-      extractTranscriptTurnsFromTranscript(raw, transcriptRuntime, record.workspacePath ?? agent?.workspacePath)
-    );
-  } catch {
-    return [] as TranscriptTurn[];
-  }
-}
-
-function extractEmailsFromValues(values: Array<string | null | undefined>) {
-  const emails = new Set<string>();
-
-  for (const value of values) {
-    if (!value) {
-      continue;
-    }
-
-    for (const match of value.match(EMAIL_PATTERN) ?? []) {
-      emails.add(match.toLowerCase());
-    }
-  }
-
-  return [...emails];
-}
-
-function isPlaceholderMissionResponseText(value: string | null) {
-  if (!value) {
-    return false;
-  }
-
-  const normalized = value.trim().toLowerCase();
-
-  return (
-    normalized === "ready" ||
-    normalized === "completed" ||
-    normalized === "complete" ||
-    normalized === "ok" ||
-    normalized === "success"
-  );
-}
-
-function missionRequestsFileArtifact(value: string | null) {
-  if (!value) {
-    return false;
-  }
-
-  return (
-    /\.(txt|md|json|csv|html|pdf|docx?)\b/i.test(value) ||
-    /\b(file|files|artifact|artifacts|report|document|save|export|attachment)\b/i.test(value) ||
-    /\b(dosya|dosyasi|kaydet|kaydi|cikti)\b/i.test(value)
-  );
-}
-
-function missionRequestsEmailAddress(value: string | null) {
-  if (!value) {
-    return false;
-  }
-
-  return /\b(email|e-mail|mail|mail address|mail adres|eposta|e-posta)\b/i.test(value);
-}
-
-function missionNeedsExternalLookup(value: string | null) {
-  if (!value) {
-    return false;
-  }
-
-  return (
-    /https?:\/\//i.test(value) ||
-    /\b[a-z0-9-]+\.(com|net|org|io|ai|co|tr|app|dev|me|info|biz|edu|gov)\b/i.test(value) ||
-    /\b(site|website|web|browser|browse|fetch|sitesine|siteye|siteyi)\b/i.test(value)
-  );
 }
 
 export async function createAgent(input: AgentCreateInput) {
@@ -6265,120 +5896,6 @@ ${teamSection ? `\n\n${teamSection}` : ""}${coordinationSection ? `\n\n${coordin
 `;
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
-async function resolveRuntimeTranscriptPath(
-  agentId: string,
-  sessionId: string,
-  workspacePath?: string
-) {
-  const candidates = [
-    path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`),
-    workspacePath
-      ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`)
-      : null
-  ].filter(Boolean) as string[];
-
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch {
-      continue;
-    }
-  }
-
-  const aliasedTranscriptPath = await resolveRuntimeTranscriptPathFromSessionCatalog(
-    agentId,
-    sessionId,
-    workspacePath
-  );
-
-  if (aliasedTranscriptPath) {
-    return aliasedTranscriptPath;
-  }
-
-  return null;
-}
-
-async function resolveRuntimeTranscriptPathFromSessionCatalog(
-  agentId: string,
-  sessionId: string,
-  workspacePath?: string
-) {
-  const catalogCandidates = [
-    path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", "sessions.json"),
-    workspacePath
-      ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", "sessions.json")
-      : null
-  ].filter(Boolean) as string[];
-
-  for (const catalogPath of catalogCandidates) {
-    try {
-      const raw = await readFile(catalogPath, "utf8");
-      const parsed = JSON.parse(raw) as Record<string, { sessionId?: string; sessionFile?: string }>;
-
-      for (const entry of Object.values(parsed)) {
-        if (!entry || entry.sessionId !== sessionId || typeof entry.sessionFile !== "string") {
-          continue;
-        }
-
-        await access(entry.sessionFile);
-        return entry.sessionFile;
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-function createFallbackRuntimeOutput(runtime: RuntimeRecord): RuntimeOutputRecord {
-  const timestamp = new Date().toISOString();
-
-  return {
-    runtimeId: runtime.id,
-    sessionId: runtime.sessionId,
-    taskId: runtime.taskId,
-    status: "available",
-    finalText: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
-    finalTimestamp: timestamp,
-    stopReason: "fallback",
-    errorMessage: null,
-    items: [
-      {
-        id: `${runtime.id}:fallback`,
-        role: "assistant",
-        timestamp,
-        text: "Fallback mode is active. Connect a real OpenClaw gateway to inspect live runtime output.",
-        stopReason: "fallback",
-        isError: false
-      }
-    ],
-    createdFiles: [],
-    warnings: [],
-    warningSummary: null
-  };
-}
-
-function createMissingRuntimeOutput(runtime: RuntimeRecord, errorMessage: string): RuntimeOutputRecord {
-  return {
-    runtimeId: runtime.id,
-    sessionId: runtime.sessionId,
-    taskId: runtime.taskId,
-    status: "missing",
-    finalText: null,
-    finalTimestamp: null,
-    stopReason: null,
-    errorMessage,
-    items: [],
-    createdFiles: [],
-    warnings: [],
-    warningSummary: null
-  };
-}
-/* eslint-enable @typescript-eslint/no-unused-vars */
-
 function buildTaskFeed(
   task: TaskRecord,
   runs: RuntimeRecord[],
@@ -7021,416 +6538,6 @@ function timestampFromUnix(value: number | null | undefined) {
     : new Date().toISOString();
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
-function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?: string): RuntimeOutputRecord {
-  const turns = filterTranscriptTurnsForRuntime(runtime, extractTranscriptTurns(raw, runtime, workspacePath));
-
-  if (runtime.source === "turn") {
-    const turnId = typeof runtime.metadata.turnId === "string" ? runtime.metadata.turnId : null;
-    const turn = turnId ? turns.find((entry) => entry.id === turnId) : resolveRuntimeMissionTurn(runtime, turns);
-
-    if (turn) {
-      return runtimeOutputFromTurn(runtime, turn);
-    }
-  }
-
-  const latestTurn = turns.at(-1);
-
-  if (latestTurn) {
-    return runtimeOutputFromTurn(runtime, latestTurn);
-  }
-
-  return {
-    runtimeId: runtime.id,
-    sessionId: runtime.sessionId,
-    taskId: runtime.taskId,
-    status: "missing",
-    finalText: null,
-    finalTimestamp: null,
-    stopReason: null,
-    errorMessage: "No transcript entries were found for this runtime.",
-    items: [],
-    createdFiles: [],
-    warnings: [],
-    warningSummary: null
-  };
-}
-
-function filterTranscriptTurnsForRuntime(runtime: RuntimeRecord, turns: TranscriptTurn[]) {
-  const dispatchSubmittedAt =
-    typeof runtime.metadata.dispatchSubmittedAt === "string"
-      ? Date.parse(runtime.metadata.dispatchSubmittedAt)
-      : Number.NaN;
-
-  if (Number.isNaN(dispatchSubmittedAt)) {
-    return turns;
-  }
-
-  return turns.filter((turn) => {
-    const updatedAt = Date.parse(turn.updatedAt || turn.timestamp);
-    return !Number.isNaN(updatedAt) && updatedAt >= dispatchSubmittedAt - 1500;
-  });
-}
-
-function resolveRuntimeMissionTurn(runtime: RuntimeRecord, turns: TranscriptTurn[]) {
-  const mission = typeof runtime.metadata.mission === "string" ? runtime.metadata.mission : null;
-
-  if (!mission) {
-    return null;
-  }
-
-  const matchingTurns = turns.filter((turn) => matchesMissionText(turn.prompt, mission));
-
-  if (matchingTurns.length === 0) {
-    return null;
-  }
-
-  const runtimeUpdatedAt = runtime.updatedAt ?? 0;
-
-  return matchingTurns.sort((left, right) => {
-    const leftUpdatedAt = Date.parse(left.updatedAt);
-    const rightUpdatedAt = Date.parse(right.updatedAt);
-    const leftDelta = Math.abs((Number.isNaN(leftUpdatedAt) ? 0 : leftUpdatedAt) - runtimeUpdatedAt);
-    const rightDelta = Math.abs((Number.isNaN(rightUpdatedAt) ? 0 : rightUpdatedAt) - runtimeUpdatedAt);
-
-    return leftDelta - rightDelta;
-  })[0];
-}
-
-function runtimeOutputFromTurn(runtime: RuntimeRecord, turn: TranscriptTurn): RuntimeOutputRecord {
-  return {
-    runtimeId: runtime.id,
-    sessionId: runtime.sessionId,
-    taskId: runtime.taskId,
-    status: turn.items.length > 0 ? "available" : "missing",
-    finalText: turn.finalText,
-    finalTimestamp: turn.finalTimestamp,
-    stopReason: turn.stopReason,
-    errorMessage: turn.errorMessage,
-    items: turn.items.slice(-12),
-    createdFiles: turn.createdFiles,
-    warnings: turn.warnings,
-    warningSummary: turn.warningSummary
-  };
-}
-
-function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePath?: string) {
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  const turns: TranscriptTurn[] = [];
-  let sessionCwd = workspacePath;
-  let currentTurn:
-    | (Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "errorMessage" | "warningSummary"> & {
-        errorMessage: string | null;
-        pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
-        pendingToolNames: Set<string>;
-      })
-    | null = null;
-
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as SessionTranscriptEntry;
-
-      if (entry.type === "session" && typeof entry.cwd === "string" && entry.cwd.trim()) {
-        sessionCwd = entry.cwd.trim();
-        continue;
-      }
-
-      if (entry.type === "custom" && entry.customType === "openclaw:prompt-error" && currentTurn) {
-        currentTurn.runId ||= entry.data?.runId;
-        currentTurn.updatedAt = entry.timestamp || currentTurn.updatedAt;
-        currentTurn.errorMessage ||= entry.data?.error || null;
-        continue;
-      }
-
-      if (entry.type !== "message" || !entry.message?.role) {
-        continue;
-      }
-
-      const role = entry.message.role;
-
-      if (role !== "assistant" && role !== "toolResult" && role !== "user") {
-        continue;
-      }
-
-      const text = extractTranscriptText(entry.message.content);
-      const errorMessage = entry.message.errorMessage ?? null;
-      const warningMessage = resolveNonFatalToolWarning(role, entry.message, text, errorMessage);
-
-      if (!text && !errorMessage) {
-        if (
-          !(
-            (role === "assistant" && entry.message.content?.some((item) => item.type === "toolCall")) ||
-            (role === "toolResult" && typeof entry.message.toolName === "string" && entry.message.toolName.trim())
-          )
-        ) {
-          continue;
-        }
-      }
-
-      const item: RuntimeOutputItem = {
-        id: entry.id || `${role}-${Date.now()}`,
-        role,
-        timestamp: entry.timestamp || new Date().toISOString(),
-        text: text || errorMessage || "",
-        toolName:
-          role === "toolResult"
-            ? entry.message.toolName?.trim() || extractToolNameFromTranscriptText(text)
-            : undefined,
-        stopReason: role === "assistant" ? entry.message.stopReason ?? null : null,
-        errorMessage,
-        isWarning: Boolean(warningMessage),
-        isError:
-          Boolean(errorMessage) ||
-          entry.message.isError === true ||
-          entry.message.stopReason === "error" ||
-          entry.message.stopReason === "aborted"
-      };
-
-      if (role === "user") {
-        if (currentTurn) {
-          turns.push(finalizeTranscriptTurn(currentTurn));
-        }
-
-        currentTurn = {
-          id: entry.id || `turn-${turns.length}`,
-          prompt: normalizeTranscriptPrompt(item.text),
-          sessionId: runtime.sessionId,
-          runId: undefined,
-          timestamp: item.timestamp,
-          updatedAt: item.timestamp,
-          items: [item],
-          tokenUsage: undefined,
-          errorMessage: null,
-          createdFiles: [],
-          warnings: [],
-          toolNames: [],
-          pendingCreatedFiles: new Map(),
-          pendingToolNames: new Set()
-        };
-        continue;
-      }
-
-      if (!currentTurn) {
-        continue;
-      }
-
-      if (role === "assistant" && Array.isArray(entry.message.content)) {
-        for (const contentItem of entry.message.content) {
-          if (contentItem.type !== "toolCall") {
-            continue;
-          }
-
-          if (typeof contentItem.name === "string" && contentItem.name.trim()) {
-            currentTurn.pendingToolNames.add(contentItem.name.trim());
-          }
-
-          if (contentItem.name !== "write") {
-            continue;
-          }
-
-          const candidatePath =
-            typeof contentItem.arguments?.path === "string" ? contentItem.arguments.path.trim() : "";
-
-          if (!candidatePath) {
-            continue;
-          }
-
-          const resolved = resolveTranscriptArtifactPath(candidatePath, sessionCwd);
-
-          if (!resolved) {
-            continue;
-          }
-
-          currentTurn.pendingCreatedFiles.set(contentItem.id || `${entry.id || "toolCall"}:${candidatePath}`, {
-            path: resolved.path,
-            displayPath: resolved.displayPath
-          });
-        }
-      }
-
-      currentTurn.items.push(item);
-      currentTurn.updatedAt = item.timestamp;
-      currentTurn.errorMessage ||= errorMessage;
-
-      if (warningMessage && !currentTurn.warnings.includes(warningMessage)) {
-        currentTurn.warnings.push(warningMessage);
-      }
-
-      if (
-        role === "toolResult" &&
-        entry.message.isError !== true &&
-        entry.message.toolName === "write" &&
-        typeof entry.message.toolCallId === "string"
-      ) {
-        const createdFile = currentTurn.pendingCreatedFiles.get(entry.message.toolCallId);
-
-        if (createdFile) {
-          currentTurn.createdFiles.push(createdFile);
-          currentTurn.pendingCreatedFiles.delete(entry.message.toolCallId);
-        }
-      }
-
-      if (role === "toolResult") {
-        const toolName =
-          entry.message.toolName?.trim() || extractToolNameFromTranscriptText(item.text)?.trim() || null;
-
-        if (toolName) {
-          currentTurn.pendingToolNames.add(toolName);
-        }
-      }
-
-      if (role === "assistant" && entry.message.usage) {
-        const usage = entry.message.usage as {
-          input?: number;
-          output?: number;
-          totalTokens?: number;
-          cacheRead?: number;
-          prompt_tokens?: number;
-          completion_tokens?: number;
-          total_tokens?: number;
-        };
-        currentTurn.tokenUsage = {
-          input: usage.input ?? usage.prompt_tokens ?? 0,
-          output: usage.output ?? usage.completion_tokens ?? 0,
-          total:
-            usage.totalTokens ??
-            usage.total_tokens ??
-            (usage.input ?? usage.prompt_tokens ?? 0) + (usage.output ?? usage.completion_tokens ?? 0),
-          cacheRead: usage.cacheRead ?? 0
-        };
-      }
-    } catch {
-      continue;
-    }
-  }
-
-  if (currentTurn) {
-    turns.push(finalizeTranscriptTurn(currentTurn));
-  }
-
-  return turns;
-}
-
-function finalizeTranscriptTurn(
-  turn: Omit<TranscriptTurn, "status" | "finalText" | "finalTimestamp" | "stopReason" | "warningSummary"> & {
-    errorMessage: string | null;
-    pendingCreatedFiles: Map<string, RuntimeCreatedFile>;
-    pendingToolNames: Set<string>;
-  }
-): TranscriptTurn {
-  const { pendingCreatedFiles, pendingToolNames, ...rest } = turn;
-  void pendingCreatedFiles;
-  void pendingToolNames;
-  const finalAssistant = [...turn.items]
-    .reverse()
-    .find((item) => item.role === "assistant" && (item.text.trim().length > 0 || item.errorMessage));
-  const lastItem = turn.items.at(-1);
-  const stopReason = finalAssistant?.stopReason ?? null;
-  const hasError =
-    Boolean(turn.errorMessage) ||
-    finalAssistant?.isError === true ||
-    stopReason === "error" ||
-    stopReason === "aborted";
-  const warnings = unique(turn.warnings);
-  const status =
-    hasError
-      ? "stalled"
-      : lastItem?.role === "assistant" && lastItem.stopReason && lastItem.stopReason !== "toolUse"
-        ? "completed"
-        : "running";
-
-  return {
-    ...rest,
-    status,
-    finalText: finalAssistant?.text ?? null,
-    finalTimestamp: finalAssistant?.timestamp ?? null,
-    stopReason,
-    errorMessage: turn.errorMessage || finalAssistant?.errorMessage || null,
-    createdFiles: dedupeCreatedFiles(turn.createdFiles),
-    warnings,
-    warningSummary: warnings[0] ?? null,
-    toolNames: uniqueStrings([...turn.pendingToolNames])
-  };
-}
-
-function collectTranscriptToolNames(turns: TranscriptTurn[]) {
-  return uniqueStrings(turns.flatMap((turn) => turn.toolNames));
-}
-
-function createTurnRuntime(
-  runtime: RuntimeRecord,
-  turn: TranscriptTurn,
-  toolNames: string[] = turn.toolNames
-): RuntimeRecord {
-  const updatedAt = Date.parse(turn.updatedAt);
-  const title = formatTurnTitle(turn.prompt, runtime.agentId);
-  const subtitle =
-    turn.warningSummary
-      ? summarizeText(`Completed with fallback: ${turn.warningSummary}`, 90)
-      : turn.finalText
-        ? summarizeText(turn.finalText, 90)
-        : turn.status === "stalled"
-          ? "Run stalled"
-          : "Main session run";
-
-  return {
-    id: `runtime:${runtime.sessionId}:${turn.id}`,
-    source: "turn",
-    key: `${runtime.key}:turn:${turn.id}`,
-    title,
-    subtitle,
-    status: turn.status,
-    updatedAt: Number.isNaN(updatedAt) ? runtime.updatedAt : updatedAt,
-    ageMs: Number.isNaN(updatedAt) ? runtime.ageMs : Math.max(Date.now() - updatedAt, 0),
-    agentId: runtime.agentId,
-    workspaceId: runtime.workspaceId,
-    modelId: runtime.modelId,
-    sessionId: runtime.sessionId,
-    taskId: runtime.taskId,
-    runId: turn.runId || turn.id,
-    toolNames,
-    tokenUsage: turn.tokenUsage,
-    metadata: {
-      ...runtime.metadata,
-      turnId: turn.id,
-      turnPrompt: turn.prompt,
-      stage: "main.turn",
-      historical: turn.status !== "running",
-      createdFiles: turn.createdFiles,
-      warnings: turn.warnings,
-      warningSummary: turn.warningSummary
-    }
-  };
-}
-
-function resolveTranscriptArtifactPath(targetPath: string, basePath?: string) {
-  const normalizedTarget = targetPath.trim();
-
-  if (!normalizedTarget) {
-    return null;
-  }
-
-  const absolutePath = path.isAbsolute(normalizedTarget)
-    ? path.normalize(normalizedTarget)
-    : basePath
-      ? path.resolve(basePath, normalizedTarget)
-      : null;
-
-  if (!absolutePath) {
-    return null;
-  }
-
-  const displayPath =
-    basePath && absolutePath.startsWith(`${path.resolve(basePath)}${path.sep}`)
-      ? path.relative(path.resolve(basePath), absolutePath) || path.basename(absolutePath)
-      : absolutePath;
-
-  return {
-    path: absolutePath,
-    displayPath
-  } satisfies RuntimeCreatedFile;
-}
-
 function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {
   const seen = new Set<string>();
   const deduped: RuntimeCreatedFile[] = [];
@@ -7447,24 +6554,6 @@ function dedupeCreatedFiles(files: RuntimeCreatedFile[]) {
   return deduped;
 }
 
-function normalizeTranscriptPrompt(text: string) {
-  return text
-    .replace(/^Sender \(untrusted metadata\):[\s\S]*?```[\s\S]*?```\s*/i, "")
-    .replace(/^\[[^\]]+\]\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function formatTurnTitle(prompt: string, agentId?: string) {
-  const normalized = prompt.trim();
-
-  if (!normalized) {
-    return `${prettifyAgentName(agentId)} run`;
-  }
-
-  return compactMissionText(normalized, 38) || `${prettifyAgentName(agentId)} run`;
-}
-
 function summarizeText(value: string, maxLength: number) {
   const normalized = value.replace(/\s+/g, " ").trim();
 
@@ -7474,70 +6563,6 @@ function summarizeText(value: string, maxLength: number) {
 
   return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
 }
-
-function resolveNonFatalToolWarning(
-  role: NonNullable<SessionTranscriptEntry["message"]>["role"],
-  message: NonNullable<SessionTranscriptEntry["message"]>,
-  text: string,
-  errorMessage: string | null
-) {
-  if (role !== "toolResult" || message.isError === true || errorMessage) {
-    return null;
-  }
-
-  const exitCode = message.details?.exitCode;
-
-  if (typeof exitCode !== "number" || exitCode === 0) {
-    return null;
-  }
-
-  const sourceText = message.details?.aggregated || text;
-  const cleaned = sourceText
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => !/^\(Command exited with code \d+\)$/i.test(line));
-  const primaryLine =
-    cleaned.find((line) => !line.startsWith("[WARNING]")) ||
-    cleaned.find((line) => line.startsWith("[WARNING]")) ||
-    `${message.toolName || "tool"} exited with code ${exitCode}`;
-  const normalized = primaryLine.replace(/^\[WARNING\]\s*/i, "").trim();
-
-  return summarizeText(normalized || `${message.toolName || "tool"} exited with code ${exitCode}`, 160);
-}
-
-function isHeartbeatTurn(prompt: string) {
-  return prompt.toLowerCase().startsWith("read heartbeat.md if it exists");
-}
-
-function extractTranscriptText(
-  content: Array<{
-    type?: string;
-    text?: string;
-    thinking?: string;
-  }> = []
-) {
-  return content
-    .flatMap((item) => {
-      if (item.type === "text" && item.text) {
-        return [item.text];
-      }
-
-      if (item.type === "thinking" && item.thinking) {
-        return [`[thinking] ${item.thinking}`];
-      }
-
-      return [];
-    })
-    .join("\n\n")
-    .trim();
-}
-
-function extractToolNameFromTranscriptText(text: string) {
-  const match = text.match(/"tool(Name)?":\s*"([^"]+)"/i);
-  return match?.[2];
-}
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 function workspaceIdFromPath(workspacePath: string) {
   const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
