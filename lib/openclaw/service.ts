@@ -71,6 +71,26 @@ import {
   scaffoldWorkspaceContents
 } from "@/lib/openclaw/domains/workspace-bootstrap";
 import {
+  composeMissionWithOutputRouting,
+  prepareMissionOutputPlan
+} from "@/lib/openclaw/domains/mission-routing";
+import {
+  collectTranscriptToolNames as collectTranscriptToolNamesFromTranscript,
+  extractTranscriptTurns as extractTranscriptTurnsFromTranscript,
+  filterTranscriptTurnsForRuntime as filterTranscriptTurnsForRuntimeFromTranscript,
+  getRuntimeOutputForResolvedRuntime as getRuntimeOutputForResolvedRuntimeFromTranscript,
+  mapSessionToRuntimes as mapSessionToRuntimesFromTranscript,
+  parseRuntimeOutput as parseRuntimeOutputFromTranscript,
+  resolveRuntimeTranscriptPath as resolveRuntimeTranscriptPathFromTranscript
+} from "@/lib/openclaw/domains/runtime-transcript";
+import {
+  assertWorkspaceBootstrapAgentIdsAvailable as assertWorkspaceBootstrapAgentIdsAvailableFromProvisioning,
+  createBootstrappedWorkspaceAgent as createBootstrappedWorkspaceAgentFromProvisioning,
+  createWorkspaceAgentId as createWorkspaceAgentIdFromProvisioning,
+  ensureAgentPolicySkill as ensureAgentPolicySkillFromProvisioning,
+  ensureWorkspaceSkillMarkdown as ensureWorkspaceSkillMarkdownFromProvisioning
+} from "@/lib/openclaw/domains/agent-provisioning";
+import {
   applyAgentIdentity,
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
@@ -686,7 +706,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
 
     const liveSessionRuntimes = (
       await Promise.all(
-        sessions.map((session) => mapSessionToRuntimes(session, agentConfig, agentsList))
+        sessions.map((session) => mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, mapRuntime))
       )
     ).flat();
     const annotatedLiveSessionRuntimes = await annotateMissionDispatchMetadata(liveSessionRuntimes);
@@ -2115,7 +2135,11 @@ async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecor
     return;
   }
 
-  const transcriptPath = await resolveRuntimeTranscriptPath(runtime.agentId, runtime.sessionId, record.workspacePath ?? undefined);
+  const transcriptPath = await resolveRuntimeTranscriptPathFromTranscript(
+    runtime.agentId,
+    runtime.sessionId,
+    record.workspacePath ?? undefined
+  );
 
   if (!transcriptPath) {
     return;
@@ -2128,7 +2152,7 @@ async function reconcileMissionDispatchRuntimeState(record: MissionDispatchRecor
     return;
   }
 
-  const output = parseRuntimeOutput(runtime, raw, record.workspacePath ?? undefined);
+  const output = parseRuntimeOutputFromTranscript(runtime, raw, record.workspacePath ?? undefined);
   const finalizedFromTranscript = Boolean(output.finalTimestamp && output.stopReason && output.stopReason !== "toolUse");
   const stalledFromTranscript =
     Boolean(output.errorMessage) || output.stopReason === "error" || output.stopReason === "aborted";
@@ -2173,7 +2197,11 @@ async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord
     return null;
   }
 
-  const transcriptPath = await resolveRuntimeTranscriptPath(record.agentId, sessionId, record.workspacePath ?? undefined);
+  const transcriptPath = await resolveRuntimeTranscriptPathFromTranscript(
+    record.agentId,
+    sessionId,
+    record.workspacePath ?? undefined
+  );
 
   if (!transcriptPath) {
     return null;
@@ -2182,9 +2210,9 @@ async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord
   try {
     const raw = await readFile(transcriptPath, "utf8");
     const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
-    const turns = filterTranscriptTurnsForRuntime(
+    const turns = filterTranscriptTurnsForRuntimeFromTranscript(
       transcriptRuntime,
-      extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? undefined)
+      extractTranscriptTurnsFromTranscript(raw, transcriptRuntime, record.workspacePath ?? undefined)
     );
 
     if (turns.length === 0) {
@@ -2999,46 +3027,6 @@ function extractMissionCommandMeta(value: unknown) {
   return meta && typeof meta === "object" ? meta : null;
 }
 
-async function mapSessionToRuntimes(
-  session: SessionsPayload["sessions"][number],
-  agentConfig: AgentConfigPayload,
-  agentsList: AgentPayload
-) {
-  const runtime = mapRuntime(session, agentConfig, agentsList);
-
-  if (!session.key?.endsWith(":main") || !session.agentId || !session.sessionId) {
-    return [runtime];
-  }
-
-  const agent = agentsList.find((entry) => entry.id === session.agentId);
-  const config = agentConfig.find((entry) => entry.id === session.agentId);
-  const transcriptPath = await resolveRuntimeTranscriptPath(
-    session.agentId,
-    session.sessionId,
-    agent?.workspace || config?.workspace
-  );
-
-  if (!transcriptPath) {
-    return [runtime];
-  }
-
-  try {
-    const raw = await readFile(transcriptPath, "utf8");
-    const turns = extractTranscriptTurns(raw, runtime, agent?.workspace || config?.workspace).filter(
-      (turn) => !isHeartbeatTurn(turn.prompt)
-    );
-    const observedToolNames = collectTranscriptToolNames(turns);
-
-    if (turns.length === 0) {
-      return [runtime];
-    }
-
-    return turns.slice(-6).reverse().map((turn) => createTurnRuntime(runtime, turn, observedToolNames));
-  } catch {
-    return [runtime];
-  }
-}
-
 export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutputRecord> {
   let snapshot = await getMissionControlSnapshot({ includeHidden: true });
   let runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
@@ -3063,7 +3051,7 @@ export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutput
     };
   }
 
-  return getRuntimeOutputForResolvedRuntime(runtime, snapshot);
+  return getRuntimeOutputForResolvedRuntimeFromTranscript(runtime, snapshot);
 }
 
 export async function getTaskDetail(
@@ -3107,7 +3095,7 @@ export async function getTaskDetail(
     .filter((runtime): runtime is RuntimeRecord => Boolean(runtime))
     .sort(sortRuntimesByUpdatedAtDesc);
   const outputs = await Promise.all(
-    runs.map((runtime) => getRuntimeOutputForResolvedRuntime(runtime, snapshot))
+    runs.map((runtime) => getRuntimeOutputForResolvedRuntimeFromTranscript(runtime, snapshot))
   );
   const outputByRuntimeId = new Map(outputs.map((output) => [output.runtimeId, output]));
   const createdFiles = dedupeCreatedFiles(
@@ -3174,7 +3162,7 @@ async function buildTaskDetailFromDispatchRecord(
   const runs = dispatchRuntimes.length > 0 ? dispatchRuntimes : [fallbackRuntime];
   const task = buildTaskRecord(`dispatch:${dispatchRecord.id}`, runs, agentNameById);
   const outputs = await Promise.all(
-    runs.map((runtime) => getRuntimeOutputForResolvedRuntime(runtime, snapshot))
+    runs.map((runtime) => getRuntimeOutputForResolvedRuntimeFromTranscript(runtime, snapshot))
   );
   const outputByRuntimeId = new Map(outputs.map((output) => [output.runtimeId, output]));
   const createdFiles = dedupeCreatedFiles(
@@ -3236,7 +3224,7 @@ async function buildTaskIntegrityRecord(input: {
   const finalResponseText = runtimeFinalText || dispatchResultText || null;
   const finalResponseSource = runtimeFinalText ? "runtime" : dispatchResultText ? "dispatch" : "none";
   const sessionMismatch = Boolean(dispatchRecord && transcriptTurns.length > 0 && matchingTranscriptTurns.length === 0);
-  const toolNames = collectTranscriptToolNames(matchingTranscriptTurns);
+  const toolNames = collectTranscriptToolNamesFromTranscript(matchingTranscriptTurns);
   const emails = extractEmailsFromValues([
     finalResponseText,
     dispatchResultText,
@@ -3430,7 +3418,7 @@ async function readMissionDispatchTranscriptTurns(
   }
 
   const agent = snapshot.agents.find((entry) => entry.id === record.agentId);
-  const transcriptPath = await resolveRuntimeTranscriptPath(
+  const transcriptPath = await resolveRuntimeTranscriptPathFromTranscript(
     record.agentId,
     sessionId,
     record.workspacePath ?? agent?.workspacePath
@@ -3444,9 +3432,9 @@ async function readMissionDispatchTranscriptTurns(
     const raw = await readFile(transcriptPath, "utf8");
     const transcriptRuntime = buildMissionDispatchTranscriptRuntime(record, sessionId);
 
-    return filterTranscriptTurnsForRuntime(
+    return filterTranscriptTurnsForRuntimeFromTranscript(
       transcriptRuntime,
-      extractTranscriptTurns(raw, transcriptRuntime, record.workspacePath ?? agent?.workspacePath)
+      extractTranscriptTurnsFromTranscript(raw, transcriptRuntime, record.workspacePath ?? agent?.workspacePath)
     );
   } catch {
     return [] as TranscriptTurn[];
@@ -3517,46 +3505,6 @@ function missionNeedsExternalLookup(value: string | null) {
   );
 }
 
-async function getRuntimeOutputForResolvedRuntime(
-  runtime: RuntimeRecord,
-  snapshot: MissionControlSnapshot
-): Promise<RuntimeOutputRecord> {
-  if (snapshot.mode === "fallback") {
-    return createFallbackRuntimeOutput(runtime);
-  }
-
-  if (!runtime.sessionId || !runtime.agentId) {
-    return createMissingRuntimeOutput(runtime, "This runtime does not expose a session transcript yet.");
-  }
-
-  const agent = snapshot.agents.find((entry) => entry.id === runtime.agentId);
-  const transcriptPath = await resolveRuntimeTranscriptPath(runtime.agentId, runtime.sessionId, agent?.workspacePath);
-
-  if (!transcriptPath) {
-    return createMissingRuntimeOutput(runtime, "No transcript file was found for this runtime session.");
-  }
-
-  try {
-    const raw = await readFile(transcriptPath, "utf8");
-    return parseRuntimeOutput(runtime, raw, agent?.workspacePath);
-  } catch (error) {
-    return {
-      runtimeId: runtime.id,
-      sessionId: runtime.sessionId,
-      taskId: runtime.taskId,
-      status: "error",
-      finalText: null,
-      finalTimestamp: null,
-      stopReason: null,
-      errorMessage: error instanceof Error ? error.message : "Unable to read runtime transcript.",
-      items: [],
-      createdFiles: [],
-      warnings: [],
-      warningSummary: null
-    };
-  }
-}
-
 export async function createAgent(input: AgentCreateInput) {
   const agentId = slugify(input.id.trim());
 
@@ -3613,7 +3561,7 @@ export async function createAgent(input: AgentCreateInput) {
 
   await runOpenClaw(args);
 
-  const policySkillId = await ensureAgentPolicySkill({
+  const policySkillId = await ensureAgentPolicySkillFromProvisioning({
     workspacePath: resolvedWorkspacePath,
     agentId,
     agentName: displayName,
@@ -3622,7 +3570,7 @@ export async function createAgent(input: AgentCreateInput) {
     snapshot
   });
   for (const skillId of presetSkillIds) {
-    await ensureWorkspaceSkillMarkdown(resolvedWorkspacePath, skillId);
+    await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
   const configEntry = await upsertAgentConfigEntry(
@@ -3770,7 +3718,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     };
   }
 
-  const policySkillId = await ensureAgentPolicySkill({
+  const policySkillId = await ensureAgentPolicySkillFromProvisioning({
     workspacePath: resolvedWorkspacePath,
     agentId,
     agentName: normalizeOptionalValue(input.name) ?? currentName ?? agentId,
@@ -3789,7 +3737,7 @@ export async function updateAgent(input: AgentUpdateInput) {
         : currentDeclaredSkills
       : filterKnownOpenClawSkillIds(filterAgentPolicySkills(input.skills));
   for (const skillId of nextDeclaredSkills) {
-    await ensureWorkspaceSkillMarkdown(resolvedWorkspacePath, skillId);
+    await ensureWorkspaceSkillMarkdownFromProvisioning(resolvedWorkspacePath, skillId);
   }
 
   const configEntry = await upsertAgentConfigEntry(
@@ -4297,7 +4245,7 @@ export async function createWorkspaceProject(
     percent: 72,
     detail: "Checking current OpenClaw snapshot and agent ids."
   });
-  assertWorkspaceBootstrapAgentIdsAvailable(snapshot, normalized.slug, enabledAgents);
+  assertWorkspaceBootstrapAgentIdsAvailableFromProvisioning(snapshot, normalized.slug, enabledAgents);
   await progress.completeStep(
     "validate",
     `Workspace input and ${enabledAgents.length} agent configuration${enabledAgents.length === 1 ? "" : "s"} are ready.`
@@ -4346,7 +4294,7 @@ export async function createWorkspaceProject(
     });
     await progress.addActivity("agents", `Creating ${agent.name} (${agent.role}).`);
 
-    const createdAgentId = await createBootstrappedWorkspaceAgent({
+    const createdAgentId = await createBootstrappedWorkspaceAgentFromProvisioning({
       workspacePath: targetDir,
       workspaceSlug: normalized.slug,
       workspaceModelId: normalized.modelId,
@@ -4370,7 +4318,7 @@ export async function createWorkspaceProject(
   const primaryAgentId =
     createdAgentIds.find((agentId) =>
       enabledAgents.some(
-        (agent) => agent.isPrimary && createWorkspaceAgentId(normalized.slug, agent.id) === agentId
+        (agent) => agent.isPrimary && createWorkspaceAgentIdFromProvisioning(normalized.slug, agent.id) === agentId
       )
     ) ?? createdAgentIds[0];
 
@@ -4776,7 +4724,7 @@ async function syncWorkspaceAgentsToPlan(input: {
     }
 
     const createdAgentId = await createAgent({
-      id: createWorkspaceAgentId(input.workspaceSlug, desiredAgent.id),
+      id: createWorkspaceAgentIdFromProvisioning(input.workspaceSlug, desiredAgent.id),
       workspaceId: input.currentWorkspace.id,
       workspacePath: input.currentWorkspace.path,
       name: normalizeOptionalValue(desiredAgent.name) ?? undefined,
@@ -5264,7 +5212,8 @@ function stringifyFailureChunk(value: unknown) {
   return "";
 }
 
-async function createBootstrappedWorkspaceAgent(params: {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _createBootstrappedWorkspaceAgent(params: {
   workspacePath: string;
   workspaceSlug: string;
   workspaceModelId?: string;
@@ -5410,65 +5359,6 @@ async function runWorkspaceKickoffMission(
   return result;
 }
 
-async function prepareMissionOutputPlan(workspacePath: string, mission: string) {
-  const runFolder = buildMissionOutputFolderName(mission);
-  const absoluteOutputDir = path.join(workspacePath, "deliverables", runFolder);
-  const relativeOutputDir = normalizeWorkspaceRelativePath(path.join("deliverables", runFolder));
-  const notesDirRelative = normalizeWorkspaceRelativePath("memory");
-
-  await mkdir(absoluteOutputDir, { recursive: true });
-  await mkdir(path.join(workspacePath, "memory"), { recursive: true });
-
-  return {
-    runFolder,
-    absoluteOutputDir,
-    relativeOutputDir,
-    notesDirRelative
-  };
-}
-
-function composeMissionWithOutputRouting(
-  mission: string,
-  outputPlan: {
-    relativeOutputDir: string;
-    notesDirRelative: string;
-  },
-  policy?: AgentPolicy,
-  setupAgentId?: string | null
-) {
-  const resolvedPolicy = policy ?? resolveAgentPolicy(DEFAULT_AGENT_PRESET);
-
-  return [
-    mission,
-    "",
-    "Task output routing:",
-    `- Put substantial outputs, drafts, reports, docs, and file deliverables under \`${outputPlan.relativeOutputDir}/\`.`,
-    `- If a file is requested, default to \`${outputPlan.relativeOutputDir}/<descriptive-file-name>\` unless the user explicitly asks for another path.`,
-    `- Use \`${outputPlan.notesDirRelative}/\` only for temporary notes or durable workspace memory, not final deliverables.`,
-    "- Avoid writing final artifacts to the workspace root.",
-    "- Only update shared workspace docs when the change is durable and workspace-wide; task-specific docs should stay inside this run folder.",
-    "",
-    "Agent operating policy:",
-    ...buildAgentPolicyPromptLines(resolvedPolicy, setupAgentId)
-  ].join("\n");
-}
-
-function buildMissionOutputFolderName(mission: string) {
-  const now = new Date();
-  const timestamp = [
-    now.getFullYear(),
-    padNumber(now.getMonth() + 1),
-    padNumber(now.getDate()),
-    padNumber(now.getHours()),
-    padNumber(now.getMinutes()),
-    padNumber(now.getSeconds())
-  ].join("-");
-  const normalizedMission = mission.replace(/^\[[^\]]+\]\s*/i, "").trim();
-  const missionSlug = slugify(normalizedMission).slice(0, 48).replace(/^-+|-+$/g, "") || "task";
-
-  return `${timestamp}-${missionSlug}`;
-}
-
 function createWorkspaceAgentId(workspaceSlug: string, agentKey: string) {
   return `${workspaceSlug}-${slugify(agentKey) || "agent"}`;
 }
@@ -5521,7 +5411,8 @@ function assertAgentIdAvailable(
   );
 }
 
-function assertWorkspaceBootstrapAgentIdsAvailable(
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _assertWorkspaceBootstrapAgentIdsAvailable(
   snapshot: MissionControlSnapshot,
   workspaceSlug: string,
   agents: WorkspaceAgentBlueprintInput[]
@@ -5616,7 +5507,8 @@ async function ensureAgentPolicySkill(params: {
   return skillId;
 }
 
-async function ensureWorkspaceSkillMarkdown(workspacePath: string, skillId: string) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _ensureWorkspaceSkillMarkdown(workspacePath: string, skillId: string) {
   const [knownSkillId] = filterKnownOpenClawSkillIds([skillId]);
 
   if (!knownSkillId) {
@@ -6373,6 +6265,7 @@ ${teamSection ? `\n\n${teamSection}` : ""}${coordinationSection ? `\n\n${coordin
 `;
 }
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 async function resolveRuntimeTranscriptPath(
   agentId: string,
   sessionId: string,
@@ -6484,6 +6377,7 @@ function createMissingRuntimeOutput(runtime: RuntimeRecord, errorMessage: string
     warningSummary: null
   };
 }
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 function buildTaskFeed(
   task: TaskRecord,
@@ -7127,6 +7021,7 @@ function timestampFromUnix(value: number | null | undefined) {
     : new Date().toISOString();
 }
 
+/* eslint-disable @typescript-eslint/no-unused-vars */
 function parseRuntimeOutput(runtime: RuntimeRecord, raw: string, workspacePath?: string): RuntimeOutputRecord {
   const turns = filterTranscriptTurnsForRuntime(runtime, extractTranscriptTurns(raw, runtime, workspacePath));
 
@@ -7642,6 +7537,7 @@ function extractToolNameFromTranscriptText(text: string) {
   const match = text.match(/"tool(Name)?":\s*"([^"]+)"/i);
   return match?.[2];
 }
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 function workspaceIdFromPath(workspacePath: string) {
   const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
@@ -9110,7 +9006,7 @@ async function syncAgentPolicySkills(
         (entry) => entry.workspaceId === agent.workspaceId && entry.policy.preset === "setup" && entry.id !== agent.id
       )?.id ?? null;
 
-    const policySkillId = await ensureAgentPolicySkill({
+    const policySkillId = await ensureAgentPolicySkillFromProvisioning({
       workspacePath: agent.workspacePath,
       agentId: agent.id,
       agentName: agent.name,
@@ -9198,7 +9094,7 @@ function findMatchingWorkspaceAgent(
   const workspacePrefix = `${workspaceSlug}-`;
 
   return (
-    agents.find((agent) => agent.id === createWorkspaceAgentId(workspaceSlug, agentKey)) ??
+    agents.find((agent) => agent.id === createWorkspaceAgentIdFromProvisioning(workspaceSlug, agentKey)) ??
     agents.find((agent) => agent.id === `${workspacePrefix}${normalizedKey}`) ??
     agents.find((agent) => normalizedKey.length > 0 && agent.id.endsWith(`-${normalizedKey}`)) ??
     agents.find((agent) => agent.id === normalizedKey) ??
@@ -9995,14 +9891,6 @@ function unique(values: string[]) {
 
 function isNonEmptyString(value: string | null | undefined): value is string {
   return Boolean(value);
-}
-
-function padNumber(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function normalizeWorkspaceRelativePath(targetPath: string) {
-  return targetPath.split(path.sep).join("/");
 }
 
 function normalizeUpdateError(value: string | undefined) {
