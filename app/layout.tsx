@@ -4,7 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 import "@/app/globals.css";
 
-const siteTitle = "AgentOS | OpenClaw Mission Control";
+const siteTitle = "AgentOS | Control Plane";
 const siteDescription = "Human Control Layer for AI Agents and Companies | Built on OpenClaw.";
 const socialImagePath = "/readme/agentos1.webp";
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.VERCEL_URL;
@@ -18,11 +18,11 @@ export const metadata: Metadata = {
   metadataBase,
   title: siteTitle,
   description: siteDescription,
-  applicationName: "AgentOS | Mission Control",
+  applicationName: "AgentOS | Control Plane",
   manifest: "/site.webmanifest",
   openGraph: {
     type: "website",
-    siteName: "AgentOS | Mission Control",
+    siteName: "AgentOS | Control Plane",
     title: siteTitle,
     description: siteDescription,
     images: [
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
         url: socialImagePath,
         width: 1536,
         height: 1024,
-        alt: "AgentOS mission-control interface"
+        alt: "AgentOS control-plane interface"
       }
     ]
   },

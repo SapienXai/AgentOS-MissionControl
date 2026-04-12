@@ -166,8 +166,8 @@ export async function POST(request: Request) {
         await fail(
           "verifying",
           smokeTest.error
-            ? `Mission Control could not verify a real agent turn. ${smokeTest.error}`
-            : "Mission Control could not verify a real agent turn yet.",
+            ? `AgentOS could not verify a real agent turn. ${smokeTest.error}`
+            : "AgentOS could not verify a real agent turn yet.",
           {
             snapshot: freshSnapshot,
             manualCommand: manualCommand ?? buildModelManualCommand(freshSnapshot, preferredModelId, manualCommandBin),
@@ -370,7 +370,7 @@ export async function POST(request: Request) {
           message: "Verifying the selected model..."
         });
         await verifyReady(
-          "The selected model was saved, but Mission Control still cannot verify it.",
+          "The selected model was saved, but AgentOS still cannot verify it.",
           input.modelId
         );
         return;
@@ -604,7 +604,7 @@ function resolveVerificationFailure(
 
   return {
     message: snapshot.diagnostics.modelReadiness.defaultModel
-      ? "The default model is set, but Mission Control still cannot verify it yet."
+      ? "The default model is set, but AgentOS still cannot verify it yet."
       : "Choose a default model to finish setup.",
     manualCommand: buildModelManualCommand(snapshot, preferredModelId, commandBin)
   };

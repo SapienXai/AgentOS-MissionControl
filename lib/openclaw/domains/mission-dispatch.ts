@@ -189,7 +189,7 @@ export async function buildTaskIntegrityRecord(input: {
       id: "missing-transcript",
       severity: "warning",
       title: "No runtime transcript was captured",
-      detail: "Mission Control could not verify what the agent actually did because no transcript was recovered for this dispatch."
+      detail: "AgentOS could not verify what the agent actually did because no transcript was recovered for this dispatch."
     });
   }
 

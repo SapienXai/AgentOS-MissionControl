@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const command = input.command.trim();
 
     if (!command.startsWith("openclaw ")) {
-      throw new Error("Only OpenClaw commands can be opened from Mission Control.");
+      throw new Error("Only OpenClaw commands can be opened from AgentOS.");
     }
 
     if (process.platform !== "darwin") {

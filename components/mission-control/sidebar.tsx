@@ -536,14 +536,14 @@ export function MissionSidebar({
           )}
         >
           <RailTooltip
-            label="Mission Control"
+            label="AgentOS"
             side="right"
             surfaceTheme={surfaceTheme}
             panelCollapsed={isPanelCollapsed}
           >
             <button
               type="button"
-              aria-label={isPanelCollapsed ? "Open mission control" : "Collapse mission control"}
+              aria-label={isPanelCollapsed ? "Open AgentOS" : "Collapse AgentOS"}
               onClick={togglePanelFromRail}
               className="flex h-9 w-9 shrink-0 aspect-square items-center justify-center overflow-hidden rounded-[8px] border border-cyan-300/20 bg-cyan-400/[0.12] shadow-[0_10px_24px_rgba(34,211,238,0.18)]"
             >
@@ -642,7 +642,7 @@ export function MissionSidebar({
                 </span>
                 <span className="text-[11px] font-medium text-slate-600">|</span>
                 <span className="font-display text-[10px] font-normal tracking-[0.18em] text-slate-500">
-                  Mission Control
+                  Control Plane
                 </span>
               </div>
 

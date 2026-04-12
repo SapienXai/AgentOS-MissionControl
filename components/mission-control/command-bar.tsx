@@ -584,7 +584,7 @@ export function CommandBar({
 
                 <div className="ml-auto flex items-center gap-1">
                   <IconButton
-                    label="Refresh mission control"
+                    label="Refresh AgentOS"
                     onClick={async () => {
                       setIsRefreshing(true);
                       await onRefresh();

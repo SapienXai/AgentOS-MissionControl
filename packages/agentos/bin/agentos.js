@@ -741,7 +741,7 @@ function displayHost(host) {
 }
 
 function printHelp() {
-  console.log(`AgentOS Mission Control
+  console.log(`AgentOS
 
 Usage:
   agentos
@@ -1142,7 +1142,6 @@ function parseVersion(value) {
 }
 
 async function installReleaseUpdate(status) {
-  const installRoot = path.dirname(packageRoot);
   const artifactName = `agentos-${getAssetPlatform()}-${getAssetArch()}.tgz`;
   const checksumName = `${artifactName}.sha256`;
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "agentos-update-"));

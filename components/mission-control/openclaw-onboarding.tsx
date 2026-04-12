@@ -188,7 +188,7 @@ export function OpenClawOnboarding({
               surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
             )}
           >
-            OpenClaw Mission Control
+            AgentOS
           </p>
           <h1
             className={cn(
@@ -366,7 +366,7 @@ export function OpenClawOnboarding({
                       : "bg-white text-slate-950 hover:bg-white/92"
                   )}
                 >
-                  {hasWorkspaces ? "Enter Mission Control" : "Create first workspace"}
+                  {hasWorkspaces ? "Enter AgentOS" : "Create first workspace"}
                   <ArrowRight className="ml-1.5 h-3 w-3" />
                 </Button>
               </>
@@ -850,7 +850,7 @@ function LaunchpadStage({
 }) {
   const hasWorkspaces = workspaceCount > 0;
   const launchSummary = hasWorkspaces
-    ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use Mission Control to inspect them or create another workspace for a new mission.`
+    ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use AgentOS to inspect them or create another workspace for a new mission.`
     : "No workspace exists yet. Create one first so the live system has a place to keep context and deliverables.";
 
   return (
@@ -951,7 +951,7 @@ function LaunchpadStage({
           )}
         >
           {hasWorkspaces
-            ? "Open Mission Control to inspect the live graph, or create another workspace if you want a separate mission lane."
+            ? "Open AgentOS to inspect the live graph, or create another workspace if you want a separate mission lane."
             : "Create the first workspace now. That is the shortest path from a ready system to a real mission."}
         </p>
       </div>
@@ -1330,7 +1330,7 @@ function resolvePrimaryAction(params: {
 }) {
   if (params.stage === "system") {
     if (params.systemReady && params.modelReady) {
-      return { kind: "dismiss" as const, label: "Enter Mission Control" };
+      return { kind: "dismiss" as const, label: "Enter AgentOS" };
     }
 
     if (params.systemReady) {
@@ -1341,7 +1341,7 @@ function resolvePrimaryAction(params: {
   }
 
   if (params.modelReady) {
-    return { kind: "dismiss" as const, label: "Enter Mission Control" };
+    return { kind: "dismiss" as const, label: "Enter AgentOS" };
   }
 
   if (params.selectedModelId && params.availableModelIds.includes(params.selectedModelId)) {

@@ -95,7 +95,7 @@ function buildAgentChatPrompt(
 
   const trimmed = message.trim();
   const instructions = [
-    "You are chatting directly with the operator inside Mission Control. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards."
+    "You are chatting directly with the operator inside AgentOS. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards."
   ];
 
   if (options.agentDir) {
@@ -114,7 +114,7 @@ function buildAgentChatPrompt(
   }
 
   instructions.push(
-    `Mission Control applies self-renames through a structured action, not by having you edit files yourself. If the operator asks to rename you or set your display name, reply normally and append exactly one action block on its own line using this format: <${MISSION_CONTROL_ACTION_TAG}>{"type":"rename_agent","name":"New Name"}</${MISSION_CONTROL_ACTION_TAG}>.`
+    `AgentOS applies self-renames through a structured action, not by having you edit files yourself. If the operator asks to rename you or set your display name, reply normally and append exactly one action block on its own line using this format: <${MISSION_CONTROL_ACTION_TAG}>{"type":"rename_agent","name":"New Name"}</${MISSION_CONTROL_ACTION_TAG}>.`
   );
   instructions.push(
     "Only emit that action block for an actual rename request. Do not emit it for questions about your current name, hypothetical questions about rename mechanics, or identity discussions that do not request a change."
@@ -122,7 +122,7 @@ function buildAgentChatPrompt(
 
   if (options.agentDir) {
     instructions.push(
-      `If the operator asks which path would be updated, explain that Mission Control applies the rename centrally and then syncs ${options.agentDir}/IDENTITY.md.`
+      `If the operator asks which path would be updated, explain that AgentOS applies the rename centrally and then syncs ${options.agentDir}/IDENTITY.md.`
     );
   }
 
@@ -130,7 +130,7 @@ function buildAgentChatPrompt(
     instructions.push(options.workspaceTeamPrompt);
   }
 
-  instructions.push(`Your current display name in Mission Control is ${options.agentName}.`);
+  instructions.push(`Your current display name in AgentOS is ${options.agentName}.`);
   const prefix = `${instructions.join("\n")}\n`;
 
   return turns

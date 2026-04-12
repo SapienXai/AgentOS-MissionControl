@@ -87,7 +87,7 @@ export function analyzeWorkspaceWizardSourceInput(rawValue: string): WorkspaceWi
       kind: "empty",
       createSourceMode: "empty",
       label: "Fresh workspace",
-      hint: "Mission Control will scaffold a new project folder."
+      hint: "AgentOS will scaffold a new project folder."
     };
   }
 

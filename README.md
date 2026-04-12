@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="public/readme/banner.jpeg" alt="AgentOS mission-control interface" width="100%" />
+  <img src="public/readme/banner.jpeg" alt="AgentOS control-plane interface" width="100%" />
 
-# AgentOS | Mission Control
+# AgentOS | Control Plane
 
 **Human operating layer for coordinating AI agents, projects, and companies from a single workspace.**
 
@@ -43,7 +43,7 @@ As AI agents become cheaper to run, the bottleneck shifts from raw orchestration
 Someone still has to decide what matters, inspect active work, route missions, review outputs, and keep multiple projects legible.
 
 Most agent systems expose runtimes, sessions, and CLI primitives.
-AgentOS adds the missing operating layer above them: a mission-control interface for humans coordinating teams of agents across real workspaces.
+AgentOS adds the missing operating layer above them: a control-plane interface for humans coordinating teams of agents across real workspaces.
 
 This repository contains the current AgentOS control plane: a Next.js application that sits above OpenClaw and turns live agent state into an operator-facing system for planning, execution, inspection, and workspace management.
 
@@ -131,7 +131,7 @@ In practice, that means:
 
 1. AgentOS reads live OpenClaw surfaces such as gateway status, agent inventory, config, models, sessions, presence, and transcript files.
 2. The service layer normalizes that data into a single `MissionControlSnapshot`.
-3. The UI renders that snapshot as a mission-control surface with a topology canvas, sidebar, inspector, and command bar.
+3. The UI renders that snapshot as a control-plane surface with a topology canvas, sidebar, inspector, and command bar.
 4. Operator actions such as mission dispatch, workspace creation, agent updates, planner deploys, gateway changes, or file reveal calls are translated into OpenClaw CLI commands and local filesystem operations.
 5. Snapshot state is refreshed over Server-Sent Events so the UI can stay close to real runtime activity.
 
@@ -182,7 +182,7 @@ Launch new projects with confidence. Structured wizards capture context, scaffol
 | `CommandBar` | Mission composition, agent targeting, thinking level selection, refresh, and quick suggestions |
 | `WorkspaceWizardDialog` | Handle both basic workspace creation and advanced planner-driven workspace design and deploy |
 | `OpenClawOnboarding` | Detect, install, start, verify OpenClaw, and guide model readiness when the local machine is not ready |
-| `ResetDialog` | Preview Mission Control reset or full uninstall actions and stream execution progress and logs |
+| `ResetDialog` | Preview AgentOS reset or full uninstall actions and stream execution progress and logs |
 
 ## Repository Map (Key Files)
 
@@ -257,7 +257,7 @@ packages/agentos/
 ```
 
 This is a representative map of the current control-plane code, not an exhaustive file listing.
-Many internal files still use `mission-control` naming; that is the current AgentOS application shipped in this repository.
+Many internal files still use legacy `mission-control` naming.
 
 ## Setup And Development
 
@@ -422,7 +422,7 @@ pnpm build
 | `/api/planner/:planId/turn` | `POST` | Process a planner conversation turn |
 | `/api/planner/:planId/simulate` | `POST` | Simulate the planner team |
 | `/api/planner/:planId/deploy` | `POST` | Deploy a planned workspace |
-| `/api/reset` | `POST` | Preview or execute a Mission Control reset or full uninstall flow |
+| `/api/reset` | `POST` | Preview or execute an AgentOS reset or full uninstall flow |
 | `/api/settings/gateway` | `PATCH` | Update the OpenClaw gateway endpoint |
 | `/api/settings/workspace-root` | `PATCH` | Update the default workspace root |
 | `/api/system/open-terminal` | `POST` | Open a supported OpenClaw command in Terminal on macOS |
@@ -433,8 +433,8 @@ pnpm build
 AgentOS keeps most durable operational state close to the workspace and to OpenClaw itself.
 
 - OpenClaw-backed runtime state comes from gateway status, agent config, models, sessions, presence, and transcript files.
-- AgentOS settings are stored in `.mission-control/settings.json`.
-- Planner drafts and planner runtime assets are stored under `.mission-control/planner/`.
+- AgentOS settings are stored under the legacy `.mission-control/settings.json` path.
+- Planner drafts and planner runtime assets are stored under the legacy `.mission-control/planner/` path.
 - Planner deploys write workspace-specific planning artifacts under `.openclaw/planner/`, including `blueprint.json` and `deploy-report.json`.
 - Browser convenience state such as theme, draft missions, recent prompts, and the last planner id is stored in `localStorage`.
 - When OpenClaw is unavailable, AgentOS returns an explicit fallback snapshot with demo workspaces, agents, models, and runtimes.

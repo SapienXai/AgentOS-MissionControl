@@ -308,7 +308,7 @@ const missionControlSettingsPath = path.join(missionControlRootPath, "settings.j
 const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
 const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
 const runtimeSmokeTestTtlMs = 12 * 60 * 60 * 1000;
-const runtimeSmokeTestMessage = "Mission Control runtime smoke test. Reply with a brief READY status.";
+const runtimeSmokeTestMessage = "AgentOS runtime smoke test. Reply with a brief READY status.";
 type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
   checkedAt: string;
@@ -1155,7 +1155,7 @@ function isDirectChatRuntime(runtime: RuntimeRecord) {
 
 function isDirectChatPrompt(text: string) {
   return (
-    /You are chatting (?:directly )?with the operator inside Mission Control/i.test(text) ||
+    /You are chatting (?:directly )?with the operator inside AgentOS/i.test(text) ||
     /Do not create tasks or mention task cards/i.test(text) ||
     /Messages stay in this drawer and are stored locally in your browser/i.test(text)
   );
@@ -1536,7 +1536,7 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
       agentId: null,
       runId: null,
       summary: null,
-      error: "Mission Control could not find an OpenClaw agent for the runtime smoke test."
+      error: "AgentOS could not find an OpenClaw agent for the runtime smoke test."
     };
   }
 
@@ -1573,7 +1573,7 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
       summary:
         payload.summary ||
         extractMissionCommandPayloads(payload)[0]?.text ||
-        "Mission Control verified a real OpenClaw turn.",
+        "AgentOS verified a real OpenClaw turn.",
       error: null
     };
 

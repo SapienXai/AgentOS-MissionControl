@@ -65,7 +65,7 @@ const plansRootPath = path.join(plannerRootPath, "plans");
 const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
 const WEBSITE_INSPECTION_TIMEOUT_MS = 3500;
 const WEBSITE_FOLLOWUP_TIMEOUT_MS = 1800;
-const PLANNER_RUNTIME_NAME = "Mission Control Planner Runtime";
+const PLANNER_RUNTIME_NAME = "AgentOS Planner Runtime";
 const PLANNER_RUNTIME_SYSTEM_TAG = "mission-control-planner";
 
 type WorkspacePlanDeployOptions = {
@@ -651,7 +651,7 @@ const plannerAdvisorNames: Record<PlannerAdvisorId, string> = {
 const plannerRuntimeSkillContents: Record<string, string> = {
   "planner-architect": `# Workspace Architect
 
-You are the primary planning agent for Mission Control.
+You are the primary planning agent for AgentOS.
 
 ## Mission
 - Understand the operator's intent through conversation.
@@ -691,7 +691,7 @@ You are the primary planning agent for Mission Control.
 - When a domain or website implies a likely brand name, use it unless contradicted.
 - If a section must be removed in a revision, use the relevant removeIds list for agents, workflows, channels, automations, or hooks.
 - When changing source mode, clear stale repo and folder fields in the same patch.
-- Treat Mission Control as the source of truth. Patch only the fields that should change.
+- Treat AgentOS as the source of truth. Patch only the fields that should change.
 `,
   "planner-founder": `# Founder Advisor
 
@@ -1123,7 +1123,7 @@ function buildPlannerArchitectPrompt(
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
 
   return [
-    "You are Workspace Architect, the primary planning agent inside Mission Control.",
+    "You are Workspace Architect, the primary planning agent inside AgentOS.",
     "Return valid JSON only. Do not wrap the JSON in markdown fences.",
     'Schema: {"reply":"string","mode":"guided|advanced|null","reviewRequested":boolean,"assumptions":["..."],"suggestions":["..."],"questions":["..."],"patch":{}}',
     "Rules:",
@@ -1933,7 +1933,7 @@ async function provisionPlannerChannels(
     if (!args) {
       warnings.push(`Channel "${channel.name}" uses an unsupported provisioning shape.`);
       await options.onProgress?.({
-        message: `Skipped ${channel.name}. Mission Control does not know how to provision this channel shape yet.`,
+        message: `Skipped ${channel.name}. AgentOS does not know how to provision this channel shape yet.`,
         percent: Math.round(((index + 1) / enabledChannels.length) * 100),
         status: "error"
       });
@@ -2669,7 +2669,7 @@ async function fetchWebsiteResponse(url: string, timeoutMs = WEBSITE_INSPECTION_
         redirect: "follow",
         signal: controller.signal,
         headers: {
-          "User-Agent": "OpenClaw Mission Control Planner/0.1"
+          "User-Agent": "OpenClaw AgentOS Planner/0.1"
         },
         cache: "no-store"
       }),

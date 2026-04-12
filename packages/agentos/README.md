@@ -12,7 +12,7 @@ Run:
 agentos
 ```
 
-The `agentos` command starts the local AgentOS Mission Control server and prints the local URL.
+The `agentos` command starts the local AgentOS server and prints the local URL.
 
 If you pass `--open` and AgentOS is already listening on the selected port, the CLI opens the existing instance instead of failing.
 

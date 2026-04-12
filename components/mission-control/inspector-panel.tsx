@@ -1525,14 +1525,14 @@ function TaskIntegrityCard({
         : missingFinalResponseIssue
           ? missingFinalResponseIssue.detail
         : integrity.status === "verified"
-          ? "Mission Control found a matching transcript and the captured result looks internally consistent."
+          ? "AgentOS found a matching transcript and the captured result looks internally consistent."
           : integrity.sessionMismatch
             ? "The linked transcript belongs to a different mission or stale session, so this completion cannot be trusted yet."
             : integrity.issues.some((issue) => issue.id === "empty-output-dir")
               ? "The task is marked completed, but the expected deliverables are missing from the output folder."
               : integrity.status === "error"
                 ? "The captured evidence does not line up with the requested mission."
-                : "Mission Control recovered partial evidence, but this result still needs operator review.";
+                : "AgentOS recovered partial evidence, but this result still needs operator review.";
 
   return (
     <InfoCard

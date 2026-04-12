@@ -101,7 +101,7 @@ export async function executeReset(
     phase: "planning",
     message:
       target === "mission-control"
-        ? "Preparing the Mission Control reset plan..."
+        ? "Preparing the AgentOS reset plan..."
         : "Preparing the full uninstall plan..."
   });
   await emit({
@@ -169,7 +169,7 @@ export async function executeReset(
   await emit({
     type: "status",
     phase: "refreshing",
-    message: "Refreshing the Mission Control snapshot..."
+    message: "Refreshing the AgentOS snapshot..."
   });
 
   clearMissionControlCaches();
@@ -179,10 +179,10 @@ export async function executeReset(
   return {
     message:
       target === "mission-control"
-        ? "Mission Control reset completed."
+        ? "AgentOS reset completed."
         : backgroundLogPath
           ? "Full uninstall started. Final CLI cleanup is running in the background."
-          : "Full uninstall completed for Mission Control and OpenClaw state.",
+          : "Full uninstall completed for AgentOS and OpenClaw state.",
     snapshot,
     backgroundLogPath
   };
@@ -226,19 +226,19 @@ function buildResetPreviewWorkspaces(
         workspace.path.startsWith(`${plannerRuntimeWorkspacePath}${path.sep}`)
       ) {
         action = "delete-folder";
-        reasons.push("Planner runtime workspace managed by Mission Control.");
+        reasons.push("Planner runtime workspace managed by AgentOS.");
       } else if (workspace.bootstrap.sourceMode === "empty") {
         action = "delete-folder";
-        reasons.push("Mission Control created this workspace from an empty folder.");
+        reasons.push("AgentOS created this workspace from an empty folder.");
       } else if (workspace.bootstrap.sourceMode === "clone") {
         action = "delete-folder";
-        reasons.push("Mission Control cloned and manages this workspace folder.");
+        reasons.push("AgentOS cloned and manages this workspace folder.");
       } else if (workspace.bootstrap.sourceMode === "existing") {
         action = "clean-integration";
-        reasons.push("Attached existing folder. The folder stays, but OpenClaw and Mission Control integration files are removed.");
+        reasons.push("Attached existing folder. The folder stays, but OpenClaw and AgentOS integration files are removed.");
       } else {
         action = "clean-integration";
-        reasons.push("Workspace origin is unknown. The folder stays, but OpenClaw and Mission Control integration files are removed.");
+        reasons.push("Workspace origin is unknown. The folder stays, but OpenClaw and AgentOS integration files are removed.");
       }
 
       return {
@@ -287,7 +287,7 @@ function buildResetWarnings(
 
   if (metadataOnlyWorkspaces > 0) {
     warnings.push(
-      `${metadataOnlyWorkspaces} attached workspace folder${metadataOnlyWorkspaces === 1 ? "" : "s"} will be preserved. Only OpenClaw and Mission Control integration files will be removed there.`
+      `${metadataOnlyWorkspaces} attached workspace folder${metadataOnlyWorkspaces === 1 ? "" : "s"} will be preserved. Only OpenClaw and AgentOS integration files will be removed there.`
     );
   }
 
@@ -344,7 +344,7 @@ async function runMissionControlReset(
       if (isOpenClawStateWorkspacePath(workspace.path)) {
         await emit({
           type: "log",
-          text: `Skipping OpenClaw state workspace during Mission Control reset: ${workspace.name} (${workspace.path})`
+          text: `Skipping OpenClaw state workspace during AgentOS reset: ${workspace.name} (${workspace.path})`
         });
         continue;
       }
@@ -388,7 +388,7 @@ async function runMissionControlReset(
   await emit({
     type: "status",
     phase: "mission-control-state",
-    message: "Removing Mission Control planner and settings state..."
+    message: "Removing AgentOS planner and settings state..."
   });
 
   await rm(plannerRootPath, { recursive: true, force: true });
@@ -397,7 +397,7 @@ async function runMissionControlReset(
 
   await emit({
     type: "log",
-    text: `Removed Mission Control state under ${missionControlRootPath}`
+    text: `Removed AgentOS state under ${missionControlRootPath}`
   });
 }
 

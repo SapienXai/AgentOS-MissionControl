@@ -173,7 +173,7 @@ export async function POST(request: Request) {
               ? error.message
               : "OpenClaw binary could not be resolved after install.";
 
-          await fail("installing-cli", "OpenClaw installed, but Mission Control could not resolve the new CLI yet.", {
+          await fail("installing-cli", "OpenClaw installed, but AgentOS could not resolve the new CLI yet.", {
             manualCommand: installSpec.manualCommand,
             docsUrl
           });
@@ -285,7 +285,7 @@ export async function POST(request: Request) {
         await send({
           type: "status",
           phase: "verifying",
-          message: "Waiting for Mission Control to detect a live OpenClaw gateway..."
+          message: "Waiting for AgentOS to detect a live OpenClaw gateway..."
         });
 
         try {
@@ -308,7 +308,7 @@ export async function POST(request: Request) {
           await fail(
             "verifying",
             gatewayModeBlocked
-              ? "OpenClaw gateway needs local mode enabled before Mission Control can connect."
+              ? "OpenClaw gateway needs local mode enabled before AgentOS can connect."
               : "OpenClaw did not become ready in time.",
             {
               manualCommand: gatewayModeBlocked
@@ -334,7 +334,7 @@ export async function POST(request: Request) {
 
         await fail(
           "verifying",
-          "OpenClaw is online, but Mission Control cannot write to the OpenClaw runtime state yet.",
+          "OpenClaw is online, but AgentOS cannot write to the OpenClaw runtime state yet.",
           {
             snapshot: await getMissionControlSnapshot({ force: true })
           }
@@ -516,14 +516,14 @@ async function repairGatewayModeIfNeeded(
   await send({
     type: "status",
     phase: "starting-gateway",
-    message: "Configuring OpenClaw gateway for local Mission Control access..."
+    message: "Configuring OpenClaw gateway for local AgentOS access..."
   });
 
   const setModeResult = await runCommand(openClawBin, ["config", "set", "gateway.mode", "local"], send);
   appendOutput(setModeResult);
 
   if (setModeResult.errorMessage || setModeResult.timedOut || setModeResult.code !== 0) {
-    throw new Error("Mission Control could not set gateway.mode=local automatically.");
+    throw new Error("AgentOS could not set gateway.mode=local automatically.");
   }
 
   await send({
@@ -536,7 +536,7 @@ async function repairGatewayModeIfNeeded(
   appendOutput(restartResult);
 
   if (restartResult.errorMessage || restartResult.timedOut || restartResult.code !== 0) {
-    throw new Error("Mission Control updated gateway.mode, but the gateway restart failed.");
+    throw new Error("AgentOS updated gateway.mode, but the gateway restart failed.");
   }
 
   return true;

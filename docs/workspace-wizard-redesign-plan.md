@@ -76,7 +76,7 @@ The target is **not** a loose inspiration pass. The wizard should be a **high-fi
 - keep the visual system recognizably aligned with the reference so quality does not degrade through over-interpretation;
 - only diverge where the domain requires it (workspace blueprint panel, mode switch, create/deploy controls, planner readiness states).
 
-This means the final result should feel materially closer to the reference product than to the current Mission Control dialogs.
+This means the final result should feel materially closer to the reference product than to the current AgentOS dialogs.
 
 ### Unified flow
 

@@ -895,7 +895,7 @@ export function MissionControlShell({
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          reason: "Aborted from Mission Control.",
+          reason: "Aborted from AgentOS.",
           dispatchId: resolvedDispatchId
         })
       });
@@ -1453,7 +1453,7 @@ export function MissionControlShell({
 
       if (!nextSnapshot.diagnostics.installed) {
         toast.message("OpenClaw is unavailable.", {
-          description: nextSnapshot.diagnostics.issues[0] || "Mission Control is running in fallback mode."
+          description: nextSnapshot.diagnostics.issues[0] || "AgentOS is running in fallback mode."
         });
         return;
       }
@@ -1521,8 +1521,8 @@ export function MissionControlShell({
 
       toast.success("Gateway updated.", {
         description: nextGatewayUrl?.trim()
-          ? `Mission Control now targets ${result.snapshot.diagnostics.configuredGatewayUrl || result.snapshot.diagnostics.gatewayUrl}.`
-          : "Mission Control reverted to the local default gateway."
+          ? `AgentOS now targets ${result.snapshot.diagnostics.configuredGatewayUrl || result.snapshot.diagnostics.gatewayUrl}.`
+          : "AgentOS reverted to the local default gateway."
       });
     } catch (error) {
       toast.error("Gateway update failed.", {
@@ -1559,7 +1559,7 @@ export function MissionControlShell({
       toast.success("Workspace root updated.", {
         description: nextWorkspaceRoot?.trim()
           ? `New workspaces will default to ${compactPath(result.snapshot.diagnostics.workspaceRoot)}. Existing workspaces stay where they are.`
-          : "Mission Control reverted to the default workspace root. Existing workspaces were not moved."
+          : "AgentOS reverted to the default workspace root. Existing workspaces were not moved."
       });
     } catch (error) {
       toast.error("Workspace root update failed.", {
@@ -1660,7 +1660,7 @@ export function MissionControlShell({
     setResetStatusMessage(
       resetDialogTarget === "full-uninstall"
         ? "Starting full uninstall..."
-        : "Starting Mission Control reset..."
+        : "Starting AgentOS reset..."
     );
     setResetResultMessage(null);
     setResetBackgroundLogPath(null);
@@ -1732,7 +1732,7 @@ export function MissionControlShell({
                 toast.success(
                   resetDialogTarget === "full-uninstall"
                     ? "Full uninstall started."
-                    : "Mission Control reset completed.",
+                    : "AgentOS reset completed.",
                   {
                     description: event.message
                   }
@@ -1741,7 +1741,7 @@ export function MissionControlShell({
                 toast.error(
                   resetDialogTarget === "full-uninstall"
                     ? "Full uninstall failed."
-                    : "Mission Control reset failed.",
+                    : "AgentOS reset failed.",
                   {
                     description: event.message
                   }
@@ -1786,7 +1786,7 @@ export function MissionControlShell({
       toast.error(
         resetDialogTarget === "full-uninstall"
           ? "Full uninstall failed."
-          : "Mission Control reset failed.",
+          : "AgentOS reset failed.",
         {
           description: error instanceof Error ? error.message : "Unknown reset error."
         }
@@ -2874,7 +2874,7 @@ function CanvasTitlePill({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
           surfaceTheme === "light" ? "text-[#816958]/80" : "text-slate-400/75"
         )}
       >
-        Mission Control
+        Control Plane
       </h2>
     </div>
   );
@@ -3194,7 +3194,7 @@ function CanvasTopBar({
                     surfaceTheme === "light" ? "text-amber-950/80" : "text-amber-50/85"
                   )}
                 >
-                  A newer OpenClaw release was detected. You can update directly from Mission Control.
+                  A newer OpenClaw release was detected. You can update directly from AgentOS.
                 </p>
                 <button
                   type="button"
@@ -3738,7 +3738,7 @@ function CanvasTopBar({
                       : "border-rose-400/20 bg-white/[0.04] text-rose-100 hover:bg-rose-500/10"
                   )}
                 >
-                  Reset Mission Control
+                  Reset AgentOS
                 </Button>
                 <Button
                   type="button"
@@ -4043,13 +4043,13 @@ function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
   if (!snapshot.diagnostics.installed) {
     return {
       label: "Install OpenClaw",
-      description: "Download the CLI and get Mission Control ready."
+      description: "Download the CLI and get AgentOS ready."
     };
   }
 
   if (resolveOpenClawSystemReady(snapshot)) {
     return {
-      label: "Enter Mission Control",
+      label: "Enter AgentOS",
       description: "OpenClaw is online and runtime state is writable."
     };
   }

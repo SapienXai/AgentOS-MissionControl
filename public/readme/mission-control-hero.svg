@@ -1,5 +1,5 @@
 <svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">OpenClaw Mission Control hero banner</title>
+  <title id="title">AgentOS control plane hero banner</title>
   <desc id="desc">A stylized control surface showing workspaces, agents, runtimes, diagnostics, and a mission command bar.</desc>
   <defs>
     <linearGradient id="bg" x1="160" y1="80" x2="1460" y2="860" gradientUnits="userSpaceOnUse">
@@ -53,7 +53,7 @@
   </g>
 
   <text x="96" y="128" fill="#F5FAFF" font-size="54" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="700" letter-spacing="-1.4">
-    OpenClaw Mission Control
+    AgentOS Control Plane
   </text>
   <text x="96" y="174" fill="#91A7C6" font-size="24" font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif" font-weight="500">
     Live workspaces, agents, sessions, diagnostics, and mission dispatch in one operator surface.

@@ -41,7 +41,7 @@ export function buildWorkspaceCreateProgressTemplate(input: {
       : input.sourceMode === "existing"
         ? {
             label: "Attaching existing folder",
-            description: "Mission Control is validating the existing directory and preparing it for bootstrap."
+            description: "AgentOS is validating the existing directory and preparing it for bootstrap."
           }
         : {
             label: "Preparing workspace folder",
@@ -50,7 +50,7 @@ export function buildWorkspaceCreateProgressTemplate(input: {
 
   return {
     title: "Provisioning workspace",
-    description: "Mission Control is creating the workspace and reporting each real bootstrap step as it finishes.",
+    description: "AgentOS is creating the workspace and reporting each real bootstrap step as it finishes.",
     steps: [
       {
         id: "validate",

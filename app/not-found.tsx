@@ -5,7 +5,7 @@ export default function NotFound() {
         <p className="text-[11px] uppercase tracking-[0.32em] text-slate-500">OpenClaw</p>
         <h1 className="mt-3 font-display text-3xl">Page not found</h1>
         <p className="mt-3 max-w-md text-sm leading-6 text-slate-400">
-          The requested mission-control route does not exist in this workspace.
+          The requested AgentOS route does not exist in this workspace.
         </p>
       </div>
     </main>

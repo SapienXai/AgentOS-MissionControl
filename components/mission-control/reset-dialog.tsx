@@ -66,11 +66,11 @@ export function ResetDialog({
     !hasFinished &&
     confirmText.trim() === expectedConfirmation;
   const title =
-    target === "full-uninstall" ? "Full Uninstall" : "Reset Mission Control";
+    target === "full-uninstall" ? "Full Uninstall" : "Reset AgentOS";
   const description =
     target === "full-uninstall"
-      ? "Remove Mission Control state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS CLI installs."
-      : "Remove Mission Control-managed workspaces, attached agents, planner state, and browser state.";
+      ? "Remove AgentOS state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS CLI installs."
+      : "Remove AgentOS-managed workspaces, attached agents, planner state, and browser state.";
   const dangerButtonClassName =
     surfaceTheme === "light"
       ? "border-rose-400/80 bg-rose-600 text-white hover:bg-rose-700"
@@ -189,7 +189,7 @@ export function ResetDialog({
                     Workspace impact
                   </p>
                   <p className={cn("mt-1 text-sm", surfaceTheme === "light" ? "text-[#6d5647]" : "text-slate-400")}>
-                    `Delete folder` removes the workspace directory. `Keep folder` only removes OpenClaw and Mission Control integration from that location.
+                    `Delete folder` removes the workspace directory. `Keep folder` only removes OpenClaw and AgentOS integration from that location.
                   </p>
                 </div>
                 <Button
@@ -260,7 +260,7 @@ export function ResetDialog({
 
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <PathPanel
-                title="Mission Control state"
+                title="AgentOS state"
                 items={preview.missionControlPaths}
                 surfaceTheme={surfaceTheme}
               />

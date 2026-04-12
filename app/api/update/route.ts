@@ -192,7 +192,7 @@ export async function POST(request: Request) {
           await send({
             type: "done",
             ok: true,
-            message: "OpenClaw update completed, but Mission Control could not refresh status immediately.",
+            message: "OpenClaw update completed, but AgentOS could not refresh status immediately.",
             exitCode: code,
             stdout,
             stderr: stderr
