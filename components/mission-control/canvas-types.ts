@@ -1,3 +1,5 @@
+import type { Edge, Node } from "@xyflow/react";
+
 import type {
   MissionControlSurfaceProvider,
   ModelRecord,
@@ -99,4 +101,25 @@ export type MissionEdgeData = {
   taskFocused?: boolean;
   surfaceTether?: boolean;
   surfaceAccentColor?: string | null;
+};
+
+type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;
+type AgentCanvasNode = Node<AgentNodeData, "agent">;
+type SurfaceTetherCanvasNode = Node<SurfaceTetherNodeData, "surface-module">;
+type TaskCanvasNode = Node<TaskNodeData, "task">;
+
+export type CanvasEdge = Edge<MissionEdgeData, "simplebezier">;
+export type CanvasNode = WorkspaceCanvasNode | AgentCanvasNode | SurfaceTetherCanvasNode | TaskCanvasNode;
+export type PersistedNodePosition = {
+  x: number;
+  y: number;
+};
+export type SpringVelocity = {
+  x: number;
+  y: number;
+};
+export type PersistedNodePositionMap = Record<string, PersistedNodePosition>;
+export type FocusTaskAnchor = {
+  taskId: string;
+  agentId: string | null;
 };
