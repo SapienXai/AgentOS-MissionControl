@@ -17,11 +17,6 @@ import {
   filterKnownOpenClawToolIds,
   getAgentPresetMeta,
   inferAgentPresetFromContext,
-  isAgentFileAccess,
-  isAgentInstallScope,
-  isAgentMissingToolBehavior,
-  isAgentNetworkAccess,
-  isAgentPreset,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
 import {
@@ -46,12 +41,10 @@ import {
   formatAgentDisplayName,
   stripMissionRouting
 } from "@/lib/openclaw/presenters";
-import { readOpenClawSurfaceAccounts } from "@/lib/openclaw/surface-adapters";
 import { getSurfaceKind } from "@/lib/openclaw/surface-catalog";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
-  buildWorkspaceAgentName,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
 import {
@@ -59,16 +52,73 @@ import {
   buildWorkspaceScaffoldDocuments,
   WORKSPACE_CONTEXT_CORE_PATHS,
   WORKSPACE_CONTEXT_OPTIONAL_PATHS,
-  normalizeWorkspaceDocOverrides,
-  type WorkspaceScaffoldDocumentContext
+  normalizeWorkspaceDocOverrides
 } from "@/lib/openclaw/workspace-docs";
+import {
+  buildAgentPolicyPromptLines,
+  buildWorkspaceKickoffPrompt,
+  describeWorkspaceSourceActivity,
+  describeWorkspaceSourceCompletion,
+  describeWorkspaceSourceStart,
+  detectWorkspaceToolExamples,
+  extractKickoffProgressMessages,
+  materializeWorkspaceSource,
+  renderSkillMarkdown,
+  resolveWorkspaceBootstrapInput,
+  resolveWorkspaceCreationTargetDir,
+  writeTextFileEnsured,
+  writeTextFileIfMissing,
+  scaffoldWorkspaceContents
+} from "@/lib/openclaw/domains/workspace-bootstrap";
+import {
+  applyAgentIdentity,
+  buildAgentPolicySkillId,
+  buildWorkspaceAgentStatePath,
+  filterAgentPolicySkills,
+  mapAgentHeartbeatToInput,
+  normalizeDeclaredAgentTools,
+  readAgentConfigList,
+  readAgentIdentityOverrides,
+  upsertAgentConfigEntry,
+  writeAgentConfigList
+} from "@/lib/openclaw/domains/agent-config";
+import {
+  areWorkspaceAgentsEqual,
+  areWorkspaceCreateRulesEqual,
+  collectWorkspaceEditableDocPaths,
+  collectWorkspaceResourceState,
+  createWorkspaceProjectFromEditSeed,
+  listLocalWorkspaceSkills
+} from "@/lib/openclaw/domains/workspace-edit";
+import {
+  parseWorkspaceProjectManifestAgent,
+  readWorkspaceProjectManifest,
+  normalizeChannelRegistry,
+  uniqueByChatId
+} from "@/lib/openclaw/domains/workspace-manifest";
+import type {
+  WorkspaceProjectManifest,
+  WorkspaceProjectManifestAgent
+} from "@/lib/openclaw/domains/workspace-manifest";
+import {
+  applyChannelAccountDisplayNames,
+  buildLegacyRegistrySurfaceAccounts,
+  buildManagedDiscordBinding,
+  discoverDiscordRoutes,
+  discoverSurfaceRoutes,
+  discoverTelegramGroups,
+  getChannelRegistry,
+  mergeMissionControlSurfaceAccounts,
+  parseDiscordRouteId,
+  readChannelAccounts,
+  readChannelRegistry
+} from "@/lib/openclaw/domains/channels";
+import type { ManagedDiscordBinding } from "@/lib/openclaw/domains/channels";
 import type {
   AgentCreateInput,
   AgentDeleteInput,
-  AgentHeartbeatInput,
   AgentPolicy,
   AgentStatus,
-  DiscoveredSurfaceRoute,
   OperationProgressSnapshot,
   AgentUpdateInput,
   ModelReadiness,
@@ -109,10 +159,11 @@ import type {
   MissionControlSurfaceProvider,
   ChannelRegistry,
   ChannelAccountRecord,
-  PlannerContextSource,
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelWorkspaceBinding
 } from "@/lib/openclaw/types";
+
+export { discoverDiscordRoutes, discoverSurfaceRoutes, discoverTelegramGroups, getChannelRegistry };
 
 const execFileAsync = promisify(execFile);
 
@@ -239,7 +290,6 @@ const missionDispatchRunnerDiagnosticJsonKeys = new Set([
   "stdout",
   "warning"
 ]);
-type MutableAgentConfigEntry = AgentConfigPayload[number] & Record<string, unknown>;
 type RuntimeSmokeTestCacheEntry = {
   status: "passed" | "failed";
   checkedAt: string;
@@ -397,34 +447,6 @@ type MissionCommandPayload = {
 };
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
-type WorkspaceProjectManifestAgent = {
-  id: string;
-  name: string | null;
-  role: string | null;
-  isPrimary: boolean;
-  skillId: string | null;
-  toolIds: string[];
-  modelId: string | null;
-  enabled: boolean;
-  policy: AgentPolicy | null;
-  emoji: string | null;
-  theme: string | null;
-  channelIds: string[];
-};
-type WorkspaceProjectManifest = {
-  name: string | null;
-  directory: string | null;
-  template: WorkspaceTemplate | null;
-  sourceMode: WorkspaceSourceMode | null;
-  agentTemplate: string | null;
-  teamPreset: WorkspaceTeamPreset | null;
-  modelProfile: WorkspaceModelProfile | null;
-  rules: WorkspaceCreateRules | null;
-  hidden: boolean;
-  systemTag: string | null;
-  agents: WorkspaceProjectManifestAgent[];
-  channels: WorkspaceChannelSummary[];
-};
 type SessionTranscriptEntry = {
   type?: string;
   id?: string;
@@ -2179,11 +2201,11 @@ async function buildObservedMissionDispatchRuntime(record: MissionDispatchRecord
   }
 }
 
-async function readMissionDispatchRecords() {
+async function readMissionDispatchRecords(): Promise<MissionDispatchRecord[]> {
   try {
     const entries = await readdir(missionDispatchesRootPath, { withFileTypes: true });
     const nowMs = Date.now();
-    const records = await Promise.all(
+    const records = (await Promise.all(
       entries
         .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
         .map(async (entry) => {
@@ -2204,7 +2226,7 @@ async function readMissionDispatchRecords() {
 
           return record;
         })
-    );
+    )) as Array<MissionDispatchRecord | null>;
 
     return records
       .filter((record): record is MissionDispatchRecord => Boolean(record))
@@ -2214,11 +2236,11 @@ async function readMissionDispatchRecords() {
   }
 }
 
-async function readMissionDispatchRecordById(dispatchId: string) {
+async function readMissionDispatchRecordById(dispatchId: string): Promise<MissionDispatchRecord | null> {
   return readMissionDispatchRecord(missionDispatchRecordPath(dispatchId));
 }
 
-async function readMissionDispatchRecord(filePath: string) {
+async function readMissionDispatchRecord(filePath: string): Promise<MissionDispatchRecord | null> {
   try {
     const raw = await readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as Partial<MissionDispatchRecord>;
@@ -4260,7 +4282,10 @@ export async function createWorkspaceProject(
   );
   await progress.addActivity("validate", `Validated workspace name "${normalized.name}".`);
 
-  const targetDir = await resolveWorkspaceCreationTargetDir(normalized);
+  const targetDir = await resolveWorkspaceCreationTargetDir(
+    normalized,
+    resolveWorkspaceRoot(await getConfiguredWorkspaceRoot())
+  );
   await progress.updateStep("validate", {
     percent: 38,
     detail: `Reserved target directory at ${targetDir}.`
@@ -4283,8 +4308,7 @@ export async function createWorkspaceProject(
   await materializeWorkspaceSource({
     targetDir,
     sourceMode: normalized.sourceMode,
-    repoUrl: normalized.repoUrl,
-    existingPath: normalized.existingPath
+    repoUrl: normalized.repoUrl
   });
   await progress.completeStep("source", describeWorkspaceSourceCompletion(normalized.sourceMode, targetDir));
 
@@ -4468,37 +4492,6 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
     workspaceId: workspaceIdFromPath(targetPath),
     previousWorkspaceId: workspace.id,
     workspacePath: targetPath
-  };
-}
-
-function createWorkspaceProjectFromEditSeed(seed: WorkspaceEditSeed): WorkspaceProject {
-  return {
-    id: seed.workspaceId,
-    name: seed.name,
-    slug: slugify(path.basename(seed.workspacePath)),
-    path: seed.workspacePath,
-    kind: "workspace",
-    agentIds: [],
-    modelIds: [],
-    activeRuntimeIds: [],
-    totalSessions: 0,
-    health: "standby",
-    bootstrap: {
-      template: null,
-      sourceMode: null,
-      agentTemplate: null,
-      coreFiles: [],
-      optionalFiles: [],
-      folders: [],
-      projectShell: [],
-      localSkillIds: []
-    },
-    capabilities: {
-      skills: [],
-      tools: [],
-      workspaceOnlyAgentCount: 0
-    },
-    channels: []
   };
 }
 
@@ -5271,177 +5264,6 @@ function stringifyFailureChunk(value: unknown) {
   return "";
 }
 
-type ResolvedWorkspaceBootstrapInput = {
-  name: string;
-  slug: string;
-  brief?: string;
-  directory?: string;
-  modelId?: string;
-  repoUrl?: string;
-  existingPath?: string;
-  sourceMode: WorkspaceSourceMode;
-  template: WorkspaceTemplate;
-  teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
-  modelProfile: WorkspaceModelProfile;
-  rules: WorkspaceCreateRules;
-  docOverrides: WorkspaceDocOverride[];
-  agents: WorkspaceAgentBlueprintInput[];
-  contextSources: PlannerContextSource[];
-};
-
-async function materializeWorkspaceSource(params: {
-  targetDir: string;
-  sourceMode: WorkspaceSourceMode;
-  repoUrl?: string;
-  existingPath?: string;
-}) {
-  if (params.sourceMode === "existing") {
-    await ensureExistingDirectory(params.targetDir);
-    return;
-  }
-
-  if (params.sourceMode === "clone") {
-    const repoUrl = normalizeOptionalValue(params.repoUrl);
-
-    if (!repoUrl) {
-      throw new Error("Repository URL is required when cloning a repo.");
-    }
-
-    await ensurePathAvailable(params.targetDir, "");
-    await mkdir(path.dirname(params.targetDir), { recursive: true });
-    await runSystemCommand("git", ["clone", repoUrl, params.targetDir]);
-    return;
-  }
-
-  await ensureFreshWorkspaceDirectory(params.targetDir);
-}
-
-async function scaffoldWorkspaceContents(
-  workspacePath: string,
-  options: {
-    name: string;
-    brief?: string;
-    template: WorkspaceTemplate;
-    teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
-    modelProfile: WorkspaceModelProfile;
-    rules: WorkspaceCreateRules;
-    sourceMode: WorkspaceSourceMode;
-    docOverrides: WorkspaceDocOverride[];
-    agents: WorkspaceAgentBlueprintInput[];
-    contextSources: WorkspaceScaffoldDocumentContext["contextSources"];
-  }
-) {
-  const templateMeta = getWorkspaceTemplateMeta(options.template);
-  const createdAt = new Date().toISOString();
-  const toolExamples = await detectWorkspaceToolExamples(workspacePath);
-
-  await ensureWorkspaceGitignore(workspacePath);
-  await mkdir(path.join(workspacePath, "skills"), { recursive: true });
-  await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "runs"), { recursive: true });
-  await mkdir(path.join(workspacePath, ".openclaw", "project-shell", "tasks"), { recursive: true });
-
-  await writeTextFileIfMissing(path.join(workspacePath, ".openclaw", "project-shell", "events.jsonl"), "");
-  await writeTextFileIfMissing(
-    path.join(workspacePath, ".openclaw", "project.json"),
-    `${JSON.stringify(
-      {
-        version: 1,
-        slug: slugify(options.name),
-        name: options.name,
-        icon: templateMeta.icon,
-        createdAt,
-        updatedAt: createdAt,
-        template: options.template,
-        sourceMode: options.sourceMode,
-        teamPreset: options.teamPreset,
-        modelProfile: options.modelProfile,
-        agentTemplate: options.teamPreset === "solo" ? "solo" : "core-team",
-        rules: {
-          workspaceOnly: options.rules.workspaceOnly,
-          generateStarterDocs: options.rules.generateStarterDocs,
-          generateMemory: options.rules.generateMemory,
-          kickoffMission: options.rules.kickoffMission
-        },
-        contextSources: options.contextSources,
-        agents: options.agents.map((agent) => ({
-          id: agent.id,
-          name: agent.name,
-          role: agent.role,
-          enabled: agent.enabled,
-          emoji: normalizeOptionalValue(agent.emoji) ?? null,
-          theme: normalizeOptionalValue(agent.theme) ?? null,
-          isPrimary: Boolean(agent.isPrimary),
-          skillId: normalizeOptionalValue(agent.skillId) ?? null,
-          modelId: normalizeOptionalValue(agent.modelId) ?? null,
-          policy: agent.policy ?? null
-        }))
-      },
-      null,
-      2
-    )}\n`
-  );
-
-  const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
-    name: options.name,
-    brief: options.brief,
-    template: options.template,
-    sourceMode: options.sourceMode,
-    rules: options.rules,
-    agents: options.agents,
-    toolExamples,
-    docOverrides: options.docOverrides,
-    contextSources: options.contextSources
-  });
-
-  for (const document of scaffoldDocuments) {
-    await writeTextFileIfMissing(path.join(workspacePath, document.path), document.content);
-  }
-
-  for (const agent of options.agents) {
-    const skillId = normalizeOptionalValue(agent.skillId);
-
-    if (!skillId) {
-      continue;
-    }
-
-    await mkdir(path.join(workspacePath, "skills", skillId), { recursive: true });
-    await writeTextFileIfMissing(
-      path.join(workspacePath, "skills", skillId, "SKILL.md"),
-      renderSkillMarkdown(skillId, agent.role)
-    );
-  }
-}
-
-const workspaceGitignoreManagedEntries = [
-  ".openclaw/agents/",
-  ".openclaw/project-shell/events.jsonl",
-  ".openclaw/project-shell/runs/",
-  ".openclaw/project-shell/tasks/"
-] as const;
-
-async function ensureWorkspaceGitignore(workspacePath: string) {
-  const gitignorePath = path.join(workspacePath, ".gitignore");
-  let existing = "";
-
-  try {
-    existing = await readFile(gitignorePath, "utf8");
-  } catch {
-    existing = "";
-  }
-
-  const missingEntries = workspaceGitignoreManagedEntries.filter((entry) => !existing.includes(entry));
-
-  if (missingEntries.length === 0) {
-    return;
-  }
-
-  const managedBlock = ["# OpenClaw local runtime state", ...missingEntries].join("\n");
-  const nextContents =
-    existing.trim().length > 0 ? `${existing.trimEnd()}\n\n${managedBlock}\n` : `${managedBlock}\n`;
-
-  await writeTextFileEnsured(gitignorePath, nextContents);
-}
-
 async function createBootstrappedWorkspaceAgent(params: {
   workspacePath: string;
   workspaceSlug: string;
@@ -5588,396 +5410,6 @@ async function runWorkspaceKickoffMission(
   return result;
 }
 
-function describeWorkspaceSourceStart(sourceMode: WorkspaceSourceMode, targetDir: string) {
-  if (sourceMode === "clone") {
-    return `Cloning the source repository into ${targetDir}.`;
-  }
-
-  if (sourceMode === "existing") {
-    return `Preparing the existing workspace folder at ${targetDir}.`;
-  }
-
-  return `Creating a fresh workspace folder at ${targetDir}.`;
-}
-
-function describeWorkspaceSourceActivity(
-  sourceMode: WorkspaceSourceMode,
-  normalized: ResolvedWorkspaceBootstrapInput
-) {
-  if (sourceMode === "clone") {
-    return normalized.repoUrl
-      ? `Cloning ${normalized.repoUrl}.`
-      : "Cloning the requested repository.";
-  }
-
-  if (sourceMode === "existing") {
-    return normalized.existingPath
-      ? `Attaching ${normalized.existingPath}.`
-      : "Attaching the requested folder.";
-  }
-
-  return "Preparing an empty workspace scaffold.";
-}
-
-function describeWorkspaceSourceCompletion(sourceMode: WorkspaceSourceMode, targetDir: string) {
-  if (sourceMode === "clone") {
-    return `Repository content is available at ${targetDir}.`;
-  }
-
-  if (sourceMode === "existing") {
-    return `Existing folder linked and ready at ${targetDir}.`;
-  }
-
-  return `Fresh workspace folder created at ${targetDir}.`;
-}
-
-function extractKickoffProgressMessages(text: string) {
-  const trimmed = text.trim();
-
-  if (!trimmed) {
-    return [];
-  }
-
-  const normalized = trimmed
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.replace(/^[>•*-]\s*/, ""))
-    .filter((line) => !line.startsWith("{") && !line.startsWith("["));
-
-  return Array.from(new Set(normalized)).slice(0, 3);
-}
-
-function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): ResolvedWorkspaceBootstrapInput {
-  const name = input.name.trim();
-
-  if (!name) {
-    throw new Error("Workspace name is required.");
-  }
-
-  const slug = slugify(name);
-
-  if (!slug) {
-    throw new Error("Workspace name must include letters or numbers.");
-  }
-
-  const template = input.template ?? "software";
-  const teamPreset = input.teamPreset ?? "core";
-  const sourceMode = input.sourceMode ?? "empty";
-  const modelProfile = input.modelProfile ?? "balanced";
-  const rules: WorkspaceCreateRules = {
-    ...DEFAULT_WORKSPACE_RULES,
-    ...(input.rules ?? {})
-  };
-  const normalizedAgents = (input.agents?.length
-    ? input.agents
-    : buildDefaultWorkspaceAgents(template, teamPreset, name)
-  ).map((agent) => ({
-    id: slugify(agent.id) || "agent",
-    role: agent.role.trim() || prettifyAgentName(agent.id),
-    name:
-      normalizeOptionalValue(agent.name) ??
-      (agent.isPrimary
-        ? buildWorkspaceAgentName(name, agent.role, prettifyAgentName(agent.id))
-        : prettifyAgentName(agent.id)),
-    enabled: agent.enabled !== false,
-    emoji: normalizeOptionalValue(agent.emoji),
-    theme: normalizeOptionalValue(agent.theme),
-    skillId: normalizeOptionalValue(agent.skillId),
-    modelId: normalizeOptionalValue(agent.modelId),
-    isPrimary: Boolean(agent.isPrimary),
-    heartbeat: resolveHeartbeatDraft(
-      agent.policy?.preset ??
-        inferAgentPresetFromContext({
-          skills: agent.skillId ? [agent.skillId] : [],
-          id: agent.id,
-          name: agent.name
-        }),
-      agent.heartbeat
-    ),
-    policy: resolveAgentPolicy(
-      agent.policy?.preset ??
-        inferAgentPresetFromContext({
-          skills: agent.skillId ? [agent.skillId] : [],
-          id: agent.id,
-          name: agent.name
-        }),
-      {
-        ...agent.policy,
-        fileAccess: rules.workspaceOnly ? agent.policy?.fileAccess ?? "workspace-only" : "extended"
-      }
-    )
-  }));
-
-  if (!normalizedAgents.some((agent) => agent.enabled && agent.isPrimary)) {
-    const firstEnabledAgent = normalizedAgents.find((agent) => agent.enabled);
-    if (firstEnabledAgent) {
-      firstEnabledAgent.isPrimary = true;
-    }
-  }
-
-  const duplicateEnabledAgentIds = findDuplicateStrings(
-    normalizedAgents.filter((agent) => agent.enabled).map((agent) => agent.id)
-  );
-
-  if (duplicateEnabledAgentIds.length > 0) {
-    throw new Error(
-      `Enabled agents must have unique ids. Conflicts: ${duplicateEnabledAgentIds.join(", ")}.`
-    );
-  }
-
-  return {
-    name,
-    slug,
-    brief: normalizeOptionalValue(input.brief),
-    directory: normalizeOptionalValue(input.directory),
-    modelId: normalizeOptionalValue(input.modelId),
-    repoUrl: normalizeOptionalValue(input.repoUrl),
-    existingPath: normalizeOptionalValue(input.existingPath),
-    sourceMode,
-    template,
-    teamPreset,
-    modelProfile,
-    rules,
-    docOverrides: normalizeWorkspaceDocOverrides(input.docOverrides),
-    agents: normalizedAgents,
-    contextSources: normalizeWorkspaceContextSources(input.contextSources)
-  };
-}
-
-function normalizeWorkspaceContextSources(
-  sources?: WorkspaceCreateInput["contextSources"]
-): PlannerContextSource[] {
-  return (sources ?? []).flatMap((source) => {
-    if (!source || typeof source !== "object") {
-      return [];
-    }
-
-    const kind = isPlannerContextSourceKind(source.kind) ? source.kind : "prompt";
-    const label = normalizeOptionalValue(source.label) ?? kind;
-    const summary = normalizeOptionalValue(source.summary) ?? label;
-    const status = source.status === "error" ? "error" : "ready";
-    const createdAt = normalizeOptionalValue(source.createdAt) ?? new Date().toISOString();
-
-    if (!label || !summary) {
-      return [];
-    }
-
-    return [
-      {
-        id: normalizeOptionalValue(source.id) ?? `${kind}-${slugify(label) || "context"}`,
-        kind,
-        label,
-        summary,
-        details: Array.isArray(source.details)
-          ? source.details
-              .map((entry) => normalizeOptionalValue(entry) ?? "")
-              .filter((entry): entry is string => Boolean(entry))
-          : [],
-        status,
-        createdAt,
-        ...(typeof source.confidence === "number" ? { confidence: source.confidence } : {}),
-        ...(normalizeOptionalValue(source.error)
-          ? { error: normalizeOptionalValue(source.error) }
-          : {}),
-        ...(normalizeOptionalValue(source.url) ? { url: normalizeOptionalValue(source.url) } : {})
-      }
-    ];
-  });
-}
-
-function isPlannerContextSourceKind(value: unknown): value is PlannerContextSource["kind"] {
-  return value === "prompt" || value === "website" || value === "repo" || value === "folder";
-}
-
-async function resolveWorkspaceCreationTargetDir(input: ResolvedWorkspaceBootstrapInput) {
-  const workspaceRoot = resolveWorkspaceRoot(await getConfiguredWorkspaceRoot());
-
-  if (input.sourceMode === "existing") {
-    const existingPath = input.existingPath || input.directory;
-
-    if (!existingPath) {
-      throw new Error("Choose an existing folder for this workspace.");
-    }
-
-    return path.isAbsolute(existingPath) ? existingPath : path.resolve(existingPath);
-  }
-
-  if (input.directory) {
-    return path.isAbsolute(input.directory)
-      ? input.directory
-      : path.join(workspaceRoot, input.directory);
-  }
-
-  return path.join(workspaceRoot, input.slug);
-}
-
-async function ensureFreshWorkspaceDirectory(targetDir: string) {
-  try {
-    const targetStat = await stat(targetDir);
-
-    if (!targetStat.isDirectory()) {
-      throw new Error("Target workspace path exists and is not a directory.");
-    }
-
-    const entries = await readdir(targetDir);
-
-    if (entries.length > 0) {
-      throw new Error("Target workspace directory already contains files. Use Existing folder instead.");
-    }
-  } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
-
-    if (code === "ENOENT") {
-      await mkdir(targetDir, { recursive: true });
-      return;
-    }
-
-    if (error instanceof Error) {
-      throw error;
-    }
-
-    throw new Error("Unable to prepare the workspace directory.");
-  }
-
-  await mkdir(targetDir, { recursive: true });
-}
-
-async function ensureExistingDirectory(targetDir: string) {
-  try {
-    const targetStat = await stat(targetDir);
-
-    if (!targetStat.isDirectory()) {
-      throw new Error("The selected existing path is not a directory.");
-    }
-  } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? error.code : undefined;
-
-    if (code === "ENOENT") {
-      throw new Error("The selected existing folder does not exist.");
-    }
-
-    if (error instanceof Error) {
-      throw error;
-    }
-
-    throw new Error("Unable to access the selected existing folder.");
-  }
-}
-
-async function runSystemCommand(
-  command: string,
-  args: string[],
-  options: {
-    cwd?: string;
-    timeoutMs?: number;
-  } = {}
-) {
-  try {
-    await execFileAsync(command, args, {
-      cwd: options.cwd ?? process.cwd(),
-      timeout: options.timeoutMs ?? 120000,
-      maxBuffer: 8 * 1024 * 1024
-    });
-  } catch (error) {
-    const message =
-      typeof error === "object" &&
-      error &&
-      "stderr" in error &&
-      typeof error.stderr === "string" &&
-      error.stderr.trim()
-        ? error.stderr.trim()
-        : error instanceof Error
-          ? error.message
-          : "Unknown system command failure.";
-
-    throw new Error(message);
-  }
-}
-
-async function writeTextFileIfMissing(filePath: string, contents: string) {
-  try {
-    await access(filePath);
-  } catch {
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, contents, "utf8");
-  }
-}
-
-async function writeTextFileEnsured(filePath: string, contents: string) {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, contents, "utf8");
-}
-
-async function detectWorkspaceToolExamples(workspacePath: string) {
-  const examples: string[] = [];
-  const packageExamples = await detectPackageExamples(workspacePath);
-  const makeExamples = await detectMakeExamples(workspacePath);
-  const pythonExamples = await detectPythonExamples(workspacePath);
-
-  examples.push(...packageExamples, ...makeExamples, ...pythonExamples);
-
-  if (examples.length === 0) {
-    examples.push(
-      "Use repository-local scripts or documented commands for repeatable workflows.",
-      "Update this file when the project exposes a cleaner build, test, or release path."
-    );
-  }
-
-  return uniqueStrings(examples).slice(0, 6);
-}
-
-async function detectPackageExamples(workspacePath: string) {
-  const packageJsonPath = path.join(workspacePath, "package.json");
-
-  try {
-    const raw = await readFile(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      packageManager?: string;
-      scripts?: Record<string, string>;
-    };
-    const scripts = parsed.scripts ?? {};
-    const manager = await detectPackageManager(workspacePath, parsed.packageManager);
-    const examples = [`Use \`${manager} install\` before the first local run.`];
-
-    for (const scriptName of ["dev", "start", "test", "lint", "build"]) {
-      if (scripts[scriptName]) {
-        examples.push(`Use \`${formatPackageScript(manager, scriptName)}\` for the ${scriptName} workflow.`);
-      }
-    }
-
-    return examples;
-  } catch {
-    return [];
-  }
-}
-
-async function detectMakeExamples(workspacePath: string) {
-  const makefilePath = path.join(workspacePath, "Makefile");
-
-  try {
-    const raw = await readFile(makefilePath, "utf8");
-    const matches = raw.match(/^(dev|test|lint|build|run):/gm) ?? [];
-    return matches.map((entry) => `Use \`make ${entry.replace(/:$/, "")}\` if the Makefile is the primary entry point.`);
-  } catch {
-    return [];
-  }
-}
-
-async function detectPythonExamples(workspacePath: string) {
-  const examples: string[] = [];
-
-  if (await pathExists(path.join(workspacePath, "pyproject.toml"))) {
-    examples.push("Use `pytest` for Python verification if the project exposes a test suite.");
-  }
-
-  if (await pathExists(path.join(workspacePath, "requirements.txt"))) {
-    examples.push("Install Python dependencies in a virtualenv before running project commands.");
-  }
-
-  return examples;
-}
-
 async function prepareMissionOutputPlan(workspacePath: string, mission: string) {
   const runFolder = buildMissionOutputFolderName(mission);
   const absoluteOutputDir = path.join(workspacePath, "deliverables", runFolder);
@@ -6019,105 +5451,6 @@ function composeMissionWithOutputRouting(
     "Agent operating policy:",
     ...buildAgentPolicyPromptLines(resolvedPolicy, setupAgentId)
   ].join("\n");
-}
-
-function buildAgentPolicyPromptLines(policy: AgentPolicy, setupAgentId?: string | null) {
-  const lines: string[] = [
-    `- Preset: ${formatAgentPresetLabel(policy.preset)}.`
-  ];
-
-  if (policy.preset === "browser") {
-    lines.push("- Prefer browser-native evidence capture, screenshots, and reproducible user-path validation.");
-  } else if (policy.preset === "monitoring") {
-    lines.push("- Periodically inspect the workspace, surface blockers, and leave concise triage handoffs without broad implementation changes.");
-  } else if (policy.preset === "setup") {
-    lines.push("- Prepare the environment, unblock other agents, and keep mutations minimal and explicit.");
-  } else if (policy.preset === "worker") {
-    lines.push("- Focus on producing deliverables, reviews, analysis, or code without unnecessary environment mutation.");
-  } else {
-    lines.push("- Operate with the selected policy, keep artifacts reviewable, and avoid surprising side effects.");
-  }
-
-  switch (policy.missingToolBehavior) {
-    case "fallback":
-      lines.push(
-        "- If required tooling is unavailable, do not install it. Produce the closest viable fallback artifact, such as .md or .txt, and state the limitation."
-      );
-      break;
-    case "ask-setup":
-      lines.push(
-        "- If required tooling is unavailable, stop before installing anything and report the missing capability clearly."
-      );
-      break;
-    case "route-setup":
-      lines.push(
-        setupAgentId
-          ? `- If required tooling is unavailable, do not install it yourself. Leave a concrete handoff for setup agent \`${setupAgentId}\` with the exact missing tools or commands.`
-          : "- If required tooling is unavailable, do not install it yourself. Leave a concrete setup handoff with the exact missing tools or commands."
-      );
-      break;
-    case "allow-install":
-      lines.push("- If required tooling is unavailable, you may install it when the install scope below permits it.");
-      break;
-  }
-
-  switch (policy.installScope) {
-    case "none":
-      lines.push("- Install scope: none. Do not run package installation commands.");
-      break;
-    case "workspace":
-      lines.push(
-        "- Install scope: workspace only. Limit installs to project-local or workspace-local dependencies and avoid system package managers."
-      );
-      break;
-    case "system":
-      lines.push("- Install scope: system. System-wide installs are allowed when necessary, but keep them minimal and report what changed.");
-      break;
-  }
-
-  lines.push(
-    policy.fileAccess === "workspace-only"
-      ? "- File access: workspace only. Keep file operations inside the attached workspace."
-      : "- File access: extended. Prefer the workspace, but you may touch adjacent paths when the task explicitly needs them."
-  );
-  lines.push(
-    policy.networkAccess === "enabled"
-      ? "- Network access: enabled when the task requires external information or downloads."
-      : "- Network access: restricted. Avoid network access unless the task explicitly depends on it."
-  );
-
-  return lines;
-}
-
-async function detectPackageManager(workspacePath: string, declaredPackageManager?: string) {
-  const normalizedDeclared = normalizeOptionalValue(declaredPackageManager);
-
-  if (normalizedDeclared) {
-    return normalizedDeclared.split("@")[0];
-  }
-
-  if (await pathExists(path.join(workspacePath, "pnpm-lock.yaml"))) {
-    return "pnpm";
-  }
-
-  if (await pathExists(path.join(workspacePath, "yarn.lock"))) {
-    return "yarn";
-  }
-
-  return "npm";
-}
-
-async function pathExists(targetPath: string) {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function formatPackageScript(packageManager: string, scriptName: string) {
-  return packageManager === "yarn" ? `yarn ${scriptName}` : `${packageManager} run ${scriptName}`;
 }
 
 function buildMissionOutputFolderName(mission: string) {
@@ -6213,38 +5546,6 @@ function assertWorkspaceBootstrapAgentIdsAvailable(
       `Workspace bootstrap would create agent id "${agentId}", but it already exists in workspace "${describeAgentWorkspace(snapshot, existingAgent)}". Rename the workspace or adjust the agent ids.`
     );
   }
-}
-
-function buildWorkspaceAgentStatePath(workspacePath: string, agentId: string) {
-  return path.join(workspacePath, ".openclaw", "agents", agentId, "agent");
-}
-
-function mapAgentHeartbeatToInput(heartbeat: OpenClawAgent["heartbeat"]): AgentHeartbeatInput {
-  return {
-    enabled: heartbeat.enabled,
-    every: heartbeat.every ?? undefined
-  };
-}
-
-function buildAgentPolicySkillId(agentId: string) {
-  return `agent-policy-${slugify(agentId) || "agent"}`;
-}
-
-function isAgentPolicySkillId(skillId: string | undefined) {
-  return Boolean(skillId && /^agent-policy-/.test(skillId));
-}
-
-function filterAgentPolicySkills(skills: string[]) {
-  return skills.filter((skillId) => !isAgentPolicySkillId(skillId));
-}
-
-function normalizeDeclaredAgentTools(toolIds: string[]) {
-  return uniqueStrings(
-    toolIds
-      .filter((toolId) => typeof toolId === "string")
-      .map((toolId) => toolId.trim())
-      .filter((toolId) => Boolean(toolId) && toolId !== "fs.workspaceOnly")
-  );
 }
 
 type TelegramCoordinationChannelSummary = {
@@ -7043,106 +6344,6 @@ export function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | 
 `;
 }
 
-function renderSkillMarkdown(skillId: string, role: string) {
-  switch (skillId) {
-    case "project-builder":
-      return `# Project Builder
-
-Use this skill when implementing changes in the current project.
-
-- Prefer direct code or artifact changes over speculative planning.
-- Respect AGENTS.md, TOOLS.md, MEMORY.md, and memory/*.md before large edits.
-- Put task-specific artifacts under the current deliverables run folder instead of the workspace root.
-- Verify impact before finishing and leave the workspace in a clearer state.
-`;
-    case "project-reviewer":
-      return `# Project Reviewer
-
-Use this skill when reviewing changes in the current project.
-
-- Prioritize correctness, regressions, edge cases, and missing tests.
-- Prefer concrete findings with file and behavior references.
-- Keep summaries brief after findings.
-`;
-    case "project-tester":
-      return `# Project Tester
-
-Use this skill when validating behavior in the current project.
-
-- Prefer reproducible checks over assumptions.
-- Focus on failures, regressions, missing coverage, and environment constraints.
-- Report exactly what was verified and what could not be verified.
-`;
-    case "project-learner":
-      return `# Project Learner
-
-Use this skill when consolidating durable project knowledge.
-
-- Capture stable conventions, architecture decisions, and delivery notes.
-- Prefer updating MEMORY.md or memory/*.md with concise, durable facts.
-- Avoid ephemeral chatter and duplicated notes.
-`;
-    case "project-browser":
-      return `# Project Browser
-
-Use this skill when validating browser flows in the current workspace.
-
-- Exercise real user paths, not only component-level assumptions.
-- Capture screenshots, repro steps, and UI regressions with concrete evidence.
-- Hand off findings that need code changes back to the implementation agent.
-`;
-    case "project-researcher":
-      return `# Project Researcher
-
-Use this skill when investigating, synthesizing, or pressure-testing a problem space.
-
-- Start with explicit questions, evidence sources, and output goals.
-- Distinguish verified facts from inference.
-- Convert durable findings into MEMORY.md or memory/*.md.
-`;
-    case "project-strategist":
-      return `# Project Strategist
-
-Use this skill when shaping positioning, campaign direction, or editorial priorities.
-
-- Tie recommendations to audience, channel, and measurable goals.
-- Prefer explicit tradeoffs over vague guidance.
-- Save task-specific briefs, plans, and campaign artifacts inside the current deliverables run folder.
-- Leave a clear next-step plan other agents can execute.
-`;
-    case "project-writer":
-      return `# Project Writer
-
-Use this skill when drafting messaging, copy, or narrative assets.
-
-- Write for the target audience and channel rather than internal shorthand.
-- Keep tone and structure consistent with the workspace brief.
-- Save publishable drafts and task-specific docs inside the current deliverables run folder.
-- Flag assumptions that need strategic review before publication.
-`;
-    case "project-analyst":
-      return `# Project Analyst
-
-Use this skill when evaluating results, experiments, or performance signals.
-
-- Prefer measurable baselines and explicit comparisons.
-- Separate observed performance from speculation about causality.
-- Keep task-specific reports and analysis artifacts inside the current deliverables run folder.
-- Write down recommendations that can be actioned by the team.
-`;
-    default:
-      return `# ${role}
-
-Use this skill when operating in the current workspace.
-
-- Stay grounded in the shared workspace context.
-- Produce durable artifacts when the work needs to be handed off.
-- Put task-specific artifacts in the current deliverables run folder and keep notes in memory/.
-- Keep outputs specific, reviewable, and easy for other agents to extend.
-`;
-  }
-}
-
 function renderAgentPolicySkillMarkdown(
   agentName: string,
   policy: AgentPolicy,
@@ -7170,306 +6371,6 @@ ${buildAgentPolicyPromptLines(policy, setupAgentId)
   .join("\n")}
 ${teamSection ? `\n\n${teamSection}` : ""}${coordinationSection ? `\n\n${coordinationSection}` : ""}
 `;
-}
-
-function buildWorkspaceKickoffPrompt(
-  template: WorkspaceTemplate,
-  brief: string | undefined,
-  rules: WorkspaceCreateRules
-) {
-  const templateMeta = getWorkspaceTemplateMeta(template);
-  const contextManifest = buildWorkspaceContextManifest(template, rules);
-  const manifestSummary = contextManifest.sections
-    .map((section) => {
-      const resourceList = section.resources.map((resource) => resource.label).join(", ");
-      return section.enabled
-        ? `${section.title}: ${resourceList || "none"}`
-        : `${section.title}: disabled by workspace rules`;
-    })
-    .join("\n");
-
-  return [
-    `You are bootstrapping a newly created ${templateMeta.label.toLowerCase()} workspace.`,
-    brief ? `Project brief: ${brief}` : "No detailed project brief was provided yet.",
-    "Inspect the current files and improve the starter workspace without rewriting files that already had meaningful content.",
-    "Treat the following workspace context manifest as the source of truth:",
-    manifestSummary,
-    "If those docs exist, refine the brief, architecture, memory, and deliverables guidance based on the real repository state instead of guessing.",
-    "Leave the workspace with a concise first task batch and any critical unknowns clearly called out.",
-    "Prefer concrete workspace-grounded edits over verbose chat output."
-  ].join("\n\n");
-}
-
-async function upsertAgentConfigEntry(
-  agentId: string,
-  workspacePath: string,
-  updates: {
-    name?: string;
-    model?: string;
-    heartbeat?: { every?: string } | null;
-    skills?: string[];
-    tools?: MutableAgentConfigEntry["tools"] | null;
-  },
-  snapshot?: MissionControlSnapshot
-) {
-  const configList = await readAgentConfigList(snapshot);
-  const existingIndex = configList.findIndex((entry) => entry.id === agentId);
-  const nextEntry: MutableAgentConfigEntry =
-    existingIndex >= 0
-      ? { ...configList[existingIndex] }
-      : {
-          id: agentId,
-          workspace: workspacePath
-        };
-
-  nextEntry.workspace = workspacePath;
-
-  if (updates.name) {
-    nextEntry.name = updates.name;
-  }
-
-  if (typeof updates.model === "string") {
-    nextEntry.model = updates.model;
-  } else {
-    delete nextEntry.model;
-  }
-
-  if (updates.heartbeat?.every) {
-    nextEntry.heartbeat = {
-      every: updates.heartbeat.every
-    };
-  } else if (updates.heartbeat === null) {
-    delete nextEntry.heartbeat;
-  }
-
-  if (Array.isArray(updates.skills) && updates.skills.length > 0) {
-    nextEntry.skills = uniqueStrings(updates.skills);
-  } else if (Array.isArray(updates.skills)) {
-    delete nextEntry.skills;
-  }
-
-  if (updates.tools) {
-    nextEntry.tools = updates.tools;
-  } else if (updates.tools === null) {
-    delete nextEntry.tools;
-  }
-
-  if (existingIndex >= 0) {
-    configList[existingIndex] = nextEntry;
-  } else {
-    configList.push(nextEntry);
-  }
-
-  await writeAgentConfigList(configList);
-  return nextEntry;
-}
-
-async function readAgentConfigList(snapshot?: MissionControlSnapshot) {
-  try {
-    const config = await runOpenClawJson<MutableAgentConfigEntry[]>([
-      "config",
-      "get",
-      "agents.list",
-      "--json"
-    ]);
-
-    return Array.isArray(config) ? config : [];
-  } catch (error) {
-    if (isMissingAgentConfigListError(error)) {
-      return snapshot ? buildAgentConfigListFromSnapshot(snapshot) : [];
-    }
-
-    throw error;
-  }
-}
-
-async function writeAgentConfigList(configList: MutableAgentConfigEntry[]) {
-  await runOpenClaw([
-    "config",
-    "set",
-    "--strict-json",
-    "agents.list",
-    JSON.stringify(configList)
-  ]);
-}
-
-function isMissingAgentConfigListError(error: unknown) {
-  const message = extractErrorMessage(error);
-  return /Config path not found:\s*agents\.list|Config path not found:\s*agents\.list/i.test(message);
-}
-
-function buildAgentConfigListFromSnapshot(snapshot: MissionControlSnapshot) {
-  return snapshot.agents.map((agent) => {
-    const displayName = formatAgentDisplayName(agent);
-    const identity = {
-      name: displayName,
-      ...(agent.identity.emoji ? { emoji: agent.identity.emoji } : {}),
-      ...(agent.identity.theme ? { theme: agent.identity.theme } : {}),
-      ...(agent.identity.avatar ? { avatar: agent.identity.avatar } : {})
-    };
-
-    const configEntry: MutableAgentConfigEntry = {
-      id: agent.id,
-      workspace: agent.workspacePath,
-      name: displayName
-    };
-
-    if (agent.modelId && agent.modelId !== "unassigned") {
-      configEntry.model = agent.modelId;
-    }
-
-    if (agent.heartbeat.enabled && agent.heartbeat.every) {
-      configEntry.heartbeat = {
-        every: agent.heartbeat.every
-      };
-    }
-
-    if (agent.skills.length > 0) {
-      configEntry.skills = uniqueStrings(agent.skills);
-    }
-
-    if (agent.tools.includes("fs.workspaceOnly")) {
-      configEntry.tools = {
-        fs: {
-          workspaceOnly: true
-        }
-      };
-    }
-
-    if (Object.keys(identity).length > 0) {
-      configEntry.identity = identity;
-    }
-
-    if (agent.isDefault) {
-      configEntry.default = true;
-    }
-
-    return configEntry;
-  });
-}
-
-function extractErrorMessage(error: unknown) {
-  if (!error) {
-    return "";
-  }
-
-  if (error instanceof Error) {
-    const parts = [error.message];
-    if ("stderr" in error && typeof error.stderr === "string") {
-      parts.push(error.stderr);
-    }
-    if ("stdout" in error && typeof error.stdout === "string") {
-      parts.push(error.stdout);
-    }
-    return parts.filter(Boolean).join("\n");
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  return "";
-}
-
-async function applyAgentIdentity(
-  agentId: string,
-  workspacePath: string,
-  identity: {
-    name?: string;
-    emoji?: string;
-    theme?: string;
-    avatar?: string;
-  },
-  agentDir?: string
-) {
-  const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
-  const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
-  const identityMarkdown = renderAgentIdentityMarkdown({
-    name: normalizeOptionalValue(identity.name) ?? agentId,
-    emoji: normalizeOptionalValue(identity.emoji),
-    avatar: normalizeOptionalValue(identity.avatar)
-  });
-
-  await writeTextFileEnsured(identityFilePath, identityMarkdown);
-
-  const args = [
-    "agents",
-    "set-identity",
-    "--agent",
-    agentId,
-    "--workspace",
-    workspacePath,
-    "--identity-file",
-    identityFilePath,
-    "--json"
-  ];
-
-  if (identity.name) {
-    args.push("--name", identity.name);
-  }
-
-  if (identity.emoji) {
-    args.push("--emoji", identity.emoji);
-  }
-
-  if (identity.theme) {
-    args.push("--theme", identity.theme);
-  }
-
-  if (identity.avatar) {
-    args.push("--avatar", identity.avatar);
-  }
-
-  await runOpenClaw(args);
-}
-
-function renderAgentIdentityMarkdown(identity: {
-  name: string;
-  emoji?: string | null;
-  avatar?: string | null;
-}) {
-  const avatar = normalizeOptionalValue(identity.avatar);
-
-  return `# IDENTITY.md - Who Am I?
-
-- **Name:** ${identity.name}
-- **Creature:** OpenClaw agent
-- **Vibe:** pragmatic, concise, workspace-grounded
-- **Emoji:** ${identity.emoji ?? ""}
-- **Avatar:** ${avatar ?? ""}
-
----
-
-This identity file lives with the agent state so each agent can keep its own identity.
-`;
-}
-
-async function readAgentIdentityOverrides(agentDir?: string) {
-  const resolvedAgentDir = normalizeOptionalValue(agentDir);
-
-  if (!resolvedAgentDir) {
-    return { name: null, emoji: null, avatar: null };
-  }
-
-  const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
-
-  try {
-    const raw = await readFile(identityFilePath, "utf8");
-    const lines = raw.split(/\r?\n/);
-    const parseField = (label: string) => {
-      const match = lines.find((line) => new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i").test(line.trim()));
-      const value = match?.match(new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i"))?.[1];
-      return normalizeOptionalValue(value ? cleanMarkdown(value) : null) ?? null;
-    };
-
-    return {
-      name: parseField("Name"),
-      emoji: parseField("Emoji"),
-      avatar: parseField("Avatar")
-    };
-  } catch {
-    return { name: null, emoji: null, avatar: null };
-  }
 }
 
 async function resolveRuntimeTranscriptPath(
@@ -9065,276 +7966,39 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
   };
 }
 
-function areWorkspaceCreateRulesEqual(left: WorkspaceCreateRules, right: WorkspaceCreateRules) {
-  return (
-    left.workspaceOnly === right.workspaceOnly &&
-    left.generateStarterDocs === right.generateStarterDocs &&
-    left.generateMemory === right.generateMemory &&
-    left.kickoffMission === right.kickoffMission
-  );
+function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelType {
+  return value === "internal" || value === "slack" || value === "telegram" || value === "discord" || value === "googlechat";
 }
 
-function areWorkspaceAgentsEqual(
-  left: WorkspaceAgentBlueprintInput[],
-  right: WorkspaceAgentBlueprintInput[]
-) {
-  if (left.length !== right.length) {
-    return false;
+type ManagedChatChannelProvider = Exclude<PlannerChannelType, "internal">;
+
+async function buildManagedSurfaceAccountId(provider: MissionControlSurfaceProvider, name: string) {
+  const baseSlug = slugify(name.trim()) || provider;
+  const baseId = `${provider}-${baseSlug}`;
+  const registry = await readChannelRegistry();
+  const existingIds = new Set([
+    ...registry.channels.filter((channel) => channel.type === provider).map((channel) => channel.id),
+    ...(await readChannelAccounts()).filter((account) => account.type === provider).map((account) => account.id)
+  ]);
+
+  if (!existingIds.has(baseId)) {
+    return baseId;
   }
 
-  const normalizeAgent = (agent: WorkspaceAgentBlueprintInput) => ({
-    id: agent.id.trim(),
-    role: agent.role.trim(),
-    name: agent.name.trim(),
-    enabled: agent.enabled,
-    emoji: normalizeOptionalValue(agent.emoji) ?? null,
-    theme: normalizeOptionalValue(agent.theme) ?? null,
-    skillId: normalizeOptionalValue(agent.skillId) ?? null,
-    modelId: normalizeOptionalValue(agent.modelId) ?? null,
-    isPrimary: Boolean(agent.isPrimary),
-    policy: agent.policy
-      ? {
-          preset: agent.policy.preset,
-          missingToolBehavior: agent.policy.missingToolBehavior,
-          installScope: agent.policy.installScope,
-          fileAccess: agent.policy.fileAccess,
-          networkAccess: agent.policy.networkAccess
-        }
-      : null,
-    heartbeat: agent.heartbeat
-      ? {
-          enabled: agent.heartbeat.enabled,
-          every: normalizeOptionalValue(agent.heartbeat.every) ?? null
-        }
-      : null,
-    channelIds: uniqueStrings(agent.channelIds ?? []).sort((left, right) => left.localeCompare(right))
-  });
+  let index = 2;
+  while (existingIds.has(`${baseId}-${index}`)) {
+    index += 1;
+  }
 
-  const sortById = (leftAgent: WorkspaceAgentBlueprintInput, rightAgent: WorkspaceAgentBlueprintInput) =>
-    leftAgent.id.localeCompare(rightAgent.id);
-
-  const normalizedLeft = [...left].sort(sortById).map(normalizeAgent);
-  const normalizedRight = [...right].sort(sortById).map(normalizeAgent);
-
-  return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+  return `${baseId}-${index}`;
 }
 
-async function collectWorkspaceEditableDocPaths(workspacePath: string) {
-  const docPaths = new Set<string>();
-  const rootEntries = await readdir(workspacePath, { withFileTypes: true });
-
-  for (const entry of rootEntries) {
-    if (entry.isFile() && isEditableMarkdownFile(entry.name)) {
-      docPaths.add(entry.name);
-    }
-  }
-
-  for (const directoryName of ["docs", "memory"] as const) {
-    const directoryPath = path.join(workspacePath, directoryName);
-
-    if (!(await pathMatchesKind(directoryPath, "directory"))) {
-      continue;
-    }
-
-    const relativePaths = await collectMarkdownPathsInDirectory(directoryPath, directoryName);
-    for (const relativePath of relativePaths) {
-      docPaths.add(relativePath);
-    }
-  }
-
-  const deliverablesReadmePath = path.join(workspacePath, "deliverables", "README.md");
-  if (await pathMatchesKind(deliverablesReadmePath, "file")) {
-    docPaths.add("deliverables/README.md");
-  }
-
-  return Array.from(docPaths).sort((left, right) => left.localeCompare(right));
+async function buildTelegramAccountId(name: string) {
+  return buildManagedSurfaceAccountId("telegram", name);
 }
 
-async function collectMarkdownPathsInDirectory(absoluteDirectoryPath: string, relativePrefix: string) {
-  const results: string[] = [];
-  const entries = await readdir(absoluteDirectoryPath, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) {
-      continue;
-    }
-
-    const nextRelativePath = path.join(relativePrefix, entry.name);
-    const nextAbsolutePath = path.join(absoluteDirectoryPath, entry.name);
-
-    if (entry.isDirectory()) {
-      results.push(...(await collectMarkdownPathsInDirectory(nextAbsolutePath, nextRelativePath)));
-      continue;
-    }
-
-    if (entry.isFile() && isEditableMarkdownFile(entry.name)) {
-      results.push(nextRelativePath);
-    }
-  }
-
-  return results;
-}
-
-function isEditableMarkdownFile(fileName: string) {
-  return fileName.toLowerCase().endsWith(".md");
-}
-
-async function collectWorkspaceResourceState(
-  workspacePath: string,
-  entries: Array<{
-    id: string;
-    label: string;
-    relativePath: string;
-    kind: "file" | "directory";
-  }>
-) {
-  return Promise.all(
-    entries.map(async (entry) => ({
-      id: entry.id,
-      label: entry.label,
-      present: await pathMatchesKind(path.join(workspacePath, entry.relativePath), entry.kind)
-    }))
-  );
-}
-
-async function listLocalWorkspaceSkills(workspacePath: string) {
-  const skillsPath = path.join(workspacePath, "skills");
-
-  try {
-    const entries = await readdir(skillsPath, { withFileTypes: true });
-    const localSkills = await Promise.all(
-      entries
-        .filter((entry) => entry.isDirectory())
-        .map(async (entry) => {
-          const skillFile = path.join(skillsPath, entry.name, "SKILL.md");
-          return (await pathMatchesKind(skillFile, "file")) ? entry.name : null;
-        })
-    );
-
-    return localSkills
-      .filter((entry): entry is string => typeof entry === "string" && !isAgentPolicySkillId(entry))
-      .sort((left, right) => left.localeCompare(right));
-  } catch {
-    return [];
-  }
-}
-
-async function readWorkspaceProjectManifest(workspacePath: string) {
-  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
-
-  try {
-    const raw = await readFile(projectFilePath, "utf8");
-    const candidate = JSON.parse(raw);
-    const parsed = isObjectRecord(candidate) ? candidate : {};
-    const agents = Array.isArray(parsed.agents)
-      ? parsed.agents
-          .map((entry) => parseWorkspaceProjectManifestAgent(entry))
-          .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
-      : [];
-    const channels = Array.isArray(parsed.channels)
-      ? parsed.channels
-          .map((entry) => parseWorkspaceProjectManifestChannel(entry))
-          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
-      : [];
-    const rules = parseWorkspaceCreateRules(parsed.rules);
-
-    return {
-      name: typeof parsed.name === "string" ? parsed.name : null,
-      directory: typeof parsed.directory === "string" ? parsed.directory : null,
-      template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
-      sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
-      agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
-      teamPreset: isWorkspaceTeamPreset(parsed.teamPreset) ? parsed.teamPreset : null,
-      modelProfile: isWorkspaceModelProfile(parsed.modelProfile) ? parsed.modelProfile : null,
-      rules,
-      hidden: parsed.hidden === true,
-      systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
-      contextSources: parseWorkspaceProjectManifestContextSources(parsed.contextSources),
-      agents,
-      channels
-    };
-  } catch {
-    return {
-      name: null,
-      directory: null,
-      template: null,
-      sourceMode: null,
-      agentTemplate: null,
-      teamPreset: null,
-      modelProfile: null,
-      rules: null,
-      hidden: false,
-      systemTag: null,
-      contextSources: [],
-      agents: [],
-      channels: []
-    };
-  }
-}
-
-function parseWorkspaceProjectManifestContextSources(raw: unknown): PlannerContextSource[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw.flatMap((entry) => {
-    if (!isObjectRecord(entry)) {
-      return [];
-    }
-
-    const kind = isPlannerContextSourceKind(entry.kind) ? entry.kind : "prompt";
-    const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : kind;
-    const summary = typeof entry.summary === "string" && entry.summary.trim() ? entry.summary.trim() : label;
-    const id =
-      typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `${kind}-${slugify(label) || "context"}`;
-
-    return normalizeWorkspaceContextSources([
-      {
-        id,
-        kind,
-        label,
-        summary,
-        details: Array.isArray(entry.details) ? entry.details.filter((detail): detail is string => typeof detail === "string") : [],
-        status: entry.status === "error" ? "error" : "ready",
-        createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
-        confidence: typeof entry.confidence === "number" ? entry.confidence : undefined,
-        url: typeof entry.url === "string" ? entry.url : undefined,
-        error: typeof entry.error === "string" ? entry.error : undefined
-      }
-    ]);
-  });
-}
-
-async function readChannelRegistry() {
-  try {
-    const raw = await readFile(channelRegistryPath, "utf8");
-    const candidate = JSON.parse(raw);
-    const parsed = isObjectRecord(candidate) ? candidate : {};
-    const channels = Array.isArray(parsed.channels)
-      ? parsed.channels
-          .map((entry) => parseWorkspaceChannelSummary(entry))
-          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
-      : [];
-    const registry = normalizeChannelRegistry({
-      version: 1 as const,
-      channels
-    } satisfies ChannelRegistry);
-    return await reconcileTelegramRegistryAccounts(registry);
-  } catch {
-    return normalizeChannelRegistry({
-      version: 1 as const,
-      channels: []
-    } satisfies ChannelRegistry);
-  }
-}
-
-async function readChannelAccounts() {
-  try {
-    const accounts = await readOpenClawSurfaceAccounts();
-    return dedupeChannelAccounts(accounts);
-  } catch {
-    return [] as ChannelAccountRecord[];
-  }
+async function writeChannelRegistry(registry: ChannelRegistry) {
+  await writeTextFileEnsured(channelRegistryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
 
 type TelegramPairingRequest = {
@@ -9410,52 +8074,6 @@ async function readTelegramAccountBotIds() {
   }
 }
 
-function dedupeChannelAccounts(accounts: ChannelAccountRecord[]) {
-  const telegramByBot = new Map<string, ChannelAccountRecord>();
-  const others: ChannelAccountRecord[] = [];
-
-  for (const account of accounts) {
-    if (account.type !== "telegram") {
-      others.push(account);
-      continue;
-    }
-
-    const botId =
-      typeof account.metadata?.botId === "string" && account.metadata.botId.trim().length > 0
-        ? account.metadata.botId.trim()
-        : null;
-
-    if (!botId) {
-      if (!telegramByBot.has(account.id)) {
-        telegramByBot.set(account.id, account);
-      }
-      continue;
-    }
-
-    const current = telegramByBot.get(botId);
-    if (!current) {
-      telegramByBot.set(botId, account);
-      continue;
-    }
-
-    const candidateScore = scoreTelegramAccountChoice(account.id);
-    const currentScore = scoreTelegramAccountChoice(current.id);
-    if (candidateScore > currentScore) {
-      telegramByBot.set(botId, account);
-    }
-  }
-
-  return [...others, ...Array.from(telegramByBot.values())];
-}
-
-function scoreTelegramAccountChoice(accountId: string) {
-  if (accountId !== "default") {
-    return 2;
-  }
-
-  return 1;
-}
-
 async function findTelegramAccountByToken(token: string, accounts: ChannelAccountRecord[]) {
   const botId = normalizeOptionalValue(token.split(":", 1)[0]);
   if (!botId) {
@@ -9464,90 +8082,6 @@ async function findTelegramAccountByToken(token: string, accounts: ChannelAccoun
 
   const accountBotIds = await readTelegramAccountBotIds();
   return accounts.find((account) => accountBotIds.get(account.id) === botId) ?? null;
-}
-
-async function reconcileTelegramRegistryAccounts(registry: ChannelRegistry) {
-  const telegramAccounts = (await readChannelAccounts()).filter((account) => account.type === "telegram");
-  if (telegramAccounts.length === 0) {
-    return registry;
-  }
-
-  const accountIds = new Set(telegramAccounts.map((account) => account.id));
-  const accountsByName = new Map<string, ChannelAccountRecord[]>();
-
-  for (const account of telegramAccounts) {
-    const key = account.name.trim().toLowerCase();
-    if (!key) {
-      continue;
-    }
-
-    const current = accountsByName.get(key) ?? [];
-    current.push(account);
-    accountsByName.set(key, current);
-  }
-
-  let changed = false;
-  const nextChannels = registry.channels.map((channel) => {
-    if (channel.type !== "telegram" || accountIds.has(channel.id)) {
-      return channel;
-    }
-
-    const matches = accountsByName.get(channel.name.trim().toLowerCase()) ?? [];
-    if (matches.length !== 1) {
-      return channel;
-    }
-
-    changed = true;
-    return {
-      ...channel,
-      id: matches[0].id,
-      name: matches[0].name
-    };
-  });
-
-  if (!changed) {
-    return registry;
-  }
-
-  return normalizeChannelRegistry({
-    version: 1,
-    channels: nextChannels
-  });
-}
-
-type ManagedChatChannelProvider = Exclude<PlannerChannelType, "internal">;
-
-async function buildManagedSurfaceAccountId(provider: MissionControlSurfaceProvider, name: string) {
-  const baseSlug = slugify(name.trim()) || provider;
-  const baseId = `${provider}-${baseSlug}`;
-  const registry = await readChannelRegistry();
-  const existingIds = new Set([
-    ...registry.channels.filter((channel) => channel.type === provider).map((channel) => channel.id),
-    ...(await readChannelAccounts()).filter((account) => account.type === provider).map((account) => account.id)
-  ]);
-
-  if (!existingIds.has(baseId)) {
-    return baseId;
-  }
-
-  let index = 2;
-  while (existingIds.has(`${baseId}-${index}`)) {
-    index += 1;
-  }
-
-  return `${baseId}-${index}`;
-}
-
-async function buildTelegramAccountId(name: string) {
-  return buildManagedSurfaceAccountId("telegram", name);
-}
-
-async function writeChannelRegistry(registry: ChannelRegistry) {
-  await writeTextFileEnsured(channelRegistryPath, `${JSON.stringify(registry, null, 2)}\n`);
-}
-
-export async function getChannelRegistry() {
-  return readChannelRegistry();
 }
 
 export async function createManagedChatChannelAccount(input: {
@@ -10261,270 +8795,8 @@ async function removeWorkspaceProjectChannelReferences(workspacePath: string, ch
   await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
-async function pathMatchesKind(targetPath: string, kind: "file" | "directory") {
-  try {
-    const targetStat = await stat(targetPath);
-    return kind === "directory" ? targetStat.isDirectory() : targetStat.isFile();
-  } catch {
-    return false;
-  }
-}
-
-function isWorkspaceTemplate(value: unknown): value is WorkspaceTemplate {
-  return (
-    value === "software" ||
-    value === "frontend" ||
-    value === "backend" ||
-    value === "research" ||
-    value === "content"
-  );
-}
-
-function isWorkspaceSourceMode(value: unknown): value is WorkspaceSourceMode {
-  return value === "empty" || value === "clone" || value === "existing";
-}
-
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function parseWorkspaceProjectManifestAgent(value: unknown): WorkspaceProjectManifestAgent | null {
-  if (!isObjectRecord(value) || typeof value.id !== "string") {
-    return null;
-  }
-
-  return {
-    id: value.id,
-    name: typeof value.name === "string" ? value.name : null,
-    role: typeof value.role === "string" ? value.role : null,
-    isPrimary: Boolean(value.isPrimary),
-    enabled: value.enabled !== false,
-    skillId: typeof value.skillId === "string" ? value.skillId : null,
-    toolIds: Array.isArray(value.toolIds)
-      ? uniqueStrings(
-          value.toolIds
-            .filter((entry): entry is string => typeof entry === "string")
-            .map((entry) => entry.trim())
-            .filter((entry) => Boolean(entry) && entry !== "fs.workspaceOnly")
-        )
-      : [],
-    modelId: typeof value.modelId === "string" ? value.modelId : null,
-    emoji: typeof value.emoji === "string" ? value.emoji : null,
-    theme: typeof value.theme === "string" ? value.theme : null,
-    policy: parseAgentPolicy(value.policy),
-    channelIds: Array.isArray(value.channelIds)
-      ? value.channelIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : []
-  };
-}
-
-function parseWorkspaceProjectManifestChannel(value: unknown): WorkspaceChannelSummary | null {
-  return parseWorkspaceChannelSummary(value);
-}
-
-function parseWorkspaceChannelSummary(value: unknown): WorkspaceChannelSummary | null {
-  if (!isObjectRecord(value) || typeof value.id !== "string") {
-    return null;
-  }
-
-  return {
-    id: value.id,
-    type: isMissionControlSurfaceProviderValue(value.type) ? value.type : "internal",
-    name: typeof value.name === "string" ? value.name : value.id,
-    primaryAgentId: typeof value.primaryAgentId === "string" ? value.primaryAgentId : null,
-    workspaces: Array.isArray(value.workspaces)
-      ? value.workspaces
-          .map((entry) => parseWorkspaceChannelWorkspaceBinding(entry))
-          .filter((entry): entry is WorkspaceChannelWorkspaceBinding => Boolean(entry))
-      : []
-  };
-}
-
-function isMissionControlSurfaceProviderValue(value: unknown): value is MissionControlSurfaceProvider {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelType {
-  return value === "internal" || value === "slack" || value === "telegram" || value === "discord" || value === "googlechat";
-}
-
-function parseWorkspaceChannelWorkspaceBinding(value: unknown): WorkspaceChannelWorkspaceBinding | null {
-  if (!isObjectRecord(value) || typeof value.workspaceId !== "string" || typeof value.workspacePath !== "string") {
-    return null;
-  }
-
-  return {
-    workspaceId: value.workspaceId,
-    workspacePath: value.workspacePath,
-    agentIds: Array.isArray(value.agentIds)
-      ? value.agentIds.filter((entry): entry is string => typeof entry === "string" && Boolean(entry.trim()))
-      : [],
-    groupAssignments: Array.isArray(value.groupAssignments)
-      ? value.groupAssignments
-          .map((entry) => parseWorkspaceChannelGroupAssignment(entry))
-          .filter((entry): entry is WorkspaceChannelGroupAssignment => Boolean(entry))
-      : []
-  };
-}
-
-function parseWorkspaceChannelGroupAssignment(value: unknown): WorkspaceChannelGroupAssignment | null {
-  if (!isObjectRecord(value) || typeof value.chatId !== "string") {
-    return null;
-  }
-
-  return {
-    chatId: value.chatId,
-    agentId: typeof value.agentId === "string" ? value.agentId : null,
-    title: typeof value.title === "string" ? value.title : null,
-    enabled: value.enabled !== false
-  };
-}
-
-function normalizeChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
-  const channels = registry.channels
-    .map((channel) => ({
-      id: channel.id.trim(),
-      type: isMissionControlSurfaceProviderValue(channel.type) ? channel.type : "internal",
-      name: channel.name.trim() || channel.id.trim(),
-      primaryAgentId: normalizeOptionalValue(channel.primaryAgentId) ?? null,
-      workspaces: channel.workspaces
-        .map((workspace) => ({
-          workspaceId: workspace.workspaceId.trim(),
-          workspacePath: workspace.workspacePath.trim(),
-          agentIds: uniqueStrings(workspace.agentIds.map((agentId) => agentId.trim()).filter(Boolean)),
-          groupAssignments: workspace.groupAssignments
-            .map((assignment) => ({
-              chatId: assignment.chatId.trim(),
-              agentId: normalizeOptionalValue(assignment.agentId) ?? null,
-              title: normalizeOptionalValue(assignment.title) ?? null,
-              enabled: assignment.enabled !== false
-            }))
-            .filter((assignment) => Boolean(assignment.chatId))
-        }))
-        .filter((workspace) => Boolean(workspace.workspaceId) && Boolean(workspace.workspacePath))
-    }))
-    .filter((channel) => Boolean(channel.id));
-
-  const deduped = new Map<string, WorkspaceChannelSummary>();
-
-  for (const channel of channels) {
-    const existing = deduped.get(channel.id);
-
-    if (!existing) {
-      deduped.set(channel.id, {
-        ...channel,
-        workspaces: channel.workspaces
-      });
-      continue;
-    }
-
-    const workspaceMap = new Map<string, WorkspaceChannelWorkspaceBinding>();
-    for (const workspace of existing.workspaces) {
-      workspaceMap.set(workspace.workspaceId, workspace);
-    }
-
-    for (const workspace of channel.workspaces) {
-      const current = workspaceMap.get(workspace.workspaceId);
-
-      if (!current) {
-        workspaceMap.set(workspace.workspaceId, workspace);
-        continue;
-      }
-
-      workspaceMap.set(workspace.workspaceId, {
-        ...current,
-        agentIds: uniqueStrings([...current.agentIds, ...workspace.agentIds]),
-        groupAssignments: uniqueByChatId([...current.groupAssignments, ...workspace.groupAssignments])
-      });
-    }
-
-    deduped.set(channel.id, {
-      ...existing,
-      name: existing.name || channel.name,
-      primaryAgentId: existing.primaryAgentId || channel.primaryAgentId,
-      workspaces: Array.from(workspaceMap.values())
-    });
-  }
-
-  return {
-    version: 1,
-    channels: Array.from(deduped.values())
-  };
-}
-
-function uniqueByChatId(assignments: WorkspaceChannelGroupAssignment[]) {
-  const seen = new Map<string, WorkspaceChannelGroupAssignment>();
-
-  for (const assignment of assignments) {
-    if (!assignment.chatId) {
-      continue;
-    }
-
-    seen.set(assignment.chatId, assignment);
-  }
-
-  return Array.from(seen.values());
-}
-
-function applyChannelAccountDisplayNames(accounts: ChannelAccountRecord[], registry: ChannelRegistry) {
-  const labels = new Map(
-    registry.channels
-      .filter((channel) => Boolean(channel.id))
-      .map((channel) => [channel.id, channel.name.trim() || channel.id] as const)
-  );
-
-  return accounts.map((account) => ({
-    ...account,
-    name: labels.get(account.id) ?? account.name
-  }));
-}
-
-function buildLegacyRegistrySurfaceAccounts(registry: ChannelRegistry) {
-  return registry.channels
-    .filter((channel) => channel.type !== "internal" && channel.workspaces.length > 0)
-    .map(
-      (channel) =>
-        ({
-          id: channel.id,
-          type: channel.type,
-          name: channel.name.trim() || channel.id,
-          enabled: true,
-          kind: getSurfaceKind(channel.type),
-          capabilities: [getSurfaceKind(channel.type)],
-          metadata: {
-            source: "channel-registry",
-            legacy: true
-          }
-        }) satisfies ChannelAccountRecord
-    );
-}
-
-function mergeMissionControlSurfaceAccounts(accounts: ChannelAccountRecord[]) {
-  const merged = new Map<string, ChannelAccountRecord>();
-
-  for (const account of accounts) {
-    const key = `${account.type}:${account.id}`;
-    const existing = merged.get(key);
-
-    if (!existing) {
-      merged.set(key, account);
-      continue;
-    }
-
-    merged.set(key, {
-      ...existing,
-      name: existing.name || account.name,
-      enabled: existing.enabled !== false,
-      kind: existing.kind ?? account.kind,
-      capabilities: uniqueStrings([...(existing.capabilities ?? []), ...(account.capabilities ?? [])]),
-      metadata: {
-        ...(account.metadata ?? {}),
-        ...(existing.metadata ?? {})
-      }
-    });
-  }
-
-  return Array.from(merged.values());
 }
 
 function cloneChannelRegistry(registry: ChannelRegistry): ChannelRegistry {
@@ -10550,21 +8822,6 @@ type ManagedTelegramRoutingCleanup = {
   removedGroupIds?: string[];
 };
 
-type OpenClawChannelLogsPayload = {
-  lines?: Array<{
-    time?: string;
-    message?: string;
-    raw?: string;
-  }>;
-};
-
-type TelegramAllowlistConfig = Record<
-  string,
-  {
-    requireMention?: boolean;
-  }
->;
-
 type DiscordGuildConfig = Record<
   string,
   {
@@ -10574,263 +8831,6 @@ type DiscordGuildConfig = Record<
     name?: string;
   }
 >;
-
-export async function discoverSurfaceRoutes(input: {
-  provider: MissionControlSurfaceProvider;
-  accountId?: string | null;
-}) {
-  switch (input.provider) {
-    case "telegram":
-      return discoverTelegramGroups();
-    case "discord":
-      return discoverDiscordRoutes(input.accountId);
-    default:
-      return [] as DiscoveredSurfaceRoute[];
-  }
-}
-
-export async function discoverTelegramGroups() {
-  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
-    "channels",
-    "logs",
-    "--channel",
-    "telegram",
-    "--json",
-    "--lines",
-    "200"
-  ]).catch(() => null);
-
-  if (!payload?.lines?.length) {
-    return await readTelegramAllowlistGroups();
-  }
-
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-
-  const rememberGroup = (group: DiscoveredSurfaceRoute) => {
-    const existing = discovered.get(group.routeId);
-    if (!existing) {
-      discovered.set(group.routeId, group);
-      return;
-    }
-
-    discovered.set(group.routeId, {
-      routeId: group.routeId,
-      provider: "telegram",
-      kind: "group",
-      title: group.title ?? existing.title,
-      lastSeen: selectLatestIsoTimestamp(existing.lastSeen, group.lastSeen)
-    });
-  };
-
-  for (const line of payload.lines) {
-    const lineTime = typeof line?.time === "string" ? line.time : null;
-
-    for (const group of extractTelegramGroupsFromUnknown(line, lineTime)) {
-      rememberGroup(group);
-    }
-
-    if (typeof line?.raw === "string") {
-      try {
-        const parsed = JSON.parse(line.raw);
-        for (const group of extractTelegramGroupsFromUnknown(parsed, lineTime)) {
-          rememberGroup(group);
-        }
-      } catch {
-        for (const group of extractTelegramGroupsFromText(line.raw, lineTime)) {
-          rememberGroup(group);
-        }
-      }
-    }
-
-    if (typeof line?.message === "string") {
-      for (const group of extractTelegramGroupsFromText(line.message, lineTime)) {
-        rememberGroup(group);
-      }
-    }
-  }
-
-  for (const group of await readTelegramAllowlistGroups()) {
-    if (!discovered.has(group.routeId)) {
-      discovered.set(group.routeId, group);
-    }
-  }
-
-  return Array.from(discovered.values()).sort((left, right) => {
-    const leftLabel = left.title ?? left.routeId;
-    const rightLabel = right.title ?? right.routeId;
-    return leftLabel.localeCompare(rightLabel);
-  });
-}
-
-export async function discoverDiscordRoutes(accountId?: string | null) {
-  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
-    "channels",
-    "logs",
-    "--channel",
-    "discord",
-    "--json",
-    "--lines",
-    "300"
-  ]).catch(() => null);
-
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-
-  const rememberRoute = (route: DiscoveredSurfaceRoute) => {
-    const existing = discovered.get(route.routeId);
-    if (!existing) {
-      discovered.set(route.routeId, route);
-      return;
-    }
-
-    discovered.set(route.routeId, {
-      ...existing,
-      title: route.title ?? existing.title,
-      subtitle: route.subtitle ?? existing.subtitle,
-      lastSeen: selectLatestIsoTimestamp(existing.lastSeen, route.lastSeen),
-      guildId: route.guildId ?? existing.guildId,
-      parentId: route.parentId ?? existing.parentId
-    });
-  };
-
-  for (const route of await readDiscordConfiguredRoutes()) {
-    rememberRoute(route);
-  }
-
-  for (const line of payload?.lines ?? []) {
-    const lineTime = typeof line?.time === "string" ? line.time : null;
-
-    for (const route of extractDiscordRoutesFromUnknown(line, lineTime, accountId)) {
-      rememberRoute(route);
-    }
-
-    if (typeof line?.raw === "string") {
-      try {
-        const parsed = JSON.parse(line.raw);
-        for (const route of extractDiscordRoutesFromUnknown(parsed, lineTime, accountId)) {
-          rememberRoute(route);
-        }
-      } catch {
-        for (const route of extractDiscordRoutesFromText(line.raw, lineTime, accountId)) {
-          rememberRoute(route);
-        }
-      }
-    }
-
-    if (typeof line?.message === "string") {
-      for (const route of extractDiscordRoutesFromText(line.message, lineTime, accountId)) {
-        rememberRoute(route);
-      }
-    }
-  }
-
-  return Array.from(discovered.values()).sort((left, right) => {
-    const leftLabel = left.title ?? left.routeId;
-    const rightLabel = right.title ?? right.routeId;
-    return leftLabel.localeCompare(rightLabel);
-  });
-}
-
-async function readTelegramAllowlistGroups() {
-  try {
-    const groups = await runOpenClawJson<TelegramAllowlistConfig>([
-      "config",
-      "get",
-      "channels.telegram.groups",
-      "--json"
-    ]);
-
-    return Object.keys(groups ?? {})
-      .map((chatId) => ({
-        routeId: chatId,
-        provider: "telegram" as const,
-        kind: "group" as const,
-        title: null,
-        lastSeen: null
-      }))
-      .sort((left, right) => left.routeId.localeCompare(right.routeId));
-  } catch {
-    return [] as DiscoveredSurfaceRoute[];
-  }
-}
-
-async function readDiscordConfiguredRoutes() {
-  try {
-    const guilds = await runOpenClawJson<DiscordGuildConfig>([
-      "config",
-      "get",
-      "channels.discord.guilds",
-      "--json"
-    ]);
-    const routes: DiscoveredSurfaceRoute[] = [];
-
-    for (const [guildId, rawGuild] of Object.entries(guilds ?? {})) {
-      if (!normalizeDiscordId(guildId) || !isObjectRecord(rawGuild)) {
-        continue;
-      }
-
-      const guild = rawGuild as Record<string, unknown>;
-      const guildLabel = normalizeOptionalValue(guild.name as string | null | undefined) ?? guildId;
-      const roleIds = Array.isArray(guild.roles)
-        ? guild.roles
-            .filter((entry) => typeof entry === "string" || typeof entry === "number")
-            .map((entry) => String(entry).trim())
-            .filter((entry) => Boolean(normalizeDiscordId(entry)))
-        : [];
-
-      for (const roleId of roleIds) {
-        routes.push({
-          routeId: encodeDiscordRouteId({
-            kind: "role",
-            guildId,
-            targetId: roleId
-          }),
-          provider: "discord",
-          kind: "role",
-          title: `@${roleId}`,
-          subtitle: guildLabel,
-          lastSeen: null,
-          guildId
-        });
-      }
-
-      const channels = isObjectRecord(guild.channels) ? (guild.channels as Record<string, unknown>) : {};
-      for (const [channelKey, rawChannel] of Object.entries(channels)) {
-        const channelRecord = isObjectRecord(rawChannel) ? (rawChannel as Record<string, unknown>) : {};
-        const channelId =
-          normalizeDiscordId(channelKey) ??
-          normalizeDiscordId(channelRecord.id as string | number | null | undefined);
-
-        if (!channelId) {
-          continue;
-        }
-
-        const label =
-          normalizeOptionalValue(channelRecord.name as string | null | undefined) ??
-          normalizeOptionalValue(channelRecord.label as string | null | undefined) ??
-          `#${channelId}`;
-
-        routes.push({
-          routeId: encodeDiscordRouteId({
-            kind: "channel",
-            guildId,
-            targetId: channelId
-          }),
-          provider: "discord",
-          kind: "channel",
-          title: label,
-          subtitle: guildLabel,
-          lastSeen: null,
-          guildId
-        });
-      }
-    }
-
-    return routes;
-  } catch {
-    return [] as DiscoveredSurfaceRoute[];
-  }
-}
-
 async function updateManagedSurfaceRouting(
   registry: ChannelRegistry,
   cleanup: ManagedTelegramRoutingCleanup = {}
@@ -10917,7 +8917,7 @@ async function updateManagedSurfaceRouting(
         workspace.groupAssignments
           .filter((assignment) => assignment.enabled !== false && assignment.agentId)
           .map((assignment) => buildManagedDiscordBinding(channel.id, assignment))
-          .filter((binding): binding is { agentId: string; match: Record<string, unknown> } => Boolean(binding))
+          .filter((binding): binding is Exclude<ManagedDiscordBinding, null> => Boolean(binding))
       )
     )
   ];
@@ -11176,564 +9176,6 @@ async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry,
   });
 }
 
-function extractTelegramGroupsFromUnknown(value: unknown, lineTime: string | null): DiscoveredSurfaceRoute[] {
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-  const queue: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
-  const seen = new Set<unknown>();
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || current.depth > 6) {
-      continue;
-    }
-
-    const candidate = current.value;
-    if (candidate === null || candidate === undefined) {
-      continue;
-    }
-
-    if (typeof candidate !== "object") {
-      continue;
-    }
-
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) {
-        queue.push({ value: item, depth: current.depth + 1 });
-      }
-      continue;
-    }
-
-    if (!isObjectRecord(candidate)) {
-      continue;
-    }
-
-    const chatId = normalizeTelegramGroupChatId(candidate.chatId);
-    if (chatId) {
-      const title =
-        normalizeOptionalValue(candidate.title as string | null | undefined) ??
-        normalizeOptionalValue(candidate.chatTitle as string | null | undefined) ??
-        null;
-      discovered.set(chatId, {
-        routeId: chatId,
-        provider: "telegram",
-        kind: "group",
-        title,
-        lastSeen: lineTime
-      });
-    }
-
-    for (const nested of Object.values(candidate)) {
-      queue.push({ value: nested, depth: current.depth + 1 });
-    }
-  }
-
-  return Array.from(discovered.values());
-}
-
-function extractTelegramGroupsFromText(text: string, lineTime: string | null): DiscoveredSurfaceRoute[] {
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-  const objectPattern = /\{[^{}]*"chatId"\s*:\s*-?\d+[^{}]*\}/g;
-
-  for (const match of text.matchAll(objectPattern)) {
-    const fragment = match[0];
-    try {
-      const parsed = JSON.parse(fragment);
-      for (const group of extractTelegramGroupsFromUnknown(parsed, lineTime)) {
-        discovered.set(group.routeId, group);
-      }
-      continue;
-    } catch {
-      // Fall through to regex extraction below.
-    }
-
-    const chatIdMatch = fragment.match(/"chatId"\s*:\s*(-?\d+)/);
-    const chatId = normalizeTelegramGroupChatId(chatIdMatch?.[1] ?? null);
-    if (!chatId) {
-      continue;
-    }
-
-    const titleMatch = fragment.match(/"title"\s*:\s*"([^"]+)"/);
-    discovered.set(chatId, {
-      routeId: chatId,
-      provider: "telegram",
-      kind: "group",
-      title: titleMatch?.[1] ?? null,
-      lastSeen: lineTime
-    });
-  }
-
-  return Array.from(discovered.values());
-}
-
-type DiscordRouteId = {
-  kind: "channel" | "thread" | "role";
-  guildId: string | null;
-  targetId: string;
-  parentId?: string | null;
-};
-
-type DiscordRouteContext = {
-  accountId: string | null;
-  guildId: string | null;
-  guildName: string | null;
-  channelId: string | null;
-  channelName: string | null;
-  threadId: string | null;
-  threadName: string | null;
-};
-
-function buildManagedDiscordBinding(accountId: string, assignment: WorkspaceChannelGroupAssignment) {
-  const parsed = parseDiscordRouteId(assignment.chatId);
-  if (!parsed || !assignment.agentId) {
-    return null;
-  }
-
-  if (parsed.kind === "role") {
-    if (!parsed.guildId) {
-      return null;
-    }
-
-    return {
-      agentId: assignment.agentId,
-      match: {
-        channel: "discord",
-        accountId,
-        guildId: parsed.guildId,
-        roles: [parsed.targetId]
-      }
-    };
-  }
-
-  return {
-    agentId: assignment.agentId,
-    match: {
-      channel: "discord",
-      accountId,
-      ...(parsed.guildId ? { guildId: parsed.guildId } : {}),
-      peer: {
-        kind: parsed.kind,
-        id: parsed.targetId
-      }
-    }
-  };
-}
-
-function extractDiscordRoutesFromUnknown(
-  value: unknown,
-  lineTime: string | null,
-  accountIdFilter?: string | null
-): DiscoveredSurfaceRoute[] {
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-  const queue: Array<{ value: unknown; depth: number; context: DiscordRouteContext }> = [
-    {
-      value,
-      depth: 0,
-      context: {
-        accountId: null,
-        guildId: null,
-        guildName: null,
-        channelId: null,
-        channelName: null,
-        threadId: null,
-        threadName: null
-      }
-    }
-  ];
-  const seen = new Set<unknown>();
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current || current.depth > 7) {
-      continue;
-    }
-
-    const candidate = current.value;
-    if (candidate === null || candidate === undefined) {
-      continue;
-    }
-
-    if (typeof candidate !== "object") {
-      continue;
-    }
-
-    if (seen.has(candidate)) {
-      continue;
-    }
-    seen.add(candidate);
-
-    if (Array.isArray(candidate)) {
-      for (const item of candidate) {
-        queue.push({
-          value: item,
-          depth: current.depth + 1,
-          context: current.context
-        });
-      }
-      continue;
-    }
-
-    if (!isObjectRecord(candidate)) {
-      continue;
-    }
-
-    const nextContext = mergeDiscordRouteContext(current.context, candidate);
-    if (accountIdFilter && nextContext.accountId && nextContext.accountId !== accountIdFilter) {
-      continue;
-    }
-
-    const channelRoute = createDiscoveredDiscordChannelRoute(nextContext, lineTime);
-    if (channelRoute) {
-      discovered.set(channelRoute.routeId, channelRoute);
-    }
-
-    const threadRoute = createDiscoveredDiscordThreadRoute(nextContext, lineTime);
-    if (threadRoute) {
-      discovered.set(threadRoute.routeId, threadRoute);
-    }
-
-    for (const roleRoute of extractDiscordRoleRoutes(candidate, nextContext, lineTime)) {
-      discovered.set(roleRoute.routeId, roleRoute);
-    }
-
-    for (const nested of Object.values(candidate)) {
-      queue.push({
-        value: nested,
-        depth: current.depth + 1,
-        context: nextContext
-      });
-    }
-  }
-
-  return Array.from(discovered.values());
-}
-
-function extractDiscordRoutesFromText(
-  text: string,
-  lineTime: string | null,
-  accountIdFilter?: string | null
-): DiscoveredSurfaceRoute[] {
-  const discovered = new Map<string, DiscoveredSurfaceRoute>();
-  const accountIdInText = text.match(/accountId["=:\s]+([A-Za-z0-9._-]+)/i)?.[1] ?? null;
-  if (accountIdFilter && accountIdInText && accountIdInText !== accountIdFilter) {
-    return [];
-  }
-
-  const objectPattern = /\{[^{}]*(guildId|channelId|threadId|roleIds|roles)[^{}]*\}/g;
-  for (const match of text.matchAll(objectPattern)) {
-    try {
-      const parsed = JSON.parse(match[0]);
-      for (const route of extractDiscordRoutesFromUnknown(parsed, lineTime, accountIdFilter)) {
-        discovered.set(route.routeId, route);
-      }
-    } catch {
-      // Fall back to lightweight regex extraction below.
-    }
-  }
-
-  const guildId = normalizeDiscordId(text.match(/guild(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
-  const channelId = normalizeDiscordId(text.match(/channel(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
-  const threadId = normalizeDiscordId(text.match(/thread(?:Id)?["=:\s]+(\d{5,})/i)?.[1] ?? null);
-
-  if (channelId) {
-    const route = createDiscoveredDiscordRoute({
-      kind: "channel",
-      guildId,
-      targetId: channelId,
-      title: `#${channelId}`,
-      subtitle: guildId ? `Guild ${guildId}` : null,
-      lastSeen: lineTime
-    });
-    discovered.set(route.routeId, route);
-  }
-
-  if (threadId) {
-    const route = createDiscoveredDiscordRoute({
-      kind: "thread",
-      guildId,
-      targetId: threadId,
-      parentId: channelId,
-      title: `Thread ${threadId}`,
-      subtitle: channelId ? `Channel ${channelId}` : guildId ? `Guild ${guildId}` : null,
-      lastSeen: lineTime
-    });
-    discovered.set(route.routeId, route);
-  }
-
-  if (guildId) {
-    const rolePattern = /\b(\d{5,})\b/g;
-    const rolesBlock = text.match(/roles?["=:\s]+\[([^\]]+)\]/i)?.[1] ?? "";
-    for (const match of rolesBlock.matchAll(rolePattern)) {
-      const roleId = normalizeDiscordId(match[1]);
-      if (!roleId) {
-        continue;
-      }
-
-      const route = createDiscoveredDiscordRoute({
-        kind: "role",
-        guildId,
-        targetId: roleId,
-        title: `@${roleId}`,
-        subtitle: `Guild ${guildId}`,
-        lastSeen: lineTime
-      });
-      discovered.set(route.routeId, route);
-    }
-  }
-
-  return Array.from(discovered.values());
-}
-
-function mergeDiscordRouteContext(base: DiscordRouteContext, candidate: Record<string, unknown>): DiscordRouteContext {
-  const guildRecord = isObjectRecord(candidate.guild) ? (candidate.guild as Record<string, unknown>) : null;
-  const channelRecord = isObjectRecord(candidate.channel) ? (candidate.channel as Record<string, unknown>) : null;
-  const threadRecord = isObjectRecord(candidate.thread) ? (candidate.thread as Record<string, unknown>) : null;
-  const peerRecord = isObjectRecord(candidate.peer) ? (candidate.peer as Record<string, unknown>) : null;
-
-  const explicitChannelKind = normalizeOptionalValue(candidate.kind as string | null | undefined);
-  const explicitType = normalizeOptionalValue(candidate.type as string | null | undefined);
-  const candidateId = normalizeDiscordId(candidate.id);
-
-  const channelId =
-    normalizeDiscordId(candidate.channelId) ??
-    normalizeDiscordId(candidate.channel_id) ??
-    normalizeDiscordId(channelRecord?.id) ??
-    (peerRecord?.kind === "channel" ? normalizeDiscordId(peerRecord.id) : null) ??
-    ((explicitChannelKind === "channel" || explicitType === "channel") && candidateId ? candidateId : null) ??
-    base.channelId;
-  const threadId =
-    normalizeDiscordId(candidate.threadId) ??
-    normalizeDiscordId(candidate.thread_id) ??
-    normalizeDiscordId(threadRecord?.id) ??
-    (peerRecord?.kind === "thread" ? normalizeDiscordId(peerRecord.id) : null) ??
-    ((explicitChannelKind === "thread" || explicitType === "thread") && candidateId ? candidateId : null) ??
-    base.threadId;
-
-  return {
-    accountId:
-      normalizeOptionalValue(candidate.accountId as string | null | undefined) ??
-      normalizeOptionalValue(candidate.channelAccountId as string | null | undefined) ??
-      normalizeOptionalValue(candidate.account as string | null | undefined) ??
-      base.accountId,
-    guildId:
-      normalizeDiscordId(candidate.guildId) ??
-      normalizeDiscordId(candidate.guild_id) ??
-      normalizeDiscordId(guildRecord?.id) ??
-      base.guildId,
-    guildName:
-      normalizeOptionalValue(candidate.guildName as string | null | undefined) ??
-      normalizeOptionalValue(guildRecord?.name as string | null | undefined) ??
-      base.guildName,
-    channelId,
-    channelName:
-      normalizeOptionalValue(candidate.channelName as string | null | undefined) ??
-      normalizeOptionalValue(channelRecord?.name as string | null | undefined) ??
-      ((explicitChannelKind === "channel" || explicitType === "channel")
-        ? normalizeOptionalValue(candidate.name as string | null | undefined)
-        : null) ??
-      base.channelName,
-    threadId,
-    threadName:
-      normalizeOptionalValue(candidate.threadName as string | null | undefined) ??
-      normalizeOptionalValue(threadRecord?.name as string | null | undefined) ??
-      ((explicitChannelKind === "thread" || explicitType === "thread")
-        ? normalizeOptionalValue(candidate.name as string | null | undefined)
-        : null) ??
-      base.threadName
-  };
-}
-
-function extractDiscordRoleRoutes(
-  candidate: Record<string, unknown>,
-  context: DiscordRouteContext,
-  lineTime: string | null
-) {
-  if (!context.guildId) {
-    return [] as DiscoveredSurfaceRoute[];
-  }
-
-  const routes = new Map<string, DiscoveredSurfaceRoute>();
-  const roleCollections: unknown[] = [
-    candidate.roleIds,
-    candidate.memberRoleIds,
-    candidate.roles,
-    isObjectRecord(candidate.member) ? (candidate.member as Record<string, unknown>).roles : null
-  ];
-
-  for (const collection of roleCollections) {
-    if (!Array.isArray(collection)) {
-      continue;
-    }
-
-    for (const entry of collection) {
-      const roleId =
-        normalizeDiscordId(entry) ??
-        (isObjectRecord(entry) ? normalizeDiscordId((entry as Record<string, unknown>).id) : null);
-
-      if (!roleId) {
-        continue;
-      }
-
-      const roleName = isObjectRecord(entry)
-        ? normalizeOptionalValue((entry as Record<string, unknown>).name as string | null | undefined)
-        : null;
-      const route = createDiscoveredDiscordRoute({
-        kind: "role",
-        guildId: context.guildId,
-        targetId: roleId,
-        title: roleName ? `@${roleName}` : `@${roleId}`,
-        subtitle: context.guildName ?? context.guildId,
-        lastSeen: lineTime
-      });
-      routes.set(route.routeId, route);
-    }
-  }
-
-  return Array.from(routes.values());
-}
-
-function createDiscoveredDiscordChannelRoute(context: DiscordRouteContext, lineTime: string | null) {
-  if (!context.channelId) {
-    return null;
-  }
-
-  return createDiscoveredDiscordRoute({
-    kind: "channel",
-    guildId: context.guildId,
-    targetId: context.channelId,
-    title: context.channelName ? `#${context.channelName}` : `#${context.channelId}`,
-    subtitle: context.guildName ?? context.guildId,
-    lastSeen: lineTime
-  });
-}
-
-function createDiscoveredDiscordThreadRoute(context: DiscordRouteContext, lineTime: string | null) {
-  if (!context.threadId) {
-    return null;
-  }
-
-  return createDiscoveredDiscordRoute({
-    kind: "thread",
-    guildId: context.guildId,
-    targetId: context.threadId,
-    parentId: context.channelId,
-    title: context.threadName ?? `Thread ${context.threadId}`,
-    subtitle:
-      context.channelName && context.guildName
-        ? `#${context.channelName} · ${context.guildName}`
-        : context.channelName
-          ? `#${context.channelName}`
-          : context.guildName ?? context.guildId,
-    lastSeen: lineTime
-  });
-}
-
-function createDiscoveredDiscordRoute(input: {
-  kind: "channel" | "thread" | "role";
-  guildId: string | null;
-  targetId: string;
-  parentId?: string | null;
-  title: string | null;
-  subtitle: string | null;
-  lastSeen: string | null;
-}) {
-  return {
-    routeId: encodeDiscordRouteId({
-      kind: input.kind,
-      guildId: input.guildId,
-      targetId: input.targetId,
-      parentId: input.parentId
-    }),
-    provider: "discord" as const,
-    kind: input.kind,
-    title: input.title,
-    subtitle: input.subtitle,
-    lastSeen: input.lastSeen,
-    guildId: input.guildId,
-    parentId: input.parentId ?? null
-  } satisfies DiscoveredSurfaceRoute;
-}
-
-function encodeDiscordRouteId(route: DiscordRouteId) {
-  const guildId = route.guildId ?? "_";
-  if (route.kind === "thread") {
-    return `thread:${guildId}:${route.targetId}:${route.parentId ?? "_"}`;
-  }
-
-  return `${route.kind}:${guildId}:${route.targetId}`;
-}
-
-function parseDiscordRouteId(value: string) {
-  const trimmed = value.trim();
-  const [kind, guildIdToken, targetId, parentId] = trimmed.split(":");
-
-  if (
-    (kind !== "channel" && kind !== "thread" && kind !== "role") ||
-    !normalizeDiscordId(targetId)
-  ) {
-    return null;
-  }
-
-  return {
-    kind,
-    guildId: guildIdToken && guildIdToken !== "_" ? normalizeDiscordId(guildIdToken) : null,
-    targetId: normalizeDiscordId(targetId) as string,
-    parentId: kind === "thread" ? normalizeDiscordId(parentId) : null
-  } satisfies DiscordRouteId;
-}
-
-function normalizeDiscordId(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return /^\d{5,}$/.test(trimmed) ? trimmed : null;
-}
-
-function normalizeTelegramGroupChatId(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value) && value < 0) {
-    return String(value);
-  }
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return /^-\d+$/.test(trimmed) ? trimmed : null;
-}
-
-function selectLatestIsoTimestamp(current: string | null, candidate: string | null) {
-  if (!candidate) {
-    return current;
-  }
-
-  if (!current) {
-    return candidate;
-  }
-
-  const currentValue = Date.parse(current);
-  const candidateValue = Date.parse(candidate);
-  if (Number.isNaN(candidateValue)) {
-    return current;
-  }
-
-  if (Number.isNaN(currentValue) || candidateValue > currentValue) {
-    return candidate;
-  }
-
-  return current;
-}
-
 async function mutateChannelRegistry(
   mutate: (registry: ChannelRegistry) => void | Promise<void>,
   cleanup: ManagedTelegramRoutingCleanup = {}
@@ -11762,66 +9204,6 @@ function findMatchingWorkspaceAgent(
     agents.find((agent) => agent.id === normalizedKey) ??
     null
   );
-}
-
-function parseWorkspaceCreateRules(value: unknown): WorkspaceCreateRules | null {
-  if (!isObjectRecord(value)) {
-    return null;
-  }
-
-  const workspaceOnly = typeof value.workspaceOnly === "boolean" ? value.workspaceOnly : null;
-  const generateStarterDocs =
-    typeof value.generateStarterDocs === "boolean" ? value.generateStarterDocs : null;
-  const generateMemory = typeof value.generateMemory === "boolean" ? value.generateMemory : null;
-  const kickoffMission = typeof value.kickoffMission === "boolean" ? value.kickoffMission : null;
-
-  if (
-    workspaceOnly === null &&
-    generateStarterDocs === null &&
-    generateMemory === null &&
-    kickoffMission === null
-  ) {
-    return null;
-  }
-
-  return {
-    workspaceOnly: workspaceOnly ?? true,
-    generateStarterDocs: generateStarterDocs ?? DEFAULT_WORKSPACE_RULES.generateStarterDocs,
-    generateMemory: generateMemory ?? DEFAULT_WORKSPACE_RULES.generateMemory,
-    kickoffMission: kickoffMission ?? DEFAULT_WORKSPACE_RULES.kickoffMission
-  };
-}
-
-function isWorkspaceTeamPreset(value: unknown): value is WorkspaceTeamPreset {
-  return value === "solo" || value === "core" || value === "custom";
-}
-
-function isWorkspaceModelProfile(value: unknown): value is WorkspaceModelProfile {
-  return value === "balanced" || value === "fast" || value === "quality";
-}
-
-function parseAgentPolicy(value: unknown): AgentPolicy | null {
-  if (!isObjectRecord(value)) {
-    return null;
-  }
-
-  if (
-    !isAgentPreset(value.preset) ||
-    !isAgentMissingToolBehavior(value.missingToolBehavior) ||
-    !isAgentInstallScope(value.installScope) ||
-    !isAgentFileAccess(value.fileAccess) ||
-    !isAgentNetworkAccess(value.networkAccess)
-  ) {
-    return null;
-  }
-
-  return {
-    preset: value.preset,
-    missingToolBehavior: value.missingToolBehavior,
-    installScope: value.installScope,
-    fileAccess: value.fileAccess,
-    networkAccess: value.networkAccess
-  };
 }
 
 function collectBulletSections(

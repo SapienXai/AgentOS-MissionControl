@@ -2,11 +2,11 @@
 
 import { startTransition, useEffect, useState } from "react";
 
-import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
 
 type ConnectionState = "connecting" | "live" | "retrying";
 
-export function useMissionControlData(initialSnapshot: MissionControlSnapshot) {
+export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
 
@@ -14,7 +14,7 @@ export function useMissionControlData(initialSnapshot: MissionControlSnapshot) {
     const source = new EventSource("/api/stream");
 
     source.addEventListener("snapshot", (event) => {
-      const nextSnapshot = JSON.parse(event.data) as MissionControlSnapshot;
+      const nextSnapshot = JSON.parse(event.data) as ControlPlaneSnapshot;
       startTransition(() => {
         setSnapshot(nextSnapshot);
         setConnectionState("live");
@@ -42,7 +42,7 @@ export function useMissionControlData(initialSnapshot: MissionControlSnapshot) {
     const response = await fetch("/api/snapshot", {
       cache: "no-store"
     });
-    const nextSnapshot = (await response.json()) as MissionControlSnapshot;
+    const nextSnapshot = (await response.json()) as ControlPlaneSnapshot;
 
     startTransition(() => {
       setSnapshot(nextSnapshot);

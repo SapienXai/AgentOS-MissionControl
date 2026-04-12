@@ -24,7 +24,7 @@ import { InteractiveContent } from "@/components/mission-control/interactive-con
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTaskFeed } from "@/hooks/use-task-feed";
-import type { TaskFeedEvent } from "@/lib/openclaw/types";
+import type { TaskFeedEvent } from "@/lib/agentos/contracts";
 import {
   badgeVariantForRuntimeStatus,
   compactMissionText,

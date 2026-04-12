@@ -7,7 +7,7 @@ import { z } from "zod";
 
 import { getModelProviderDescriptor, isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { formatOpenClawCommand, resolveOpenClawBin, runOpenClawJson } from "@/lib/openclaw/cli";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import type {
   AddModelsCatalogModel,
   AddModelsEmptyState,
@@ -16,7 +16,7 @@ import type {
   AddModelsProviderConnectionStatus,
   AddModelsProviderId,
   MissionControlSnapshot
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

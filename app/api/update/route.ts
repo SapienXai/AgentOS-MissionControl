@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { resolveOpenClawBin } from "@/lib/openclaw/cli";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
-import type { OpenClawUpdateStreamEvent } from "@/lib/openclaw/types";
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import type { OpenClawUpdateStreamEvent } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

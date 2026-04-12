@@ -35,7 +35,7 @@ import type {
   WorkspaceCreateRules,
   WorkspacePlan,
   WorkspaceTemplate
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { WORKSPACE_TEMPLATE_OPTIONS } from "@/lib/openclaw/workspace-presets";
 import {
   buildWorkspaceContextManifest,

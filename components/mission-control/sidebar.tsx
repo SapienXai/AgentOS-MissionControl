@@ -69,7 +69,7 @@ import {
   formatModelLabel,
   toneForHealth
 } from "@/lib/openclaw/presenters";
-import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {

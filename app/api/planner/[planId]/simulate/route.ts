@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { simulateWorkspacePlan } from "@/lib/openclaw/planner";
+import { simulateWorkspacePlan } from "@/lib/agentos/planner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

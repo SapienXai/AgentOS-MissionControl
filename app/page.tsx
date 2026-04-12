@@ -1,5 +1,5 @@
 import { MissionControlShell } from "@/components/mission-control/mission-control-shell";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 
 export const dynamic = "force-dynamic";
 

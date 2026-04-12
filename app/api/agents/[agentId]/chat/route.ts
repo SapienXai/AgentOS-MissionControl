@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
-import { clearMissionControlCaches, updateAgent } from "@/lib/openclaw/service";
-import type { MissionDispatchStatus, MissionResponse } from "@/lib/openclaw/types";
+import { clearMissionControlCaches, updateAgent } from "@/lib/agentos/control-plane";
+import type { MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

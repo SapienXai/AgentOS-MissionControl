@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getModelProviderDescriptor } from "@/lib/openclaw/model-provider-registry";
-import type { AddModelsCatalogModel, AddModelsProviderId } from "@/lib/openclaw/types";
+import type { AddModelsCatalogModel, AddModelsProviderId } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 function filterModels(models: AddModelsCatalogModel[], search: string) {

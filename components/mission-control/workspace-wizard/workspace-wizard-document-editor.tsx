@@ -11,7 +11,7 @@ import {
   buildWorkspaceEditableDocuments,
   normalizeWorkspaceDocOverrides
 } from "@/lib/openclaw/workspace-docs";
-import type { WorkspacePlan } from "@/lib/openclaw/types";
+import type { WorkspacePlan } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";

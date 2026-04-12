@@ -22,7 +22,7 @@ import type {
   WorkspacePlan,
   WorkspacePlanDeployResult,
   WorkspacePlanDeployStreamEvent
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import {
   applyBasicInputToWorkspacePlan,
   appendBasicModeImportNote,

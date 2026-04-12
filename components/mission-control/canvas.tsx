@@ -35,7 +35,7 @@ import { TaskNode } from "@/components/mission-control/nodes/task-node";
 import { WorkspaceNode } from "@/components/mission-control/nodes/workspace-node";
 import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
-import type { MissionControlSnapshot, OpenClawAgent, TaskRecord } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot, MissionControlSurfaceProvider, OpenClawAgent, TaskRecord } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type WorkspaceCanvasNode = Node<WorkspaceNodeData, "workspace">;

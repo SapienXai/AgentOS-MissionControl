@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { ResetPreview, ResetTarget } from "@/lib/openclaw/types";
+import type { ResetPreview, ResetTarget } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";

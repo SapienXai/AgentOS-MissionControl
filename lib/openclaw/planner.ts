@@ -39,7 +39,7 @@ import {
   createWorkspaceProject,
   getMissionControlSnapshot,
   submitMission
-} from "@/lib/openclaw/service";
+} from "@/lib/agentos/control-plane";
 import type {
   PlannerAdvisorId,
   PlannerAdvisorNote,

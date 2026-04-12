@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import type { TaskDetailRecord, TaskFeedEvent, TaskDetailStreamEvent } from "@/lib/openclaw/types";
+import type { TaskDetailRecord, TaskFeedEvent, TaskDetailStreamEvent } from "@/lib/agentos/contracts";
+
+const EMPTY_TASK_FEED: TaskFeedEvent[] = [];
 
 export function useTaskFeed(
   taskId: string,
@@ -23,19 +25,12 @@ export function useTaskFeed(
     taskId: null,
     message: null
   });
+  const dispatchId = typeof options.dispatchId === "string" && options.dispatchId.trim() ? options.dispatchId.trim() : null;
+  const isOptimisticTask = taskId.startsWith("optimistic-task:");
+  const optimisticFeed = enabled && isOptimisticTask && !dispatchId ? options.optimisticFeed ?? EMPTY_TASK_FEED : null;
 
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-
-    const dispatchId = typeof options.dispatchId === "string" && options.dispatchId.trim() ? options.dispatchId.trim() : null;
-    const isOptimisticTask = taskId.startsWith("optimistic-task:");
-
-    if (isOptimisticTask && !dispatchId) {
-      setFeedState({ taskId, feed: options.optimisticFeed ?? [], detail: null });
-      setConnectedTaskId(taskId);
-      setErrorState({ taskId, message: null });
+    if (!enabled || optimisticFeed) {
       return;
     }
 
@@ -85,12 +80,12 @@ export function useTaskFeed(
       eventSource.removeEventListener("task", handleTask as EventListener);
       eventSource.removeEventListener("task-error", handleError as EventListener);
     };
-  }, [taskId, enabled, options.dispatchId, options.optimisticFeed]);
+  }, [taskId, enabled, dispatchId, optimisticFeed]);
 
-  const feed = feedState.taskId === taskId ? feedState.feed : [];
-  const detail = feedState.taskId === taskId ? feedState.detail : null;
-  const error = errorState.taskId === taskId ? errorState.message : null;
-  const loading = enabled && connectedTaskId !== taskId && error === null;
+  const feed = optimisticFeed ?? (feedState.taskId === taskId ? feedState.feed : []);
+  const detail = optimisticFeed ? null : feedState.taskId === taskId ? feedState.detail : null;
+  const error = optimisticFeed ? null : errorState.taskId === taskId ? errorState.message : null;
+  const loading = optimisticFeed ? false : enabled && connectedTaskId !== taskId && error === null;
 
   return { feed, detail, loading, error };
 }

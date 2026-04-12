@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { discoverTelegramGroups, getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { discoverTelegramGroups, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

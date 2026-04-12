@@ -41,7 +41,7 @@ import type {
   MissionControlSurfaceKind,
   MissionControlSurfaceProvider,
   WorkspaceChannelGroupAssignment
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type ChannelMutationResult = {
@@ -49,6 +49,11 @@ type ChannelMutationResult = {
   registry?: MissionControlSnapshot["channelRegistry"];
   account?: MissionControlSnapshot["channelAccounts"][number];
 };
+
+function getProvisionDraftText(draft: Record<string, string | boolean>, key: string) {
+  const value = draft[key];
+  return typeof value === "string" ? value : "";
+}
 
 const SURFACE_KIND_ORDER: MissionControlSurfaceKind[] = ["chat", "inbox", "trigger"];
 
@@ -356,7 +361,7 @@ export function WorkspaceChannelsDialog({
       return;
     }
 
-    if (!provisionDraft.name.trim()) {
+    if (!getProvisionDraftText(provisionDraft, "name").trim()) {
       toast.error("A surface name is required.");
       return;
     }
@@ -367,7 +372,7 @@ export function WorkspaceChannelsDialog({
       const config = buildProvisionConfig(currentCatalogEntry.provisionFields, provisionDraft);
       const payload: Record<string, unknown> = {
         type: activeProvider,
-        name: provisionDraft.name.trim(),
+        name: getProvisionDraftText(provisionDraft, "name").trim(),
         config,
         primaryAgentId: newPrimaryAgentId || null,
         agentId: newPrimaryAgentId || undefined
@@ -574,7 +579,7 @@ export function WorkspaceChannelsDialog({
     currentCatalogEntry.supportsProvisioning &&
     !isSaving &&
     Boolean(newPrimaryAgentId) &&
-    Boolean(provisionDraft.name.trim()) &&
+    Boolean(getProvisionDraftText(provisionDraft, "name").trim()) &&
     provisionFieldsReady;
 
   const renderProvisionField = (field: SurfaceProvisionField) => {
@@ -1112,7 +1117,7 @@ export function WorkspaceChannelsDialog({
                   <FormField label="Surface name" htmlFor="surface-name">
                     <Input
                       id="surface-name"
-                      value={provisionDraft.name}
+                      value={getProvisionDraftText(provisionDraft, "name")}
                       onChange={(event) =>
                         setProvisionDraft((current) => ({ ...current, name: event.target.value }))
                       }

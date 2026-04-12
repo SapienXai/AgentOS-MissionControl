@@ -16,7 +16,7 @@ import { CreateAgentDialog } from "@/components/mission-control/create-agent-dia
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
-import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/agentos/contracts";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 

@@ -11,13 +11,13 @@ import {
 import {
   ensureOpenClawRuntimeSmokeTest,
   getMissionControlSnapshot
-} from "@/lib/openclaw/service";
+} from "@/lib/agentos/control-plane";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
   OpenClawModelOnboardingStreamEvent
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

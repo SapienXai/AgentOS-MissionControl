@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { discoverSurfaceRoutes, getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { discoverSurfaceRoutes, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

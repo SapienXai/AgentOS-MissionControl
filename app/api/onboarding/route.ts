@@ -7,12 +7,12 @@ import { z } from "zod";
 
 import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
-import { ensureOpenClawRuntimeStateAccess, getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { ensureOpenClawRuntimeStateAccess, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import type {
   MissionControlSnapshot,
   OpenClawOnboardingPhase,
   OpenClawOnboardingStreamEvent
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

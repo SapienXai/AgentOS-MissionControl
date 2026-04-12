@@ -6,8 +6,8 @@ import {
   deleteWorkspaceProject,
   getMissionControlSnapshot,
   updateWorkspaceProject
-} from "@/lib/openclaw/service";
-import type { OperationProgressSnapshot, WorkspaceCreateStreamEvent } from "@/lib/openclaw/types";
+} from "@/lib/agentos/control-plane";
+import type { OperationProgressSnapshot, WorkspaceCreateStreamEvent } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

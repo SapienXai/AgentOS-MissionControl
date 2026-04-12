@@ -29,7 +29,7 @@ import type {
   PlannerInference,
   WorkspacePlan,
   WorkspaceTemplate
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 export type SurfaceTheme = "dark" | "light";

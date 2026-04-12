@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Check, LoaderCircle } from "lucide-react";
 
-import type { OperationProgressSnapshot } from "@/lib/openclaw/types";
+import type { OperationProgressSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type OperationProgressProps = {

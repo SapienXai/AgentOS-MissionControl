@@ -15,7 +15,7 @@ import {
   isAddModelsProviderId
 } from "@/lib/openclaw/model-provider-registry";
 import { formatAgentDisplayName, formatContextWindow, formatModelLabel } from "@/lib/openclaw/presenters";
-import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type AgentModelRecord = MissionControlSnapshot["models"][number];

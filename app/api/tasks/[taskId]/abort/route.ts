@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { abortMissionTask } from "@/lib/openclaw/service";
+import { abortMissionTask } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

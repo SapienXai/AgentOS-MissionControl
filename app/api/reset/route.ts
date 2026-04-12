@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { executeReset, getResetPreview } from "@/lib/openclaw/reset";
-import type { ResetStreamEvent } from "@/lib/openclaw/types";
+import { executeReset, getResetPreview } from "@/lib/agentos/reset";
+import type { ResetStreamEvent } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

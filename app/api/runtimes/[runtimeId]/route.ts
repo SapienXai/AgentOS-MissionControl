@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getRuntimeOutput } from "@/lib/openclaw/service";
+import { getRuntimeOutput } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

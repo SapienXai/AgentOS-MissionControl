@@ -34,7 +34,7 @@ import {
 import type {
   MissionControlSnapshot,
   WorkspacePlan
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import {
   buildWorkspaceWizardPathPreview,
   inferWorkspaceWizardTemplate,

@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 import { ArchitectReadoutCard } from "@/components/mission-control/workspace-wizard/architect-readout-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { WorkspacePlan } from "@/lib/openclaw/types";
+import type { WorkspacePlan } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { submitWorkspaceDocumentRewrite } from "@/lib/openclaw/planner";
+import { submitWorkspaceDocumentRewrite } from "@/lib/agentos/planner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

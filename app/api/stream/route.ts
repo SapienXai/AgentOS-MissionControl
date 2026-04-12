@@ -1,4 +1,4 @@
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -12,7 +12,7 @@ import {
   deleteAgent,
   deleteWorkspaceProject,
   getMissionControlSnapshot
-} from "@/lib/openclaw/service";
+} from "@/lib/agentos/control-plane";
 import type {
   MissionControlSnapshot,
   ResetPreview,

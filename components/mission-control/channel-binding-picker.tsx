@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 import { getWorkspaceChannels } from "@/lib/openclaw/channel-bindings";

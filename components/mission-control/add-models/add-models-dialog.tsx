@@ -32,7 +32,7 @@ import type {
   AddModelsProviderConnectionStatus,
   AddModelsProviderId,
   MissionControlSnapshot
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/ui/sonner";
 

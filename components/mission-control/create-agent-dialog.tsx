@@ -42,7 +42,7 @@ import {
   type AgentHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
 import { syncWorkspaceAgentChannelBindings } from "@/lib/openclaw/channel-bindings";
-import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type AgentDraft = {

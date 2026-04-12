@@ -5,7 +5,7 @@ import type {
   RuntimeRecord,
   TaskRecord,
   WorkspaceProject
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 
 export type WorkspaceNodeData = Record<string, unknown> & {
   workspace: WorkspaceProject;

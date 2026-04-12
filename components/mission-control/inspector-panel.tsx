@@ -52,7 +52,7 @@ import type {
   TaskDetailStreamEvent,
   TaskRecord,
   WorkspaceResourceState
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
 

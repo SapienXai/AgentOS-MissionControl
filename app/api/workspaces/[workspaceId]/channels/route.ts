@@ -11,8 +11,8 @@ import {
   upsertWorkspaceChannel,
   bindWorkspaceChannelAgent,
   unbindWorkspaceChannelAgent
-} from "@/lib/openclaw/service";
-import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/openclaw/types";
+} from "@/lib/agentos/control-plane";
+import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

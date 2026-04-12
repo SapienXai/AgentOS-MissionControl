@@ -26,7 +26,7 @@ import type {
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
   OpenClawOnboardingPhase
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";

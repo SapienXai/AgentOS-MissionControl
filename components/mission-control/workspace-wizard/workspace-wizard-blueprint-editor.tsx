@@ -16,7 +16,7 @@ import type {
   WorkspacePlan,
   WorkspaceSourceMode,
   WorkspaceTemplate
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";

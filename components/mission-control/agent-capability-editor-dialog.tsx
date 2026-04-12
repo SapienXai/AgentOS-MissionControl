@@ -29,7 +29,7 @@ import {
   updateSnapshotAgentCapabilities
 } from "@/lib/openclaw/capability-editor";
 import { OPENCLAW_BUILTIN_TOOL_CATALOG, OPENCLAW_TOOL_GROUP_CATALOG } from "@/lib/openclaw/tool-catalog";
-import type { MissionControlSnapshot } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 
 type AgentCapabilityEditorDialogProps = {
   open: boolean;

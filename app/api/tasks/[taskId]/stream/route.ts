@@ -1,5 +1,5 @@
-import { getTaskDetail } from "@/lib/openclaw/service";
-import type { TaskDetailStreamEvent } from "@/lib/openclaw/types";
+import { getTaskDetail } from "@/lib/agentos/control-plane";
+import type { TaskDetailStreamEvent } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

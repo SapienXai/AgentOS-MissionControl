@@ -18,7 +18,7 @@ import {
 import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import { MISSION_CONTROL_ACTION_TAG } from "@/lib/openclaw/chat-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/openclaw/types";
+import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = AgentChatMessage;

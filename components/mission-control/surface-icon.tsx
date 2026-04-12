@@ -3,7 +3,7 @@
 import * as simpleIcons from "simple-icons";
 
 import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
-import type { MissionControlSurfaceProvider } from "@/lib/openclaw/types";
+import type { MissionControlSurfaceProvider } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type SimpleIconData = {

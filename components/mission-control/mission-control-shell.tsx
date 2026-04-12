@@ -62,7 +62,7 @@ import type {
   TaskFeedEvent,
   OpenClawUpdateStreamEvent,
   TaskRecord
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 import { normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import { cn } from "@/lib/utils";
 

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { deployWorkspacePlan } from "@/lib/openclaw/planner";
+import { deployWorkspacePlan } from "@/lib/agentos/planner";
 import type {
   OperationProgressSnapshot,
   WorkspacePlanDeployStreamEvent
-} from "@/lib/openclaw/types";
+} from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

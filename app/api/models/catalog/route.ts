@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 import { isAddModelsProviderId, modelProviderRegistry } from "@/lib/openclaw/model-provider-registry";
 import { runOpenClawJson } from "@/lib/openclaw/cli";
-import { getMissionControlSnapshot } from "@/lib/openclaw/service";
-import type { AddModelsCatalogModel, MissionControlSnapshot } from "@/lib/openclaw/types";
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import type { AddModelsCatalogModel, MissionControlSnapshot } from "@/lib/agentos/contracts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
