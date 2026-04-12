@@ -17,3 +17,15 @@ export function isOpenClawMissionReady(snapshot: MissionControlSnapshot) {
     snapshot.diagnostics.modelReadiness.ready &&
     isOpenClawRuntimeSmokeTestReady(snapshot);
 }
+
+export function resolveMissionDispatchReadinessError(snapshot: MissionControlSnapshot) {
+  if (!isOpenClawSystemReady(snapshot)) {
+    return "OpenClaw system setup is incomplete. Verify the CLI, gateway, and runtime state before dispatching missions.";
+  }
+
+  if (!snapshot.diagnostics.modelReadiness.ready) {
+    return "OpenClaw model setup is incomplete. Configure a usable default model before dispatching missions.";
+  }
+
+  return null;
+}
