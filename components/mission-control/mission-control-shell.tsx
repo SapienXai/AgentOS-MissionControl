@@ -1,12 +1,9 @@
 "use client";
 
 import {
-  AlertTriangle,
   ArrowUpCircle,
-  CheckCircle2,
   ChevronDown,
   EyeOff,
-  LoaderCircle,
   MoonStar,
   RefreshCw,
   Settings2,
@@ -22,37 +19,37 @@ import { AgentModelPickerDialog } from "@/components/mission-control/agent-model
 import { AgentCapabilityEditorDialog } from "@/components/mission-control/agent-capability-editor-dialog";
 import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
+import { MissionControlShellDialogs } from "@/components/mission-control/mission-control-shell.dialogs";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import { ResetDialog } from "@/components/mission-control/reset-dialog";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import dynamic from "next/dynamic";
 import { toast } from "@/components/ui/sonner";
 import { useMissionControlData } from "@/hooks/use-mission-control-data";
 import type { AgentDetailFocus } from "@/components/mission-control/canvas-types";
+import type { OptimisticMissionTask } from "@/components/mission-control/mission-control-shell.utils";
 import {
   CanvasTitlePill as MissionControlCanvasTitlePill,
   CanvasTopBar as MissionControlCanvasTopBar
 } from "@/components/mission-control/mission-control-shell.topbar";
 import {
-  resolveUpdateDialogDescription,
-  resolveUpdateDialogTitle,
-  resolveUpdateResultIconWrapClassName,
-  resolveUpdateResultPanelClassName
+  createOptimisticMissionTaskRecord,
+  findReplacementTaskForOptimisticTask,
+  isDirectChatRuntime,
+  isTaskAbortable,
+  isTaskHiddenByPreferences,
+  mergeSnapshotWithOptimisticTasks,
+  resolveGatewayDraft,
+  resolveModelOnboardingActionCopy,
+  resolveModelOnboardingStartPhase,
+  resolveOnboardingAction,
+  resolveTaskPrompt,
+  resolveWorkspaceRootDraft,
+  updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
-import { compactPath, formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import { compactPath } from "@/lib/openclaw/presenters";
 import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
   isOpenClawSystemReady as resolveOpenClawSystemReady
@@ -69,7 +66,6 @@ import type {
   ResetPreview,
   ResetStreamEvent,
   ResetTarget,
-  TaskFeedEvent,
   OpenClawUpdateStreamEvent,
   TaskRecord
 } from "@/lib/agentos/contracts";
@@ -105,19 +101,6 @@ type CapabilityEditorRequest = {
 type AgentModelRequest = {
   requestId: string;
   agentId: string;
-};
-type OptimisticMissionTask = {
-  requestId: string;
-  dispatchId: string | null;
-  task: TaskRecord;
-};
-type MissionDispatchStart = {
-  requestId: string;
-  mission: string;
-  agentId: string;
-  workspaceId: string | null;
-  submittedAt: number;
-  abortController: AbortController;
 };
 
 type SurfaceTheme = "dark" | "light";
@@ -264,10 +247,6 @@ export function MissionControlShell({
   ]
     .filter(Boolean)
     .join(" · ");
-  const isUpdateRunning = updateRunState === "running";
-  const isUpdateFinished = updateRunState === "success" || updateRunState === "error";
-  const updateDialogTitle = resolveUpdateDialogTitle(updateRunState);
-  const updateDialogDescription = resolveUpdateDialogDescription(updateRunState);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
   const shouldAutoShowOnboarding =
@@ -2350,9 +2329,13 @@ export function MissionControlShell({
           onOpenChange={handleResetDialogOpenChange}
         />
 
-        <Dialog
-          open={taskAbortRequest !== null}
-          onOpenChange={(open) => {
+        <MissionControlShellDialogs
+          snapshot={snapshot}
+          surfaceTheme={surfaceTheme}
+          taskAbortRequest={taskAbortRequest}
+          taskAbortRunState={taskAbortRunState}
+          taskAbortMessage={taskAbortMessage}
+          onTaskAbortOpenChange={(open) => {
             if (taskAbortRunState === "running") {
               return;
             }
@@ -2363,123 +2346,17 @@ export function MissionControlShell({
               setTaskAbortMessage(null);
             }
           }}
-        >
-          <DialogContent
-            className={cn(
-              "max-w-[480px] gap-5 p-5 sm:p-6",
-              surfaceTheme === "light"
-                ? "border-[#d7c5b7] bg-[rgba(252,247,241,0.98)] text-[#4a382c] shadow-[0_30px_80px_rgba(161,125,101,0.2)]"
-                : "border-white/10 bg-slate-950/94 text-slate-100"
-            )}
-          >
-            <DialogHeader>
-              <DialogTitle className={surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"}>
-                Abort task?
-              </DialogTitle>
-              <DialogDescription className={surfaceTheme === "light" ? "text-[#7e6555]" : "text-slate-400"}>
-                This stops the current OpenClaw dispatch for the selected task. It does not delete captured evidence or files.
-              </DialogDescription>
-            </DialogHeader>
-
-            {taskAbortRequest ? (
-              <div
-                className={cn(
-                  "rounded-[20px] border px-4 py-4",
-                  surfaceTheme === "light"
-                    ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4f3d31]"
-                    : "border-rose-400/20 bg-rose-400/10 text-rose-50"
-                )}
-              >
-                <p className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Selected task</p>
-                <p className="mt-2 font-display text-[1.02rem] leading-6 text-inherit">
-                  {taskAbortRequest.title}
-                </p>
-                <p className={cn("mt-1 text-sm leading-6", surfaceTheme === "light" ? "text-[#8b7262]" : "text-rose-100/80")}>
-                  {taskAbortRequest.subtitle}
-                </p>
-                {taskAbortMessage ? (
-                  <p className="mt-3 rounded-[16px] border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-sm text-rose-50">
-                    {taskAbortMessage}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={taskAbortRunState === "running"}
-                className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
-                onClick={() => {
-                  if (taskAbortRunState === "running") {
-                    return;
-                  }
-
-                  setTaskAbortRequest(null);
-                  setTaskAbortRunState("idle");
-                  setTaskAbortMessage(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={!taskAbortRequest || taskAbortRunState === "running"}
-                onClick={() => {
-                  void confirmTaskAbort();
-                }}
-              >
-                {taskAbortRunState === "running" ? (
-                  <>
-                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                    Aborting...
-                  </>
-                ) : (
-                  "Abort task"
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <div
-          className={cn(
-            "pointer-events-auto absolute bottom-3 right-[74px] z-30 text-[11px] tracking-[0.04em] lg:bottom-4",
-            isInspectorOpen ? "lg:right-[426px]" : "lg:right-[86px]",
-            surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
-          )}
-        >
-          Built on{" "}
-          <a
-            href="https://openclaw.ai/"
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "transition-colors",
-              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
-            )}
-          >
-            OpenClaw
-          </a>{" "}
-          by{" "}
-          <a
-            href="https://sapienx.app/"
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "transition-colors",
-              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
-            )}
-          >
-            SapienX
-          </a>
-        </div>
-
-        <Dialog
-          open={isUpdateDialogOpen}
-          onOpenChange={(open) => {
+          onTaskAbortConfirm={() => {
+            void confirmTaskAbort();
+          }}
+          updateDialogOpen={isUpdateDialogOpen}
+          updateRunState={updateRunState}
+          updateStatusMessage={updateStatusMessage}
+          updateResultMessage={updateResultMessage}
+          updateLog={updateLog}
+          activeRuntimeCount={activeRuntimeCount}
+          updateInstallDescriptor={updateInstallDescriptor}
+          onUpdateDialogOpenChange={(open) => {
             if (updateRunState === "running") {
               return;
             }
@@ -2490,606 +2367,11 @@ export function MissionControlShell({
               resetUpdateDialogState();
             }
           }}
-        >
-          <DialogContent
-            className={cn(
-              "max-w-[468px] gap-5 p-5 sm:p-6",
-              surfaceTheme === "light"
-                ? "border-[#d7c5b7] bg-[rgba(252,247,241,0.98)] text-[#4a382c] shadow-[0_30px_80px_rgba(161,125,101,0.2)]"
-                : "border-white/10 bg-slate-950/94 text-slate-100"
-            )}
-          >
-            <DialogHeader>
-              <DialogTitle className={surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"}>
-                {updateDialogTitle}
-              </DialogTitle>
-              <DialogDescription className={surfaceTheme === "light" ? "text-[#7e6555]" : "text-slate-400"}>
-                {updateDialogDescription}
-              </DialogDescription>
-            </DialogHeader>
-
-            {isUpdateFinished ? (
-              <div
-                className={cn(
-                  "space-y-4",
-                  surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                )}
-              >
-                <div
-                  className={cn(
-                    "rounded-[24px] border px-4 py-5",
-                    resolveUpdateResultPanelClassName(updateRunState, surfaceTheme)
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={cn(
-                        "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
-                        resolveUpdateResultIconWrapClassName(updateRunState, surfaceTheme)
-                      )}
-                    >
-                      {updateRunState === "success" ? (
-                        <CheckCircle2 className="h-5 w-5" />
-                      ) : (
-                        <AlertTriangle className="h-5 w-5" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-display text-[1.05rem] leading-6">
-                        {updateRunState === "success" ? "OpenClaw is up to date" : "Update needs attention"}
-                      </p>
-                      <p className="mt-1 text-sm leading-6">
-                        {updateResultMessage ||
-                          (updateRunState === "success"
-                            ? "The update finished successfully."
-                            : "The update did not finish cleanly.")}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    <div
-                      className={cn(
-                        "rounded-[18px] border px-3 py-3",
-                        surfaceTheme === "light" ? "border-white/70 bg-white/70" : "border-white/10 bg-slate-950/30"
-                      )}
-                    >
-                      <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
-                        Installed version
-                      </p>
-                      <p className="mt-2 font-display text-lg text-inherit">
-                        v{snapshot.diagnostics.version || snapshot.diagnostics.latestVersion || "unknown"}
-                      </p>
-                    </div>
-                    <div
-                      className={cn(
-                        "rounded-[18px] border px-3 py-3",
-                        surfaceTheme === "light" ? "border-white/70 bg-white/70" : "border-white/10 bg-slate-950/30"
-                      )}
-                    >
-                      <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
-                        Install mode
-                      </p>
-                      <p className="mt-2 text-sm font-medium text-inherit">{updateInstallDescriptor || "unknown"}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className={cn(
-                    "rounded-[20px] border",
-                    surfaceTheme === "light"
-                      ? "border-[#e3d4c8] bg-[#fffaf6]"
-                      : "border-white/8 bg-white/[0.03]"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "flex items-center justify-between border-b px-4 py-3",
-                      surfaceTheme === "light" ? "border-[#eadccf]" : "border-white/8"
-                    )}
-                  >
-                    <p
-                      className={cn(
-                        "text-[10px] uppercase tracking-[0.24em]",
-                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                      )}
-                    >
-                      Update log
-                    </p>
-                    <span className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
-                      {updateRunState === "success" ? "Completed" : "Failed"}
-                    </span>
-                  </div>
-                  <pre
-                    className={cn(
-                      "max-h-[180px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[11px] leading-5",
-                      surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                    )}
-                  >
-                    {updateLog || "No command output was captured."}
-                  </pre>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div
-                  className={cn(
-                    "grid gap-3 sm:grid-cols-2",
-                    surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                  )}
-                >
-                  <div
-                    className={cn(
-                      "rounded-[20px] border px-4 py-4",
-                      surfaceTheme === "light"
-                        ? "border-[#e3d4c8] bg-[#fffaf6]"
-                        : "border-white/8 bg-white/[0.03]"
-                    )}
-                  >
-                    <p
-                      className={cn(
-                        "text-[10px] uppercase tracking-[0.24em]",
-                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                      )}
-                    >
-                      Version target
-                    </p>
-                    <p className="mt-2 font-display text-[1.1rem] leading-6 text-inherit">
-                      v{snapshot.diagnostics.latestVersion || snapshot.diagnostics.version || "unknown"}
-                    </p>
-                    <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
-                      Current: v{snapshot.diagnostics.version || "unknown"}
-                    </p>
-                  </div>
-
-                  <div
-                    className={cn(
-                      "rounded-[20px] border px-4 py-4",
-                      surfaceTheme === "light"
-                        ? "border-[#e3d4c8] bg-[#fffaf6]"
-                        : "border-white/8 bg-white/[0.03]"
-                    )}
-                  >
-                    <p
-                      className={cn(
-                        "text-[10px] uppercase tracking-[0.24em]",
-                        surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
-                      )}
-                    >
-                      Install mode
-                    </p>
-                    <p className="mt-2 text-sm font-medium leading-6 text-inherit">{updateInstallDescriptor || "unknown"}</p>
-                    <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
-                      {compactPath(snapshot.diagnostics.updateRoot || "") || "Install root unavailable"}
-                    </p>
-                  </div>
-                </div>
-
-                <div
-                  className={cn(
-                    "rounded-[20px] border px-4 py-3 text-sm",
-                    activeRuntimeCount > 0
-                      ? surfaceTheme === "light"
-                        ? "border-rose-300/80 bg-rose-50 text-rose-800"
-                        : "border-rose-300/25 bg-rose-300/10 text-rose-100"
-                      : surfaceTheme === "light"
-                        ? "border-[#e3d4c8] bg-[#fffaf6] text-[#745e4f]"
-                        : "border-white/8 bg-white/[0.03] text-slate-300"
-                  )}
-                >
-                  {activeRuntimeCount > 0
-                    ? `${activeRuntimeCount} running or queued runtime${activeRuntimeCount === 1 ? "" : "s"} may be interrupted during the update.`
-                    : "No running runtimes are currently tracked, so the update risk is lower."}
-                </div>
-
-                {isUpdateRunning ? (
-                  <div
-                    className={cn(
-                      "rounded-[20px] border",
-                      surfaceTheme === "light"
-                        ? "border-[#e3d4c8] bg-[#fffaf6]"
-                        : "border-white/8 bg-white/[0.03]"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "flex items-center gap-3 border-b px-4 py-3",
-                        surfaceTheme === "light" ? "border-[#eadccf]" : "border-white/8"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "flex h-9 w-9 items-center justify-center rounded-2xl border",
-                          surfaceTheme === "light"
-                            ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#7b6453]"
-                            : "border-white/10 bg-white/[0.05] text-slate-200"
-                        )}
-                      >
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className={surfaceTheme === "light" ? "text-sm font-medium text-[#4a382c]" : "text-sm font-medium text-white"}>
-                          Update in progress
-                        </p>
-                        <p className={surfaceTheme === "light" ? "text-xs text-[#8b7262]" : "text-xs text-slate-400"}>
-                          {updateStatusMessage || "Streaming OpenClaw output..."}
-                        </p>
-                      </div>
-                    </div>
-                    <pre
-                      className={cn(
-                        "max-h-[180px] min-h-[120px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[11px] leading-5",
-                        surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
-                      )}
-                    >
-                      {updateLog || "Waiting for command output..."}
-                    </pre>
-                  </div>
-                ) : null}
-              </>
-            )}
-
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setIsUpdateDialogOpen(false);
-                  resetUpdateDialogState();
-                }}
-                disabled={isUpdateRunning}
-                className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
-              >
-                {isUpdateFinished ? "Done" : "Cancel"}
-              </Button>
-              {isUpdateFinished ? null : (
-                <Button
-                  type="button"
-                  onClick={runOpenClawUpdate}
-                  disabled={isUpdateRunning}
-                  className={cn(
-                    snapshot.diagnostics.updateAvailable
-                      ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-400/20 hover:bg-amber-300"
-                      : "",
-                    surfaceTheme === "light" && !snapshot.diagnostics.updateAvailable
-                      ? "bg-[#c8946f] text-white shadow-[0_12px_28px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                      : ""
-                  )}
-                >
-                  {isUpdateRunning ? (
-                    <>
-                      <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                      Updating...
-                    </>
-                  ) : (
-                    "Update now"
-                  )}
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          onRunOpenClawUpdate={() => {
+            void runOpenClawUpdate();
+          }}
+        />
       </div>
     </div>
   );
 }
-
-function resolveTaskPrompt(task: TaskRecord) {
-  if (task.mission?.trim()) {
-    return task.mission.trim();
-  }
-
-  if (task.title.trim()) {
-    return task.title.trim();
-  }
-
-  return task.subtitle.trim() || "Continue this task.";
-}
-
-function resolveTaskDispatchStatus(task: TaskRecord) {
-  return typeof task.metadata.dispatchStatus === "string" ? task.metadata.dispatchStatus : null;
-}
-
-function isTaskAborted(task: TaskRecord) {
-  const dispatchStatus = resolveTaskDispatchStatus(task);
-  const runtimeStatus = task.status as string;
-  return dispatchStatus === "cancelled" || dispatchStatus === "aborted" || runtimeStatus === "cancelled" || runtimeStatus === "aborted";
-}
-
-function isTaskAbortable(task: TaskRecord) {
-  if (isTaskAborted(task)) {
-    return false;
-  }
-
-  const runtimeStatus = task.status as string;
-  return runtimeStatus === "running" || runtimeStatus === "queued";
-}
-
-function mergeSnapshotWithOptimisticTasks(
-  snapshot: MissionControlSnapshot,
-  optimisticMissionTasks: OptimisticMissionTask[]
-) {
-  if (optimisticMissionTasks.length === 0) {
-    return snapshot;
-  }
-
-  const visibleOptimisticTasks = optimisticMissionTasks
-    .filter((entry) => !findReplacementTaskForOptimisticTask(snapshot.tasks, entry))
-    .map((entry) => entry.task);
-
-  if (visibleOptimisticTasks.length === 0) {
-    return snapshot;
-  }
-
-  return {
-    ...snapshot,
-    tasks: [...visibleOptimisticTasks, ...snapshot.tasks]
-  };
-}
-
-function findReplacementTaskForOptimisticTask(
-  tasks: TaskRecord[],
-  optimisticTask: OptimisticMissionTask
-) {
-  return tasks.find((task) => matchesOptimisticTaskReplacement(task, optimisticTask)) ?? null;
-}
-
-function matchesOptimisticTaskReplacement(task: TaskRecord, optimisticTask: OptimisticMissionTask) {
-  const dispatchId = optimisticTask.dispatchId?.trim();
-
-  if (!dispatchId) {
-    return false;
-  }
-
-  return task.dispatchId === dispatchId || task.key === `dispatch:${dispatchId}`;
-}
-
-function createOptimisticMissionTaskRecord(
-  event: MissionDispatchStart,
-  snapshot: MissionControlSnapshot
-): OptimisticMissionTask {
-  const submittedAtIso = new Date(event.submittedAt).toISOString();
-  const agent = snapshot.agents.find((entry) => entry.id === event.agentId);
-  const feedEvent: TaskFeedEvent = {
-    id: `optimistic:${event.requestId}:submitted`,
-    kind: "user",
-    timestamp: submittedAtIso,
-    title: "Mission submitted",
-    detail: summarizeTaskTitle(event.mission, 220),
-    agentId: event.agentId
-  };
-
-  return {
-    requestId: event.requestId,
-    dispatchId: null,
-    task: {
-      id: `optimistic-task:${event.requestId}`,
-      key: `optimistic:${event.requestId}`,
-      title: summarizeTaskTitle(event.mission, 86),
-      mission: event.mission,
-      subtitle: "Sending mission to AgentOS. Waiting for a dispatch id.",
-      status: "queued",
-      updatedAt: event.submittedAt,
-      ageMs: 0,
-      workspaceId: event.workspaceId ?? undefined,
-      primaryAgentId: event.agentId,
-      primaryAgentName: formatAgentDisplayName(agent ?? { name: "OpenClaw" }),
-      runtimeIds: [],
-      agentIds: [event.agentId],
-      sessionIds: [],
-      runIds: [],
-      runtimeCount: 0,
-      updateCount: 0,
-      liveRunCount: 0,
-      artifactCount: 0,
-      warningCount: 0,
-      metadata: {
-        optimistic: true,
-        optimisticRequestId: event.requestId,
-        bootstrapStage: "submitting",
-        dispatchSubmittedAt: submittedAtIso,
-        optimisticEvents: [feedEvent]
-      }
-    }
-  };
-}
-
-function updateOptimisticMissionTask(
-  task: TaskRecord,
-  input: {
-    dispatchId?: string;
-    status: TaskRecord["status"];
-    subtitle: string;
-    bootstrapStage: string;
-    feedEvent: TaskFeedEvent;
-  }
-): TaskRecord {
-  const events = readOptimisticTaskEvents(task).concat(input.feedEvent);
-
-  return {
-    ...task,
-    dispatchId: input.dispatchId ?? task.dispatchId,
-    status: input.status,
-    subtitle: input.subtitle,
-    updatedAt: Date.now(),
-    liveRunCount: input.status === "stalled" || input.status === "cancelled" ? 0 : 1,
-    warningCount: input.status === "stalled" || input.status === "cancelled" ? 1 : task.warningCount,
-    metadata: {
-      ...task.metadata,
-      bootstrapStage: input.bootstrapStage,
-      optimisticEvents: dedupeOptimisticTaskEvents(events)
-    }
-  };
-}
-
-function readOptimisticTaskEvents(task: TaskRecord) {
-  const value = task.metadata.optimisticEvents;
-
-  if (!Array.isArray(value)) {
-    return [] as TaskFeedEvent[];
-  }
-
-  return value.filter(isTaskFeedEvent);
-}
-
-function dedupeOptimisticTaskEvents(events: TaskFeedEvent[]) {
-  const byId = new Map<string, TaskFeedEvent>();
-
-  for (const event of events) {
-    byId.set(event.id, event);
-  }
-
-  return [...byId.values()].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
-}
-
-function isTaskHiddenByPreferences(
-  task: TaskRecord,
-  hiddenRuntimeIds: string[],
-  hiddenTaskKeys: string[],
-  lockedTaskKeys: string[]
-) {
-  const safeHiddenRuntimeIds = Array.isArray(hiddenRuntimeIds) ? hiddenRuntimeIds : [];
-  const safeHiddenTaskKeys = Array.isArray(hiddenTaskKeys) ? hiddenTaskKeys : [];
-  const safeLockedTaskKeys = Array.isArray(lockedTaskKeys) ? lockedTaskKeys : [];
-
-  if (safeLockedTaskKeys.includes(task.key)) {
-    return false;
-  }
-
-  if (safeHiddenTaskKeys.includes(task.key)) {
-    return true;
-  }
-
-  if (task.runtimeIds.length === 0) {
-    return false;
-  }
-
-  return task.runtimeIds.every((runtimeId) => safeHiddenRuntimeIds.includes(runtimeId));
-}
-
-function isDirectChatRuntime(runtime: { metadata: Record<string, unknown> }) {
-  return typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct";
-}
-
-function isTaskFeedEvent(value: unknown): value is TaskFeedEvent {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as TaskFeedEvent).id === "string" &&
-    typeof (value as TaskFeedEvent).kind === "string" &&
-    typeof (value as TaskFeedEvent).timestamp === "string" &&
-    typeof (value as TaskFeedEvent).title === "string" &&
-    typeof (value as TaskFeedEvent).detail === "string"
-  );
-}
-
-function summarizeTaskTitle(value: string, maxLength: number) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(maxLength - 1, 1)).trimEnd()}…`;
-}
-
-function formatGatewayDraft(gatewayUrl: string) {
-  return gatewayUrl.replace(/\/$/, "");
-}
-
-function resolveGatewayDraft(snapshot: MissionControlSnapshot) {
-  return formatGatewayDraft(snapshot.diagnostics.configuredGatewayUrl || snapshot.diagnostics.gatewayUrl);
-}
-
-function resolveWorkspaceRootDraft(snapshot: MissionControlSnapshot) {
-  return compactPath(snapshot.diagnostics.configuredWorkspaceRoot || snapshot.diagnostics.workspaceRoot);
-}
-
-function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent): OpenClawModelOnboardingPhase {
-  if (intent === "refresh") {
-    return "refreshing";
-  }
-
-  if (intent === "discover") {
-    return "discovering";
-  }
-
-  return "detecting";
-}
-
-function resolveModelOnboardingActionCopy(intent: ModelOnboardingIntent) {
-  if (intent === "discover") {
-    return {
-      statusMessage: "Scanning models...",
-      successTitle: "Models discovered.",
-      errorTitle: "Model discovery failed."
-    };
-  }
-
-  if (intent === "login-provider") {
-    return {
-      statusMessage: "Checking auth...",
-      successTitle: "Provider connected.",
-      errorTitle: "Provider auth needs attention."
-    };
-  }
-
-  if (intent === "refresh") {
-    return {
-      statusMessage: "Refreshing...",
-      successTitle: "Model setup refreshed.",
-      errorTitle: "Model refresh failed."
-    };
-  }
-
-  return {
-    statusMessage: "Checking models...",
-    successTitle: "Model setup ready.",
-    errorTitle: "Model setup failed."
-  };
-}
-
-function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
-  if (!snapshot.diagnostics.installed) {
-    return {
-      label: "Install OpenClaw",
-      description: "Download the CLI and get AgentOS ready."
-    };
-  }
-
-  if (resolveOpenClawSystemReady(snapshot)) {
-    return {
-      label: "Enter AgentOS",
-      description: "OpenClaw is online and runtime state is writable."
-    };
-  }
-
-  if (snapshot.diagnostics.rpcOk) {
-    return {
-      label: "Repair runtime access",
-      description: "OpenClaw is online, but write access still needs verification."
-    };
-  }
-
-  if (!snapshot.diagnostics.loaded) {
-    return {
-      label: "Prepare local gateway",
-      description:
-        "Register and start the local gateway."
-    };
-  }
-
-  if (!snapshot.diagnostics.rpcOk) {
-    return {
-      label: "Start OpenClaw",
-      description: "Start the local gateway and wait for RPC."
-    };
-  }
-
-  return {
-    label: "Start OpenClaw",
-    description: "Start the local gateway and wait for RPC."
-  };
-}
-

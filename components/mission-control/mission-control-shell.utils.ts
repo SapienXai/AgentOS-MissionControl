@@ -11,7 +11,7 @@ type UpdateRunState = "idle" | "running" | "success" | "error";
 type SurfaceTheme = "dark" | "light";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
 
-type OptimisticMissionTask = {
+export type OptimisticMissionTask = {
   requestId: string;
   dispatchId: string | null;
   task: TaskRecord;

@@ -156,6 +156,7 @@ export function CanvasTopBar({
   const isModelActionRunning = modelOnboardingRunState === "running";
   const isOffline = health === "offline";
   const healthLabel = formatHealthLabel(health);
+  const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion);
   const settingsSecondaryButtonStyles = settingsButtonClassName(surfaceTheme, "secondary");
   const settingsPrimaryButtonStyles = settingsButtonClassName(surfaceTheme, "primary");
   const settingsWarningButtonStyles = settingsButtonClassName(surfaceTheme, "warning");
@@ -348,68 +349,109 @@ export function CanvasTopBar({
               </span>
             </div>
 
-            {snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion ? (
-              <div
-                className={cn(
-                  "mt-2.5 rounded-[18px] border px-3 py-3",
-                  surfaceTheme === "light"
+            <div
+              className={cn(
+                "mt-2.5 rounded-[18px] border px-3 py-3",
+                hasUpdateAvailable
+                  ? surfaceTheme === "light"
                     ? "border-amber-300/90 bg-[linear-gradient(135deg,rgba(255,247,237,0.98),rgba(252,231,214,0.94))] shadow-[0_16px_36px_rgba(194,120,55,0.16)]"
                     : "border-amber-300/30 bg-[linear-gradient(135deg,rgba(71,35,8,0.62),rgba(33,20,8,0.82))] shadow-[0_18px_42px_rgba(245,158,11,0.14)]"
-                )}
-              >
-                <div className="flex items-start justify-between gap-2.5">
-                  <div>
+                  : surfaceTheme === "light"
+                    ? "border-[#e6d7cb] bg-[#fffaf6]"
+                    : "border-white/8 bg-white/[0.03]"
+              )}
+            >
+              <div className="flex items-start justify-between gap-2.5">
+                <div>
+                  <p
+                    className={cn(
+                      "text-[8px] uppercase tracking-[0.18em]",
+                      hasUpdateAvailable
+                        ? surfaceTheme === "light"
+                          ? "text-amber-800/70"
+                          : "text-amber-200/80"
+                        : surfaceTheme === "light"
+                          ? "text-[#9a7f6c]"
+                          : "text-slate-500"
+                    )}
+                  >
+                    {hasUpdateAvailable ? "Update available" : "Update status"}
+                  </p>
+                  <div className="mt-1.5 flex items-baseline gap-1.5">
                     <p
                       className={cn(
-                        "text-[8px] uppercase tracking-[0.18em]",
-                        surfaceTheme === "light" ? "text-amber-800/70" : "text-amber-200/80"
+                        "font-display text-[0.98rem]",
+                        hasUpdateAvailable
+                          ? surfaceTheme === "light"
+                            ? "text-amber-950"
+                            : "text-amber-50"
+                          : surfaceTheme === "light"
+                            ? "text-[#3f2f24]"
+                            : "text-white"
                       )}
                     >
-                      Update available
+                      {hasUpdateAvailable ? `v${snapshot.diagnostics.latestVersion}` : `v${snapshot.diagnostics.version || "unknown"}`}
                     </p>
-                    <div className="mt-1.5 flex items-baseline gap-1.5">
-                      <p
-                        className={cn(
-                          "font-display text-[0.98rem]",
-                          surfaceTheme === "light" ? "text-amber-950" : "text-amber-50"
-                        )}
-                      >
-                        v{snapshot.diagnostics.latestVersion}
-                      </p>
-                      <p
-                        className={cn(
-                          "text-[9px]",
-                          surfaceTheme === "light" ? "text-amber-900/70" : "text-amber-100/70"
-                        )}
-                      >
-                        from v{snapshot.diagnostics.version || "unknown"}
-                      </p>
-                    </div>
+                    <p
+                      className={cn(
+                        "text-[9px]",
+                        hasUpdateAvailable
+                          ? surfaceTheme === "light"
+                            ? "text-amber-900/70"
+                            : "text-amber-100/70"
+                          : surfaceTheme === "light"
+                            ? "text-[#8b7262]"
+                            : "text-slate-400"
+                      )}
+                    >
+                      {hasUpdateAvailable
+                        ? `from v${snapshot.diagnostics.version || "unknown"}`
+                        : snapshot.diagnostics.updateInfo?.trim() ||
+                          "No newer OpenClaw release was reported in the latest snapshot."}
+                    </p>
                   </div>
-                  <ArrowUpCircle
-                    className={cn(
-                      "mt-0.5 h-4 w-4",
-                      surfaceTheme === "light" ? "text-amber-700" : "text-amber-300"
-                    )}
-                  />
                 </div>
-                <p
+                <ArrowUpCircle
                   className={cn(
-                    "mt-1.5 text-[10px] leading-[1.05rem]",
-                    surfaceTheme === "light" ? "text-amber-950/80" : "text-amber-50/85"
+                    "mt-0.5 h-4 w-4",
+                    hasUpdateAvailable
+                      ? surfaceTheme === "light"
+                        ? "text-amber-700"
+                        : "text-amber-300"
+                      : surfaceTheme === "light"
+                        ? "text-[#8b7262]"
+                        : "text-slate-400"
                   )}
-                >
-                  A newer OpenClaw release was detected. You can update directly from AgentOS.
-                </p>
-                <button
-                  type="button"
-                  onClick={onOpenUpdateDialog}
-                  className={cn("mt-2.5 inline-flex items-center justify-center py-1", settingsWarningSolidButtonStyles)}
-                >
-                  Update now
-                </button>
+                />
               </div>
-            ) : null}
+              <p
+                className={cn(
+                  "mt-1.5 text-[10px] leading-[1.05rem]",
+                  hasUpdateAvailable
+                    ? surfaceTheme === "light"
+                      ? "text-amber-950/80"
+                      : "text-amber-50/85"
+                    : surfaceTheme === "light"
+                      ? "text-[#816958]"
+                      : "text-slate-400"
+                )}
+              >
+                {hasUpdateAvailable
+                  ? "A newer OpenClaw release was detected. You can update directly from AgentOS."
+                  : "OpenClaw is currently on the latest reported release."
+                }
+              </p>
+              <button
+                type="button"
+                onClick={onOpenUpdateDialog}
+                className={cn(
+                  "mt-2.5 inline-flex items-center justify-center py-1",
+                  hasUpdateAvailable ? settingsWarningSolidButtonStyles : settingsSecondaryButtonStyles
+                )}
+              >
+                {hasUpdateAvailable ? "Update now" : "Review update"}
+              </button>
+            </div>
 
             <div
               className={cn(
