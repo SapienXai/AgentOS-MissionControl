@@ -29,7 +29,7 @@ export function readPersistedNodePositions(scopeKey: string) {
 export function extractPersistedNodePositions(nodes: CanvasNode[]) {
   return Object.fromEntries(
     nodes
-      .filter((node) => node.type === "agent" || node.type === "task")
+      .filter(isPersistableCanvasNode)
       .map((node) => [
         resolveNodePersistedPositionKey(node),
         {
@@ -103,7 +103,13 @@ export function resolvePersistedPosition(
   return { x: saved.x, y: saved.y };
 }
 
-export function resolveNodePersistedPositionKey(node: CanvasNode) {
+type PersistableCanvasNode = Extract<CanvasNode, { type: "agent" | "task" }>;
+
+function isPersistableCanvasNode(node: CanvasNode): node is PersistableCanvasNode {
+  return node.type === "agent" || node.type === "task";
+}
+
+export function resolveNodePersistedPositionKey(node: PersistableCanvasNode) {
   if (node.type === "agent") {
     return toPersistedAgentPositionKey(node.data.agent);
   }

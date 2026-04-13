@@ -12,20 +12,20 @@ type AgentLike = {
 
 type ModelLike = {
   key: string;
-  local?: boolean;
-  available?: boolean;
-  missing?: boolean;
+  local?: boolean | null;
+  available?: boolean | null;
+  missing?: boolean | null;
 };
 
 type ModelAuthProvider = {
-  provider: string;
+  provider?: string | null;
   profiles?: {
     count?: number | null;
   } | null;
 };
 
 type ModelOauthProvider = {
-  provider: string;
+  provider?: string | null;
   status?: string | null;
 };
 
@@ -179,12 +179,12 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
   );
   const authProviderMap = new Map(
     (modelStatus?.auth?.providers ?? [])
-      .filter((entry): entry is ModelAuthProvider => isNonEmptyString(entry?.provider))
+      .filter((entry): entry is ModelAuthProvider & { provider: string } => isNonEmptyString(entry?.provider))
       .map((entry) => [entry.provider, entry])
   );
   const oauthProviderMap = new Map(
     (modelStatus?.auth?.oauth?.providers ?? [])
-      .filter((entry): entry is ModelOauthProvider => isNonEmptyString(entry?.provider))
+      .filter((entry): entry is ModelOauthProvider & { provider: string } => isNonEmptyString(entry?.provider))
       .map((entry) => [entry.provider, entry])
   );
   const resolvedDefaultModel = normalizeOptionalValue(modelStatus?.resolvedDefault ?? undefined);
