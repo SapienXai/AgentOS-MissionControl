@@ -2101,6 +2101,7 @@ export function MissionControlShell({
           </div>
           <CommandBar
             snapshot={uiSnapshot}
+            surfaceTheme={surfaceTheme}
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             composeIntent={composeIntent}

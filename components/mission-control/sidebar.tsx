@@ -852,6 +852,7 @@ export function MissionSidebar({
                           defaultWorkspaceId={activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? null}
                           onRefresh={onRefresh}
                           onSnapshotChange={onSnapshotChange}
+                          surfaceTheme={surfaceTheme}
                           trigger={
                             <Button
                               variant="secondary"
@@ -1583,6 +1584,7 @@ export function MissionSidebar({
                 channelIds={editDraft.channelIds}
                 agentId={editDraft.id}
                 isSaving={isSavingAgent}
+                surfaceTheme={surfaceTheme}
                 onChange={(channelIds) =>
                   setEditDraft((current) =>
                     current

@@ -1,35 +1,39 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import {
-  formatAgentFileAccessLabel,
-  formatAgentInstallScopeLabel,
-  formatAgentMissingToolBehaviorLabel,
-  formatAgentNetworkAccessLabel,
-  formatCapabilityLabel,
-  getAgentPresetMeta,
-  resolveAgentPolicy
-} from "@/lib/openclaw/agent-presets";
 import { defaultHeartbeatForPreset } from "@/lib/openclaw/agent-heartbeat";
+import { getAgentPresetMeta } from "@/lib/openclaw/agent-presets";
 import type { AgentPreset } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
+
+type SurfaceTheme = "dark" | "light";
 
 export function FormField({
   label,
   htmlFor,
-  children
+  children,
+  surfaceTheme = "dark"
 }: {
   label: string;
   htmlFor: string;
   children: ReactNode;
+  surfaceTheme?: SurfaceTheme;
 }) {
+  const isLight = surfaceTheme === "light";
+
   return (
-    <div className="space-y-2">
-      <Label htmlFor={htmlFor} className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+    <div className="space-y-1.5">
+      <Label
+        htmlFor={htmlFor}
+        className={cn(
+          "text-[10px] uppercase tracking-[0.16em]",
+          isLight ? "text-[#8d7766]" : "text-slate-400"
+        )}
+      >
         {label}
       </Label>
       {children}
@@ -40,155 +44,106 @@ export function FormField({
 export function AgentPresetCard({
   preset,
   active,
-  expanded,
-  onClick
+  onClick,
+  surfaceTheme = "dark"
 }: {
   preset: AgentPreset;
   active: boolean;
-  expanded: boolean;
   onClick: () => void;
+  surfaceTheme?: SurfaceTheme;
 }) {
   const meta = getAgentPresetMeta(preset);
-  const policy = resolveAgentPolicy(preset);
   const heartbeat = defaultHeartbeatForPreset(preset);
-  const isExpanded = expanded;
+  const isLight = surfaceTheme === "light";
 
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      aria-expanded={isExpanded}
       className={cn(
-        "flex h-full min-w-0 shrink-0 flex-col rounded-[20px] border p-3 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/40 snap-start",
-        isExpanded ? "w-[16rem] sm:w-[17rem]" : "w-[11rem] sm:w-[12rem]",
-        active
-          ? "border-cyan-300/30 bg-cyan-400/10 shadow-[0_0_0_1px_rgba(34,211,238,0.08)]"
-          : "border-white/10 bg-white/[0.03] hover:border-white/20 hover:bg-white/[0.05]"
+        "flex h-full min-h-[200px] min-w-0 flex-col justify-between rounded-[24px] border p-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 snap-start",
+        isLight
+          ? "border-[#e3d7cc] bg-white/92 shadow-[0_16px_34px_rgba(161,125,101,0.08)] focus-visible:ring-[#c89e73]/30 hover:border-[#d3c0b2] hover:bg-white"
+          : "border-white/10 bg-white/[0.03] shadow-[0_12px_28px_rgba(0,0,0,0.22)] focus-visible:ring-cyan-300/40 hover:border-white/20 hover:bg-white/[0.05]",
+        active &&
+          (isLight
+            ? "border-[#c89e73] bg-[#fff8f0] shadow-[0_18px_44px_rgba(161,125,101,0.14)]"
+            : "border-cyan-300/30 bg-cyan-400/10 shadow-[0_0_0_1px_rgba(34,211,238,0.08)]")
       )}
-      data-expanded={isExpanded ? "true" : "false"}
     >
-      <div className="flex h-full flex-col gap-2.5">
+      <div className="space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[11px]">
-                {meta.defaultEmoji}
-              </span>
-              <p className="truncate text-[13px] font-medium text-white">{meta.label}</p>
-            </div>
-            <p
+          <div className="flex min-w-0 items-start gap-3">
+            <span
               className={cn(
-                "text-[11px] leading-4 text-slate-400",
-                isExpanded ? "line-clamp-none" : "line-clamp-2"
+                "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border text-[15px]",
+                isLight ? "border-[#ded0c2] bg-[#faf5ef] text-[#7b604c]" : "border-white/10 bg-white/5 text-white"
               )}
             >
-              {meta.description}
-            </p>
+              {meta.defaultEmoji ?? <Sparkles className="h-4 w-4" />}
+            </span>
+            <div className="min-w-0">
+              <p className={cn("line-clamp-2 break-words text-[14px] font-semibold leading-5", isLight ? "text-[#2f2016]" : "text-white")}>
+                {meta.label}
+              </p>
+              <p className={cn("mt-1 line-clamp-3 text-[12px] leading-5", isLight ? "text-[#6d5849]" : "text-slate-400")}>
+                {meta.description}
+              </p>
+            </div>
           </div>
-          <Badge variant={meta.badgeVariant} className="shrink-0 px-2 py-1 text-[9px] normal-case tracking-normal">
-            {active ? "selected" : isExpanded ? "open" : "preset"}
+          <Badge
+            variant={active ? "default" : "muted"}
+            className={cn(
+              "shrink-0 px-2 py-0.5 text-[9px] normal-case tracking-normal",
+              isLight
+                ? active
+                  ? "border-[#c89e73]/35 bg-[#f4e6d8] text-[#5f432f]"
+                  : "border-[#e1d5c8] bg-white text-[#846a58]"
+                : active
+                  ? "border-cyan-300/30 bg-cyan-400/10 text-cyan-50"
+                  : "border-white/10 bg-white/5 text-slate-300"
+            )}
+          >
+            {active ? "selected" : "preset"}
           </Badge>
         </div>
 
-        {isExpanded ? (
-          <div className="space-y-3 border-t border-white/10 pt-3">
-            <PresetChipGroup title="Tools" tone="cyan" items={meta.tools} />
-            <PresetChipGroup title="Skills" tone="amber" items={meta.skillIds} />
-
-            <div className="space-y-2">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Policy</p>
-              <div className="flex flex-wrap gap-1.5">
-                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                  {formatAgentMissingToolBehaviorLabel(policy.missingToolBehavior)}
-                </Badge>
-                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                  {formatAgentInstallScopeLabel(policy.installScope)}
-                </Badge>
-                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                  {formatAgentFileAccessLabel(policy.fileAccess)}
-                </Badge>
-                <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                  Network {formatAgentNetworkAccessLabel(policy.networkAccess)}
-                </Badge>
-                <Badge
-                  variant={heartbeat.enabled ? "success" : "muted"}
-                  className="px-2 py-1 text-[9px] normal-case tracking-normal"
-                >
-                  Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Click again to collapse</p>
-              <Badge variant="muted" className="gap-1 px-2 py-1 text-[9px] normal-case tracking-normal">
-                <ChevronUp className="h-3 w-3" />
-                Collapse
-              </Badge>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-auto space-y-2">
-            <p className="text-[10px] leading-4 text-slate-500">
-              {meta.tools.length} tools · {meta.skillIds.length} skills · Network{" "}
-              {formatAgentNetworkAccessLabel(policy.networkAccess)}
-            </p>
-            <div className="flex items-center justify-between gap-2">
-              <Badge variant="muted" className="px-2 py-1 text-[9px] normal-case tracking-normal">
-                Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
-              </Badge>
-              <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                Details
-                <ChevronDown className="h-3 w-3" />
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <Badge
+            variant="muted"
+            className={cn(
+              "px-2 py-0.5 text-[10px] normal-case tracking-normal",
+              isLight ? "border-[#e1d5c8] bg-[#fbf7f2] text-[#6f5747]" : ""
+            )}
+          >
+            {meta.tools.length} tools
+          </Badge>
+          <Badge
+            variant="muted"
+            className={cn(
+              "px-2 py-0.5 text-[10px] normal-case tracking-normal",
+              isLight ? "border-[#e1d5c8] bg-[#fbf7f2] text-[#6f5747]" : ""
+            )}
+          >
+            {meta.skillIds.length} skills
+          </Badge>
+          <Badge
+            variant={heartbeat.enabled ? "success" : "muted"}
+            className={cn(
+              "px-2 py-0.5 text-[10px] normal-case tracking-normal",
+              isLight
+                ? heartbeat.enabled
+                  ? "border-emerald-300/40 bg-emerald-100 text-emerald-800"
+                  : "border-[#e1d5c8] bg-[#fbf7f2] text-[#6f5747]"
+                : ""
+            )}
+          >
+            Heartbeat {heartbeat.enabled ? heartbeat.every : "off"}
+          </Badge>
+        </div>
       </div>
     </button>
-  );
-}
-
-export function PresetChipGroup({
-  title,
-  tone,
-  items
-}: {
-  title: string;
-  tone: "cyan" | "amber";
-  items: string[];
-}) {
-  return (
-    <div>
-      <p className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{title}</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {items.map((item) => (
-          <PresetChip key={item} tone={tone} label={formatCapabilityLabel(item)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function PresetChip({
-  label,
-  tone
-}: {
-  label: string;
-  tone: "cyan" | "amber";
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex max-w-full items-center whitespace-nowrap rounded-full border px-2 py-1 text-[9px] font-medium leading-none tracking-normal",
-        tone === "cyan"
-          ? "border-cyan-300/20 bg-cyan-400/10 text-cyan-50"
-          : "border-amber-300/20 bg-amber-400/10 text-amber-50"
-      )}
-    >
-      {label}
-    </span>
   );
 }
 
@@ -197,25 +152,35 @@ export function AgentPolicySelect<T extends string>({
   htmlFor,
   value,
   options,
-  onChange
+  onChange,
+  surfaceTheme = "dark"
 }: {
   label: string;
   htmlFor: string;
   value: T;
   options: Array<{ value: T; label: string; description: string }>;
   onChange: (value: T) => void;
+  surfaceTheme?: SurfaceTheme;
 }) {
+  const isLight = surfaceTheme === "light";
+
   return (
-    <FormField label={label} htmlFor={htmlFor}>
+    <FormField label={label} htmlFor={htmlFor} surfaceTheme={surfaceTheme}>
       <select
         id={htmlFor}
         value={value}
         onChange={(event) => onChange(event.target.value as T)}
-        className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+        style={isLight ? { colorScheme: "light" } : undefined}
+        className={cn(
+          "flex h-10 w-full rounded-2xl border px-3.5 py-2 text-[13px] outline-none transition-colors",
+          isLight
+            ? "border-[#dccfc3] bg-white text-[#3f2f24] placeholder:text-[#9b8573] focus:border-[#c89e73] focus:ring-2 focus:ring-[#c89e73]/15"
+            : "border-white/10 bg-white/5 text-white placeholder:text-slate-500 focus:border-cyan-300/30 focus:ring-2 focus:ring-cyan-300/15"
+        )}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
-            {option.label} - {option.description}
+            {option.label}
           </option>
         ))}
       </select>

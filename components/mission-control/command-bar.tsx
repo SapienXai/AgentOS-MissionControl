@@ -70,6 +70,7 @@ const maxRecentPrompts = 6;
 
 export function CommandBar({
   snapshot,
+  surfaceTheme,
   activeWorkspaceId,
   selectedNodeId,
   composeIntent,
@@ -85,6 +86,7 @@ export function CommandBar({
   onMissionResponse
 }: {
   snapshot: MissionControlSnapshot;
+  surfaceTheme: "dark" | "light";
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   composeIntent: ComposeIntent | null;
@@ -676,17 +678,18 @@ export function CommandBar({
                         />
                       ))}
                       {targetWorkspace ? (
-                        <CreateAgentDialog
-                          snapshot={snapshot}
-                          defaultWorkspaceId={targetWorkspace.id}
-                          onRefresh={onRefresh}
-                          onAgentCreated={(agentId) => {
-                            preferredCreatedAgentIdRef.current = agentId;
-                            setTargetAgentId(agentId);
-                          }}
-                          trigger={
-                            <button
-                              type="button"
+                      <CreateAgentDialog
+                        snapshot={snapshot}
+                        defaultWorkspaceId={targetWorkspace.id}
+                        onRefresh={onRefresh}
+                        onAgentCreated={(agentId) => {
+                          preferredCreatedAgentIdRef.current = agentId;
+                          setTargetAgentId(agentId);
+                        }}
+                        surfaceTheme={surfaceTheme}
+                        trigger={
+                          <button
+                            type="button"
                               className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12px] text-slate-300 transition-all hover:bg-white/[0.08] hover:text-white"
                             >
                               + Create Agent
