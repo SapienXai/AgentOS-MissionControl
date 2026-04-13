@@ -14,7 +14,7 @@ import type {
   WorkspaceChannelSummary
 } from "@/lib/openclaw/types";
 
-const missionControlRootPath = path.join(process.cwd(), ".mission-control");
+const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
 
 type OpenClawChannelLogsPayload = {

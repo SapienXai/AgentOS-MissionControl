@@ -7,7 +7,7 @@ import { runOpenClaw } from "@/lib/openclaw/cli";
 import type { OpenClawRuntimeSmokeTest } from "@/lib/agentos/contracts";
 
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
-const missionControlRootPath = path.join(process.cwd(), ".mission-control");
+const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
 const runtimeSmokeTestTtlMs = 12 * 60 * 60 * 1000;
 

@@ -24,12 +24,18 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const missionControlRootPath = path.join(process.cwd(), ".mission-control");
-const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
-const plannerRootPath = path.join(missionControlRootPath, "planner");
-const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
-const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
-const openClawDefaultWorkspacePath = path.join(openClawStateRootPath, "workspace-dev");
+const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
+const missionControlSettingsPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "settings.json");
+const plannerRootPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "planner");
+const plannerRuntimeWorkspacePath = path.join(
+  /*turbopackIgnore: true*/ plannerRootPath,
+  "runtime-workspace"
+);
+const openClawStateRootPath = path.join(/*turbopackIgnore: true*/ os.homedir(), ".openclaw");
+const openClawDefaultWorkspacePath = path.join(
+  /*turbopackIgnore: true*/ openClawStateRootPath,
+  "workspace-dev"
+);
 const browserStorageKeys = [
   "mission-control-surface-theme",
   "mission-control-workspace-plan-id",
@@ -376,7 +382,7 @@ async function runMissionControlReset(
         }
       }
 
-      const workspaceOpenClawPath = path.join(workspace.path, ".openclaw");
+      const workspaceOpenClawPath = path.join(/*turbopackIgnore: true*/ workspace.path, ".openclaw");
       await rm(workspaceOpenClawPath, { recursive: true, force: true });
       await emit({
         type: "log",
@@ -472,7 +478,7 @@ async function detectGlobalPackageAction(
       continue;
     }
 
-    const packagePath = path.join(rootPath, ...packageName.split("/"));
+      const packagePath = path.join(/*turbopackIgnore: true*/ rootPath, ...packageName.split("/"));
 
     if (await pathExists(packagePath)) {
       return {
@@ -495,7 +501,13 @@ async function detectGlobalPackageAction(
 }
 
 async function detectAgentOsReleaseAction(): Promise<ResetPreviewPackageAction | null> {
-  const defaultScriptPath = path.join(os.homedir(), ".agentos", "package", "bin", "agentos.js");
+  const defaultScriptPath = path.join(
+    /*turbopackIgnore: true*/ os.homedir(),
+    ".agentos",
+    "package",
+    "bin",
+    "agentos.js"
+  );
 
   if (await pathExists(defaultScriptPath)) {
     return {
@@ -549,7 +561,7 @@ async function getGlobalPackageRoot(manager: string) {
       });
 
       const globalDir = stdout.toString().trim();
-      return globalDir ? path.join(globalDir, "node_modules") : null;
+      return globalDir ? path.join(/*turbopackIgnore: true*/ globalDir, "node_modules") : null;
     }
 
     const { stdout } = await execFileAsync(manager, ["root", "-g"], {
@@ -647,8 +659,14 @@ function inferAgentOsReleaseScriptPath(launcherContents: string | null) {
 
 async function scheduleBackgroundPackageRemoval(commands: string[]) {
   const timestamp = Date.now();
-  const scriptPath = path.join(os.tmpdir(), `agentos-full-uninstall-${timestamp}.sh`);
-  const logPath = path.join(os.tmpdir(), `agentos-full-uninstall-${timestamp}.log`);
+  const scriptPath = path.join(
+    /*turbopackIgnore: true*/ os.tmpdir(),
+    `agentos-full-uninstall-${timestamp}.sh`
+  );
+  const logPath = path.join(
+    /*turbopackIgnore: true*/ os.tmpdir(),
+    `agentos-full-uninstall-${timestamp}.log`
+  );
   const commandLines = commands.flatMap((command) => [
     `printf 'Running: %s\\n' ${quoteShellArg(command)}`,
     `if ${command}; then`,

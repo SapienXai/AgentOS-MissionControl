@@ -37,16 +37,32 @@ async function copyDirectoryContents(sourceDir, targetDir) {
     const targetPath = path.join(targetDir, entry.name);
 
     if (entry.isDirectory()) {
-      await cp(sourcePath, targetPath, {
-        recursive: true,
-        dereference: true
-      });
+      try {
+        await cp(sourcePath, targetPath, {
+          recursive: true,
+          dereference: true
+        });
+      } catch (error) {
+        if (isMissingPathError(error)) {
+          continue;
+        }
+
+        throw error;
+      }
       continue;
     }
 
-    await cp(sourcePath, targetPath, {
-      dereference: true
-    });
+    try {
+      await cp(sourcePath, targetPath, {
+        dereference: true
+      });
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        continue;
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -98,8 +114,12 @@ async function materializeBundleNodeModules(nodeModulesDir) {
 
     try {
       await copyNestedPackagesToRoot(storeNodeModulesDir, nodeModulesDir);
-    } catch {
-      continue;
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        continue;
+      }
+
+      throw error;
     }
   }
 
@@ -142,4 +162,8 @@ async function removeDotStoreFiles(dir) {
       await rm(targetPath, { force: true });
     }
   }
+}
+
+function isMissingPathError(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

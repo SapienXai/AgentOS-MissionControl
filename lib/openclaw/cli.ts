@@ -1,25 +1,11 @@
 import "server-only";
 
-import { execFile, spawn } from "node:child_process";
-import os from "node:os";
-import path from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { spawn } from "node:child_process";
 
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
-const isWindows = process.platform === "win32";
 let resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
-let npmGlobalPrefixPromise: Promise<string> | null = null;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
-const openClawRuntimePathCandidates = [
-  process.env.OLLAMA_BIN ? path.dirname(process.env.OLLAMA_BIN) : null,
-  "/usr/local/bin",
-  "/opt/homebrew/bin",
-  path.join(os.homedir(), ".local", "bin"),
-  path.join(os.homedir(), ".ollama", "bin")
-].filter((candidate): candidate is string => Boolean(candidate));
 
 interface CommandOptions {
   timeoutMs?: number;
@@ -69,8 +55,7 @@ export async function runOpenClawStream(
   const openClawBin = await resolveOpenClawBin();
 
   return new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(openClawBin, args, {
-      cwd: process.cwd(),
+    const child = spawn(/*turbopackIgnore: true*/ openClawBin, args, {
       env: buildOpenClawEnv()
     });
 
@@ -210,13 +195,11 @@ export async function resolveOpenClawBin(): Promise<string> {
   }
 
   resolveOpenClawBinPromise = (async () => {
-    const candidates = await collectOpenClawCandidates();
+    const candidate = process.env.OPENCLAW_BIN?.trim() || OPENCLAW_BIN;
 
-    for (const candidate of candidates) {
-      if (await canExecuteOpenClaw(candidate)) {
-        resolvedOpenClawBin = candidate;
-        return candidate;
-      }
+    if (await canExecuteOpenClaw(candidate)) {
+      resolvedOpenClawBin = candidate;
+      return candidate;
     }
 
     throw new Error("OpenClaw CLI is not installed or could not be resolved.");
@@ -232,7 +215,6 @@ export async function resolveOpenClawBin(): Promise<string> {
 export function resetOpenClawBinCache() {
   resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
   resolveOpenClawBinPromise = null;
-  npmGlobalPrefixPromise = null;
 }
 
 function parseJsonOutput<T>(text: string): T {
@@ -355,86 +337,21 @@ function quoteShellSegment(value: string) {
 }
 
 function buildOpenClawEnv() {
-  const env = { ...process.env };
-  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-  const currentPath = env[pathKey] || "";
-  const mergedPath = Array.from(
-    new Set([
-      ...currentPath.split(path.delimiter),
-      ...openClawRuntimePathCandidates
-    ].filter(isNonEmptyString))
-  ).join(path.delimiter);
-
-  env[pathKey] = mergedPath;
-
-  if (pathKey !== "PATH") {
-    env.PATH = mergedPath;
-  }
-
-  return env;
-}
-
-async function collectOpenClawCandidates() {
-  const home = os.homedir();
-  const npmPrefix = await resolveNpmGlobalPrefix();
-  const homebrewPrefix = process.arch === "arm64" ? "/opt/homebrew" : "/usr/local";
-  const pathCandidates = isWindows
-    ? [
-        path.join(home, ".openclaw", "bin", "openclaw.cmd"),
-        path.join(home, ".openclaw", "bin", "openclaw.exe"),
-        path.join(home, "AppData", "Roaming", "npm", "openclaw.cmd"),
-        path.join(home, "AppData", "Roaming", "npm", "openclaw.exe"),
-        npmPrefix ? path.join(npmPrefix, "openclaw.cmd") : null,
-        npmPrefix ? path.join(npmPrefix, "openclaw.exe") : null
-      ]
-    : [
-        path.join(home, ".openclaw", "bin", "openclaw"),
-        path.join(home, ".local", "bin", "openclaw"),
-        path.join(home, ".npm-global", "bin", "openclaw"),
-        path.join(home, ".volta", "bin", "openclaw"),
-        path.join(home, "Library", "pnpm", "openclaw"),
-        path.join("/usr/local", "bin", "openclaw"),
-        path.join(homebrewPrefix, "bin", "openclaw"),
-        npmPrefix ? path.join(npmPrefix, "bin", "openclaw") : null,
-        npmPrefix ? path.join(npmPrefix, "openclaw") : null
-      ];
-
-  return [...new Set([resolvedOpenClawBin, OPENCLAW_BIN, "openclaw", ...pathCandidates].filter(isNonEmptyString))];
+  return { ...process.env };
 }
 
 async function canExecuteOpenClaw(command: string) {
-  try {
-    await execFileAsync(command, ["--version"], {
-      cwd: process.cwd(),
-      timeout: 5000,
-      maxBuffer: 1024 * 1024
+  return await new Promise<boolean>((resolve) => {
+    const child = spawn(/*turbopackIgnore: true*/ command, ["--version"], {
+      stdio: "ignore"
     });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
-async function resolveNpmGlobalPrefix() {
-  if (!npmGlobalPrefixPromise) {
-    npmGlobalPrefixPromise = (async () => {
-      try {
-        const { stdout } = await execFileAsync(isWindows ? "npm.cmd" : "npm", ["prefix", "-g"], {
-          cwd: process.cwd(),
-          timeout: 5000,
-          maxBuffer: 1024 * 1024
-        });
+    child.once("error", () => {
+      resolve(false);
+    });
 
-        return stdout.toString().trim();
-      } catch {
-        return "";
-      }
-    })();
-  }
-
-  return npmGlobalPrefixPromise;
-}
-
-function isNonEmptyString(value: string | null | undefined): value is string {
-  return Boolean(value);
+    child.once("exit", (code) => {
+      resolve(code === 0);
+    });
+  });
 }

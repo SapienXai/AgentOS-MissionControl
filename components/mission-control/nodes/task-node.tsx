@@ -48,16 +48,18 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
     data.task.status === "running" ||
     data.task.liveRunCount > 0;
 
-  const optimisticEvents = Array.isArray(data.task.metadata.optimisticEvents)
-    ? data.task.metadata.optimisticEvents
-    : [];
-  const optimisticFeed = useMemo(
-    () => optimisticEvents.filter(isTaskFeedEvent),
-    [optimisticEvents]
-  );
+  const optimisticFeed = useMemo(() => {
+    const value = data.task.metadata.optimisticEvents;
+
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.filter(isTaskFeedEvent);
+  }, [data.task.metadata.optimisticEvents]);
   const latestOptimisticEvent =
-    optimisticEvents.length > 0 && isTaskFeedEvent(optimisticEvents[optimisticEvents.length - 1])
-      ? optimisticEvents[optimisticEvents.length - 1]
+    optimisticFeed.length > 0 && isTaskFeedEvent(optimisticFeed[optimisticFeed.length - 1])
+      ? optimisticFeed[optimisticFeed.length - 1]
       : null;
   const { feed, detail, loading, error } = useTaskFeed(data.task.id, shouldStreamFeed, {
     dispatchId: data.task.dispatchId,
