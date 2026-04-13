@@ -1,17 +1,9 @@
 "use client";
 
 import {
-  ArrowUpCircle,
-  ChevronDown,
   EyeOff,
-  MoonStar,
   RefreshCw,
-  Settings2,
-  Square,
-  SunMedium
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";

@@ -67,9 +67,13 @@ export type MissionDispatchRecord = Omit<MissionDispatchRecordLike, "status" | "
   observation: MissionDispatchObservation;
 };
 
-const missionControlRootPath = path.join(process.cwd(), ".mission-control");
+const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const missionDispatchesRootPath = path.join(missionControlRootPath, "dispatches");
-const missionDispatchRunnerPath = path.join(process.cwd(), "scripts", "openclaw-mission-dispatch-runner.mjs");
+const missionDispatchRunnerPath = path.join(
+  /*turbopackIgnore: true*/ process.cwd(),
+  "scripts",
+  "openclaw-mission-dispatch-runner.mjs"
+);
 const missionDispatchRetentionMs = 3 * 24 * 60 * 60 * 1000;
 
 const execFileAsync = promisify(execFile);

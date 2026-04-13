@@ -115,7 +115,7 @@ export function WorkspaceChannelsDialog({
     () => workspaceSurfaces.filter((surface) => surface.type === activeProvider),
     [activeProvider, workspaceSurfaces]
   );
-  const currentCatalogEntry = getSurfaceCatalogEntry(activeProvider);
+  const currentCatalogEntry = useMemo(() => getSurfaceCatalogEntry(activeProvider), [activeProvider]);
   const basicProvisionFields = currentCatalogEntry.provisionFields.filter((field) => field.section !== "advanced");
   const advancedProvisionFields = currentCatalogEntry.provisionFields.filter((field) => field.section === "advanced");
   const isLinkedAccountId = useCallback(
@@ -212,7 +212,7 @@ export function WorkspaceChannelsDialog({
 
   useEffect(() => {
     setProvisionDraft(buildEmptyProvisionDraft(currentCatalogEntry));
-  }, [activeProvider]);
+  }, [currentCatalogEntry]);
 
   useEffect(() => {
     if (!providerOptions.includes(activeProvider)) {

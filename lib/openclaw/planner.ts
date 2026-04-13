@@ -60,7 +60,11 @@ import type {
   WorkspacePlanDeployResult
 } from "@/lib/openclaw/types";
 
-const plannerRootPath = path.join(process.cwd(), ".mission-control", "planner");
+const plannerRootPath = path.join(
+  /*turbopackIgnore: true*/ process.cwd(),
+  ".mission-control",
+  "planner"
+);
 const plansRootPath = path.join(plannerRootPath, "plans");
 const plannerRuntimeWorkspacePath = path.join(plannerRootPath, "runtime-workspace");
 const WEBSITE_INSPECTION_TIMEOUT_MS = 3500;

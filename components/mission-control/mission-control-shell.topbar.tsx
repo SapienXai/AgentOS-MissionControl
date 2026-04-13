@@ -10,7 +10,6 @@ import {
   type MissionControlShellSettingsPanelProps
 } from "@/components/mission-control/mission-control-shell.settings";
 import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
-import { isOpenClawMissionReady } from "@/lib/openclaw/readiness";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -88,7 +87,6 @@ export function CanvasTopBar({
   const { snapshot, surfaceTheme } = settingsPanelProps;
   const { onOpenSetupWizard } = settingsPanelProps;
   const health = snapshot.diagnostics.health;
-  const isOpenClawReady = isOpenClawMissionReady(snapshot);
   const isOffline = health === "offline";
   const healthLabel = formatHealthLabel(health);
   const settingsChromeButtonStyles = settingsChromeButtonClassName(surfaceTheme);

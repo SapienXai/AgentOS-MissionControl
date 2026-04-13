@@ -29,7 +29,7 @@ function resolveNextCliPath() {
 }
 
 function resolveBuildArgs() {
-  const args = [resolveNextCliPath(), "build", "--webpack"];
+  const args = [resolveNextCliPath(), "build"];
 
   if (process.platform === "win32") {
     args.unshift("--require", windowsPreloadPath);

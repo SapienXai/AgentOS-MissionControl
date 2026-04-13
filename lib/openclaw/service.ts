@@ -32,11 +32,7 @@ import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
-import {
-  compactMissionText,
-  formatAgentDisplayName,
-  stripMissionRouting
-} from "@/lib/openclaw/presenters";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { getSurfaceKind } from "@/lib/openclaw/surface-catalog";
 import {
   DEFAULT_WORKSPACE_RULES,
@@ -71,23 +67,12 @@ import {
   buildTaskDetailFromDispatchRecord,
   buildTaskDetailFromTaskRecord
 } from "@/lib/openclaw/domains/task-detail";
-import {
-  extractMissionCommandPayloads,
-  resolveMissionDispatchCompletionDetail,
-  resolveMissionDispatchIntegrityWarning,
-  resolveMissionDispatchOutputFile,
-  resolveMissionDispatchResultText,
-  resolveMissionDispatchSummary
-} from "@/lib/openclaw/domains/mission-dispatch-model";
+import { extractMissionCommandPayloads } from "@/lib/openclaw/domains/mission-dispatch-model";
 import {
   annotateMissionDispatchMetadata as annotateMissionDispatchMetadataFromRuntime,
   buildMissionDispatchRuntimes as buildMissionDispatchRuntimesFromRuntime,
   isSyntheticDispatchRuntime
 } from "@/lib/openclaw/domains/mission-dispatch-runtime";
-import {
-  presentMissionDispatchRunnerLogEntry,
-  readMissionDispatchRunnerLogs
-} from "@/lib/openclaw/domains/mission-dispatch-runner-logs";
 import {
   buildObservedMissionDispatchRuntime,
   persistMissionDispatchObservation,
@@ -157,7 +142,6 @@ import type { ManagedDiscordBinding } from "@/lib/openclaw/domains/channels";
 import {
   collectIssues,
   compareVersionStrings,
-  isNonEmptyString,
   normalizeOptionalValue,
   normalizeUpdateError,
   resolveAgentAction,
@@ -188,10 +172,8 @@ import type {
   AgentCreateInput,
   AgentDeleteInput,
   AgentPolicy,
-  AgentStatus,
   OperationProgressSnapshot,
   AgentUpdateInput,
-  ModelReadiness,
   MissionControlSnapshot,
   MissionAbortResponse,
   MissionResponse,
@@ -202,7 +184,6 @@ import type {
   PresenceRecord,
   RelationshipRecord,
   TaskDetailRecord,
-  TaskRecord,
   RuntimeRecord,
   WorkspacePlan,
   RuntimeOutputRecord,
@@ -328,7 +309,7 @@ type AgentConfigPayload = Array<{
   default?: boolean;
 }>;
 
-const missionControlRootPath = path.join(process.cwd(), ".mission-control");
+const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
 const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
