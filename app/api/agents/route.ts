@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { AGENT_BOOTSTRAP_FILE_PATHS } from "@/lib/openclaw/agent-bootstrap-files";
 import { createAgent, deleteAgent, getMissionControlSnapshot, updateAgent } from "@/lib/agentos/control-plane";
 
 export const runtime = "nodejs";
@@ -19,6 +20,11 @@ const heartbeatSchema = z.object({
   every: z.string().optional()
 });
 
+const bootstrapFileSchema = z.object({
+  path: z.enum(AGENT_BOOTSTRAP_FILE_PATHS),
+  content: z.string()
+});
+
 const createAgentSchema = z.object({
   id: z.string().min(1),
   workspaceId: z.string().min(1),
@@ -29,6 +35,7 @@ const createAgentSchema = z.object({
   avatar: z.string().optional(),
   policy: agentPolicySchema.optional(),
   heartbeat: heartbeatSchema.optional(),
+  bootstrapFiles: z.array(bootstrapFileSchema).optional(),
   channelIds: z.array(z.string()).optional()
 });
 

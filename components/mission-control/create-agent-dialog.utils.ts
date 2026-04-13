@@ -4,6 +4,14 @@ import {
   defaultHeartbeatForPreset,
   resolveHeartbeatDraft
 } from "@/lib/openclaw/agent-heartbeat";
+import {
+  AGENT_BOOTSTRAP_FILE_OPTIONS,
+  buildAgentBootstrapFileDrafts,
+  rebaseAgentBootstrapFileDrafts,
+  type AgentBootstrapFileDraft,
+  type AgentBootstrapFileKind,
+  type AgentBootstrapFilePath
+} from "@/lib/openclaw/agent-bootstrap-files";
 import { getAgentPresetMeta, resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/agentos/contracts";
 
@@ -18,6 +26,14 @@ export type AgentDraft = {
   heartbeat: AgentHeartbeatDraft;
   channelIds: string[];
 };
+
+export type {
+  AgentBootstrapFileDraft,
+  AgentBootstrapFileKind,
+  AgentBootstrapFilePath
+} from "@/lib/openclaw/agent-bootstrap-files";
+
+export { AGENT_BOOTSTRAP_FILE_OPTIONS };
 
 export function buildAgentDraft(workspaceId: string, seed: Partial<AgentDraft> = {}): AgentDraft {
   const policy = resolveAgentPolicy(seed.policy?.preset ?? "worker", seed.policy);
@@ -101,3 +117,23 @@ export function applyAgentPreset(draft: AgentDraft, preset: AgentPreset): AgentD
 }
 
 export { defaultHeartbeatForPreset };
+
+export function buildAgentBootstrapFileDraftsForDraft(
+  draft: Pick<AgentDraft, "name" | "emoji" | "theme" | "avatar" | "policy" | "heartbeat">
+) {
+  return buildAgentBootstrapFileDrafts({
+    name: draft.name,
+    emoji: draft.emoji,
+    theme: draft.theme,
+    avatar: draft.avatar,
+    preset: draft.policy.preset,
+    heartbeat: draft.heartbeat
+  });
+}
+
+export function rebaseAgentBootstrapFilesForDraft(
+  currentFiles: AgentBootstrapFileDraft[],
+  draft: Pick<AgentDraft, "name" | "emoji" | "theme" | "avatar" | "policy" | "heartbeat">
+) {
+  return rebaseAgentBootstrapFileDrafts(currentFiles, buildAgentBootstrapFileDraftsForDraft(draft));
+}

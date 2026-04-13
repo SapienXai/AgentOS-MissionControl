@@ -2,8 +2,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import {
+  parseAgentIdentityMarkdown,
+  renderAgentIdentityMarkdown as renderAgentIdentityMarkdownTemplate
+} from "@/lib/openclaw/agent-bootstrap-files";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import type { AgentHeartbeatInput, MissionControlSnapshot, OpenClawAgent } from "@/lib/openclaw/types";
+import type {
+  AgentBootstrapFileInput,
+  AgentHeartbeatInput,
+  MissionControlSnapshot,
+  OpenClawAgent
+} from "@/lib/openclaw/types";
 
 export type MutableAgentConfigEntry = {
   id: string;
@@ -45,15 +54,6 @@ function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
-}
-
-function cleanMarkdown(value: string) {
-  return value
-    .replace(/\r\n/g, "\n")
-    .replace(/\*\*(.*?)\*\*/g, "$1")
-    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function extractErrorMessage(error: unknown) {
@@ -218,16 +218,20 @@ export async function applyAgentIdentity(
     emoji?: string;
     theme?: string;
     avatar?: string;
+    content?: string;
   },
   agentDir?: string
 ) {
   const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
   const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
-  const identityMarkdown = renderAgentIdentityMarkdown({
-    name: normalizeOptionalValue(identity.name) ?? agentId,
-    emoji: normalizeOptionalValue(identity.emoji),
-    avatar: normalizeOptionalValue(identity.avatar)
-  });
+  const identityMarkdown =
+    normalizeOptionalValue(identity.content) ??
+    renderAgentIdentityMarkdownTemplate({
+      name: normalizeOptionalValue(identity.name) ?? agentId,
+      emoji: normalizeOptionalValue(identity.emoji),
+      theme: normalizeOptionalValue(identity.theme),
+      avatar: normalizeOptionalValue(identity.avatar)
+    });
 
   await mkdir(path.dirname(identityFilePath), { recursive: true });
   await writeFile(identityFilePath, identityMarkdown, "utf8");
@@ -263,52 +267,45 @@ export async function applyAgentIdentity(
   await runOpenClaw(args);
 }
 
-function renderAgentIdentityMarkdown(identity: {
-  name: string;
-  emoji?: string | null;
-  avatar?: string | null;
-}) {
-  const avatar = normalizeOptionalValue(identity.avatar);
+export async function writeAgentBootstrapFiles(
+  agentId: string,
+  workspacePath: string,
+  files: AgentBootstrapFileInput[],
+  agentDir?: string
+) {
+  const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
 
-  return `# IDENTITY.md - Who Am I?
+  await mkdir(resolvedAgentDir, { recursive: true });
 
-- **Name:** ${identity.name}
-- **Creature:** OpenClaw agent
-- **Vibe:** pragmatic, concise, workspace-grounded
-- **Emoji:** ${identity.emoji ?? ""}
-- **Avatar:** ${avatar ?? ""}
+  for (const file of files) {
+    const filePath = path.join(resolvedAgentDir, file.path);
 
----
-
-This identity file lives with the agent state so each agent can keep its own identity.
-`;
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, file.content, "utf8");
+  }
 }
 
 export async function readAgentIdentityOverrides(agentDir?: string) {
   const resolvedAgentDir = normalizeOptionalValue(agentDir);
 
   if (!resolvedAgentDir) {
-    return { name: null, emoji: null, avatar: null };
+    return { name: null, emoji: null, theme: null, avatar: null };
   }
 
   const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
 
   try {
     const raw = await readFile(identityFilePath, "utf8");
-    const lines = raw.split(/\r?\n/);
-    const parseField = (label: string) => {
-      const match = lines.find((line) => new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i").test(line.trim()));
-      const value = match?.match(new RegExp(`^-\\s+\\*\\*${label}:\\*\\*\\s*(.*)$`, "i"))?.[1];
-      return normalizeOptionalValue(value ? cleanMarkdown(value) : null) ?? null;
-    };
+    const parsed = parseAgentIdentityMarkdown(raw);
 
     return {
-      name: parseField("Name"),
-      emoji: parseField("Emoji"),
-      avatar: parseField("Avatar")
+      name: parsed.name,
+      emoji: parsed.emoji,
+      theme: parsed.theme,
+      avatar: parsed.avatar
     };
   } catch {
-    return { name: null, emoji: null, avatar: null };
+    return { name: null, emoji: null, theme: null, avatar: null };
   }
 }
 

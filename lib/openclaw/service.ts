@@ -21,6 +21,7 @@ import {
   resolveHeartbeatDraft,
   serializeHeartbeatConfig
 } from "@/lib/openclaw/agent-heartbeat";
+import { parseAgentIdentityMarkdown } from "@/lib/openclaw/agent-bootstrap-files";
 import {
   detectOpenClaw,
   runOpenClaw,
@@ -105,6 +106,7 @@ import {
   readAgentConfigList,
   readAgentIdentityOverrides,
   upsertAgentConfigEntry,
+  writeAgentBootstrapFiles,
   writeAgentConfigList
 } from "@/lib/openclaw/domains/agent-config";
 import {
@@ -721,7 +723,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
             normalizeOptionalValue(identityOverrides.emoji) ||
             configured?.identity?.emoji ||
             rawAgent.identityEmoji,
-          theme: configured?.identity?.theme,
+          theme: normalizeOptionalValue(identityOverrides.theme) || configured?.identity?.theme,
           avatar: normalizeOptionalValue(identityOverrides.avatar) || configured?.identity?.avatar,
           source: rawAgent.identitySource
         },
@@ -1192,12 +1194,27 @@ export async function createAgent(input: AgentCreateInput) {
   const presetMeta = getAgentPresetMeta(policy.preset);
   const presetSkillIds = filterKnownOpenClawSkillIds(presetMeta.skillIds);
   const presetToolIds = filterKnownOpenClawToolIds(presetMeta.tools);
-  const displayName = normalizeOptionalValue(input.name) ?? presetMeta.defaultName;
-  const emoji = normalizeOptionalValue(input.emoji) ?? presetMeta.defaultEmoji;
-  const theme = normalizeOptionalValue(input.theme) ?? presetMeta.defaultTheme;
+  const bootstrapFiles = input.bootstrapFiles ?? [];
+  const bootstrapFileMap = new Map(bootstrapFiles.map((entry) => [entry.path, entry.content] as const));
+  const identityMarkdown = bootstrapFileMap.get("IDENTITY.md") ?? null;
+  const parsedIdentity = identityMarkdown ? parseAgentIdentityMarkdown(identityMarkdown) : null;
+  const displayName =
+    normalizeOptionalValue(parsedIdentity?.name) ??
+    normalizeOptionalValue(input.name) ??
+    presetMeta.defaultName;
+  const emoji =
+    normalizeOptionalValue(parsedIdentity?.emoji) ??
+    normalizeOptionalValue(input.emoji) ??
+    presetMeta.defaultEmoji;
+  const theme =
+    normalizeOptionalValue(parsedIdentity?.theme) ??
+    normalizeOptionalValue(input.theme) ??
+    presetMeta.defaultTheme;
+  const avatar = normalizeOptionalValue(parsedIdentity?.avatar) ?? normalizeOptionalValue(input.avatar);
   const heartbeat = serializeHeartbeatConfig(resolveHeartbeatDraft(policy.preset, input.heartbeat));
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup")?.id ?? null;
+  const agentDir = buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId);
 
   const args = [
     "agents",
@@ -1206,7 +1223,7 @@ export async function createAgent(input: AgentCreateInput) {
     "--workspace",
     resolvedWorkspacePath,
     "--agent-dir",
-    buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId),
+    agentDir,
     "--non-interactive",
     "--json"
   ];
@@ -1253,8 +1270,15 @@ export async function createAgent(input: AgentCreateInput) {
     name: displayName || configEntry.name,
     emoji,
     theme,
-    avatar: normalizeOptionalValue(input.avatar)
-  }, buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId));
+    avatar,
+    content: identityMarkdown ?? undefined
+  }, agentDir);
+
+  const bootstrapFilesToWrite = bootstrapFiles.filter((entry) => entry.path !== "IDENTITY.md");
+
+  if (bootstrapFilesToWrite.length > 0) {
+    await writeAgentBootstrapFiles(agentId, resolvedWorkspacePath, bootstrapFilesToWrite, agentDir);
+  }
 
   await upsertWorkspaceProjectAgentMetadata(resolvedWorkspacePath, {
     id: agentId,

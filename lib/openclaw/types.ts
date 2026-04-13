@@ -29,6 +29,13 @@ export interface AgentHeartbeatInput {
   every?: string;
 }
 
+export type AgentBootstrapFilePath = "IDENTITY.md" | "SOUL.md" | "TOOLS.md" | "HEARTBEAT.md";
+
+export interface AgentBootstrapFileInput {
+  path: AgentBootstrapFilePath;
+  content: string;
+}
+
 export interface ModelAuthProviderStatus {
   provider: string;
   connected: boolean;
@@ -1170,6 +1177,7 @@ export interface AgentCreateInput {
   avatar?: string;
   policy?: AgentPolicy;
   heartbeat?: AgentHeartbeatInput;
+  bootstrapFiles?: AgentBootstrapFileInput[];
   channelIds?: string[];
 }
 
