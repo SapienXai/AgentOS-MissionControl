@@ -80,6 +80,7 @@ export function CreateAgentDialog({
   const isLight = surfaceTheme === "light";
   const initialWorkspaceId = defaultWorkspaceId ?? snapshot.workspaces[0]?.id ?? "";
   const [isMounted, setIsMounted] = useState(false);
+  const [showAdvancedIdentity, setShowAdvancedIdentity] = useState(false);
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<WizardStage>("start");
   const [startPoint, setStartPoint] = useState<StartPoint | null>(null);
@@ -229,7 +230,6 @@ export function CreateAgentDialog({
     nextDraft.modelId = draft.modelId;
 
     setStartPoint(nextStartPoint);
-    setStage("start");
     setSelectedPreset("worker");
     setSelectedImportAgentId(null);
     setImportSearch("");
@@ -237,6 +237,13 @@ export function CreateAgentDialog({
     setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
     setActiveBootstrapFilePath(null);
     setBootstrapFileEditorValue("");
+
+    // Empty için ara adım yok — direkt details'e geç
+    if (nextStartPoint === "empty") {
+      setStage("details");
+    } else {
+      setStage("start");
+    }
   };
 
   const handlePresetSelect = (preset: AgentPreset) => {
@@ -308,6 +315,25 @@ export function CreateAgentDialog({
 
     if (stage === "preset" || stage === "import") {
       setStage("start");
+    }
+  };
+
+  const handleStepClick = (index: number) => {
+    const activeIndex = getWizardActiveStepIndex(startPoint, stage);
+
+    if (index >= activeIndex) {
+      return;
+    }
+
+    const labels = getWizardStepLabels(startPoint);
+    const label = labels[index];
+
+    if (label === "Start") {
+      setStage("start");
+    } else if (label === "Preset") {
+      setStage("preset");
+    } else if (label === "Import") {
+      setStage("import");
     }
   };
 
@@ -566,7 +592,7 @@ export function CreateAgentDialog({
                     Create New Agent
                   </DialogTitle>
                   <div className="flex items-center gap-2">
-                    <WizardStepper labels={stepLabels} activeIndex={activeStepIndex} surfaceTheme={surfaceTheme} />
+                    <WizardStepper labels={stepLabels} activeIndex={activeStepIndex} surfaceTheme={surfaceTheme} onStepClick={handleStepClick} />
                     <DialogClose asChild>
                       <button
                         type="button"
@@ -919,84 +945,88 @@ export function CreateAgentDialog({
                         </select>
                       </FormField>
 
-                      <div
-                        className={cn(
-                          "rounded-[18px] border p-3 text-[11px] leading-5",
-                          isLight
-                            ? "border-[#e2d5c9] bg-[#faf6f1] text-[#7b6657]"
-                            : "border-white/10 bg-white/[0.03] text-slate-400"
-                        )}
-                      >
-                        <p>OpenClaw generates the id automatically.</p>
-                        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-                          <span className={cn("uppercase tracking-[0.18em]", isLight ? "text-[#8b7462]" : "text-slate-500")}>
-                            Current id
-                          </span>
-                          <code
-                            className={cn(
-                              "max-w-full break-all rounded-full border px-2.5 py-1",
-                              isLight
-                                ? "border-[#dccfc3] bg-white text-[#4d392e]"
-                                : "border-white/10 bg-white/5 text-slate-200"
-                            )}
-                          >
-                            {generatedAgentId || "unavailable"}
-                          </code>
-                        </div>
-                      </div>
+                      <p className={cn("text-[10px] leading-4", isLight ? "text-[#9a8070]" : "text-slate-500")}>
+                        OpenClaw generates the agent id automatically. Review it in the Summary panel.
+                      </p>
                     </div>
                   </PanelCard>
 
                   <PanelCard
                     title="Visual identity"
-                    description="Emoji, theme, avatar."
+                    description="Emoji and display customization."
                     surfaceTheme={surfaceTheme}
                   >
-                    <div className="grid gap-3.5 sm:grid-cols-3">
+                    <div className="space-y-3.5">
                       <FormField label="Emoji" htmlFor="create-agent-emoji" surfaceTheme={surfaceTheme}>
-                        <Input
-                          id="create-agent-emoji"
-                          value={draft.emoji}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              emoji: event.target.value
-                            }))
-                          }
-                          placeholder={currentPresetMeta.defaultEmoji}
-                          className={getCreateAgentControlClassName(surfaceTheme)}
-                        />
+                        <div className="relative">
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 select-none text-base leading-none"
+                          >
+                            {draft.emoji || currentPresetMeta.defaultEmoji}
+                          </span>
+                          <Input
+                            id="create-agent-emoji"
+                            value={draft.emoji}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                emoji: event.target.value
+                              }))
+                            }
+                            placeholder={currentPresetMeta.defaultEmoji}
+                            className={cn(getCreateAgentControlClassName(surfaceTheme), "pl-9")}
+                          />
+                        </div>
                       </FormField>
 
-                      <FormField label="Theme" htmlFor="create-agent-theme" surfaceTheme={surfaceTheme}>
-                        <Input
-                          id="create-agent-theme"
-                          value={draft.theme}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              theme: event.target.value
-                            }))
-                          }
-                          placeholder={currentPresetMeta.defaultTheme}
-                          className={getCreateAgentControlClassName(surfaceTheme)}
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvancedIdentity((v) => !v)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] transition-colors",
+                          isLight ? "text-[#8b7462] hover:text-[#5d4331]" : "text-slate-500 hover:text-slate-300"
+                        )}
+                      >
+                        <ChevronRight
+                          className={cn("h-3 w-3 transition-transform duration-200", showAdvancedIdentity && "rotate-90")}
                         />
-                      </FormField>
+                        {showAdvancedIdentity ? "Hide" : "Show"} theme &amp; avatar
+                      </button>
 
-                      <FormField label="Avatar URL" htmlFor="create-agent-avatar" surfaceTheme={surfaceTheme}>
-                        <Input
-                          id="create-agent-avatar"
-                          value={draft.avatar}
-                          onChange={(event) =>
-                            setDraft((current) => ({
-                              ...current,
-                              avatar: event.target.value
-                            }))
-                          }
-                          placeholder="https://example.com/avatar.png"
-                          className={getCreateAgentControlClassName(surfaceTheme)}
-                        />
-                      </FormField>
+                      {showAdvancedIdentity ? (
+                        <div className="grid gap-3.5 sm:grid-cols-2">
+                          <FormField label="Theme" htmlFor="create-agent-theme" surfaceTheme={surfaceTheme}>
+                            <Input
+                              id="create-agent-theme"
+                              value={draft.theme}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  theme: event.target.value
+                                }))
+                              }
+                              placeholder={currentPresetMeta.defaultTheme}
+                              className={getCreateAgentControlClassName(surfaceTheme)}
+                            />
+                          </FormField>
+
+                          <FormField label="Avatar URL" htmlFor="create-agent-avatar" surfaceTheme={surfaceTheme}>
+                            <Input
+                              id="create-agent-avatar"
+                              value={draft.avatar}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  avatar: event.target.value
+                                }))
+                              }
+                              placeholder="https://example.com/avatar.png"
+                              className={getCreateAgentControlClassName(surfaceTheme)}
+                            />
+                          </FormField>
+                        </div>
+                      ) : null}
                     </div>
                   </PanelCard>
 
@@ -1027,18 +1057,11 @@ export function CreateAgentDialog({
                             Enable only for periodic watch or triage agents.
                           </p>
                         </div>
-                        <Button
+                        <button
                           type="button"
-                          variant={draft.heartbeat.enabled ? "default" : "secondary"}
-                          size="sm"
-                          className={cn(
-                            "h-8 rounded-full px-3 text-[10px]",
-                            isLight
-                              ? draft.heartbeat.enabled
-                                ? "border-[#c89e73]/35 bg-[#f5e7d8] text-[#6a4a34] hover:bg-[#f1dfcb]"
-                                : "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]"
-                              : ""
-                          )}
+                          role="switch"
+                          aria-checked={draft.heartbeat.enabled}
+                          aria-label="Toggle heartbeat"
                           onClick={() =>
                             setDraft((current) => ({
                               ...current,
@@ -1049,11 +1072,26 @@ export function CreateAgentDialog({
                                     enabled: true,
                                     every: current.heartbeat.every || defaultHeartbeatForPreset(current.policy.preset).every
                                   }
-                              }))
+                            }))
                           }
+                          className={cn(
+                            "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2",
+                            isLight
+                              ? draft.heartbeat.enabled
+                                ? "bg-[#c89e73] focus-visible:ring-[#c89e73]/40"
+                                : "bg-[#ddd0c6] focus-visible:ring-[#c89e73]/40"
+                              : draft.heartbeat.enabled
+                                ? "bg-cyan-400 focus-visible:ring-cyan-300/40"
+                                : "bg-white/20 focus-visible:ring-cyan-300/40"
+                          )}
                         >
-                          {draft.heartbeat.enabled ? "On" : "Off"}
-                        </Button>
+                          <span
+                            className={cn(
+                              "pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-md ring-0 transition-transform duration-200",
+                              draft.heartbeat.enabled ? "translate-x-5" : "translate-x-0"
+                            )}
+                          />
+                        </button>
                       </div>
 
                       {draft.heartbeat.enabled ? (
@@ -1437,11 +1475,13 @@ function getCreateAgentControlClassName(surfaceTheme: SurfaceTheme) {
 function WizardStepper({
   labels,
   activeIndex,
-  surfaceTheme = "dark"
+  surfaceTheme = "dark",
+  onStepClick
 }: {
   labels: string[];
   activeIndex: number;
   surfaceTheme?: SurfaceTheme;
+  onStepClick?: (index: number) => void;
 }) {
   const isLight = surfaceTheme === "light";
 
@@ -1450,25 +1490,10 @@ function WizardStepper({
       {labels.map((label, index) => {
         const isActive = index === activeIndex;
         const isComplete = index < activeIndex;
+        const isClickable = isComplete && Boolean(onStepClick);
 
-        return (
-          <div
-            key={`${label}-${index}`}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] transition-colors",
-              isActive
-                ? isLight
-                  ? "border-[#c89e73]/35 bg-[#f8efe4] text-[#5d4331]"
-                  : "border-cyan-300/30 bg-cyan-400/10 text-cyan-50"
-                : isComplete
-                  ? isLight
-                    ? "border-[#dccfc3] bg-white text-[#7e6757]"
-                    : "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"
-                  : isLight
-                    ? "border-[#e6dbd0] bg-white/80 text-[#8b7563]"
-                    : "border-white/10 bg-white/[0.04] text-slate-400"
-            )}
-          >
+        const inner = (
+          <>
             <span
               className={cn(
                 "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-medium",
@@ -1488,6 +1513,37 @@ function WizardStepper({
               {index + 1}
             </span>
             <span>{label}</span>
+          </>
+        );
+
+        const sharedClassName = cn(
+          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] transition-colors",
+          isActive
+            ? isLight
+              ? "border-[#c89e73]/35 bg-[#f8efe4] text-[#5d4331]"
+              : "border-cyan-300/30 bg-cyan-400/10 text-cyan-50"
+            : isComplete
+              ? isLight
+                ? "border-[#dccfc3] bg-white text-[#7e6757]"
+                : "border-emerald-300/20 bg-emerald-400/10 text-emerald-50"
+              : isLight
+                ? "border-[#e6dbd0] bg-white/80 text-[#8b7563]"
+                : "border-white/10 bg-white/[0.04] text-slate-400",
+          isClickable && (isLight ? "cursor-pointer hover:border-[#c89e73]/50 hover:bg-[#faf3ea]" : "cursor-pointer hover:border-emerald-300/30 hover:bg-emerald-400/15")
+        );
+
+        return isClickable ? (
+          <button
+            key={`${label}-${index}`}
+            type="button"
+            onClick={() => onStepClick?.(index)}
+            className={sharedClassName}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div key={`${label}-${index}`} className={sharedClassName}>
+            {inner}
           </div>
         );
       })}

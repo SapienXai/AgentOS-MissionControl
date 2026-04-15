@@ -164,6 +164,8 @@ export function AgentPolicySelect<T extends string>({
 }) {
   const isLight = surfaceTheme === "light";
 
+  const selectedOption = options.find((option) => option.value === value);
+
   return (
     <FormField label={label} htmlFor={htmlFor} surfaceTheme={surfaceTheme}>
       <select
@@ -184,6 +186,11 @@ export function AgentPolicySelect<T extends string>({
           </option>
         ))}
       </select>
+      {selectedOption?.description ? (
+        <p className={cn("mt-1 text-[10px] leading-[1.4]", isLight ? "text-[#9a8070]" : "text-slate-500")}>
+          {selectedOption.description}
+        </p>
+      ) : null}
     </FormField>
   );
 }
