@@ -96,6 +96,9 @@ export function CreateAgentDialog({
   );
   const [activeBootstrapFilePath, setActiveBootstrapFilePath] = useState<AgentBootstrapFilePath | null>(null);
   const [bootstrapFileEditorValue, setBootstrapFileEditorValue] = useState("");
+  const [bootstrapFileEditorInitialValue, setBootstrapFileEditorInitialValue] = useState("");
+  const [bootstrapFileDiscardConfirm, setBootstrapFileDiscardConfirm] = useState(false);
+  const [bootstrapFileResetConfirm, setBootstrapFileResetConfirm] = useState(false);
 
   const selectedWorkspace = snapshot.workspaces.find((workspace) => workspace.id === draft.workspaceId) ?? null;
   const currentPresetMeta = getAgentPresetMeta(draft.policy.preset);
@@ -212,6 +215,9 @@ export function CreateAgentDialog({
     setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
     setActiveBootstrapFilePath(null);
     setBootstrapFileEditorValue("");
+    setBootstrapFileEditorInitialValue("");
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
     setIsSaving(false);
     isSubmittingRef.current = false;
   };
@@ -237,6 +243,9 @@ export function CreateAgentDialog({
     setBootstrapFiles(buildAgentBootstrapFileDraftsForDraft(nextDraft));
     setActiveBootstrapFilePath(null);
     setBootstrapFileEditorValue("");
+    setBootstrapFileEditorInitialValue("");
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
 
     // Empty için ara adım yok — direkt details'e geç
     if (nextStartPoint === "empty") {
@@ -419,6 +428,9 @@ export function CreateAgentDialog({
 
     setActiveBootstrapFilePath(path);
     setBootstrapFileEditorValue(file.content);
+    setBootstrapFileEditorInitialValue(file.content);
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
   };
 
   const handleAddBootstrapFile = (kind: AgentBootstrapFileKind) => {
@@ -431,6 +443,9 @@ export function CreateAgentDialog({
     setBootstrapFiles((current) => sortBootstrapFiles([...current, template]));
     setActiveBootstrapFilePath(template.path);
     setBootstrapFileEditorValue(template.content);
+    setBootstrapFileEditorInitialValue(template.content);
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
   };
 
   const handleRemoveBootstrapFile = (path: AgentBootstrapFilePath) => {
@@ -448,6 +463,7 @@ export function CreateAgentDialog({
     }
 
     const nextContent = bootstrapFileEditorValue;
+    const manuallyEdited = nextContent !== activeBootstrapFile.baseContent;
 
     setBootstrapFiles((current) =>
       sortBootstrapFiles(
@@ -455,7 +471,8 @@ export function CreateAgentDialog({
           entry.path === activeBootstrapFile.path
             ? {
                 ...entry,
-                content: nextContent
+                content: nextContent,
+                manuallyEdited
               }
             : entry
         )
@@ -476,6 +493,9 @@ export function CreateAgentDialog({
 
     setActiveBootstrapFilePath(null);
     setBootstrapFileEditorValue("");
+    setBootstrapFileEditorInitialValue("");
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
   };
 
   const handleResetBootstrapFile = () => {
@@ -483,12 +503,36 @@ export function CreateAgentDialog({
       return;
     }
 
+    setBootstrapFileResetConfirm(true);
+  };
+
+  const handleConfirmResetBootstrapFile = () => {
+    if (!activeBootstrapFile) {
+      return;
+    }
+
     setBootstrapFileEditorValue(activeBootstrapFile.baseContent);
+    setBootstrapFileEditorInitialValue(activeBootstrapFile.baseContent);
+    setBootstrapFileResetConfirm(false);
   };
 
   const handleCloseBootstrapFile = () => {
+    if (bootstrapFileEditorValue !== bootstrapFileEditorInitialValue) {
+      setBootstrapFileDiscardConfirm(true);
+      return;
+    }
+
     setActiveBootstrapFilePath(null);
     setBootstrapFileEditorValue("");
+    setBootstrapFileEditorInitialValue("");
+  };
+
+  const handleConfirmDiscardBootstrapFile = () => {
+    setActiveBootstrapFilePath(null);
+    setBootstrapFileEditorValue("");
+    setBootstrapFileEditorInitialValue("");
+    setBootstrapFileDiscardConfirm(false);
+    setBootstrapFileResetConfirm(false);
   };
 
   if (!isMounted) {
@@ -1337,9 +1381,15 @@ export function CreateAgentDialog({
             file={activeBootstrapFile}
             value={bootstrapFileEditorValue}
             surfaceTheme={surfaceTheme}
+            discardConfirm={bootstrapFileDiscardConfirm}
+            resetConfirm={bootstrapFileResetConfirm}
             onChange={setBootstrapFileEditorValue}
             onClose={handleCloseBootstrapFile}
             onReset={handleResetBootstrapFile}
+            onConfirmReset={handleConfirmResetBootstrapFile}
+            onCancelReset={() => setBootstrapFileResetConfirm(false)}
+            onConfirmDiscard={handleConfirmDiscardBootstrapFile}
+            onCancelDiscard={() => setBootstrapFileDiscardConfirm(false)}
             onRemove={handleRemoveBootstrapFile}
             onSave={handleSaveBootstrapFile}
           />
@@ -1956,18 +2006,30 @@ function AgentBootstrapFileEditorDrawer({
   file,
   value,
   surfaceTheme = "dark",
+  discardConfirm,
+  resetConfirm,
   onChange,
   onClose,
   onReset,
+  onConfirmReset,
+  onCancelReset,
+  onConfirmDiscard,
+  onCancelDiscard,
   onRemove,
   onSave
 }: {
   file: AgentBootstrapFileDraft;
   value: string;
   surfaceTheme?: SurfaceTheme;
+  discardConfirm: boolean;
+  resetConfirm: boolean;
   onChange: (value: string) => void;
   onClose: () => void;
   onReset: () => void;
+  onConfirmReset: () => void;
+  onCancelReset: () => void;
+  onConfirmDiscard: () => void;
+  onCancelDiscard: () => void;
   onRemove: (path: AgentBootstrapFilePath) => void;
   onSave: () => void;
 }) {
@@ -2124,45 +2186,93 @@ function AgentBootstrapFileEditorDrawer({
             isLight ? "border-[#e5d8cb] bg-[#faf6f1]" : "border-white/10 bg-transparent"
           )}
         >
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
-              Changes stay local until you apply them.
-            </p>
-
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onClose}
-                className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-              >
-                Cancel
-              </Button>
-
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onReset}
-                disabled={!isDirty}
-                className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
-              >
-                Reset
-              </Button>
-
-              <Button
-                type="button"
-                onClick={onSave}
-                className={
-                  isLight
-                    ? "bg-[#c89e73] text-white shadow-[0_10px_26px_rgba(161,125,101,0.22)] hover:bg-[#b47f53]"
-                    : undefined
-                }
-              >
-                <PencilLine className="mr-2 h-4 w-4" />
-                Save file
-              </Button>
+          {discardConfirm ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
+                Discard unsaved changes?
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onCancelDiscard}
+                  className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
+                >
+                  Keep editing
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={onConfirmDiscard}
+                >
+                  Discard
+                </Button>
+              </div>
             </div>
-          </div>
+          ) : resetConfirm ? (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
+                Reset to default content?
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onCancelReset}
+                  className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={onConfirmReset}
+                >
+                  Reset
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className={cn("text-[11px] leading-4", isLight ? "text-[#7f6958]" : "text-slate-400")}>
+                Changes stay local until you apply them.
+              </p>
+
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onClose}
+                  className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onReset}
+                  disabled={!isDirty}
+                  className={isLight ? "border-[#d8c7b8] bg-white text-[#4d392f] hover:bg-[#f5efe9]" : undefined}
+                >
+                  Reset
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={onSave}
+                  className={
+                    isLight
+                      ? "bg-[#c89e73] text-white shadow-[0_10px_26px_rgba(161,125,101,0.22)] hover:bg-[#b47f53]"
+                      : undefined
+                  }
+                >
+                  <PencilLine className="mr-2 h-4 w-4" />
+                  Save file
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

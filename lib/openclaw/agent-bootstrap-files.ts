@@ -12,6 +12,7 @@ export interface AgentBootstrapFileDraft {
   removable: boolean;
   content: string;
   baseContent: string;
+  manuallyEdited: boolean;
 }
 
 export interface AgentIdentityMarkdownFields {
@@ -111,7 +112,8 @@ export function buildAgentBootstrapFileDrafts(input: {
       required: true,
       removable: false,
       content: identityContent,
-      baseContent: identityContent
+      baseContent: identityContent,
+      manuallyEdited: false
     },
     {
       kind: "soul" as const,
@@ -121,7 +123,8 @@ export function buildAgentBootstrapFileDrafts(input: {
       required: false,
       removable: true,
       content: soulContent,
-      baseContent: soulContent
+      baseContent: soulContent,
+      manuallyEdited: false
     },
     {
       kind: "tools" as const,
@@ -131,7 +134,8 @@ export function buildAgentBootstrapFileDrafts(input: {
       required: false,
       removable: true,
       content: toolsContent,
-      baseContent: toolsContent
+      baseContent: toolsContent,
+      manuallyEdited: false
     },
     {
       kind: "heartbeat" as const,
@@ -141,7 +145,8 @@ export function buildAgentBootstrapFileDrafts(input: {
       required: false,
       removable: true,
       content: heartbeatContent,
-      baseContent: heartbeatContent
+      baseContent: heartbeatContent,
+      manuallyEdited: false
     }
   ] satisfies AgentBootstrapFileDraft[];
 }
@@ -169,7 +174,11 @@ export function rebaseAgentBootstrapFileDrafts(
         required: next.required,
         removable: next.removable,
         baseContent: next.baseContent,
-        content: entry.content === entry.baseContent ? next.baseContent : entry.content
+        content: entry.manuallyEdited
+          ? entry.content
+          : entry.content === entry.baseContent
+            ? next.baseContent
+            : entry.content
       };
     })
     .sort((left, right) => (orderByPath.get(left.path) ?? Number.MAX_SAFE_INTEGER) - (orderByPath.get(right.path) ?? Number.MAX_SAFE_INTEGER));
