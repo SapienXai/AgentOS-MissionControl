@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runOpenClawJson } from "@/lib/openclaw/cli";
+import { parseDiscordRouteId, type DiscordRouteId } from "@/lib/openclaw/domains/discord-route";
 import { readOpenClawSurfaceAccounts } from "@/lib/openclaw/surface-adapters";
 import { getSurfaceKind } from "@/lib/openclaw/surface-catalog";
+import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import { normalizeChannelRegistry, parseWorkspaceChannelSummary } from "@/lib/openclaw/domains/workspace-manifest";
 import type {
   ChannelAccountRecord,
@@ -13,6 +15,8 @@ import type {
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelSummary
 } from "@/lib/openclaw/types";
+
+export { parseDiscordRouteId };
 
 const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
@@ -41,13 +45,6 @@ type DiscordGuildConfig = Record<
     name?: string;
   }
 >;
-
-type DiscordRouteId = {
-  kind: "channel" | "thread" | "role";
-  guildId: string | null;
-  targetId: string;
-  parentId?: string | null;
-};
 
 type DiscordRouteContext = {
   accountId: string | null;
@@ -195,30 +192,32 @@ export function mergeMissionControlSurfaceAccounts(accounts: ChannelAccountRecor
 export async function discoverSurfaceRoutes(input: {
   provider: MissionControlSurfaceProvider;
   accountId?: string | null;
-}) {
+}, timings?: TimingCollector) {
   switch (input.provider) {
     case "telegram":
-      return discoverTelegramGroups();
+      return discoverTelegramGroups(timings);
     case "discord":
-      return discoverDiscordRoutes(input.accountId);
+      return discoverDiscordRoutes(input.accountId, timings);
     default:
       return [] as DiscoveredSurfaceRoute[];
   }
 }
 
-export async function discoverTelegramGroups() {
-  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
-    "channels",
-    "logs",
-    "--channel",
-    "telegram",
-    "--json",
-    "--lines",
-    "200"
-  ]).catch(() => null);
+export async function discoverTelegramGroups(timings?: TimingCollector) {
+  const payload = await measureTiming(timings, "telegram-discovery.read-channel-logs", () =>
+    runOpenClawJson<OpenClawChannelLogsPayload>([
+      "channels",
+      "logs",
+      "--channel",
+      "telegram",
+      "--json",
+      "--lines",
+      "200"
+    ]).catch(() => null)
+  );
 
   if (!payload?.lines?.length) {
-    return await readTelegramAllowlistGroups();
+    return await readTelegramAllowlistGroups(timings);
   }
 
   const discovered = new Map<string, DiscoveredSurfaceRoute>();
@@ -266,7 +265,7 @@ export async function discoverTelegramGroups() {
     }
   }
 
-  for (const group of await readTelegramAllowlistGroups()) {
+  for (const group of await readTelegramAllowlistGroups(timings)) {
     if (!discovered.has(group.routeId)) {
       discovered.set(group.routeId, group);
     }
@@ -279,16 +278,18 @@ export async function discoverTelegramGroups() {
   });
 }
 
-export async function discoverDiscordRoutes(accountId?: string | null) {
-  const payload = await runOpenClawJson<OpenClawChannelLogsPayload>([
-    "channels",
-    "logs",
-    "--channel",
-    "discord",
-    "--json",
-    "--lines",
-    "300"
-  ]).catch(() => null);
+export async function discoverDiscordRoutes(accountId?: string | null, timings?: TimingCollector) {
+  const payload = await measureTiming(timings, "discord-discovery.read-channel-logs", () =>
+    runOpenClawJson<OpenClawChannelLogsPayload>([
+      "channels",
+      "logs",
+      "--channel",
+      "discord",
+      "--json",
+      "--lines",
+      "300"
+    ]).catch(() => null)
+  );
 
   const discovered = new Map<string, DiscoveredSurfaceRoute>();
 
@@ -309,7 +310,7 @@ export async function discoverDiscordRoutes(accountId?: string | null) {
     });
   };
 
-  for (const route of await readDiscordConfiguredRoutes()) {
+  for (const route of await readDiscordConfiguredRoutes(timings)) {
     rememberRoute(route);
   }
 
@@ -347,14 +348,16 @@ export async function discoverDiscordRoutes(accountId?: string | null) {
   });
 }
 
-async function readTelegramAllowlistGroups() {
+async function readTelegramAllowlistGroups(timings?: TimingCollector) {
   try {
-    const groups = await runOpenClawJson<TelegramAllowlistConfig>([
-      "config",
-      "get",
-      "channels.telegram.groups",
-      "--json"
-    ]);
+    const groups = await measureTiming(timings, "telegram-discovery.read-allowlist-config", () =>
+      runOpenClawJson<TelegramAllowlistConfig>([
+        "config",
+        "get",
+        "channels.telegram.groups",
+        "--json"
+      ])
+    );
 
     return Object.keys(groups ?? {})
       .map((chatId) => ({
@@ -370,14 +373,16 @@ async function readTelegramAllowlistGroups() {
   }
 }
 
-async function readDiscordConfiguredRoutes() {
+async function readDiscordConfiguredRoutes(timings?: TimingCollector) {
   try {
-    const guilds = await runOpenClawJson<DiscordGuildConfig>([
-      "config",
-      "get",
-      "channels.discord.guilds",
-      "--json"
-    ]);
+    const guilds = await measureTiming(timings, "discord-discovery.read-config", () =>
+      runOpenClawJson<DiscordGuildConfig>([
+        "config",
+        "get",
+        "channels.discord.guilds",
+        "--json"
+      ])
+    );
     const routes: DiscoveredSurfaceRoute[] = [];
 
     for (const [guildId, rawGuild] of Object.entries(guilds ?? {})) {
@@ -485,22 +490,6 @@ export function buildManagedDiscordBinding(
       }
     }
   };
-}
-
-export function parseDiscordRouteId(value: string) {
-  const trimmed = value.trim();
-  const [kind, guildIdToken, targetId, parentId] = trimmed.split(":");
-
-  if ((kind !== "channel" && kind !== "thread" && kind !== "role") || !normalizeDiscordId(targetId)) {
-    return null;
-  }
-
-  return {
-    kind,
-    guildId: guildIdToken && guildIdToken !== "_" ? normalizeDiscordId(guildIdToken) : null,
-    targetId: normalizeDiscordId(targetId) as string,
-    parentId: kind === "thread" ? normalizeDiscordId(parentId) : null
-  } satisfies DiscordRouteId;
 }
 
 function dedupeChannelAccounts(accounts: ChannelAccountRecord[]) {

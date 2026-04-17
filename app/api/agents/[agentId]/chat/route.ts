@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import { buildAgentChatPrompt, buildWorkspaceTeamPrompt } from "@/lib/openclaw/agent-chat-prompt";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
+import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import { clearMissionControlCaches, updateAgent } from "@/lib/agentos/control-plane";
 import type { MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
 
@@ -51,13 +55,31 @@ export async function POST(
     }
 
     const input = chatSchema.parse(await request.json());
+    const operatorMessage = input.message.trim();
+    let message = operatorMessage;
+
+    if (!isComposedAgentChatPrompt(operatorMessage)) {
+      const snapshot = await getMissionControlSnapshot({ includeHidden: true });
+      const agent = snapshot.agents.find((entry) => entry.id === agentId) ?? null;
+      const workspaceTeamPrompt = agent ? buildWorkspaceTeamPrompt(snapshot, agent) : null;
+      const workspaceSurfacePrompt = renderWorkspaceSurfaceCoordinationMarkdownForAgent(agentId, snapshot);
+
+      message = buildAgentChatPrompt([], operatorMessage, {
+        agentName: agent ? formatAgentDisplayName(agent) : agentId,
+        agentDir: agent?.agentDir,
+        workspacePath: agent?.workspacePath,
+        workspaceTeamPrompt,
+        workspaceSurfacePrompt
+      });
+    }
+
     const result = await runOpenClawJsonStream<AgentChatCommandPayload>(
       [
         "agent",
         "--agent",
         agentId,
         "--message",
-        input.message.trim(),
+        message,
         "--thinking",
         input.thinking ?? "low",
         "--timeout",
@@ -92,6 +114,15 @@ export async function POST(
       { status: 400 }
     );
   }
+}
+
+function isComposedAgentChatPrompt(value: string) {
+  return (
+    value.includes("Workspace team roster:") ||
+    value.includes("## Telegram coordination") ||
+    value.includes("## Discord coordination") ||
+    value.includes("You are chatting directly with the operator inside AgentOS.")
+  );
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {

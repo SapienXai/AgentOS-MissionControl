@@ -38,8 +38,9 @@ export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
     };
   }, []);
 
-  const refreshSnapshot = async () => {
-    const response = await fetch("/api/snapshot", {
+  const refreshSnapshot = async (options: { force?: boolean } = {}) => {
+    const url = options.force ? "/api/snapshot?force=true" : "/api/snapshot";
+    const response = await fetch(url, {
       cache: "no-store"
     });
     const nextSnapshot = (await response.json()) as ControlPlaneSnapshot;

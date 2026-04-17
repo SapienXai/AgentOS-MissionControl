@@ -29,7 +29,7 @@ export function buildWizardSteps(stage: WizardStage, systemReady: boolean, model
       id: "system",
       order: 1,
       label: "System setup",
-      description: "CLI, gateway, RPC, runtime state",
+      description: "CLI, gateway, RPC",
       state: resolveStepState(systemReady, stage === "system" && !systemReady)
     },
     {
@@ -90,7 +90,7 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
       description: runtimeReady
         ? "RPC and state are ready."
         : liveComplete
-          ? "RPC is online; verify state access."
+          ? "RPC is online; state checks continue in the background."
           : gatewayComplete
             ? "Gateway is up; verify RPC."
             : "Start the gateway and verify RPC.",

@@ -43,7 +43,7 @@ async function readGlobalCatalog(): Promise<GlobalCatalogModel[]> {
     const payload = await runOpenClawJson<OpenClawModelsListPayload>(["models", "list", "--all", "--json"]);
     return normalizeCatalogModels(payload.models);
   } catch {
-    const snapshot = await getMissionControlSnapshot({ force: true });
+    const snapshot = await getMissionControlSnapshot();
     return normalizeSnapshotModels(snapshot);
   }
 }

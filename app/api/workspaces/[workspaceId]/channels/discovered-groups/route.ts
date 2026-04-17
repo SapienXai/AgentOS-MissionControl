@@ -1,35 +1,34 @@
 import { NextResponse } from "next/server";
 
-import { discoverTelegramGroups, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import { discoverTelegramGroups } from "@/lib/agentos/control-plane";
+import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
+  const timings = createTimingCollector("workspace-telegram-discovered-groups");
+
   try {
-    const { workspaceId } = await context.params;
-    let snapshot = await getMissionControlSnapshot();
-    let workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+    await context.params;
 
-    if (!workspace) {
-      snapshot = await getMissionControlSnapshot({ force: true });
-      workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-    }
-
-    if (!workspace) {
-      return NextResponse.json({ error: "Workspace was not found." }, { status: 404 });
-    }
-
-    const groups = (await discoverTelegramGroups()).map((route) => ({
+    const groups = (await measureTiming(timings, "telegram.discovery", () => discoverTelegramGroups(timings))).map((route) => ({
       chatId: route.routeId,
       title: route.title ?? null,
       lastSeen: route.lastSeen
     }));
-    return NextResponse.json({ groups });
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
+
+    return NextResponse.json({ groups, timings: summary });
   } catch (error) {
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to discover Telegram groups."
+        error: error instanceof Error ? error.message : "Unable to discover Telegram groups.",
+        timings: summary
       },
       { status: 400 }
     );

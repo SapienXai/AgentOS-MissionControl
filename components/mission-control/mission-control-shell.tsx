@@ -47,7 +47,7 @@ import {
 import { compactPath } from "@/lib/openclaw/presenters";
 import {
   isOpenClawMissionReady as resolveOpenClawMissionReady,
-  isOpenClawSystemReady as resolveOpenClawSystemReady
+  isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
   AddModelsProviderId,
@@ -238,7 +238,7 @@ export function MissionControlShell({
     (runtime) =>
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
-  const isOpenClawSystemReady = resolveOpenClawSystemReady(snapshot);
+  const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
   const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
   const updateInstallDescriptor = [
     snapshot.diagnostics.updatePackageManager,
@@ -813,13 +813,16 @@ export function MissionControlShell({
   }, [snapshot.models, snapshot.diagnostics.modelReadiness.recommendedModelId]);
 
   useEffect(() => {
-    if (!isOpenClawSystemReady) {
-      setOnboardingStage("system");
+    if (onboardingRunState === "success" || isOpenClawOnboardingSystemReady) {
+      setOnboardingStage("models");
       return;
     }
 
-    setOnboardingStage("models");
-  }, [isOpenClawSystemReady]);
+    if (!isOpenClawOnboardingSystemReady) {
+      setOnboardingStage("system");
+      return;
+    }
+  }, [isOpenClawOnboardingSystemReady, onboardingRunState]);
 
   useEffect(() => {
     if (isOpenClawReady) {
@@ -1427,7 +1430,7 @@ export function MissionControlShell({
     await runModelAutoOnboarding();
   };
 
-  const openSetupWizard = (stage: OnboardingWizardStage = isOpenClawSystemReady ? "models" : "system") => {
+  const openSetupWizard = (stage: OnboardingWizardStage = isOpenClawOnboardingSystemReady ? "models" : "system") => {
     setIsSettingsOpen(false);
     setOnboardingStage(stage);
     setIsOnboardingDismissed(false);
@@ -1495,7 +1498,7 @@ export function MissionControlShell({
     setIsCheckingForUpdates(true);
 
     try {
-      const nextSnapshot = await refreshSnapshot();
+      const nextSnapshot = await refreshSnapshot({ force: true });
       const checkedAt = Date.now();
       const updateInfo = nextSnapshot.diagnostics.updateInfo?.trim();
 
@@ -2075,7 +2078,7 @@ export function MissionControlShell({
               manualCommand: modelOnboardingManualCommand,
               docsUrl: modelOnboardingDocsUrl,
               discoveredModels,
-              systemReady: isOpenClawSystemReady
+              systemReady: isOpenClawOnboardingSystemReady
             }}
             onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
             onSelectWorkspace={(workspaceId) => {
@@ -2088,7 +2091,7 @@ export function MissionControlShell({
             onRunModelDiscover={runModelDiscover}
             onRunModelSetDefault={runModelSetDefault}
             onConnectModelProvider={runModelProviderLogin}
-            onOpenModelSetup={() => openSetupWizard(isOpenClawSystemReady ? "models" : "system")}
+            onOpenModelSetup={() => openSetupWizard(isOpenClawOnboardingSystemReady ? "models" : "system")}
             onOpenAddModels={openAddModelsDialog}
             onEditWorkspace={openWorkspaceWizardForEdit}
             onSnapshotChange={setSnapshot}

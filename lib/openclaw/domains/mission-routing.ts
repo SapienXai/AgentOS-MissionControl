@@ -62,7 +62,8 @@ export function composeMissionWithOutputRouting(
   mission: string,
   outputPlan: Pick<MissionOutputPlan, "relativeOutputDir" | "notesDirRelative">,
   policy?: AgentPolicy,
-  setupAgentId?: string | null
+  setupAgentId?: string | null,
+  workspaceSurfacePrompt?: string | null
 ) {
   const resolvedPolicy = policy ?? resolveAgentPolicy(DEFAULT_AGENT_PRESET);
 
@@ -77,6 +78,7 @@ export function composeMissionWithOutputRouting(
     "- Only update shared workspace docs when the change is durable and workspace-wide; task-specific docs should stay inside this run folder.",
     "",
     "Agent operating policy:",
-    ...buildAgentPolicyPromptLines(resolvedPolicy, setupAgentId)
+    ...buildAgentPolicyPromptLines(resolvedPolicy, setupAgentId),
+    ...(workspaceSurfacePrompt ? ["", workspaceSurfacePrompt] : [])
   ].join("\n");
 }

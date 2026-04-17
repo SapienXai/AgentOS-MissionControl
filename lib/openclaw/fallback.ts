@@ -9,6 +9,73 @@ import {
 } from "@/lib/openclaw/workspace-docs";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
+export function createLoadingSnapshot(reason: string): MissionControlSnapshot {
+  const now = Date.now();
+  const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
+  const stateRoot = path.join(os.homedir(), ".openclaw");
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    mode: "fallback",
+    diagnostics: {
+      installed: true,
+      loaded: true,
+      rpcOk: false,
+      health: "degraded",
+      workspaceRoot,
+      configuredWorkspaceRoot: null,
+      dashboardUrl: "http://127.0.0.1:18789/",
+      gatewayUrl: "ws://127.0.0.1:18789",
+      configuredGatewayUrl: null,
+      modelReadiness: {
+        ready: false,
+        defaultModel: null,
+        resolvedDefaultModel: null,
+        defaultModelReady: false,
+        recommendedModelId: null,
+        preferredLoginProvider: null,
+        totalModelCount: 0,
+        availableModelCount: 0,
+        localModelCount: 0,
+        remoteModelCount: 0,
+        missingModelCount: 0,
+        authProviders: [],
+        issues: [reason]
+      },
+      runtime: {
+        stateRoot,
+        stateWritable: false,
+        sessionStoreWritable: false,
+        sessionStores: [],
+        smokeTest: {
+          status: "not-run",
+          checkedAt: null,
+          agentId: null,
+          runId: null,
+          summary: null,
+          error: null
+        },
+        issues: [reason]
+      },
+      securityWarnings: [],
+      issues: [reason]
+    },
+    presence: [],
+    channelAccounts: [],
+    workspaces: [],
+    agents: [],
+    models: [],
+    runtimes: [],
+    tasks: [],
+    relationships: [],
+    missionPresets: [],
+    channelRegistry: {
+      version: 1,
+      channels: []
+    }
+  };
+}
+
 export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
   const now = Date.now();
   const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");

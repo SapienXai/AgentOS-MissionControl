@@ -11,6 +11,7 @@ import {
 import { serializeHeartbeatConfig } from "@/lib/openclaw/agent-heartbeat";
 import { runOpenClaw } from "@/lib/openclaw/cli";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import {
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
@@ -221,18 +222,27 @@ export async function ensureAgentPolicySkill(params: {
   setupAgentId?: string | null;
   snapshot?: MissionControlSnapshot;
   channelRegistry?: ChannelRegistry;
+  timings?: TimingCollector;
 }) {
   const skillId = buildAgentPolicySkillId(params.agentId);
-  await ensureTelegramDelegationHelper(params.workspacePath);
-  const team = await buildWorkspaceTeamContext(params.workspacePath, params.agentId, params.snapshot ?? null);
-  const coordination = buildTelegramCoordinationContext(
-    params.agentId,
-    params.snapshot ?? null,
-    params.channelRegistry ?? params.snapshot?.channelRegistry ?? null
+  await measureTiming(params.timings, "agent-policy.ensure-telegram-helper", () =>
+    ensureTelegramDelegationHelper(params.workspacePath)
   );
-  await writeTextFileEnsured(
-    path.join(params.workspacePath, "skills", skillId, "SKILL.md"),
-    `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, team, coordination)}\n`
+  const team = await measureTiming(params.timings, "agent-policy.build-team-context", () =>
+    buildWorkspaceTeamContext(params.workspacePath, params.agentId, params.snapshot ?? null)
+  );
+  const coordination = await measureTiming(params.timings, "agent-policy.build-telegram-coordination", () =>
+    buildTelegramCoordinationContext(
+      params.agentId,
+      params.snapshot ?? null,
+      params.channelRegistry ?? params.snapshot?.channelRegistry ?? null
+    )
+  );
+  await measureTiming(params.timings, "agent-policy.write-skill", () =>
+    writeTextFileEnsured(
+      path.join(params.workspacePath, "skills", skillId, "SKILL.md"),
+      `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, team, coordination)}\n`
+    )
   );
   return skillId;
 }

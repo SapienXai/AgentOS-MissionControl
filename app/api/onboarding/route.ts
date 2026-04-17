@@ -7,7 +7,10 @@ import { z } from "zod";
 
 import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
-import { ensureOpenClawRuntimeStateAccess, getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import {
+  getMissionControlSnapshot,
+  touchOpenClawRuntimeStateAccess
+} from "@/lib/agentos/control-plane";
 import type {
   MissionControlSnapshot,
   OpenClawOnboardingPhase,
@@ -23,20 +26,15 @@ const onboardingSchema = z.object({
 
 const docsUrl = "https://docs.openclaw.ai/cli/install";
 const commandTimeoutMs = 10 * 60 * 1000;
-const readyTimeoutMs = 35 * 1000;
-const readyPollIntervalMs = 700;
+const gatewayStatusTimeoutMs = 8_000;
+const readyTimeoutMs = 12_000;
+const readyPollIntervalMs = 500;
 type CommandResult = {
   code: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
   errorMessage?: string;
-};
-
-type InstallSpec = {
-  command: string;
-  args: string[];
-  manualCommand: string;
 };
 
 export async function POST(request: Request) {
@@ -55,23 +53,50 @@ export async function POST(request: Request) {
   const writer = stream.writable.getWriter();
   const encoder = new TextEncoder();
   let writeChain = Promise.resolve();
+  let streamClosed = false;
 
   const send = (event: OpenClawOnboardingStreamEvent) => {
+    if (streamClosed) {
+      return Promise.resolve();
+    }
+
     writeChain = writeChain
-      .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+      .then(() => {
+        if (streamClosed) {
+          return;
+        }
+
+        return writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+      })
       .catch(() => {});
 
     return writeChain;
   };
 
   const closeWriter = async () => {
-    await writeChain;
-    await writer.close();
+    if (streamClosed) {
+      return;
+    }
+
+    streamClosed = true;
+
+    try {
+      await writeChain;
+    } catch {
+      // Ignore late stream errors during shutdown.
+    }
+
+    try {
+      await writer.close();
+    } catch {
+      // Ignore duplicate close attempts or a closed writer.
+    }
   };
 
   void (async () => {
     let aggregatedStdout = "";
     let aggregatedStderr = "";
+    let snapshot: MissionControlSnapshot | null = null;
 
     const appendOutput = (result: CommandResult) => {
       aggregatedStdout += result.stdout;
@@ -109,6 +134,11 @@ export async function POST(request: Request) {
       await closeWriter();
     };
 
+    const loadSnapshot = async (): Promise<MissionControlSnapshot> => {
+      snapshot ??= await getMissionControlSnapshot();
+      return snapshot as MissionControlSnapshot;
+    };
+
     try {
       await send({
         type: "status",
@@ -116,213 +146,202 @@ export async function POST(request: Request) {
         message: "Checking local OpenClaw status..."
       });
 
-      let snapshot = await getMissionControlSnapshot({ force: true });
+      let openClawBin: string;
 
-      if (isOpenClawReady(snapshot)) {
+      try {
+        openClawBin = await resolveOpenClawBin();
+      } catch (error) {
+        const currentSnapshot = await loadSnapshot();
+        aggregatedStderr = aggregatedStderr
+          ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "OpenClaw CLI could not be resolved."}`
+          : error instanceof Error
+            ? error.message
+            : "OpenClaw CLI could not be resolved.";
+
+        await fail("detecting", "OpenClaw CLI could not be resolved.", {
+          snapshot: currentSnapshot,
+          docsUrl
+        });
+        return;
+      }
+
+      const gatewayStatus = await readGatewayStatus(openClawBin);
+
+        if (gatewayStatus && (await needsGatewayRegistrationRepair(gatewayStatus))) {
+          await send({
+            type: "status",
+            phase: "installing-gateway",
+            message: "Repairing the gateway registration..."
+          });
+
+          const gatewayInstallResult = await runCommand(
+            openClawBin,
+            ["gateway", "install", "--force", "--json"],
+            send
+          );
+          appendOutput(gatewayInstallResult);
+
+          if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
+            await fail("installing-gateway", "Gateway installation failed.", {
+              exitCode: gatewayInstallResult.code,
+              manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--force", "--json"])
+            });
+            return;
+          }
+      }
+
+      if (gatewayStatus?.rpc?.ok) {
+        void getMissionControlSnapshot().catch(() => {});
+        void touchOpenClawRuntimeStateAccess({ agentId: null }).catch(() => {});
+
         await send({
           type: "done",
           ok: true,
           phase: "ready",
-          message: "OpenClaw system setup is already complete.",
+          message: "OpenClaw gateway is online. Continue to model setup.",
           exitCode: 0,
           stdout: aggregatedStdout,
-          stderr: aggregatedStderr,
-          snapshot
+          stderr: aggregatedStderr
         });
         await closeWriter();
         return;
       }
 
-      if (!snapshot.diagnostics.installed) {
-        const installSpec = resolveInstallSpec();
+        if (!gatewayStatus?.rpc?.ok) {
+          const readySnapshot = await loadSnapshot();
 
-        if (!installSpec) {
-          await fail("installing-cli", "One-click OpenClaw install is not available on this platform.", {
-            snapshot,
-            docsUrl
-          });
-          return;
-        }
-
-        await send({
-          type: "status",
-          phase: "installing-cli",
-          message: "Installing OpenClaw CLI..."
-        });
-
-        const installResult = await runCommand(installSpec.command, installSpec.args, send);
-        appendOutput(installResult);
-
-        if (installResult.errorMessage || installResult.timedOut || installResult.code !== 0) {
-          await fail("installing-cli", "OpenClaw CLI installation failed.", {
-            exitCode: installResult.code,
-            manualCommand: installSpec.manualCommand,
-            docsUrl
-          });
-          return;
-        }
-
-        resetOpenClawBinCache();
-
-        try {
-          await resolveOpenClawBin();
-        } catch (error) {
-          aggregatedStderr = aggregatedStderr
-            ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "OpenClaw binary could not be resolved after install."}`
-            : error instanceof Error
-              ? error.message
-              : "OpenClaw binary could not be resolved after install.";
-
-          await fail("installing-cli", "OpenClaw installed, but AgentOS could not resolve the new CLI yet.", {
-            manualCommand: installSpec.manualCommand,
-            docsUrl
-          });
-          return;
-        }
-
-        snapshot = await getMissionControlSnapshot({ force: true });
-      }
-
-      const openClawBin = await resolveOpenClawBin();
-
-      if (await needsGatewayRegistrationRepair(await readGatewayStatus(openClawBin))) {
-        await send({
-          type: "status",
-          phase: "installing-gateway",
-          message: "Repairing the gateway registration..."
-        });
-
-        const gatewayInstallResult = await runCommand(
-          openClawBin,
-          ["gateway", "install", "--force", "--json"],
-          send
-        );
-        appendOutput(gatewayInstallResult);
-
-        if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
-          await fail("installing-gateway", "Gateway installation failed.", {
-            exitCode: gatewayInstallResult.code,
-            manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--force", "--json"])
-          });
-          return;
-        }
-
-        snapshot = await getMissionControlSnapshot({ force: true });
-      }
-
-      if (!snapshot.diagnostics.rpcOk) {
-        await send({
-          type: "status",
-          phase: "starting-gateway",
-          message: "Starting the local gateway service..."
-        });
-
-        let gatewayStartResult = await runCommand(openClawBin, ["gateway", "start", "--json"], send);
-        appendOutput(gatewayStartResult);
-        const gatewayStartPayload = parseGatewayCommandPayload(gatewayStartResult.stdout);
-        const gatewayReportedNotLoaded = gatewayStartPayload?.result === "not-loaded";
-
-        if (
-          gatewayStartResult.errorMessage ||
-          gatewayStartResult.timedOut ||
-          gatewayStartResult.code !== 0 ||
-          gatewayReportedNotLoaded
-        ) {
-          if (!snapshot.diagnostics.loaded || gatewayReportedNotLoaded) {
+          if (isOpenClawReady(readySnapshot)) {
             await send({
-              type: "status",
-              phase: "installing-gateway",
-              message: "Gateway service is not loaded. Installing it, then retrying start..."
+              type: "done",
+              ok: true,
+              phase: "ready",
+              message: "OpenClaw system setup is already complete.",
+              exitCode: 0,
+              stdout: aggregatedStdout,
+              stderr: aggregatedStderr,
+              snapshot: readySnapshot
             });
-
-            const gatewayInstallResult = await runCommand(
-              openClawBin,
-              ["gateway", "install", "--json"],
-              send
-            );
-            appendOutput(gatewayInstallResult);
-
-            if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
-              await fail("installing-gateway", "Gateway installation failed.", {
-                exitCode: gatewayInstallResult.code,
-                manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--json"])
-              });
-              return;
-            }
-
-            await send({
-              type: "status",
-              phase: "starting-gateway",
-              message: "Starting the local gateway service after installation..."
-            });
-
-            gatewayStartResult = await runCommand(openClawBin, ["gateway", "start", "--json"], send);
-            appendOutput(gatewayStartResult);
-          }
-
-          if (gatewayStartResult.errorMessage || gatewayStartResult.timedOut || gatewayStartResult.code !== 0) {
-            await fail("starting-gateway", "Gateway failed to start.", {
-              exitCode: gatewayStartResult.code,
-              manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "start", "--json"])
-            });
+            await closeWriter();
             return;
           }
         }
 
-        // Re-check right after start; most successful starts become ready immediately.
-        snapshot = await getMissionControlSnapshot({ force: true });
-      }
+        if (!gatewayStatus?.rpc?.ok) {
+          await send({
+            type: "status",
+            phase: "starting-gateway",
+            message: "Starting the local gateway service..."
+          });
 
-      if (!isOpenClawReady(snapshot)) {
-        const repairedGatewayMode = await repairGatewayModeIfNeeded(openClawBin, send, appendOutput);
+          let gatewayStartResult = await runCommand(openClawBin, ["gateway", "start", "--json"], send);
+          appendOutput(gatewayStartResult);
+          const gatewayStartPayload = parseGatewayCommandPayload(gatewayStartResult.stdout);
+          const gatewayReportedNotLoaded = gatewayStartPayload?.result === "not-loaded";
 
-        if (repairedGatewayMode) {
-          snapshot = await getMissionControlSnapshot({ force: true });
-        }
-      }
+          if (
+            gatewayStartResult.errorMessage ||
+            gatewayStartResult.timedOut ||
+            gatewayStartResult.code !== 0 ||
+            gatewayReportedNotLoaded
+          ) {
+            if (!gatewayStatus?.service?.loaded || gatewayReportedNotLoaded) {
+              await send({
+                type: "status",
+                phase: "installing-gateway",
+                message: "Gateway service is not loaded. Installing it, then retrying start..."
+              });
 
-      if (!isOpenClawReady(snapshot)) {
-        await send({
-          type: "status",
-          phase: "verifying",
-          message: "Waiting for AgentOS to detect a live OpenClaw gateway..."
-        });
+              const gatewayInstallResult = await runCommand(
+                openClawBin,
+                ["gateway", "install", "--json"],
+                send
+              );
+              appendOutput(gatewayInstallResult);
 
-        try {
-          snapshot = await waitForReadySnapshot();
-        } catch (error) {
-          const gatewayStatus = await readGatewayStatus(openClawBin);
-          const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatus);
-          aggregatedStderr = aggregatedStderr
-            ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Gateway verification failed."}`
-            : error instanceof Error
-              ? error.message
-              : "Gateway verification failed.";
+              if (gatewayInstallResult.errorMessage || gatewayInstallResult.timedOut || gatewayInstallResult.code !== 0) {
+                await fail("installing-gateway", "Gateway installation failed.", {
+                  exitCode: gatewayInstallResult.code,
+                  manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "install", "--json"])
+                });
+                return;
+              }
 
-          if (gatewayStatus?.rpc?.error) {
-            aggregatedStderr = aggregatedStderr
-              ? `${aggregatedStderr}\n${gatewayStatus.rpc.error}`
-              : gatewayStatus.rpc.error;
+              await send({
+                type: "status",
+                phase: "starting-gateway",
+                message: "Starting the local gateway service after installation..."
+              });
+
+              gatewayStartResult = await runCommand(openClawBin, ["gateway", "start", "--json"], send);
+              appendOutput(gatewayStartResult);
+            }
+
+            if (gatewayStartResult.errorMessage || gatewayStartResult.timedOut || gatewayStartResult.code !== 0) {
+              await fail("starting-gateway", "Gateway failed to start.", {
+                exitCode: gatewayStartResult.code,
+                manualCommand: formatOpenClawCommand(openClawBin, ["gateway", "start", "--json"])
+              });
+              return;
+            }
           }
 
-          await fail(
-            "verifying",
-            gatewayModeBlocked
-              ? "OpenClaw gateway needs local mode enabled before AgentOS can connect."
-              : "OpenClaw did not become ready in time.",
-            {
-              manualCommand: gatewayModeBlocked
-                ? `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--json"])}`
-                : formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
+          snapshot = await loadSnapshot();
+
+          if (!isOpenClawReady(snapshot)) {
+            const repairedGatewayMode = await repairGatewayModeIfNeeded(openClawBin, send, appendOutput);
+
+            if (repairedGatewayMode) {
+              snapshot = await loadSnapshot();
             }
-          );
-          return;
+          }
+
+          if (!isOpenClawReady(snapshot)) {
+            await send({
+              type: "status",
+              phase: "verifying",
+              message: "Waiting for AgentOS to detect a live OpenClaw gateway..."
+            });
+
+            try {
+              snapshot = await waitForReadySnapshot();
+            } catch (error) {
+              const gatewayStatusRetry = await readGatewayStatus(openClawBin);
+              const gatewayModeBlocked = needsGatewayModeLocalRepair(gatewayStatusRetry);
+              aggregatedStderr = aggregatedStderr
+                ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Gateway verification failed."}`
+                : error instanceof Error
+                  ? error.message
+                  : "Gateway verification failed.";
+
+              if (gatewayStatusRetry?.rpc?.error) {
+                aggregatedStderr = aggregatedStderr
+                  ? `${aggregatedStderr}\n${gatewayStatusRetry.rpc.error}`
+                  : gatewayStatusRetry.rpc.error;
+              }
+
+              await fail(
+                "verifying",
+                gatewayModeBlocked
+                  ? "OpenClaw gateway needs local mode enabled before AgentOS can connect."
+                  : "OpenClaw did not become ready in time.",
+                {
+                  manualCommand: gatewayModeBlocked
+                    ? `${formatOpenClawCommand(openClawBin, ["config", "set", "gateway.mode", "local"])} && ${formatOpenClawCommand(openClawBin, ["gateway", "restart", "--json"])}`
+                    : formatOpenClawCommand(openClawBin, ["gateway", "status", "--json"])
+                }
+              );
+              return;
+            }
+          }
         }
-      }
+
+        snapshot ??= await loadSnapshot();
 
       try {
-        const runtimeAgentId = snapshot.agents.find((agent) => agent.isDefault)?.id || snapshot.agents[0]?.id || null;
-        snapshot = await ensureOpenClawRuntimeStateAccess({
+        const runtimeSnapshot = snapshot ?? (await loadSnapshot());
+        snapshot = runtimeSnapshot;
+        const runtimeAgentId = runtimeSnapshot.agents.find((agent) => agent.isDefault)?.id || runtimeSnapshot.agents[0]?.id || null;
+        await touchOpenClawRuntimeStateAccess({
           agentId: runtimeAgentId
         });
       } catch (error) {
@@ -336,7 +355,7 @@ export async function POST(request: Request) {
           "verifying",
           "OpenClaw is online, but AgentOS cannot write to the OpenClaw runtime state yet.",
           {
-            snapshot: await getMissionControlSnapshot({ force: true })
+            snapshot: snapshot ?? (await loadSnapshot())
           }
         );
         return;
@@ -372,41 +391,13 @@ export async function POST(request: Request) {
   });
 }
 
-function resolveInstallSpec(): InstallSpec | null {
-  if (process.platform === "win32") {
-    return {
-      command: "powershell.exe",
-      args: [
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "& ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard"
-      ],
-      manualCommand:
-        "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& ([scriptblock]::Create((iwr -useb https://openclaw.ai/install.ps1))) -NoOnboard\""
-    };
-  }
-
-  if (process.platform === "darwin" || process.platform === "linux") {
-    return {
-      command: "/bin/bash",
-      args: [
-        "-lc",
-        "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --no-onboard"
-      ],
-      manualCommand:
-        "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install-cli.sh | bash -s -- --no-onboard"
-    };
-  }
-
-  return null;
-}
-
 async function runCommand(
   command: string,
   args: string[],
-  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>,
+  options: {
+    timeoutMs?: number;
+  } = {}
 ): Promise<CommandResult> {
   const child = spawn(command, args, {
     cwd: process.cwd(),
@@ -422,7 +413,7 @@ async function runCommand(
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-    }, commandTimeoutMs);
+    }, options.timeoutMs ?? commandTimeoutMs);
 
     const finish = (result: CommandResult) => {
       if (resolved) {
@@ -479,7 +470,7 @@ async function runCommand(
 async function waitForReadySnapshot() {
   const startedAt = Date.now();
 
-  const immediateSnapshot = await getMissionControlSnapshot({ force: true });
+  const immediateSnapshot = await getMissionControlSnapshot();
 
   if (isOpenClawReady(immediateSnapshot)) {
     return immediateSnapshot;
@@ -488,7 +479,7 @@ async function waitForReadySnapshot() {
   while (Date.now() - startedAt < readyTimeoutMs) {
     await delay(readyPollIntervalMs);
 
-    const snapshot = await getMissionControlSnapshot({ force: true });
+    const snapshot = await getMissionControlSnapshot();
 
     if (isOpenClawReady(snapshot)) {
       return snapshot;
@@ -543,7 +534,9 @@ async function repairGatewayModeIfNeeded(
 }
 
 async function readGatewayStatus(openClawBin: string) {
-  const result = await runCommand(openClawBin, ["gateway", "status", "--json"], async () => {});
+  const result = await runCommand(openClawBin, ["gateway", "status", "--json"], async () => {}, {
+    timeoutMs: gatewayStatusTimeoutMs
+  });
 
   if (result.errorMessage || result.timedOut || result.code !== 0) {
     return null;

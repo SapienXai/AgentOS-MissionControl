@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot();
   return NextResponse.json({
     generatedAt: snapshot.generatedAt,
     mode: snapshot.mode,

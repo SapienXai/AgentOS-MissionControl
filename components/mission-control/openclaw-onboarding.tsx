@@ -6,7 +6,7 @@ import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import {
   isOpenClawMissionReady,
-  isOpenClawSystemReady
+  isOpenClawOnboardingSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
@@ -89,7 +89,7 @@ export function OpenClawOnboarding({
   onDismiss: () => void;
   canDismiss: boolean;
 }) {
-  const systemReady = isOpenClawSystemReady(snapshot);
+  const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
   const modelReady = isOpenClawMissionReady(snapshot);
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;
@@ -97,8 +97,9 @@ export function OpenClawOnboarding({
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
     "Ready";
-  const wizardSteps = buildWizardSteps(stage, systemReady, modelReady);
-  const systemSteps = buildSystemSteps(snapshot, systemPhase);
+  const systemPhaseForSteps = onboardingSystemReady ? "ready" : systemPhase;
+  const wizardSteps = buildWizardSteps(stage, onboardingSystemReady, modelReady);
+  const systemSteps = buildSystemSteps(snapshot, systemPhaseForSteps);
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
   const selectableDiscoveredModels = discoveredModels.filter(
     (model) => !availableModels.some((availableModel) => availableModel.id === model.modelId)
@@ -116,7 +117,12 @@ export function OpenClawOnboarding({
     stageRun.statusMessage ||
     stageRun.resultMessage ||
     resolveStageDescription(stage, systemActionDescription, selectedModelLabel);
-  const phaseLabel = stage === "system" ? resolveSystemPhaseLabel(systemPhase, snapshot) : resolveModelPhaseLabel(modelPhase, snapshot);
+  const phaseLabel =
+    stage === "system"
+      ? onboardingSystemReady
+        ? "ready"
+        : resolveSystemPhaseLabel(systemPhase, snapshot)
+      : resolveModelPhaseLabel(modelPhase, snapshot);
   const showDetails =
     stageRun.runState !== "idle" ||
     Boolean(stageRun.manualCommand) ||
@@ -126,7 +132,7 @@ export function OpenClawOnboarding({
 
   const primaryAction = resolvePrimaryAction({
     stage,
-    systemReady,
+    systemReady: onboardingSystemReady,
     modelReady,
     systemActionLabel,
     selectedModelId,
@@ -393,12 +399,12 @@ export function OpenClawOnboarding({
                   type="button"
                   onClick={() => {
                     if (stage === "system") {
-                      if (systemReady && modelReady) {
+                      if (onboardingSystemReady && modelReady) {
                         onDismiss();
                         return;
                       }
 
-                      if (systemReady) {
+                      if (onboardingSystemReady) {
                         onContinueToModels();
                         return;
                       }

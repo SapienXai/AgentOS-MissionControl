@@ -7,6 +7,7 @@ import {
   renderAgentIdentityMarkdown as renderAgentIdentityMarkdownTemplate
 } from "@/lib/openclaw/agent-bootstrap-files";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import type {
   AgentBootstrapFileInput,
   AgentHeartbeatInput,
@@ -156,9 +157,10 @@ export async function upsertAgentConfigEntry(
         }
       | null;
   },
-  snapshot?: MissionControlSnapshot
+  snapshot?: MissionControlSnapshot,
+  timings?: TimingCollector
 ) {
-  const configList = await readAgentConfigList(snapshot);
+  const configList = await measureTiming(timings, "agent-config.read", () => readAgentConfigList(snapshot));
   const existingIndex = configList.findIndex((entry) => entry.id === agentId);
   const nextEntry: MutableAgentConfigEntry =
     existingIndex >= 0
@@ -206,7 +208,7 @@ export async function upsertAgentConfigEntry(
     configList.push(nextEntry);
   }
 
-  await writeAgentConfigList(configList);
+  await measureTiming(timings, "agent-config.write", () => writeAgentConfigList(configList));
   return nextEntry;
 }
 
@@ -220,7 +222,8 @@ export async function applyAgentIdentity(
     avatar?: string;
     content?: string;
   },
-  agentDir?: string
+  agentDir?: string,
+  timings?: TimingCollector
 ) {
   const resolvedAgentDir = normalizeOptionalValue(agentDir) ?? buildWorkspaceAgentStatePath(workspacePath, agentId);
   const identityFilePath = path.join(resolvedAgentDir, "IDENTITY.md");
@@ -233,8 +236,10 @@ export async function applyAgentIdentity(
       avatar: normalizeOptionalValue(identity.avatar)
     });
 
-  await mkdir(path.dirname(identityFilePath), { recursive: true });
-  await writeFile(identityFilePath, identityMarkdown, "utf8");
+  await measureTiming(timings, "agent-identity.write-file", async () => {
+    await mkdir(path.dirname(identityFilePath), { recursive: true });
+    await writeFile(identityFilePath, identityMarkdown, "utf8");
+  });
 
   const args = [
     "agents",
@@ -264,7 +269,7 @@ export async function applyAgentIdentity(
     args.push("--avatar", identity.avatar);
   }
 
-  await runOpenClaw(args);
+  await measureTiming(timings, "agent-identity.sync-openclaw", () => runOpenClaw(args));
 }
 
 export async function writeAgentBootstrapFiles(

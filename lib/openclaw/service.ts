@@ -141,6 +141,7 @@ import {
   readChannelRegistry
 } from "@/lib/openclaw/domains/channels";
 import type { ManagedDiscordBinding } from "@/lib/openclaw/domains/channels";
+import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import {
   collectIssues,
   compareVersionStrings,
@@ -411,8 +412,23 @@ type MissionCommandPayload = {
 };
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
+type OpenClawRuntimeState = Omit<MissionControlSnapshot["diagnostics"]["runtime"], "smokeTest">;
 
-const SNAPSHOT_CACHE_TTL_MS = 10_000;
+type BootstrapProfileReadResult = {
+  fileName: string;
+  lines: string[];
+  source: string;
+};
+
+type WorkspaceBootstrapProfileCache = {
+  profileFiles: readonly string[];
+  contextManifest: ReturnType<typeof buildWorkspaceContextManifest>;
+  workspaceSections: Map<string, string[]>;
+  workspaceSources: string[];
+};
+
+const SNAPSHOT_CACHE_TTL_MS = 30_000;
+const RUNTIME_DIAGNOSTICS_CACHE_TTL_MS = 5 * 60_000;
 const GATEWAY_STATUS_STALE_GRACE_MS = 60_000;
 
 type SnapshotPair = {
@@ -424,6 +440,12 @@ type SnapshotCacheEntry = SnapshotPair & {
   expiresAt: number;
 };
 
+type RuntimeDiagnosticsCacheEntry = {
+  agentIdsKey: string;
+  value: OpenClawRuntimeState;
+  expiresAt: number;
+};
+
 type GatewayStatusCacheEntry = {
   value: GatewayStatusPayload;
   capturedAt: number;
@@ -431,13 +453,114 @@ type GatewayStatusCacheEntry = {
 
 let snapshotCache: SnapshotCacheEntry | null = null;
 let snapshotPromise: Promise<SnapshotPair> | null = null;
+let runtimeDiagnosticsCache: RuntimeDiagnosticsCacheEntry | null = null;
+let runtimeDiagnosticsPromise: Promise<OpenClawRuntimeState> | null = null;
 let gatewayStatusCache: GatewayStatusCacheEntry | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
+let snapshotGeneration = 0;
 
 export function clearMissionControlCaches() {
+  snapshotGeneration += 1;
   snapshotCache = null;
+  runtimeDiagnosticsCache = null;
+  runtimeDiagnosticsPromise = null;
   gatewayStatusCache = null;
   runtimeHistoryCache = new Map();
+}
+
+function loadSnapshotPairForCurrentGeneration() {
+  const generation = snapshotGeneration;
+
+  return loadMissionControlSnapshots().then((nextSnapshot) => {
+    if (generation === snapshotGeneration) {
+      snapshotCache = {
+        ...nextSnapshot,
+        expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS
+      };
+    }
+
+    return nextSnapshot;
+  });
+}
+
+function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
+  return [...new Set(agentIds.filter(Boolean))].sort().join("\u0000");
+}
+
+function loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds: string[]) {
+  const generation = snapshotGeneration;
+  const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
+
+  return inspectOpenClawRuntimeState(agentIds).then((nextState) => {
+    if (generation === snapshotGeneration) {
+      runtimeDiagnosticsCache = {
+        agentIdsKey,
+        value: nextState,
+        expiresAt: Date.now() + RUNTIME_DIAGNOSTICS_CACHE_TTL_MS
+      };
+    }
+
+    return nextState;
+  });
+}
+
+async function readBootstrapProfileFile(
+  rootPath: string,
+  workspacePath: string,
+  fileName: string
+): Promise<BootstrapProfileReadResult | null> {
+  const filePath = path.join(rootPath, fileName);
+
+  try {
+    await access(filePath);
+    const raw = await readFile(filePath, "utf8");
+    const trimmed = raw.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return {
+      fileName,
+      lines: trimmed.split(/\r?\n/),
+      source: describeBootstrapSourcePath(workspacePath, filePath)
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function buildWorkspaceBootstrapProfileCache(
+  workspacePath: string,
+  template?: WorkspaceTemplate | null,
+  rules?: WorkspaceCreateRules
+): Promise<WorkspaceBootstrapProfileCache> {
+  const contextManifest = buildWorkspaceContextManifest(template, rules ?? DEFAULT_WORKSPACE_RULES);
+  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
+  const profileFiles = [
+    ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
+  ];
+  const entries = await Promise.all(
+    profileFiles.map((fileName) => readBootstrapProfileFile(workspacePath, workspacePath, fileName))
+  );
+  const workspaceSections = new Map<string, string[]>();
+  const workspaceSources: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry) {
+      continue;
+    }
+
+    workspaceSections.set(entry.fileName, entry.lines);
+    workspaceSources.push(entry.source);
+  }
+
+  return {
+    profileFiles,
+    contextManifest,
+    workspaceSections,
+    workspaceSources
+  };
 }
 
 function resolveGatewayStatus(
@@ -472,24 +595,39 @@ function resolveGatewayStatus(
 }
 
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
-  if (!options.force && snapshotCache && snapshotCache.expiresAt > Date.now()) {
-    return options.includeHidden ? snapshotCache.full : snapshotCache.visible;
+  const cachedSnapshot = snapshotCache;
+  const cacheIsFresh = Boolean(cachedSnapshot && cachedSnapshot.expiresAt > Date.now());
+
+  if (!options.force && cacheIsFresh && cachedSnapshot) {
+    return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
+  }
+
+  if (!options.force && cachedSnapshot) {
+    if (!snapshotPromise) {
+      snapshotPromise = loadSnapshotPairForCurrentGeneration();
+      void snapshotPromise.catch(() => {});
+      void snapshotPromise.finally(() => {
+        snapshotPromise = null;
+      }).catch(() => {});
+    }
+
+    return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
   }
 
   if (snapshotPromise) {
+    if (!options.force && cachedSnapshot) {
+      return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
+    }
+
     const pending = await snapshotPromise;
     return options.includeHidden ? pending.full : pending.visible;
   }
 
-  snapshotPromise = loadMissionControlSnapshots();
+  snapshotPromise = loadSnapshotPairForCurrentGeneration();
+  void snapshotPromise.catch(() => {});
 
   try {
     const nextSnapshot = await snapshotPromise;
-
-    snapshotCache = {
-      ...nextSnapshot,
-      expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS
-    };
 
     return options.includeHidden ? nextSnapshot.full : nextSnapshot.visible;
   } finally {
@@ -550,22 +688,25 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       modelStatusResult.status === "fulfilled" ||
       sessionsResult.status === "fulfilled" ||
       presenceResult.status === "fulfilled";
-    const runtimeDiagnostics = await buildRuntimeDiagnostics(
-      agentsList.map((agent) => agent.id),
-      settings
-    );
-    const channelRegistry = await readChannelRegistry();
+    const agentIds = agentsList.map((agent) => agent.id);
+    const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(agentIds, settings);
+    void runtimeDiagnosticsPromise.catch(() => {});
+    const dispatchRecordsPromise = readMissionDispatchRecords();
+    const [channelRegistry, channelAccountsRaw] = await Promise.all([
+      readChannelRegistry(),
+      readChannelAccounts()
+    ]);
     const channelAccounts = applyChannelAccountDisplayNames(
       mergeMissionControlSurfaceAccounts([
-        ...(await readChannelAccounts()),
+        ...channelAccountsRaw,
         ...buildLegacyRegistrySurfaceAccounts(channelRegistry)
       ]),
       channelRegistry
     );
 
     const workspaceByPath = new Map<string, WorkspaceProject>();
-    const profileByAgent = new Map<string, AgentBootstrapProfile>();
     const manifestByWorkspace = new Map<string, WorkspaceProjectManifest>();
+    const workspaceBootstrapProfileByWorkspace = new Map<string, WorkspaceBootstrapProfileCache>();
     const agents: OpenClawAgent[] = [];
     const relationships: RelationshipRecord[] = [];
 
@@ -585,7 +726,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       recentSessionsByAgent.set(session.agentId, list);
     }
 
-    const dispatchRecords = await readMissionDispatchRecords();
+    const dispatchRecords = await dispatchRecordsPromise;
     const liveSessionRuntimes = (
       await Promise.all(
         sessions.map((session) => mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, mapRuntime))
@@ -606,160 +747,184 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       }
     );
     const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...annotatedLiveSessionRuntimes]);
+    const workspacePaths = Array.from(new Set(agentsList.map((agent) => agent.workspace)));
 
-    for (const rawAgent of agentsList) {
-      const configured = configByAgent.get(rawAgent.id);
-      const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
-      const workspaceId = workspaceIdFromPath(rawAgent.workspace);
-      const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
-      const manifest =
-        manifestByWorkspace.get(rawAgent.workspace) ??
-        (await readWorkspaceProjectManifest(rawAgent.workspace));
-      manifestByWorkspace.set(rawAgent.workspace, manifest);
-      const manifestAgent = manifest.agents.find((entry) => entry.id === rawAgent.id) ?? null;
-      const configuredSkills = filterAgentPolicySkills(configured?.skills ?? []);
-      const policy =
-        manifestAgent?.policy ??
-        resolveAgentPolicy(
-          inferAgentPresetFromContext({
-            skills: configuredSkills,
-            id: rawAgent.id,
-            name:
-              normalizeOptionalValue(identityOverrides.name) ||
-              configured?.name ||
-              rawAgent.name ||
-              configured?.identity?.name ||
-              rawAgent.identityName ||
-              rawAgent.id
-          }),
-          {
-            fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
-          }
+    await Promise.all(
+      workspacePaths.map(async (workspacePath) => {
+        const manifest = await readWorkspaceProjectManifest(workspacePath);
+        manifestByWorkspace.set(workspacePath, manifest);
+        workspaceBootstrapProfileByWorkspace.set(
+          workspacePath,
+          await buildWorkspaceBootstrapProfileCache(
+            workspacePath,
+            manifest.template,
+            manifest.rules ?? DEFAULT_WORKSPACE_RULES
+          )
         );
-      const configuredTools = uniqueStrings([
-        ...(manifestAgent?.toolIds ?? []),
-        ...(policy.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
-      ]);
-      const primaryModel = rawAgent.model || configured?.model || "unassigned";
-      const profileKey = rawAgent.agentDir || rawAgent.id;
-      const profile =
-        profileByAgent.get(profileKey) ??
-        (await readAgentBootstrapProfile(rawAgent.workspace, {
-          agentId: rawAgent.id,
-          agentName:
-            normalizeOptionalValue(identityOverrides.name) ||
-            configured?.name ||
-            rawAgent.name ||
-            configured?.identity?.name ||
-          rawAgent.identityName ||
-          rawAgent.id,
-          agentDir: rawAgent.agentDir,
-          configuredSkills,
-          configuredTools,
-          template: manifest.template,
-          rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES
-        }));
-      profileByAgent.set(profileKey, profile);
-      const agentRuntimes = runtimes
-        .filter((runtime) => runtime.agentId === rawAgent.id)
-        .sort(sortRuntimesByUpdatedAtDesc);
-      const observedToolNames = uniqueStrings(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
-      const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
-      const latestRuntime = agentRuntimes[0];
-      const lastActiveAt =
-        sessionList
-          .map((entry) => entry.updatedAt ?? 0)
-          .sort((left, right) => right - left)
-          .at(0) || null;
-      const heartbeat = heartbeatByAgent.get(rawAgent.id);
-      const statusValue = resolveAgentStatus({
-        rpcOk: Boolean(gatewayStatus?.rpc?.ok),
-        activeRuntime: latestRuntime,
-        heartbeatEnabled: Boolean(heartbeat?.enabled),
-        lastActiveAt
-      });
+      })
+    );
 
-      const workspace = ensureWorkspace(workspaceByPath, rawAgent.workspace);
-      workspace.agentIds.push(rawAgent.id);
-      workspace.modelIds.push(primaryModel);
-      workspace.activeRuntimeIds.push(...activeRuntimeIds);
-      workspace.totalSessions += sessionList.length;
-
-      const agent: OpenClawAgent = {
-        id: rawAgent.id,
-        name:
+    const agentEntries = await Promise.all(
+      agentsList.map(async (rawAgent) => {
+        const configured = configByAgent.get(rawAgent.id);
+        const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
+        const workspaceId = workspaceIdFromPath(rawAgent.workspace);
+        const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
+        const manifest =
+          manifestByWorkspace.get(rawAgent.workspace) ??
+          (await readWorkspaceProjectManifest(rawAgent.workspace));
+        manifestByWorkspace.set(rawAgent.workspace, manifest);
+        const workspaceBootstrapProfile =
+          workspaceBootstrapProfileByWorkspace.get(rawAgent.workspace) ??
+          (await buildWorkspaceBootstrapProfileCache(
+            rawAgent.workspace,
+            manifest.template,
+            manifest.rules ?? DEFAULT_WORKSPACE_RULES
+          ));
+        const manifestAgent = manifest.agents.find((entry) => entry.id === rawAgent.id) ?? null;
+        const configuredSkills = filterAgentPolicySkills(configured?.skills ?? []);
+        const agentName =
           normalizeOptionalValue(identityOverrides.name) ||
           configured?.name ||
           rawAgent.name ||
           configured?.identity?.name ||
           rawAgent.identityName ||
-          rawAgent.id,
-        identityName:
-          normalizeOptionalValue(identityOverrides.name) ||
-          configured?.identity?.name ||
-          rawAgent.identityName ||
-          undefined,
-        workspaceId,
-        workspacePath: rawAgent.workspace,
-        agentDir: rawAgent.agentDir,
-        modelId: primaryModel,
-        isDefault: Boolean(rawAgent.isDefault || configured?.default),
-        status: statusValue,
-        sessionCount: sessionList.length,
-        lastActiveAt,
-        currentAction: resolveAgentAction({
-          runtime: latestRuntime,
-          heartbeatEvery: heartbeat?.every ?? null,
-          status: statusValue
-        }),
-        activeRuntimeIds,
-        heartbeat: {
-          enabled: Boolean(heartbeat?.enabled),
-          every: heartbeat?.every ?? null,
-          everyMs: heartbeat?.everyMs ?? null
-        },
-        identity: {
-          emoji:
-            normalizeOptionalValue(identityOverrides.emoji) ||
-            configured?.identity?.emoji ||
-            rawAgent.identityEmoji,
-          theme: normalizeOptionalValue(identityOverrides.theme) || configured?.identity?.theme,
-          avatar: normalizeOptionalValue(identityOverrides.avatar) || configured?.identity?.avatar,
-          source: rawAgent.identitySource
-        },
-        profile,
-        skills: configuredSkills,
-        tools: configuredTools,
-        observedTools: observedToolNames,
-        policy
-      };
+          rawAgent.id;
+        const policy =
+          manifestAgent?.policy ??
+          resolveAgentPolicy(
+            inferAgentPresetFromContext({
+              skills: configuredSkills,
+              id: rawAgent.id,
+              name: agentName
+            }),
+            {
+              fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
+            }
+          );
+        const configuredTools = uniqueStrings([
+          ...(manifestAgent?.toolIds ?? []),
+          ...(policy.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
+        ]);
+        const primaryModel = rawAgent.model || configured?.model || "unassigned";
+        const profile = await readAgentBootstrapProfile(rawAgent.workspace, {
+          agentId: rawAgent.id,
+          agentName,
+          agentDir: rawAgent.agentDir,
+          configuredSkills,
+          configuredTools,
+          template: manifest.template,
+          rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES,
+          workspaceBootstrapProfile
+        });
+        const agentRuntimes = runtimes
+          .filter((runtime) => runtime.agentId === rawAgent.id)
+          .sort(sortRuntimesByUpdatedAtDesc);
+        const observedToolNames = uniqueStrings(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
+        const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
+        const latestRuntime = agentRuntimes[0];
+        const lastActiveAt =
+          sessionList
+            .map((entry) => entry.updatedAt ?? 0)
+            .sort((left, right) => right - left)
+            .at(0) || null;
+        const heartbeat = heartbeatByAgent.get(rawAgent.id);
+        const statusValue = resolveAgentStatus({
+          rpcOk: Boolean(gatewayStatus?.rpc?.ok),
+          activeRuntime: latestRuntime,
+          heartbeatEnabled: Boolean(heartbeat?.enabled),
+          lastActiveAt
+        });
 
-      agents.push(agent);
-      relationships.push({
-        id: `edge:${workspaceId}:${agent.id}:contains`,
-        sourceId: workspaceId,
-        targetId: agent.id,
-        kind: "contains",
-        label: "workspace member"
-      });
+        const agent: OpenClawAgent = {
+          id: rawAgent.id,
+          name: agentName,
+          identityName:
+            normalizeOptionalValue(identityOverrides.name) ||
+            configured?.identity?.name ||
+            rawAgent.identityName ||
+            undefined,
+          workspaceId,
+          workspacePath: rawAgent.workspace,
+          agentDir: rawAgent.agentDir,
+          modelId: primaryModel,
+          isDefault: Boolean(rawAgent.isDefault || configured?.default),
+          status: statusValue,
+          sessionCount: sessionList.length,
+          lastActiveAt,
+          currentAction: resolveAgentAction({
+            runtime: latestRuntime,
+            heartbeatEvery: heartbeat?.every ?? null,
+            status: statusValue
+          }),
+          activeRuntimeIds,
+          heartbeat: {
+            enabled: Boolean(heartbeat?.enabled),
+            every: heartbeat?.every ?? null,
+            everyMs: heartbeat?.everyMs ?? null
+          },
+          identity: {
+            emoji:
+              normalizeOptionalValue(identityOverrides.emoji) ||
+              configured?.identity?.emoji ||
+              rawAgent.identityEmoji,
+            theme: normalizeOptionalValue(identityOverrides.theme) || configured?.identity?.theme,
+            avatar: normalizeOptionalValue(identityOverrides.avatar) || configured?.identity?.avatar,
+            source: rawAgent.identitySource
+          },
+          profile,
+          skills: configuredSkills,
+          tools: configuredTools,
+          observedTools: observedToolNames,
+          policy
+        };
 
-      relationships.push({
-        id: `edge:${agent.id}:${primaryModel}:model`,
-        sourceId: agent.id,
-        targetId: primaryModel,
-        kind: "uses-model",
-        label: "model assignment"
-      });
-
-      for (const runtimeId of activeRuntimeIds) {
-        relationships.push({
+        const runtimeRelationships = activeRuntimeIds.map((runtimeId) => ({
           id: `edge:${agent.id}:${runtimeId}:run`,
           sourceId: agent.id,
           targetId: runtimeId,
-          kind: "active-run",
+          kind: "active-run" as const,
           label: "runtime"
-        });
-      }
+        })) satisfies RelationshipRecord[];
+
+        const relationships: RelationshipRecord[] = [
+          {
+            id: `edge:${workspaceId}:${agent.id}:contains`,
+            sourceId: workspaceId,
+            targetId: agent.id,
+            kind: "contains",
+            label: "workspace member"
+          },
+          {
+            id: `edge:${agent.id}:${primaryModel}:model`,
+            sourceId: agent.id,
+            targetId: primaryModel,
+            kind: "uses-model",
+            label: "model assignment"
+          },
+          ...runtimeRelationships
+        ];
+
+        return {
+          agent,
+          workspacePath: rawAgent.workspace,
+          workspaceId,
+          primaryModel,
+          sessionCount: sessionList.length,
+          activeRuntimeIds,
+          relationships
+        };
+      })
+    );
+
+    for (const entry of agentEntries) {
+      const workspace = ensureWorkspace(workspaceByPath, entry.workspacePath);
+      workspace.agentIds.push(entry.agent.id);
+      workspace.modelIds.push(entry.primaryModel);
+      workspace.activeRuntimeIds.push(...entry.activeRuntimeIds);
+      workspace.totalSessions += entry.sessionCount;
+      agents.push(entry.agent);
+      relationships.push(...entry.relationships);
     }
 
     const agentsByWorkspace = new Map<string, OpenClawAgent[]>();
@@ -772,8 +937,12 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     const workspaces = await Promise.all(
       Array.from(workspaceByPath.values()).map(async (workspace) => {
         const workspaceAgents = agentsByWorkspace.get(workspace.id) ?? [];
-        const metadata = await readWorkspaceInspectorMetadata(workspace.path, workspaceAgents);
         const manifest = manifestByWorkspace.get(workspace.path) ?? null;
+        const metadata = await readWorkspaceInspectorMetadata(
+          workspace.path,
+          workspaceAgents,
+          manifest ?? undefined
+        );
 
         return {
           ...workspace,
@@ -863,6 +1032,7 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       updateError,
       legacyInfo: status?.overview?.update
     });
+    const runtimeDiagnostics = await runtimeDiagnosticsPromise;
 
     const diagnostics = {
       installed: true,
@@ -1001,6 +1171,13 @@ export async function ensureOpenClawRuntimeStateAccess(options: {
   await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
   snapshotCache = null;
   return getMissionControlSnapshot({ force: true, includeHidden: true });
+}
+
+export async function touchOpenClawRuntimeStateAccess(options: {
+  agentId?: string | null;
+} = {}) {
+  await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
+  snapshotCache = null;
 }
 
 export async function ensureOpenClawRuntimeSmokeTest(options: {
@@ -1295,8 +1472,8 @@ export async function createAgent(input: AgentCreateInput) {
     channelIds: input.channelIds ?? []
   });
 
-  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
   snapshotCache = null;
+  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
 
   return {
     agentId,
@@ -1467,8 +1644,8 @@ export async function updateAgent(input: AgentUpdateInput) {
     toolIds: nextDeclaredTools
   });
 
-  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
   snapshotCache = null;
+  await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
 
   return {
     agentId,
@@ -1523,10 +1700,10 @@ export async function deleteAgent(input: AgentDeleteInput) {
       // Ignore skill cleanup failures for already-pruned workspaces.
     }
 
+    snapshotCache = null;
     await syncWorkspaceAgentPolicySkills(workspace.path);
   }
 
-  snapshotCache = null;
   runtimeHistoryCache = new Map();
 
   return {
@@ -1546,71 +1723,73 @@ export async function upsertWorkspaceChannel(input: {
   primaryAgentId?: string | null;
   agentIds?: string[];
   groupAssignments?: WorkspaceChannelGroupAssignment[];
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
 
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
 
-  await mutateChannelRegistry((registry) => {
-    const existingChannel = registry.channels.find((entry) => entry.id === channelId);
-    const nextChannel: WorkspaceChannelSummary =
-      existingChannel ??
-      ({
-        id: channelId,
-        type: input.type,
-        name: input.name.trim() || channelId,
-        primaryAgentId: normalizeOptionalValue(input.primaryAgentId) ?? null,
-        workspaces: []
-      } satisfies WorkspaceChannelSummary);
-    const workspaceId = input.workspaceId.trim();
-    const workspacePath = input.workspacePath.trim();
-    const workspaceBinding =
-      nextChannel.workspaces.find((entry) => entry.workspaceId === workspaceId) ??
-      ({
-        workspaceId,
+  await measureTiming(timings, "workspace-channel.registry-upsert", () =>
+    mutateChannelRegistry((registry) => {
+      const existingChannel = registry.channels.find((entry) => entry.id === channelId);
+      const nextChannel: WorkspaceChannelSummary =
+        existingChannel ??
+        ({
+          id: channelId,
+          type: input.type,
+          name: input.name.trim() || channelId,
+          primaryAgentId: normalizeOptionalValue(input.primaryAgentId) ?? null,
+          workspaces: []
+        } satisfies WorkspaceChannelSummary);
+      const workspaceId = input.workspaceId.trim();
+      const workspacePath = input.workspacePath.trim();
+      const workspaceBinding =
+        nextChannel.workspaces.find((entry) => entry.workspaceId === workspaceId) ??
+        ({
+          workspaceId,
+          workspacePath,
+          agentIds: [],
+          groupAssignments: []
+        } satisfies WorkspaceChannelWorkspaceBinding);
+      const nextAgentIds = uniqueStrings([
+        ...workspaceBinding.agentIds,
+        ...(input.agentIds ?? []).map((entry) => entry.trim()).filter(Boolean)
+      ]);
+      const nextGroupAssignments = uniqueByChatId([
+        ...workspaceBinding.groupAssignments,
+        ...(input.groupAssignments ?? []).filter((assignment) => Boolean(assignment.chatId))
+      ]);
+
+      const mergedWorkspaceBinding: WorkspaceChannelWorkspaceBinding = {
+        ...workspaceBinding,
         workspacePath,
-        agentIds: [],
-        groupAssignments: []
-      } satisfies WorkspaceChannelWorkspaceBinding);
-    const nextAgentIds = uniqueStrings([
-      ...workspaceBinding.agentIds,
-      ...(input.agentIds ?? []).map((entry) => entry.trim()).filter(Boolean)
-    ]);
-    const nextGroupAssignments = uniqueByChatId([
-      ...workspaceBinding.groupAssignments,
-      ...(input.groupAssignments ?? []).filter((assignment) => Boolean(assignment.chatId))
-    ]);
+        agentIds: nextAgentIds,
+        groupAssignments: nextGroupAssignments
+      };
 
-    const mergedWorkspaceBinding: WorkspaceChannelWorkspaceBinding = {
-      ...workspaceBinding,
-      workspacePath,
-      agentIds: nextAgentIds,
-      groupAssignments: nextGroupAssignments
-    };
+      const workspaceBindings = nextChannel.workspaces.filter((entry) => entry.workspaceId !== workspaceId);
+      workspaceBindings.push(mergedWorkspaceBinding);
 
-    const workspaceBindings = nextChannel.workspaces.filter((entry) => entry.workspaceId !== workspaceId);
-    workspaceBindings.push(mergedWorkspaceBinding);
+      const nextPrimaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? nextChannel.primaryAgentId;
 
-    const nextPrimaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? nextChannel.primaryAgentId;
-
-    registry.channels = [
-      ...registry.channels.filter((entry) => entry.id !== channelId),
-      {
-        ...nextChannel,
-        id: channelId,
-        type: input.type,
-        name: input.name.trim() || nextChannel.name || channelId,
-        primaryAgentId:
-          nextPrimaryAgentId ||
-          mergedWorkspaceBinding.agentIds[0] ||
-          mergedWorkspaceBinding.groupAssignments.find((assignment) => assignment.agentId)?.agentId ||
-          null,
-        workspaces: workspaceBindings
-      }
-    ];
-  });
+      registry.channels = [
+        ...registry.channels.filter((entry) => entry.id !== channelId),
+        {
+          ...nextChannel,
+          id: channelId,
+          type: input.type,
+          name: input.name.trim() || nextChannel.name || channelId,
+          primaryAgentId:
+            nextPrimaryAgentId ||
+            mergedWorkspaceBinding.agentIds[0] ||
+            mergedWorkspaceBinding.groupAssignments.find((assignment) => assignment.agentId)?.agentId ||
+            null,
+          workspaces: workspaceBindings
+        }
+      ];
+    }, {}, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1619,39 +1798,41 @@ export async function upsertWorkspaceChannel(input: {
 export async function disconnectWorkspaceChannel(input: {
   workspaceId: string;
   channelId: string;
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
 
-  await mutateChannelRegistry((registry) => {
-    registry.channels = registry.channels
-      .map((channel) => {
-        if (channel.id !== channelId) {
-          return channel;
-        }
+  await measureTiming(timings, "channel-registry.disconnect", () =>
+    mutateChannelRegistry((registry) => {
+      registry.channels = registry.channels
+        .map((channel) => {
+          if (channel.id !== channelId) {
+            return channel;
+          }
 
-        const workspaceBindings = channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId);
-        const remainingCandidates = uniqueStrings([
-          ...workspaceBindings.flatMap((binding) => binding.agentIds),
-          ...workspaceBindings.flatMap((binding) =>
-            binding.groupAssignments
-              .filter((assignment) => assignment.enabled !== false && assignment.agentId)
-              .map((assignment) => assignment.agentId as string)
-          )
-        ]);
+          const workspaceBindings = channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId);
+          const remainingCandidates = uniqueStrings([
+            ...workspaceBindings.flatMap((binding) => binding.agentIds),
+            ...workspaceBindings.flatMap((binding) =>
+              binding.groupAssignments
+                .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+                .map((assignment) => assignment.agentId as string)
+            )
+          ]);
 
-        return {
-          ...channel,
-          primaryAgentId: channel.primaryAgentId && remainingCandidates.includes(channel.primaryAgentId)
-            ? channel.primaryAgentId
-            : remainingCandidates[0] ?? null,
-          workspaces: workspaceBindings
-        };
-      })
-      .filter((channel) => channel.workspaces.length > 0 || channel.primaryAgentId);
-  });
+          return {
+            ...channel,
+            primaryAgentId: channel.primaryAgentId && remainingCandidates.includes(channel.primaryAgentId)
+              ? channel.primaryAgentId
+              : remainingCandidates[0] ?? null,
+            workspaces: workspaceBindings
+          };
+        })
+        .filter((channel) => channel.workspaces.length > 0 || channel.primaryAgentId);
+    }, {}, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1659,13 +1840,13 @@ export async function disconnectWorkspaceChannel(input: {
 
 export async function deleteWorkspaceChannelEverywhere(input: {
   channelId: string;
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
 
-  const registry = await readChannelRegistry();
+  const registry = await measureTiming(timings, "channel-registry.read-before-delete", () => readChannelRegistry());
   const channel = registry.channels.find((entry) => entry.id === channelId);
 
   if (!channel) {
@@ -1682,45 +1863,57 @@ export async function deleteWorkspaceChannelEverywhere(input: {
   const workspacePaths = uniqueStrings(channel.workspaces.map((workspace) => workspace.workspacePath));
 
   if (isPlannerChannelTypeValue(channel.type) && channel.type !== "internal") {
-    await runOpenClaw(
-      ["channels", "remove", "--channel", channel.type, "--account", channelId, "--delete"],
-      { timeoutMs: 60000 }
+    await measureTiming(timings, "channel.delete-openclaw-remove", () =>
+      runOpenClaw(["channels", "remove", "--channel", channel.type, "--account", channelId, "--delete"], {
+        timeoutMs: 60000
+      })
     );
   }
 
-  await mutateChannelRegistry(
-    (nextRegistry) => {
-      nextRegistry.channels = nextRegistry.channels.filter((entry) => entry.id !== channelId);
-    },
-    {
-      removedAccountIds: [channelId],
-      removedGroupIds
-    }
+  await measureTiming(timings, "channel.delete-registry-sync", () =>
+    mutateChannelRegistry(
+      (nextRegistry) => {
+        nextRegistry.channels = nextRegistry.channels.filter((entry) => entry.id !== channelId);
+      },
+      {
+        removedAccountIds: [channelId],
+        removedGroupIds
+      },
+      timings
+    )
   );
 
-  await Promise.all(workspacePaths.map((workspacePath) => removeWorkspaceProjectChannelReferences(workspacePath, channelId)));
+  await measureTiming(timings, "channel.delete-project-cleanup", () =>
+    Promise.all(
+      workspacePaths.map((workspacePath) =>
+        removeWorkspaceProjectChannelReferences(workspacePath, channelId, timings)
+      )
+    )
+  );
 
   snapshotCache = null;
-  return getChannelRegistry();
+  return measureTiming(timings, "channel.delete-read-final-registry", () => getChannelRegistry());
 }
 
 export async function setWorkspaceChannelPrimary(input: {
   channelId: string;
   primaryAgentId: string | null;
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
   }
 
-  await mutateChannelRegistry((registry) => {
-    const channel = registry.channels.find((entry) => entry.id === channelId);
-    if (!channel) {
-      throw new Error("Channel was not found.");
-    }
+  await measureTiming(timings, "channel.primary-update", () =>
+    mutateChannelRegistry((registry) => {
+      const channel = registry.channels.find((entry) => entry.id === channelId);
+      if (!channel) {
+        throw new Error("Channel was not found.");
+      }
 
-    channel.primaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? null;
-  });
+      channel.primaryAgentId = normalizeOptionalValue(input.primaryAgentId) ?? null;
+    }, {}, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1730,7 +1923,7 @@ export async function setWorkspaceChannelGroups(input: {
   channelId: string;
   workspaceId: string;
   groupAssignments: WorkspaceChannelGroupAssignment[];
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   if (!channelId) {
     throw new Error("Channel id is required.");
@@ -1738,50 +1931,52 @@ export async function setWorkspaceChannelGroups(input: {
 
   const removedGroupIds: string[] = [];
 
-  await mutateChannelRegistry((registry) => {
-    const channel = registry.channels.find((entry) => entry.id === channelId);
-    if (!channel) {
-      throw new Error("Channel was not found.");
-    }
-
-    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
-    if (!workspace) {
-      throw new Error("Workspace binding was not found for this channel.");
-    }
-
-    const previousGroupIds = new Set(
-      workspace.groupAssignments
-        .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
-        .map((assignment) => assignment.chatId)
-    );
-
-    workspace.groupAssignments = uniqueByChatId(
-      input.groupAssignments.map((assignment) => ({
-        chatId: assignment.chatId.trim(),
-        agentId: normalizeOptionalValue(assignment.agentId) ?? null,
-        title: normalizeOptionalValue(assignment.title) ?? null,
-        enabled: assignment.enabled !== false
-      }))
-    );
-    workspace.agentIds = uniqueStrings([
-      ...workspace.agentIds,
-      ...workspace.groupAssignments
-        .filter((assignment) => assignment.enabled !== false && assignment.agentId)
-        .map((assignment) => assignment.agentId as string)
-    ]);
-
-    const nextGroupIds = new Set(
-      workspace.groupAssignments
-        .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
-        .map((assignment) => assignment.chatId)
-    );
-
-    for (const chatId of previousGroupIds) {
-      if (!nextGroupIds.has(chatId)) {
-        removedGroupIds.push(chatId);
+  await measureTiming(timings, "channel.groups-update", () =>
+    mutateChannelRegistry((registry) => {
+      const channel = registry.channels.find((entry) => entry.id === channelId);
+      if (!channel) {
+        throw new Error("Channel was not found.");
       }
-    }
-  }, { removedGroupIds });
+
+      const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace binding was not found for this channel.");
+      }
+
+      const previousGroupIds = new Set(
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
+          .map((assignment) => assignment.chatId)
+      );
+
+      workspace.groupAssignments = uniqueByChatId(
+        input.groupAssignments.map((assignment) => ({
+          chatId: assignment.chatId.trim(),
+          agentId: normalizeOptionalValue(assignment.agentId) ?? null,
+          title: normalizeOptionalValue(assignment.title) ?? null,
+          enabled: assignment.enabled !== false
+        }))
+      );
+      workspace.agentIds = uniqueStrings([
+        ...workspace.agentIds,
+        ...workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+          .map((assignment) => assignment.agentId as string)
+      ]);
+
+      const nextGroupIds = new Set(
+        workspace.groupAssignments
+          .filter((assignment) => assignment.enabled !== false && Boolean(assignment.chatId))
+          .map((assignment) => assignment.chatId)
+      );
+
+      for (const chatId of previousGroupIds) {
+        if (!nextGroupIds.has(chatId)) {
+          removedGroupIds.push(chatId);
+        }
+      }
+    }, { removedGroupIds }, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1792,40 +1987,42 @@ export async function bindWorkspaceChannelAgent(input: {
   workspaceId: string;
   workspacePath: string;
   agentId: string;
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   const agentId = slugify(input.agentId.trim());
   if (!channelId || !agentId) {
     throw new Error("Channel id and agent id are required.");
   }
 
-  await mutateChannelRegistry((registry) => {
-    const channel = registry.channels.find((entry) => entry.id === channelId);
-    if (!channel) {
-      throw new Error("Channel was not found.");
-    }
+  await measureTiming(timings, "channel.bind-agent", () =>
+    mutateChannelRegistry((registry) => {
+      const channel = registry.channels.find((entry) => entry.id === channelId);
+      if (!channel) {
+        throw new Error("Channel was not found.");
+      }
 
-    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
-    const nextWorkspace: WorkspaceChannelWorkspaceBinding =
-      workspace ??
-      ({
-        workspaceId: input.workspaceId,
-        workspacePath: input.workspacePath,
-        agentIds: [],
-        groupAssignments: []
-      } satisfies WorkspaceChannelWorkspaceBinding);
+      const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+      const nextWorkspace: WorkspaceChannelWorkspaceBinding =
+        workspace ??
+        ({
+          workspaceId: input.workspaceId,
+          workspacePath: input.workspacePath,
+          agentIds: [],
+          groupAssignments: []
+        } satisfies WorkspaceChannelWorkspaceBinding);
 
-    nextWorkspace.agentIds = uniqueStrings([...nextWorkspace.agentIds, agentId]);
-    nextWorkspace.workspacePath = input.workspacePath;
-    channel.workspaces = [
-      ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
-      nextWorkspace
-    ];
+      nextWorkspace.agentIds = uniqueStrings([...nextWorkspace.agentIds, agentId]);
+      nextWorkspace.workspacePath = input.workspacePath;
+      channel.workspaces = [
+        ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
+        nextWorkspace
+      ];
 
-    if (!channel.primaryAgentId) {
-      channel.primaryAgentId = agentId;
-    }
-  });
+      if (!channel.primaryAgentId) {
+        channel.primaryAgentId = agentId;
+      }
+    }, {}, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1835,51 +2032,53 @@ export async function unbindWorkspaceChannelAgent(input: {
   channelId: string;
   workspaceId: string;
   agentId: string;
-}) {
+}, timings?: TimingCollector) {
   const channelId = normalizeChannelId(input.channelId);
   const agentId = slugify(input.agentId.trim());
   if (!channelId || !agentId) {
     throw new Error("Channel id and agent id are required.");
   }
 
-  await mutateChannelRegistry((registry) => {
-    const channel = registry.channels.find((entry) => entry.id === channelId);
-    if (!channel) {
-      throw new Error("Channel was not found.");
-    }
-
-    const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
-    if (!workspace) {
-      return;
-    }
-
-    workspace.agentIds = workspace.agentIds.filter((entry) => entry !== agentId);
-    workspace.groupAssignments = workspace.groupAssignments.filter((assignment) => assignment.agentId !== agentId);
-
-    if (channel.primaryAgentId === agentId) {
-      const fallbackAgent =
-        workspace.agentIds[0] ??
-        workspace.groupAssignments.find((assignment) => assignment.enabled !== false && assignment.agentId)?.agentId ??
-        channel.workspaces
-          .flatMap((binding) => binding.agentIds)
-          .find((candidate) => candidate !== agentId) ??
-        channel.workspaces
-          .flatMap((binding) => binding.groupAssignments)
-          .find((assignment) => assignment.enabled !== false && assignment.agentId && assignment.agentId !== agentId)
-          ?.agentId ??
-        null;
-      channel.primaryAgentId = fallbackAgent;
-    }
-
-    channel.workspaces = [
-      ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
-      {
-        ...workspace,
-        agentIds: workspace.agentIds,
-        groupAssignments: workspace.groupAssignments
+  await measureTiming(timings, "channel.unbind-agent", () =>
+    mutateChannelRegistry((registry) => {
+      const channel = registry.channels.find((entry) => entry.id === channelId);
+      if (!channel) {
+        throw new Error("Channel was not found.");
       }
-    ];
-  });
+
+      const workspace = channel.workspaces.find((entry) => entry.workspaceId === input.workspaceId);
+      if (!workspace) {
+        return;
+      }
+
+      workspace.agentIds = workspace.agentIds.filter((entry) => entry !== agentId);
+      workspace.groupAssignments = workspace.groupAssignments.filter((assignment) => assignment.agentId !== agentId);
+
+      if (channel.primaryAgentId === agentId) {
+        const fallbackAgent =
+          workspace.agentIds[0] ??
+          workspace.groupAssignments.find((assignment) => assignment.enabled !== false && assignment.agentId)?.agentId ??
+          channel.workspaces
+            .flatMap((binding) => binding.agentIds)
+            .find((candidate) => candidate !== agentId) ??
+          channel.workspaces
+            .flatMap((binding) => binding.groupAssignments)
+            .find((assignment) => assignment.enabled !== false && assignment.agentId && assignment.agentId !== agentId)
+            ?.agentId ??
+          null;
+        channel.primaryAgentId = fallbackAgent;
+      }
+
+      channel.workspaces = [
+        ...channel.workspaces.filter((entry) => entry.workspaceId !== input.workspaceId),
+        {
+          ...workspace,
+          agentIds: workspace.agentIds,
+          groupAssignments: workspace.groupAssignments
+        }
+      ];
+    }, {}, timings)
+  );
 
   snapshotCache = null;
   return getChannelRegistry();
@@ -1993,6 +2192,7 @@ export async function createWorkspaceProject(
     `${createdAgentIds.length} agent${createdAgentIds.length === 1 ? "" : "s"} linked to the workspace.`
   );
 
+  snapshotCache = null;
   await syncWorkspaceAgentPolicySkills(targetDir);
 
   const primaryAgentId =
@@ -2564,7 +2764,7 @@ async function inspectOpenClawRuntimeState(
   options: {
     touch?: boolean;
   } = {}
-) {
+): Promise<OpenClawRuntimeState> {
   const uniqueAgentIds = [...new Set(agentIds.filter(Boolean))];
   const stateRootProbe = await probeDirectoryWriteability(openClawStateRootPath, {
     createIfMissing: true,
@@ -2605,8 +2805,51 @@ async function inspectOpenClawRuntimeState(
   };
 }
 
+async function readOpenClawRuntimeState(agentIds: string[], force = false) {
+  const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
+  const cached = runtimeDiagnosticsCache;
+  const cacheMatches = Boolean(cached && cached.agentIdsKey === agentIdsKey);
+  const cacheIsFresh = Boolean(cacheMatches && cached && cached.expiresAt > Date.now());
+
+  if (!force && cacheIsFresh && cached) {
+    return cached.value;
+  }
+
+  if (!force && cacheMatches && cached) {
+    if (!runtimeDiagnosticsPromise) {
+      runtimeDiagnosticsPromise = loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds);
+      void runtimeDiagnosticsPromise.catch(() => {});
+      void runtimeDiagnosticsPromise.finally(() => {
+        runtimeDiagnosticsPromise = null;
+      }).catch(() => {});
+    }
+
+    return cached.value;
+  }
+
+  if (!force && runtimeDiagnosticsPromise && cacheMatches && cached) {
+    return cached.value;
+  }
+
+  if (runtimeDiagnosticsPromise && !force) {
+    return runtimeDiagnosticsPromise;
+  }
+
+  if (force && runtimeDiagnosticsPromise) {
+    return runtimeDiagnosticsPromise;
+  }
+
+  runtimeDiagnosticsPromise = loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds);
+  void runtimeDiagnosticsPromise.catch(() => {});
+  void runtimeDiagnosticsPromise.finally(() => {
+    runtimeDiagnosticsPromise = null;
+  }).catch(() => {});
+
+  return force ? await runtimeDiagnosticsPromise : runtimeDiagnosticsPromise;
+}
+
 async function buildRuntimeDiagnostics(agentIds: string[], settings: MissionControlSettings) {
-  const runtimeState = await inspectOpenClawRuntimeState(agentIds);
+  const runtimeState = await readOpenClawRuntimeState(agentIds);
   const smokeTest = getLatestRuntimeSmokeTest(settings);
   const issues = [
     ...runtimeState.issues,
@@ -3692,40 +3935,34 @@ async function readAgentBootstrapProfile(
     configuredTools: string[];
     template?: WorkspaceTemplate | null;
     rules?: WorkspaceCreateRules;
+    workspaceBootstrapProfile?: WorkspaceBootstrapProfileCache;
   }
 ): Promise<AgentBootstrapProfile> {
-  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
-  const searchRoots = [
-    workspacePath,
-    normalizeOptionalValue(options.agentDir)
-  ].filter((value): value is string => Boolean(value));
-  const contextManifest = buildWorkspaceContextManifest(
-    options.template,
-    options.rules ?? DEFAULT_WORKSPACE_RULES
-  );
-  const profileFiles = [
-    ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
-  ];
-  const sources: string[] = [];
-  const sections = new Map<string, string[]>();
+  const workspaceBootstrapProfile =
+    options.workspaceBootstrapProfile ??
+    (await buildWorkspaceBootstrapProfileCache(
+      workspacePath,
+      options.template,
+      options.rules
+    ));
+  const profileFiles = workspaceBootstrapProfile.profileFiles;
+  const contextManifest = workspaceBootstrapProfile.contextManifest;
+  const sections = new Map(workspaceBootstrapProfile.workspaceSections);
+  const sources = [...workspaceBootstrapProfile.workspaceSources];
+  const agentDir = normalizeOptionalValue(options.agentDir);
 
-  for (const fileName of profileFiles) {
-    for (const rootPath of searchRoots) {
-      const filePath = path.join(rootPath, fileName);
+  if (agentDir) {
+    const agentEntries = await Promise.all(
+      profileFiles.map((fileName) => readBootstrapProfileFile(agentDir, workspacePath, fileName))
+    );
 
-      try {
-        await access(filePath);
-        const raw = await readFile(filePath, "utf8");
-        const trimmed = raw.trim();
-        if (!trimmed) {
-          continue;
-        }
-
-        sources.push(describeBootstrapSourcePath(workspacePath, filePath));
-        sections.set(fileName, trimmed.split(/\r?\n/));
-      } catch {
+    for (const entry of agentEntries) {
+      if (!entry) {
         continue;
       }
+
+      sources.push(entry.source);
+      sections.set(entry.fileName, entry.lines);
     }
   }
 
@@ -3791,12 +4028,13 @@ function describeBootstrapSourcePath(workspacePath: string, filePath: string) {
 
 async function readWorkspaceInspectorMetadata(
   workspacePath: string,
-  agents: OpenClawAgent[]
+  agents: OpenClawAgent[],
+  projectMeta?: WorkspaceProjectManifest
 ): Promise<Pick<WorkspaceProject, "bootstrap" | "capabilities">> {
-  const projectMeta = await readWorkspaceProjectManifest(workspacePath);
+  const resolvedProjectMeta = projectMeta ?? (await readWorkspaceProjectManifest(workspacePath));
   const contextManifest = buildWorkspaceContextManifest(
-    projectMeta.template ?? null,
-    projectMeta.rules ?? DEFAULT_WORKSPACE_RULES
+    resolvedProjectMeta.template ?? null,
+    resolvedProjectMeta.rules ?? DEFAULT_WORKSPACE_RULES
   );
   const nonContextPaths = new Set<string>([
     ...WORKSPACE_CONTEXT_CORE_PATHS,
@@ -3858,9 +4096,9 @@ async function readWorkspaceInspectorMetadata(
 
   return {
     bootstrap: {
-      template: projectMeta.template,
-      sourceMode: projectMeta.sourceMode,
-      agentTemplate: projectMeta.agentTemplate,
+      template: resolvedProjectMeta.template,
+      sourceMode: resolvedProjectMeta.sourceMode,
+      agentTemplate: resolvedProjectMeta.agentTemplate,
       coreFiles,
       optionalFiles,
       contextFiles,
@@ -3894,13 +4132,19 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
   const teamPreset = manifest.teamPreset ?? (workspaceAgents.length <= 1 ? "solo" : "core");
   const modelProfile = manifest.modelProfile ?? "balanced";
   const rules = manifest.rules ?? DEFAULT_WORKSPACE_RULES;
+  const bootstrapProfileCache = await buildWorkspaceBootstrapProfileCache(
+    workspace.path,
+    manifest.template,
+    manifest.rules ?? DEFAULT_WORKSPACE_RULES
+  );
   const bootstrapProfile = await readAgentBootstrapProfile(workspace.path, {
     agentId: workspaceAgents[0]?.id ?? workspace.id,
     agentName: workspaceAgents[0]?.name ?? displayName,
     configuredSkills,
     configuredTools,
     template,
-    rules
+    rules,
+    workspaceBootstrapProfile: bootstrapProfileCache
   });
   const agents =
     manifest.agents.length > 0
@@ -4006,13 +4250,22 @@ function isPlannerChannelTypeValue(value: unknown): value is PlannerChannelType 
 
 type ManagedChatChannelProvider = Exclude<PlannerChannelType, "internal">;
 
-async function buildManagedSurfaceAccountId(provider: MissionControlSurfaceProvider, name: string) {
+async function buildManagedSurfaceAccountId(
+  provider: MissionControlSurfaceProvider,
+  name: string,
+  timings?: TimingCollector
+) {
   const baseSlug = slugify(name.trim()) || provider;
   const baseId = `${provider}-${baseSlug}`;
-  const registry = await readChannelRegistry();
+  const registry = await measureTiming(timings, `managed-surface.${provider}.read-channel-registry`, () =>
+    readChannelRegistry()
+  );
+  const channelAccounts = await measureTiming(timings, `managed-surface.${provider}.read-channel-accounts`, () =>
+    readChannelAccounts()
+  );
   const existingIds = new Set([
     ...registry.channels.filter((channel) => channel.type === provider).map((channel) => channel.id),
-    ...(await readChannelAccounts()).filter((account) => account.type === provider).map((account) => account.id)
+    ...channelAccounts.filter((account) => account.type === provider).map((account) => account.id)
   ]);
 
   if (!existingIds.has(baseId)) {
@@ -4027,8 +4280,8 @@ async function buildManagedSurfaceAccountId(provider: MissionControlSurfaceProvi
   return `${baseId}-${index}`;
 }
 
-async function buildTelegramAccountId(name: string) {
-  return buildManagedSurfaceAccountId("telegram", name);
+async function buildTelegramAccountId(name: string, timings?: TimingCollector) {
+  return buildManagedSurfaceAccountId("telegram", name, timings);
 }
 
 async function writeChannelRegistry(registry: ChannelRegistry) {
@@ -4077,16 +4330,18 @@ async function readTelegramPairingAccounts() {
   }
 }
 
-async function readTelegramAccountBotIds() {
+async function readTelegramAccountBotIds(timings?: TimingCollector) {
   try {
     const telegramDir = path.join(openClawStateRootPath, "telegram");
-    const files = await readdir(telegramDir);
+    const files = await measureTiming(timings, "telegram.resolve.read-bot-id-files", () => readdir(telegramDir));
     const pairs = await Promise.all(
       files
         .filter((fileName) => fileName.startsWith("update-offset-") && fileName.endsWith(".json"))
         .map(async (fileName) => {
           try {
-            const raw = await readFile(path.join(telegramDir, fileName), "utf8");
+            const raw = await measureTiming(timings, `telegram.resolve.read-bot-id-file.${fileName}`, () =>
+              readFile(path.join(telegramDir, fileName), "utf8")
+            );
             const parsed = JSON.parse(raw) as { botId?: string } | null;
             const botId = normalizeOptionalValue(parsed?.botId);
             const accountId = fileName.slice("update-offset-".length, -".json".length);
@@ -4108,13 +4363,15 @@ async function readTelegramAccountBotIds() {
   }
 }
 
-async function findTelegramAccountByToken(token: string, accounts: ChannelAccountRecord[]) {
+async function findTelegramAccountByToken(token: string, accounts: ChannelAccountRecord[], timings?: TimingCollector) {
   const botId = normalizeOptionalValue(token.split(":", 1)[0]);
   if (!botId) {
     return null;
   }
 
-  const accountBotIds = await readTelegramAccountBotIds();
+  const accountBotIds = await measureTiming(timings, "telegram.resolve.read-bot-ids", () =>
+    readTelegramAccountBotIds(timings)
+  );
   return accounts.find((account) => accountBotIds.get(account.id) === botId) ?? null;
 }
 
@@ -4125,7 +4382,7 @@ export async function createManagedChatChannelAccount(input: {
   token?: string;
   botToken?: string;
   webhookUrl?: string;
-}) {
+}, timings?: TimingCollector) {
   if (input.provider === "telegram") {
     if (!input.token?.trim()) {
       throw new Error("Telegram bot token is required.");
@@ -4135,13 +4392,15 @@ export async function createManagedChatChannelAccount(input: {
       name: input.name,
       token: input.token,
       accountId: input.accountId
-    });
+    }, timings);
   }
 
   const accountId =
-    normalizeOptionalValue(input.accountId) ?? (await buildManagedSurfaceAccountId(input.provider, input.name));
+    normalizeOptionalValue(input.accountId) ?? (await buildManagedSurfaceAccountId(input.provider, input.name, timings));
   const before = new Set(
-    (await readChannelAccounts())
+    (
+      await measureTiming(timings, `managed-chat.${input.provider}.read-before`, () => readChannelAccounts())
+    )
       .filter((account) => account.type === input.provider)
       .map((account) => account.id)
   );
@@ -4189,9 +4448,13 @@ export async function createManagedChatChannelAccount(input: {
     }
   })();
 
-  await runOpenClaw(args, { timeoutMs: 60000 });
+  await measureTiming(timings, `managed-chat.${input.provider}.provision-openclaw`, () =>
+    runOpenClaw(args, { timeoutMs: 60000 })
+  );
 
-  const afterAccounts = (await readChannelAccounts()).filter((account) => account.type === input.provider);
+  const afterAccounts = (
+    await measureTiming(timings, `managed-chat.${input.provider}.read-after`, () => readChannelAccounts())
+  ).filter((account) => account.type === input.provider);
   const created =
     afterAccounts.find((account) => account.id === accountId) ??
     afterAccounts.find((account) => !before.has(account.id) && account.name === input.name) ??
@@ -4217,7 +4480,7 @@ export async function createManagedSurfaceAccount(input: {
   botToken?: string;
   webhookUrl?: string;
   config?: Record<string, unknown>;
-}) {
+}, timings?: TimingCollector) {
   if (isManagedChatChannelProvider(input.provider)) {
     return createManagedChatChannelAccount({
       provider: input.provider,
@@ -4226,14 +4489,16 @@ export async function createManagedSurfaceAccount(input: {
       token: input.token,
       botToken: input.botToken,
       webhookUrl: input.webhookUrl
-    });
+    }, timings);
   }
 
   const provisionConfig = normalizeManagedSurfaceProvisionConfig(input.config);
   const normalizedName = input.name.trim();
   const accountIdentity = extractManagedSurfaceIdentity(input.provider, provisionConfig);
   const accountId =
-    normalizeOptionalValue(input.accountId) ?? accountIdentity ?? (await buildManagedSurfaceAccountId(input.provider, input.name));
+    normalizeOptionalValue(input.accountId) ??
+    accountIdentity ??
+    (await buildManagedSurfaceAccountId(input.provider, input.name, timings));
   const configPath = getManagedSurfaceConfigPath(input.provider);
 
   switch (input.provider) {
@@ -4253,13 +4518,15 @@ export async function createManagedSurfaceAccount(input: {
         config: provisionConfig
       });
 
-      await runOpenClaw(gmailSetupArgs, { timeoutMs: 60000 });
-
-      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
-        () => null
+      await measureTiming(timings, "managed-surface.gmail.setup-openclaw", () =>
+        runOpenClaw(gmailSetupArgs, { timeoutMs: 60000 })
       );
-      const currentHooksConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", "hooks", "--json"]).catch(
-        () => null
+
+      const currentConfig = await measureTiming(timings, "managed-surface.gmail.read-config", () =>
+        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
+      );
+      const currentHooksConfig = await measureTiming(timings, "managed-surface.gmail.read-hooks", () =>
+        runOpenClawJson<Record<string, unknown>>(["config", "get", "hooks", "--json"]).catch(() => null)
       );
       const currentPresetsValue = currentHooksConfig?.presets;
       const currentPresets = Array.isArray(currentPresetsValue)
@@ -4270,9 +4537,11 @@ export async function createManagedSurfaceAccount(input: {
         presets: uniqueStrings([...currentPresets, "gmail"])
       });
 
-      await runOpenClaw(["config", "set", "hooks", JSON.stringify(nextHooksConfig), "--strict-json"], {
-        timeoutMs: 60000
-      });
+      await measureTiming(timings, "managed-surface.gmail.write-hooks", () =>
+        runOpenClaw(["config", "set", "hooks", JSON.stringify(nextHooksConfig), "--strict-json"], {
+          timeoutMs: 60000
+        })
+      );
 
       const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
         enabled: true,
@@ -4285,14 +4554,16 @@ export async function createManagedSurfaceAccount(input: {
         ...provisionConfig
       });
 
-      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-        timeoutMs: 60000
-      });
+      await measureTiming(timings, "managed-surface.gmail.write-config", () =>
+        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+          timeoutMs: 60000
+        })
+      );
       break;
     }
     case "webhook": {
-      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
-        () => null
+      const currentConfig = await measureTiming(timings, "managed-surface.webhook.read-config", () =>
+        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
       );
       const token = normalizeManagedSurfaceString(provisionConfig.token);
       if (!token) {
@@ -4308,14 +4579,16 @@ export async function createManagedSurfaceAccount(input: {
         ...provisionConfig
       });
 
-      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-        timeoutMs: 60000
-      });
+      await measureTiming(timings, "managed-surface.webhook.write-config", () =>
+        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+          timeoutMs: 60000
+        })
+      );
       break;
     }
     case "cron": {
-      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
-        () => null
+      const currentConfig = await measureTiming(timings, "managed-surface.cron.read-config", () =>
+        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
       );
       const webhookToken = normalizeManagedSurfaceString(provisionConfig.webhookToken);
       if (!webhookToken) {
@@ -4331,14 +4604,16 @@ export async function createManagedSurfaceAccount(input: {
         ...provisionConfig
       });
 
-      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-        timeoutMs: 60000
-      });
+      await measureTiming(timings, "managed-surface.cron.write-config", () =>
+        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+          timeoutMs: 60000
+        })
+      );
       break;
     }
     case "email": {
-      const currentConfig = await runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(
-        () => null
+      const currentConfig = await measureTiming(timings, "managed-surface.email.read-config", () =>
+        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
       );
       const address = normalizeManagedSurfaceString(provisionConfig.address ?? provisionConfig.email);
       if (!address) {
@@ -4355,16 +4630,20 @@ export async function createManagedSurfaceAccount(input: {
         ...provisionConfig
       });
 
-      await runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-        timeoutMs: 60000
-      });
+      await measureTiming(timings, "managed-surface.email.write-config", () =>
+        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
+          timeoutMs: 60000
+        })
+      );
       break;
     }
     default:
       throw new Error(`OpenClaw provisioning is not implemented for ${input.provider}.`);
   }
 
-  const refreshedAccounts = (await readChannelAccounts()).filter((account) => account.type === input.provider);
+  const refreshedAccounts = (
+    await measureTiming(timings, `managed-surface.${input.provider}.read-after`, () => readChannelAccounts())
+  ).filter((account) => account.type === input.provider);
   const created =
     refreshedAccounts.find((account) => account.id === accountId) ??
     refreshedAccounts.find((account) => account.name.trim().toLowerCase() === input.name.trim().toLowerCase()) ??
@@ -4382,28 +4661,35 @@ export async function createManagedSurfaceAccount(input: {
   );
 }
 
-export async function createTelegramChannelAccount(input: { name: string; token: string; accountId?: string }) {
-  const accountId = normalizeOptionalValue(input.accountId) ?? (await buildTelegramAccountId(input.name));
+export async function createTelegramChannelAccount(
+  input: { name: string; token: string; accountId?: string },
+  timings?: TimingCollector
+) {
+  const accountId = normalizeOptionalValue(input.accountId) ?? (await buildTelegramAccountId(input.name, timings));
   const before = new Set(
-    (await readChannelAccounts())
+    (
+      await measureTiming(timings, "telegram.read-before", () => readChannelAccounts())
+    )
       .filter((account) => account.type === "telegram")
       .map((account) => account.id)
   );
 
-  await runOpenClaw(
-    [
-      "channels",
-      "add",
-      "--channel",
-      "telegram",
-      "--account",
-      accountId,
-      "--token",
-      input.token,
-      "--name",
-      input.name
-    ],
-    { timeoutMs: 60000 }
+  await measureTiming(timings, "telegram.openclaw-add", () =>
+    runOpenClaw(
+      [
+        "channels",
+        "add",
+        "--channel",
+        "telegram",
+        "--account",
+        accountId,
+        "--token",
+        input.token,
+        "--name",
+        input.name
+      ],
+      { timeoutMs: 60000 }
+    )
   );
 
   const explicitAccount: ChannelAccountRecord = {
@@ -4413,7 +4699,9 @@ export async function createTelegramChannelAccount(input: { name: string; token:
     enabled: true
   };
 
-  const afterAccounts = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+  const afterAccounts = (
+    await measureTiming(timings, "telegram.read-after", () => readChannelAccounts())
+  ).filter((account) => account.type === "telegram");
   const explicitMatch = afterAccounts.find((account) => account.id === accountId);
   if (explicitMatch) {
     return {
@@ -4424,9 +4712,13 @@ export async function createTelegramChannelAccount(input: { name: string; token:
 
   const resolveDeadline = Date.now() + 8000;
   let created: ChannelAccountRecord | null = null;
+  let attempt = 0;
 
   while (Date.now() < resolveDeadline) {
-    const after = (await readChannelAccounts()).filter((account) => account.type === "telegram");
+    attempt += 1;
+    const after = (
+      await measureTiming(timings, `telegram.resolve.${attempt}.read-channel-accounts`, () => readChannelAccounts())
+    ).filter((account) => account.type === "telegram");
     created =
       after.find((account) => account.id === accountId) ??
       after.find((account) => !before.has(account.id) && account.name === input.name) ??
@@ -4438,7 +4730,11 @@ export async function createTelegramChannelAccount(input: { name: string; token:
       break;
     }
 
-    const pairingAccounts = await readTelegramPairingAccounts();
+    const pairingAccounts = await measureTiming(
+      timings,
+      `telegram.resolve.${attempt}.read-pairing-accounts`,
+      () => readTelegramPairingAccounts()
+    );
     created =
       pairingAccounts.find((account) => !before.has(account.id) && account.name === input.name) ??
       pairingAccounts.find((account) => !before.has(account.id)) ??
@@ -4449,13 +4745,22 @@ export async function createTelegramChannelAccount(input: { name: string; token:
       break;
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await measureTiming(timings, `telegram.resolve.${attempt}.sleep`, () =>
+      new Promise((resolve) => setTimeout(resolve, 750))
+    );
   }
 
   if (!created) {
-    const existing = await findTelegramAccountByToken(
-      input.token,
-      (await readChannelAccounts()).filter((account) => account.type === "telegram")
+    const existing = await measureTiming(timings, "telegram.resolve.token-lookup", async () =>
+      findTelegramAccountByToken(
+        input.token,
+        (
+          await measureTiming(timings, "telegram.resolve.token-lookup.read-channel-accounts", () =>
+            readChannelAccounts()
+          )
+        ).filter((account) => account.type === "telegram"),
+        timings
+      )
     );
 
     if (existing) {
@@ -4781,12 +5086,18 @@ async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentI
   await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
-async function removeWorkspaceProjectChannelReferences(workspacePath: string, channelId: string) {
+async function removeWorkspaceProjectChannelReferences(
+  workspacePath: string,
+  channelId: string,
+  timings?: TimingCollector
+) {
   const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
   let parsed: Record<string, unknown> = {};
 
   try {
-    const raw = await readFile(projectFilePath, "utf8");
+    const raw = await measureTiming(timings, `workspace-project.${path.basename(workspacePath)}.read`, () =>
+      readFile(projectFilePath, "utf8")
+    );
     const candidate = JSON.parse(raw);
     parsed = isObjectRecord(candidate) ? candidate : {};
   } catch {
@@ -4826,7 +5137,9 @@ async function removeWorkspaceProjectChannelReferences(workspacePath: string, ch
   parsed.updatedAt = new Date().toISOString();
   parsed.agents = nextAgents;
 
-  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
+  await measureTiming(timings, `workspace-project.${path.basename(workspacePath)}.write`, () =>
+    writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`)
+  );
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -4867,10 +5180,11 @@ type DiscordGuildConfig = Record<
 >;
 async function updateManagedSurfaceRouting(
   registry: ChannelRegistry,
-  cleanup: ManagedTelegramRoutingCleanup = {}
+  cleanup: ManagedTelegramRoutingCleanup = {},
+  timings?: TimingCollector
 ) {
-  const currentBindings = await runOpenClawJson<unknown[]>(["config", "get", "bindings", "--json"]).catch(
-    () => []
+  const currentBindings = await measureTiming(timings, "routing.read-bindings", () =>
+    runOpenClawJson<unknown[]>(["config", "get", "bindings", "--json"]).catch(() => [])
   );
 
   const managedChannels = registry.channels.filter(
@@ -4956,19 +5270,27 @@ async function updateManagedSurfaceRouting(
     )
   ];
 
-  await runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"]);
-  await syncManagedTelegramSettings(managedTelegramChannels);
-  await syncManagedDiscordSettings(managedDiscordChannels);
+  await measureTiming(timings, "routing.write-bindings", () =>
+    runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"])
+  );
+  await measureTiming(timings, "routing.sync-telegram-settings", () =>
+    syncManagedTelegramSettings(managedTelegramChannels, timings)
+  );
+  await measureTiming(timings, "routing.sync-discord-settings", () =>
+    syncManagedDiscordSettings(managedDiscordChannels, timings)
+  );
 }
 
-async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[]) {
-  await runOpenClaw([
-    "config",
-    "set",
-    "channels.telegram.enabled",
-    managedChannels.length > 0 ? "true" : "false",
-    "--strict-json"
-  ]);
+async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
+  await measureTiming(timings, "telegram-settings.enabled", () =>
+    runOpenClaw([
+      "config",
+      "set",
+      "channels.telegram.enabled",
+      managedChannels.length > 0 ? "true" : "false",
+      "--strict-json"
+    ])
+  );
 
   const defaultAccountId =
     managedChannels.find((channel) => Boolean(channel.primaryAgentId))?.id ??
@@ -4976,15 +5298,19 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
     null;
 
   if (defaultAccountId) {
-    await runOpenClaw([
-      "config",
-      "set",
-      "channels.telegram.defaultAccount",
-      JSON.stringify(defaultAccountId),
-      "--strict-json"
-    ]);
+    await measureTiming(timings, "telegram-settings.default-account", () =>
+      runOpenClaw([
+        "config",
+        "set",
+        "channels.telegram.defaultAccount",
+        JSON.stringify(defaultAccountId),
+        "--strict-json"
+      ])
+    );
   } else {
-    await runOpenClaw(["config", "unset", "channels.telegram.defaultAccount"]).catch(() => {});
+    await measureTiming(timings, "telegram-settings.default-account-unset", () =>
+      runOpenClaw(["config", "unset", "channels.telegram.defaultAccount"]).catch(() => {})
+    );
   }
 
   const nextGroupsConfig = Object.fromEntries(
@@ -4997,26 +5323,25 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
     )
   );
 
-  await runOpenClaw([
-    "config",
-    "set",
-    "channels.telegram.groups",
-    JSON.stringify(nextGroupsConfig),
-    "--strict-json"
-  ]);
+  await measureTiming(timings, "telegram-settings.groups", () =>
+    runOpenClaw([
+      "config",
+      "set",
+      "channels.telegram.groups",
+      JSON.stringify(nextGroupsConfig),
+      "--strict-json"
+    ])
+  );
 }
 
-async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSummary[]) {
+async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
   if (managedChannels.length === 0) {
     return;
   }
 
-  const currentGuilds = await runOpenClawJson<DiscordGuildConfig>([
-    "config",
-    "get",
-    "channels.discord.guilds",
-    "--json"
-  ]).catch(() => ({}));
+  const currentGuilds = await measureTiming(timings, "discord-settings.read-guilds", () =>
+    runOpenClawJson<DiscordGuildConfig>(["config", "get", "channels.discord.guilds", "--json"]).catch(() => ({}))
+  );
   const nextGuilds: Record<string, Record<string, unknown>> = {};
 
   for (const [guildId, rawGuild] of Object.entries(currentGuilds ?? {})) {
@@ -5086,13 +5411,15 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
     return;
   }
 
-  await runOpenClaw([
-    "config",
-    "set",
-    "channels.discord.guilds",
-    JSON.stringify(nextGuilds),
-    "--strict-json"
-  ]);
+  await measureTiming(timings, "discord-settings.write-guilds", () =>
+    runOpenClaw([
+      "config",
+      "set",
+      "channels.discord.guilds",
+      JSON.stringify(nextGuilds),
+      "--strict-json"
+    ])
+  );
 }
 
 function collectTelegramRelatedAgentIds(registry: ChannelRegistry) {
@@ -5111,11 +5438,69 @@ function collectTelegramRelatedAgentIds(registry: ChannelRegistry) {
   );
 }
 
+function collectTelegramChannelAgentIds(channel: WorkspaceChannelSummary | null | undefined) {
+  if (!channel) {
+    return [] as string[];
+  }
+
+  return uniqueStrings([
+    channel.primaryAgentId ?? "",
+    ...channel.workspaces.flatMap((workspace) => [
+      ...workspace.agentIds,
+      ...workspace.groupAssignments
+        .filter((assignment) => assignment.enabled !== false && assignment.agentId)
+        .map((assignment) => assignment.agentId as string)
+    ])
+  ]);
+}
+
+function normalizeTelegramCoordinationChannel(channel: WorkspaceChannelSummary | null | undefined) {
+  if (!channel) {
+    return null;
+  }
+
+  return {
+    id: channel.id,
+    name: channel.name,
+    primaryAgentId: channel.primaryAgentId ?? null,
+    workspaces: channel.workspaces
+      .map((workspace) => ({
+        workspaceId: workspace.workspaceId,
+        workspacePath: workspace.workspacePath,
+        agentIds: uniqueStrings([...workspace.agentIds]).sort(),
+        groupAssignments: workspace.groupAssignments
+          .map((assignment) => ({
+            chatId: assignment.chatId,
+            agentId: assignment.agentId ?? null,
+            title: assignment.title ?? null,
+            enabled: assignment.enabled !== false
+          }))
+          .sort((left, right) => {
+            const leftKey = `${left.chatId}:${left.agentId ?? ""}:${left.title ?? ""}:${left.enabled}`;
+            const rightKey = `${right.chatId}:${right.agentId ?? ""}:${right.title ?? ""}:${right.enabled}`;
+            return leftKey.localeCompare(rightKey);
+          })
+      }))
+      .sort((left, right) => left.workspaceId.localeCompare(right.workspaceId))
+  };
+}
+
+function areTelegramCoordinationChannelsEqual(
+  previousChannel: WorkspaceChannelSummary | null | undefined,
+  nextChannel: WorkspaceChannelSummary | null | undefined
+) {
+  return (
+    JSON.stringify(normalizeTelegramCoordinationChannel(previousChannel)) ===
+    JSON.stringify(normalizeTelegramCoordinationChannel(nextChannel))
+  );
+}
+
 async function syncAgentPolicySkills(
   agentIds: string[],
   options: {
     snapshot?: MissionControlSnapshot;
     channelRegistry?: ChannelRegistry;
+    timings?: TimingCollector;
   } = {}
 ) {
   const relevantAgentIds = uniqueStrings(agentIds);
@@ -5124,7 +5509,11 @@ async function syncAgentPolicySkills(
     return;
   }
 
-  const snapshot = options.snapshot ?? (await getMissionControlSnapshot({ force: true, includeHidden: true }));
+  const snapshot =
+    options.snapshot ??
+    (await measureTiming(options.timings, "agent-policy.snapshot", () =>
+      getMissionControlSnapshot({ includeHidden: true })
+    ));
   const nextSnapshot = options.channelRegistry
     ? {
         ...snapshot,
@@ -5133,45 +5522,49 @@ async function syncAgentPolicySkills(
     : snapshot;
 
   for (const agentId of relevantAgentIds) {
-    const agent = nextSnapshot.agents.find((entry) => entry.id === agentId);
+    await measureTiming(options.timings, `agent-policy.sync-agent.${agentId}`, async () => {
+      const agent = nextSnapshot.agents.find((entry) => entry.id === agentId);
 
-    if (!agent) {
-      continue;
-    }
+      if (!agent) {
+        return;
+      }
 
-    const setupAgentId =
-      nextSnapshot.agents.find(
-        (entry) => entry.workspaceId === agent.workspaceId && entry.policy.preset === "setup" && entry.id !== agent.id
-      )?.id ?? null;
+      const setupAgentId =
+        nextSnapshot.agents.find(
+          (entry) => entry.workspaceId === agent.workspaceId && entry.policy.preset === "setup" && entry.id !== agent.id
+        )?.id ?? null;
 
-    const policySkillId = await ensureAgentPolicySkillFromProvisioning({
-      workspacePath: agent.workspacePath,
-      agentId: agent.id,
-      agentName: agent.name,
-      policy: agent.policy,
-      setupAgentId,
-      snapshot: nextSnapshot,
-      channelRegistry: options.channelRegistry
-    });
+      const policySkillId = await ensureAgentPolicySkillFromProvisioning({
+        workspacePath: agent.workspacePath,
+        agentId: agent.id,
+        agentName: agent.name,
+        policy: agent.policy,
+        setupAgentId,
+        snapshot: nextSnapshot,
+        channelRegistry: options.channelRegistry,
+        timings: options.timings
+      });
 
-    await upsertAgentConfigEntry(
-      agent.id,
-      agent.workspacePath,
-      {
-        name: agent.name,
-        model: normalizeOptionalValue(agent.modelId),
-        heartbeat: agent.heartbeat.enabled && agent.heartbeat.every ? { every: agent.heartbeat.every } : null,
-        skills: [...filterAgentPolicySkills(agent.skills), policySkillId],
-        tools: agent.tools.includes("fs.workspaceOnly")
-          ? {
-              fs: {
-                workspaceOnly: true
+      await upsertAgentConfigEntry(
+        agent.id,
+        agent.workspacePath,
+        {
+          name: agent.name,
+          model: normalizeOptionalValue(agent.modelId),
+          heartbeat: agent.heartbeat.enabled && agent.heartbeat.every ? { every: agent.heartbeat.every } : null,
+          skills: [...filterAgentPolicySkills(agent.skills), policySkillId],
+          tools: agent.tools.includes("fs.workspaceOnly")
+            ? {
+                fs: {
+                  workspaceOnly: true
+                }
               }
-            }
-          : null
-      },
-      nextSnapshot
-    );
+            : null
+        },
+        nextSnapshot,
+        options.timings
+      );
+    });
   }
 }
 
@@ -5182,7 +5575,7 @@ async function syncWorkspaceAgentPolicySkills(
     channelRegistry?: ChannelRegistry;
   } = {}
 ) {
-  const snapshot = options.snapshot ?? (await getMissionControlSnapshot({ force: true, includeHidden: true }));
+  const snapshot = options.snapshot ?? (await getMissionControlSnapshot({ includeHidden: true }));
   const agentIds = snapshot.agents
     .filter((entry) => entry.workspacePath === workspacePath)
     .map((entry) => entry.id);
@@ -5193,34 +5586,69 @@ async function syncWorkspaceAgentPolicySkills(
   });
 }
 
-async function syncTelegramCoordinationSkills(previousRegistry: ChannelRegistry, nextRegistry: ChannelRegistry) {
-  const relevantAgentIds = uniqueStrings([
-    ...collectTelegramRelatedAgentIds(previousRegistry),
-    ...collectTelegramRelatedAgentIds(nextRegistry)
-  ]);
+async function syncTelegramCoordinationSkills(
+  previousRegistry: ChannelRegistry,
+  nextRegistry: ChannelRegistry,
+  timings?: TimingCollector
+) {
+  const relevantAgentIds = await measureTiming(timings, "telegram-coordination.collect-changes", () => {
+    const previousTelegramChannels = new Map(
+      previousRegistry.channels
+        .filter((channel) => channel.type === "telegram")
+        .map((channel) => [channel.id, channel] as const)
+    );
+    const nextTelegramChannels = new Map(
+      nextRegistry.channels
+        .filter((channel) => channel.type === "telegram")
+        .map((channel) => [channel.id, channel] as const)
+    );
+
+    return uniqueStrings(
+      uniqueStrings([...previousTelegramChannels.keys(), ...nextTelegramChannels.keys()]).flatMap((channelId) => {
+        const previousChannel = previousTelegramChannels.get(channelId) ?? null;
+        const nextChannel = nextTelegramChannels.get(channelId) ?? null;
+
+        if (areTelegramCoordinationChannelsEqual(previousChannel, nextChannel)) {
+          return [];
+        }
+
+        return [...collectTelegramChannelAgentIds(previousChannel), ...collectTelegramChannelAgentIds(nextChannel)];
+      })
+    );
+  });
 
   if (relevantAgentIds.length === 0) {
     return;
   }
 
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  await syncAgentPolicySkills(relevantAgentIds, {
-    snapshot,
-    channelRegistry: nextRegistry
-  });
+  const snapshot = await measureTiming(timings, "telegram-coordination.snapshot", () =>
+    getMissionControlSnapshot({ includeHidden: true })
+  );
+  await measureTiming(timings, "telegram-coordination.sync-agent-policies", () =>
+    syncAgentPolicySkills(relevantAgentIds, {
+      snapshot,
+      channelRegistry: nextRegistry,
+      timings
+    })
+  );
 }
 
 async function mutateChannelRegistry(
   mutate: (registry: ChannelRegistry) => void | Promise<void>,
-  cleanup: ManagedTelegramRoutingCleanup = {}
+  cleanup: ManagedTelegramRoutingCleanup = {},
+  timings?: TimingCollector
 ) {
-  const registry = cloneChannelRegistry(await readChannelRegistry());
+  const registry = cloneChannelRegistry(await measureTiming(timings, "channel-registry.read", () => readChannelRegistry()));
   const previousRegistry = cloneChannelRegistry(registry);
-  await mutate(registry);
-  await saveChannelRegistry(registry);
-  await updateManagedSurfaceRouting(registry, cleanup);
-  await syncTelegramCoordinationSkills(previousRegistry, registry);
+  await measureTiming(timings, "channel-registry.mutate", () => mutate(registry));
+  await measureTiming(timings, "channel-registry.save", () => saveChannelRegistry(registry));
+  await measureTiming(timings, "channel-registry.update-routing", () =>
+    updateManagedSurfaceRouting(registry, cleanup, timings)
+  );
   snapshotCache = null;
+  await measureTiming(timings, "channel-registry.sync-telegram-coordination", () =>
+    syncTelegramCoordinationSkills(previousRegistry, registry, timings)
+  );
 }
 
 function findMatchingWorkspaceAgent(

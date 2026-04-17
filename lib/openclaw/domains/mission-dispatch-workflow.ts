@@ -3,6 +3,7 @@ import {
   prepareMissionOutputPlan
 } from "@/lib/openclaw/domains/mission-routing";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
+import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import {
   createMissionDispatchRecord,
   findMissionDispatchRecordForTask,
@@ -33,7 +34,7 @@ export async function submitMissionDispatch(
     throw new Error("Mission text is required.");
   }
 
-  const snapshot = await deps.getMissionControlSnapshot({ force: true, includeHidden: true });
+  const snapshot = await deps.getMissionControlSnapshot({ includeHidden: true });
   const agentId = input.agentId || deps.resolveAgentForMission(snapshot, input.workspaceId);
 
   if (!agentId) {
@@ -58,8 +59,9 @@ export async function submitMissionDispatch(
     ? await prepareMissionOutputPlan(missionWorkspace.path, mission)
     : null;
   const thinking = input.thinking ?? "medium";
+  const workspaceSurfacePrompt = renderWorkspaceSurfaceCoordinationMarkdownForAgent(agentId, snapshot);
   const routedMission = outputPlan
-    ? composeMissionWithOutputRouting(mission, outputPlan, missionAgent?.policy, setupAgentId)
+    ? composeMissionWithOutputRouting(mission, outputPlan, missionAgent?.policy, setupAgentId, workspaceSurfacePrompt)
     : mission;
   const readinessError = resolveMissionDispatchReadinessError(snapshot);
 
@@ -139,7 +141,7 @@ export async function abortMissionDispatchTask(
   dispatchId: string | null | undefined,
   deps: MissionDispatchWorkflowDependencies
 ): Promise<MissionAbortResponse> {
-  const snapshot = await deps.getMissionControlSnapshot({ force: true, includeHidden: true });
+  const snapshot = await deps.getMissionControlSnapshot({ includeHidden: true });
   const task = snapshot.tasks.find((entry) => entry.id === taskId);
   const dispatchRecord = task
     ? await findMissionDispatchRecordForTask(task)

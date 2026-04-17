@@ -4,6 +4,10 @@ export function isOpenClawRuntimeStateReady(snapshot: MissionControlSnapshot) {
   return snapshot.diagnostics.runtime.stateWritable && snapshot.diagnostics.runtime.sessionStoreWritable;
 }
 
+export function isOpenClawOnboardingSystemReady(snapshot: MissionControlSnapshot) {
+  return snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
+}
+
 export function isOpenClawRuntimeSmokeTestReady(snapshot: MissionControlSnapshot) {
   return snapshot.diagnostics.runtime.smokeTest.status === "passed";
 }

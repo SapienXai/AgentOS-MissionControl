@@ -341,6 +341,7 @@ export function WorkspaceChannelsDialog({
         channelId: account.id,
         type: activeProvider,
         name: account.name,
+        workspacePath: workspace.path,
         primaryAgentId: newPrimaryAgentId || null,
         agentId: newPrimaryAgentId || undefined
       });
@@ -373,6 +374,7 @@ export function WorkspaceChannelsDialog({
       const payload: Record<string, unknown> = {
         type: activeProvider,
         name: getProvisionDraftText(provisionDraft, "name").trim(),
+        workspacePath: workspace.path,
         config,
         primaryAgentId: newPrimaryAgentId || null,
         agentId: newPrimaryAgentId || undefined
@@ -1313,26 +1315,26 @@ function buildSurfaceRouteOptions(
 
 function describeSurfaceRouting(provider: MissionControlSurfaceProvider) {
   if (provider === "telegram") {
-    return "OpenClaw route discovery maps Telegram groups to owning agents. Unassigned groups fall back to the primary agent.";
+    return "OpenClaw surface discovery maps Telegram groups to owning agents. Unassigned groups fall back to the primary agent.";
   }
 
   if (provider === "discord") {
-    return "OpenClaw route discovery maps Discord channels, threads, and role routes to owning agents. Unassigned routes fall back to the primary agent.";
+    return "OpenClaw surface discovery maps Discord surfaces to owning agents. Unassigned surfaces fall back to the primary agent.";
   }
 
-  return "OpenClaw route discovery maps provider routes to owning agents. Unassigned routes fall back to the primary agent.";
+  return "OpenClaw surface discovery maps provider surfaces to owning agents. Unassigned surfaces fall back to the primary agent.";
 }
 
 function getEmptyRouteDiscoveryCopy(provider: MissionControlSurfaceProvider) {
   if (provider === "telegram") {
-    return "No Telegram groups found yet. Send one message in the target group, then refresh route discovery.";
+    return "No Telegram groups found yet. Send one message in the target group, then refresh surface discovery.";
   }
 
   if (provider === "discord") {
-    return "No Discord channels, threads, or role routes were discovered yet. Send one message in the target server, then refresh route discovery.";
+    return "No Discord surfaces were discovered yet. Send one message in the target server, then refresh surface discovery.";
   }
 
-  return "No routes were discovered yet for this provider.";
+  return "No surfaces were discovered yet for this provider.";
 }
 
 function buildEmptyProvisionDraft(entry: SurfaceCatalogEntry) {

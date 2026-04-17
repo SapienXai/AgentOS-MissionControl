@@ -5,14 +5,21 @@ import {
   createManagedSurfaceAccount,
   disconnectWorkspaceChannel,
   deleteWorkspaceChannelEverywhere,
-  getMissionControlSnapshot,
   setWorkspaceChannelGroups,
   setWorkspaceChannelPrimary,
   upsertWorkspaceChannel,
   bindWorkspaceChannelAgent,
   unbindWorkspaceChannelAgent
 } from "@/lib/agentos/control-plane";
+import {
+  buildLegacyRegistrySurfaceAccounts,
+  applyChannelAccountDisplayNames,
+  getChannelRegistry,
+  mergeMissionControlSurfaceAccounts,
+  readChannelAccounts
+} from "@/lib/openclaw/domains/channels";
 import type { MissionControlSurfaceProvider, WorkspaceChannelGroupAssignment } from "@/lib/agentos/contracts";
+import { createTimingCollector, formatTimingSummary, measureTiming } from "@/lib/openclaw/timing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +35,7 @@ const createChannelSchema = z.object({
   channelId: z.string().optional(),
   type: z.string().min(1),
   name: z.string().min(1),
+  workspacePath: z.string().min(1),
   config: z.record(z.any()).optional(),
   token: z.string().optional(),
   botToken: z.string().optional(),
@@ -42,6 +50,7 @@ const patchChannelSchema = z.object({
   action: z.enum(["bind-agent", "unbind-agent", "primary", "groups"]),
   agentId: z.string().nullable().optional(),
   primaryAgentId: z.string().nullable().optional(),
+  workspacePath: z.string().min(1).optional(),
   groupAssignments: z.array(groupAssignmentSchema).optional()
 });
 
@@ -52,95 +61,111 @@ const deleteChannelSchema = z.object({
 
 export async function GET(_request: Request, context: { params: Promise<{ workspaceId: string }> }) {
   const { workspaceId } = await context.params;
-  let snapshot = await getMissionControlSnapshot();
-  let workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-
-  if (!workspace) {
-    snapshot = await getMissionControlSnapshot({ force: true });
-    workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-  }
-
-  if (!workspace) {
-    return NextResponse.json({ error: "Workspace was not found." }, { status: 404 });
-  }
-
-  const channels = snapshot.channelRegistry.channels.filter((channel) =>
+  const [registry, channelAccounts] = await Promise.all([getChannelRegistry(), readChannelAccounts()]);
+  const channels = registry.channels.filter((channel) =>
     channel.workspaces.some((binding) => binding.workspaceId === workspaceId)
+  );
+  const accounts = applyChannelAccountDisplayNames(
+    mergeMissionControlSurfaceAccounts([
+      ...channelAccounts,
+      ...buildLegacyRegistrySurfaceAccounts(registry)
+    ]),
+    registry
   );
 
   return NextResponse.json({
     workspaceId,
     channels,
-    channelAccounts: snapshot.channelAccounts
+    channelAccounts: accounts
   });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
+  const timings = createTimingCollector("workspace-surface-provision");
+
   try {
     const { workspaceId } = await context.params;
-    let snapshot = await getMissionControlSnapshot();
-    let workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-
-    if (!workspace) {
-      snapshot = await getMissionControlSnapshot({ force: true });
-      workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-    }
-
-    if (!workspace) {
-      throw new Error("Workspace was not found.");
-    }
-
-    const input = createChannelSchema.parse(await request.json());
+    const input = await measureTiming(timings, "request.parse", async () =>
+      createChannelSchema.parse(await request.json())
+    );
     const channelId = input.channelId?.trim();
     const primaryAgentId = input.primaryAgentId?.trim() || null;
+    const workspacePath = input.workspacePath.trim();
     const agentIds = input.agentId ? [input.agentId.trim()] : [];
     const groupAssignments = normalizeGroupAssignments(input.groupAssignments ?? []);
 
     if (!channelId) {
-      const created = await createManagedSurfaceAccount({
-        provider: input.type as MissionControlSurfaceProvider,
-        name: input.name,
-        config: input.config,
-        token: input.token,
-        botToken: input.botToken,
-        webhookUrl: input.webhookUrl
-      });
+      const created = await measureTiming(timings, "channel.account.create", () =>
+        createManagedSurfaceAccount(
+          {
+            provider: input.type as MissionControlSurfaceProvider,
+            name: input.name,
+            config: input.config,
+            token: input.token,
+            botToken: input.botToken,
+            webhookUrl: input.webhookUrl
+          },
+          timings
+        )
+      );
 
-      const registry = await upsertWorkspaceChannel({
-        workspaceId,
-        workspacePath: workspace.path,
-        channelId: created.id,
-        type: input.type,
-        name: input.name,
-        primaryAgentId,
-        agentIds,
-        groupAssignments
-      });
+      const registry = await measureTiming(timings, "channel.registry.upsert", () =>
+        upsertWorkspaceChannel(
+          {
+            workspaceId,
+            workspacePath,
+            channelId: created.id,
+            type: input.type,
+            name: input.name,
+            primaryAgentId,
+            agentIds,
+            groupAssignments
+          },
+          timings
+        )
+      );
+
+      const summary = timings.summary();
+      console.info(formatTimingSummary(summary));
 
       return NextResponse.json({
         account: created,
-        registry
+        registry,
+        timings: summary
       });
     }
 
-    const registry = await upsertWorkspaceChannel({
-      workspaceId,
-      workspacePath: workspace.path,
-      channelId,
-      type: input.type,
-      name: input.name,
-      primaryAgentId,
-      agentIds,
-      groupAssignments
-    });
+    const registry = await measureTiming(timings, "channel.registry.upsert", () =>
+      upsertWorkspaceChannel(
+        {
+          workspaceId,
+          workspacePath,
+          channelId,
+          type: input.type,
+          name: input.name,
+          primaryAgentId,
+          agentIds,
+          groupAssignments
+        },
+        timings
+      )
+    );
+
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
 
     return NextResponse.json({
-      registry
+      registry,
+      timings: summary
     });
   } catch (error) {
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to create channel."
+        error: error instanceof Error ? error.message : "Unable to create channel.",
+        timings: summary
       },
       { status: 400 }
     );
@@ -150,18 +175,6 @@ export async function POST(request: Request, context: { params: Promise<{ worksp
 export async function PATCH(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
   try {
     const { workspaceId } = await context.params;
-    let snapshot = await getMissionControlSnapshot();
-    let workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-
-    if (!workspace) {
-      snapshot = await getMissionControlSnapshot({ force: true });
-      workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-    }
-
-    if (!workspace) {
-      throw new Error("Workspace was not found.");
-    }
-
     const input = patchChannelSchema.parse(await request.json());
 
     if (input.action === "primary") {
@@ -188,10 +201,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
         throw new Error("Agent id is required.");
       }
 
+      const workspacePath = input.workspacePath?.trim();
+      if (!workspacePath) {
+        throw new Error("Workspace path is required.");
+      }
+
       const registry = await bindWorkspaceChannelAgent({
         channelId: input.channelId,
         workspaceId,
-        workspacePath: workspace.path,
+        workspacePath,
         agentId: input.agentId
       });
 
@@ -220,36 +238,45 @@ export async function PATCH(request: Request, context: { params: Promise<{ works
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
+  const timings = createTimingCollector("workspace-surface-delete");
+
   try {
     const { workspaceId } = await context.params;
-    let snapshot = await getMissionControlSnapshot();
-    let workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-
-    if (!workspace) {
-      snapshot = await getMissionControlSnapshot({ force: true });
-      workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
-    }
-
-    if (!workspace) {
-      throw new Error("Workspace was not found.");
-    }
-
-    const input = deleteChannelSchema.parse(await request.json());
-    const registry =
+    const input = await measureTiming(timings, "request.parse", async () =>
+      deleteChannelSchema.parse(await request.json())
+    );
+    const registry = await measureTiming(timings, "channel.delete", () =>
       input.scope === "global"
-        ? await deleteWorkspaceChannelEverywhere({
-            channelId: input.channelId
-          })
-        : await disconnectWorkspaceChannel({
-            workspaceId,
-            channelId: input.channelId
-          });
+        ? deleteWorkspaceChannelEverywhere(
+            {
+              channelId: input.channelId
+            },
+            timings
+          )
+        : disconnectWorkspaceChannel(
+            {
+              workspaceId,
+              channelId: input.channelId
+            },
+            timings
+          )
+    );
 
-    return NextResponse.json({ registry });
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
+
+    return NextResponse.json({
+      registry,
+      timings: summary
+    });
   } catch (error) {
+    const summary = timings.summary();
+    console.info(formatTimingSummary(summary));
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Unable to delete channel."
+        error: error instanceof Error ? error.message : "Unable to delete channel.",
+        timings: summary
       },
       { status: 400 }
     );

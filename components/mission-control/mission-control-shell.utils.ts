@@ -1,5 +1,5 @@
 import { compactPath, formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
+import { isOpenClawOnboardingSystemReady } from "@/lib/openclaw/readiness";
 import type {
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
@@ -409,17 +409,10 @@ export function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
     };
   }
 
-  if (isOpenClawSystemReady(snapshot)) {
+  if (isOpenClawOnboardingSystemReady(snapshot)) {
     return {
       label: "Enter AgentOS",
-      description: "OpenClaw is online and runtime state is writable."
-    };
-  }
-
-  if (snapshot.diagnostics.rpcOk) {
-    return {
-      label: "Repair runtime access",
-      description: "OpenClaw is online, but write access still needs verification."
+      description: "OpenClaw is online. Runtime checks continue in the background."
     };
   }
 

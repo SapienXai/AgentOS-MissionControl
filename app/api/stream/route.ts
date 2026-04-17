@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
-const STREAM_SNAPSHOT_INTERVAL_MS = 12_000;
+const STREAM_SNAPSHOT_INTERVAL_MS = 30_000;
 
 export async function GET(request: Request) {
   let interval: ReturnType<typeof setInterval> | undefined;
@@ -82,13 +82,12 @@ export async function GET(request: Request) {
         return snapshotTask;
       };
 
-      await sendSnapshot();
-
       interval = setInterval(() => {
         void sendSnapshot();
       }, STREAM_SNAPSHOT_INTERVAL_MS);
 
       sendEvent("ready", { ok: true });
+      void sendSnapshot();
     },
     cancel() {
       closed = true;

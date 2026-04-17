@@ -28,6 +28,7 @@ import {
   updateGatewayRemoteUrl,
   updateWorkspaceProject,
   updateWorkspaceRoot,
+  touchOpenClawRuntimeStateAccess,
   unbindWorkspaceChannelAgent,
   upsertWorkspaceChannel,
   bindWorkspaceChannelAgent
@@ -73,6 +74,7 @@ export {
   updateGatewayRemoteUrl,
   updateWorkspaceProject,
   updateWorkspaceRoot,
+  touchOpenClawRuntimeStateAccess,
   unbindWorkspaceChannelAgent,
   upsertWorkspaceChannel
 };

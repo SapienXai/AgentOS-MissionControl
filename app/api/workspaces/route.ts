@@ -86,7 +86,7 @@ const workspaceDeleteSchema = z.object({
 });
 
 export async function GET() {
-  const snapshot = await getMissionControlSnapshot({ force: true });
+  const snapshot = await getMissionControlSnapshot();
   return NextResponse.json({
     workspaces: snapshot.workspaces
   });
