@@ -28,6 +28,7 @@ type UpdateRunState = "idle" | "running" | "success" | "error";
 export function MissionControlShellDialogs({
   snapshot,
   surfaceTheme,
+  isInspectorOpen,
   taskAbortRequest,
   taskAbortRunState,
   taskAbortMessage,
@@ -45,6 +46,7 @@ export function MissionControlShellDialogs({
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
+  isInspectorOpen: boolean;
   taskAbortRequest: TaskRecord | null;
   taskAbortRunState: TaskAbortState;
   taskAbortMessage: string | null;
@@ -153,37 +155,39 @@ export function MissionControlShellDialogs({
         </DialogContent>
       </Dialog>
 
-      <div
-        className={cn(
-          "pointer-events-auto absolute bottom-3 right-[74px] z-30 text-[11px] tracking-[0.04em] lg:bottom-4",
-          surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
-        )}
-      >
-        Built on{" "}
-        <a
-          href="https://openclaw.ai/"
-          target="_blank"
-          rel="noreferrer"
+      {isInspectorOpen ? null : (
+        <div
           className={cn(
-            "transition-colors",
-            surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
+            "pointer-events-auto absolute bottom-3 right-[74px] z-30 text-[11px] tracking-[0.04em] lg:bottom-4",
+            surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
           )}
         >
-          OpenClaw
-        </a>{" "}
-        by{" "}
-        <a
-          href="https://sapienx.app/"
-          target="_blank"
-          rel="noreferrer"
-          className={cn(
-            "transition-colors",
-            surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
-          )}
-        >
-          SapienX
-        </a>
-      </div>
+          Built on{" "}
+          <a
+            href="https://openclaw.ai/"
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "transition-colors",
+              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
+            )}
+          >
+            OpenClaw
+          </a>{" "}
+          by{" "}
+          <a
+            href="https://sapienx.app/"
+            target="_blank"
+            rel="noreferrer"
+            className={cn(
+              "transition-colors",
+              surfaceTheme === "light" ? "text-[#6f5a4b] hover:text-[#4f3d31]" : "text-slate-300 hover:text-slate-100"
+            )}
+          >
+            SapienX
+          </a>
+        </div>
+      )}
 
       <Dialog
         open={updateDialogOpen}

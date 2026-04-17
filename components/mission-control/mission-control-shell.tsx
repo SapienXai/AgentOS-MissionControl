@@ -2397,6 +2397,7 @@ export function MissionControlShell({
         <MissionControlShellDialogs
           snapshot={snapshot}
           surfaceTheme={surfaceTheme}
+          isInspectorOpen={isInspectorOpen}
           taskAbortRequest={taskAbortRequest}
           taskAbortRunState={taskAbortRunState}
           taskAbortMessage={taskAbortMessage}
