@@ -35,6 +35,7 @@ export type AgentNodeData = Record<string, unknown> & {
   focused?: boolean;
   composerFocused?: boolean;
   taskFocused?: boolean;
+  creationPulse?: boolean;
   activeTaskCount?: number;
   chatOpen?: boolean;
   relativeTimeReferenceMs: number;

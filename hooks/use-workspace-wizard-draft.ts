@@ -13,15 +13,19 @@ import {
   buildWorkspaceCreateProgressTemplate,
   createPendingOperationProgressSnapshot
 } from "@/lib/openclaw/operation-progress";
+import { buildDefaultWorkspaceAgents } from "@/lib/openclaw/workspace-presets";
 import type {
   OperationProgressSnapshot,
   WorkspaceEditSeed,
   WorkspaceCreateResult,
   WorkspaceCreateRules,
   WorkspaceCreateStreamEvent,
+  WorkspaceModelProfile,
   WorkspacePlan,
   WorkspacePlanDeployResult,
-  WorkspacePlanDeployStreamEvent
+  WorkspacePlanDeployStreamEvent,
+  WorkspaceTeamPreset,
+  WorkspaceTemplate
 } from "@/lib/agentos/contracts";
 import {
   applyBasicInputToWorkspacePlan,
@@ -38,6 +42,7 @@ import {
   analyzeWorkspaceWizardSourceInput,
   createInitialWorkspaceWizardBasicDraft,
   extractBasicDraftFromWorkspacePlan,
+  inferWorkspaceWizardTemplate,
   type WorkspaceWizardBasicDraft
 } from "@/lib/openclaw/workspace-wizard-inference";
 
@@ -45,7 +50,7 @@ const plannerStorageKey = "mission-control-workspace-plan-id";
 
 export type WorkspaceWizardMode = "basic" | "advanced";
 
-type WorkspaceWizardNotice = {
+export type WorkspaceWizardNotice = {
   tone: "muted" | "warning";
   title: string;
   description: string;
@@ -76,6 +81,12 @@ export function useWorkspaceWizardDraft({
   const [basicRules, setBasicRules] = useState<WorkspaceCreateRules>(() =>
     createWorkspaceWizardQuickCreateRules("fastest")
   );
+  const [basicTemplateAuto, setBasicTemplateAuto] = useState(true);
+  const [basicTemplate, setBasicTemplateState] = useState<WorkspaceTemplate>(() =>
+    inferWorkspaceWizardTemplate("")
+  );
+  const [basicTeamPreset, setBasicTeamPresetState] = useState<WorkspaceTeamPreset>("solo");
+  const [basicModelProfile, setBasicModelProfileState] = useState<WorkspaceModelProfile>("balanced");
   const [notice, setNotice] = useState<WorkspaceWizardNotice | null>(null);
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -263,7 +274,10 @@ export function useWorkspaceWizardDraft({
           const draftToApply = draftOverride ?? basicDraft;
           const seededPlan =
             draftToApply.goal.trim() || draftToApply.source.trim() || draftToApply.name.trim()
-              ? applyBasicInputToWorkspacePlan(fetchedPlan, draftToApply, basicRules)
+              ? applyBasicInputToWorkspacePlan(fetchedPlan, draftToApply, basicRules, {
+                  template: basicTemplate,
+                  modelProfile: basicModelProfile
+                })
               : fetchedPlan;
 
           return commitPlan(seededPlan);
@@ -281,7 +295,7 @@ export function useWorkspaceWizardDraft({
       planRequestRef.current = request;
       return request;
     },
-    [basicDraft, basicRules, commitPlan, plan, requestPlanner]
+    [basicDraft, basicModelProfile, basicRules, basicTemplate, commitPlan, plan, requestPlanner]
   );
 
   const startFreshDraft = useCallback(async () => {
@@ -318,6 +332,10 @@ export function useWorkspaceWizardDraft({
       setPlanId(null);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
       setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
+      setBasicTemplateAuto(true);
+      setBasicTemplateState(inferWorkspaceWizardTemplate(""));
+      setBasicTeamPresetState("solo");
+      setBasicModelProfileState("balanced");
       return;
     }
 
@@ -328,6 +346,10 @@ export function useWorkspaceWizardDraft({
     const blankDraft = createInitialWorkspaceWizardBasicDraft();
     setBasicDraft(blankDraft);
     setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
+    setBasicTemplateAuto(true);
+    setBasicTemplateState(inferWorkspaceWizardTemplate(""));
+    setBasicTeamPresetState("solo");
+    setBasicModelProfileState("balanced");
     const nextPlan = await ensurePlan({ resumeStored: false, draftOverride: blankDraft });
 
     if (nextPlan) {
@@ -447,17 +469,26 @@ export function useWorkspaceWizardDraft({
       return null;
     }
 
-    const ensuredPlan = applyBasicInputToWorkspacePlan(basePlan, basicDraft, basicRules);
+    const ensuredPlan = applyBasicInputToWorkspacePlan(basePlan, basicDraft, basicRules, {
+      template: basicTemplate,
+      modelProfile: basicModelProfile
+    });
 
     commitPlan(ensuredPlan);
     setIsCreating(true);
 
     const initialProgress = createPendingOperationProgressSnapshot(
-      buildWorkspaceCreateProgressTemplate({
-        sourceMode: ensuredPlan.workspace.sourceMode,
-        agentCount: 1,
-        kickoffMission: ensuredPlan.workspace.rules.kickoffMission ?? true
-      })
+      {
+        ...buildWorkspaceCreateProgressTemplate({
+          sourceMode: ensuredPlan.workspace.sourceMode,
+          agentCount: buildDefaultWorkspaceAgents(
+            ensuredPlan.workspace.template,
+            basicTeamPreset,
+            ensuredPlan.workspace.name
+          ).filter((agent) => agent.enabled).length,
+          kickoffMission: ensuredPlan.workspace.rules.kickoffMission ?? true
+        })
+      }
     );
 
     setCreateProgress(initialProgress);
@@ -469,7 +500,9 @@ export function useWorkspaceWizardDraft({
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          ...buildWorkspaceCreateInputFromPlan(ensuredPlan),
+          ...buildWorkspaceCreateInputFromPlan(ensuredPlan, {
+            teamPreset: basicTeamPreset
+          }),
           stream: true
         })
       });
@@ -527,7 +560,7 @@ export function useWorkspaceWizardDraft({
     } finally {
       setIsCreating(false);
     }
-  }, [basicDraft, basicRules, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, workspaceEditId]);
+  }, [basicDraft, basicModelProfile, basicRules, basicTeamPreset, basicTemplate, clearStoredPlan, commitPlan, ensurePlan, onRefresh, onWorkspaceCreated, workspaceEditId]);
 
   const applyWorkspaceChanges = useCallback(async () => {
     const activePlan = planRef.current;
@@ -822,6 +855,9 @@ export function useWorkspaceWizardDraft({
       }
 
       commitPlan(result.plan);
+      setBasicTemplateState(result.plan.workspace.template);
+      setBasicModelProfileState(result.plan.workspace.modelProfile);
+      setBasicTeamPresetState(result.plan.team.persistentAgents.filter((agent) => agent.enabled).length > 1 ? "core" : "solo");
       setMode("advanced");
       setNotice({
         tone: "muted",
@@ -864,7 +900,10 @@ export function useWorkspaceWizardDraft({
           return;
         }
 
-        const seededPlan = applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft, basicRules);
+        const seededPlan = applyBasicInputToWorkspacePlan(ensuredPlan, basicDraft, basicRules, {
+          template: basicTemplate,
+          modelProfile: basicModelProfile
+        });
         const shouldAppendImportNote =
           !seededPlan.intake.started &&
           seededPlan.conversation.filter((message) => message.role !== "system").length <= 1;
@@ -890,6 +929,9 @@ export function useWorkspaceWizardDraft({
       if (plan) {
         setBasicDraft(extractBasicDraftFromWorkspacePlan(plan));
         setBasicRules(extractBasicRulesFromWorkspacePlan(plan));
+        setBasicTemplateState(plan.workspace.template);
+        setBasicModelProfileState(plan.workspace.modelProfile);
+        setBasicTeamPresetState(plan.team.persistentAgents.filter((agent) => agent.enabled).length > 1 ? "core" : "solo");
         setNotice(
           hasAdvancedWorkspaceDetails(plan)
             ? {
@@ -905,7 +947,7 @@ export function useWorkspaceWizardDraft({
 
       setMode("basic");
     },
-    [basicDraft, basicRules, commitPlan, ensurePlan, mode, plan, workspaceEditId]
+    [basicDraft, basicModelProfile, basicRules, basicTemplate, commitPlan, ensurePlan, mode, plan, workspaceEditId]
   );
 
   const setBasicGoal = useCallback((goal: string) => {
@@ -914,10 +956,22 @@ export function useWorkspaceWizardDraft({
         ...current,
         goal
       };
+      const nextTemplate = basicTemplateAuto
+        ? inferWorkspaceWizardTemplate(`${nextDraft.goal}\n${nextDraft.source}`)
+        : basicTemplate;
+
+      if (basicTemplateAuto) {
+        setBasicTemplateState(nextTemplate);
+      }
 
       if (mode === "basic") {
         setPlan((activePlan) => {
-          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          const nextPlan = activePlan
+            ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules, {
+                template: nextTemplate,
+                modelProfile: basicModelProfile
+              })
+            : activePlan;
           planRef.current = nextPlan;
           return nextPlan;
         });
@@ -925,7 +979,7 @@ export function useWorkspaceWizardDraft({
 
       return nextDraft;
     });
-  }, [basicRules, mode]);
+  }, [basicModelProfile, basicRules, basicTemplate, basicTemplateAuto, mode]);
 
   const setBasicSource = useCallback((source: string) => {
     setBasicDraft((current) => {
@@ -933,10 +987,22 @@ export function useWorkspaceWizardDraft({
         ...current,
         source
       };
+      const nextTemplate = basicTemplateAuto
+        ? inferWorkspaceWizardTemplate(`${nextDraft.goal}\n${nextDraft.source}`)
+        : basicTemplate;
+
+      if (basicTemplateAuto) {
+        setBasicTemplateState(nextTemplate);
+      }
 
       if (mode === "basic") {
         setPlan((activePlan) => {
-          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          const nextPlan = activePlan
+            ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules, {
+                template: nextTemplate,
+                modelProfile: basicModelProfile
+              })
+            : activePlan;
           planRef.current = nextPlan;
           return nextPlan;
         });
@@ -944,7 +1010,7 @@ export function useWorkspaceWizardDraft({
 
       return nextDraft;
     });
-  }, [basicRules, mode]);
+  }, [basicModelProfile, basicRules, basicTemplate, basicTemplateAuto, mode]);
 
   const setBasicName = useCallback((name: string) => {
     setBasicDraft((current) => {
@@ -955,7 +1021,12 @@ export function useWorkspaceWizardDraft({
 
       if (mode === "basic") {
         setPlan((activePlan) => {
-          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules) : activePlan;
+          const nextPlan = activePlan
+            ? applyBasicInputToWorkspacePlan(activePlan, nextDraft, basicRules, {
+                template: basicTemplate,
+                modelProfile: basicModelProfile
+              })
+            : activePlan;
           planRef.current = nextPlan;
           return nextPlan;
         });
@@ -963,19 +1034,59 @@ export function useWorkspaceWizardDraft({
 
       return nextDraft;
     });
-  }, [basicRules, mode]);
+  }, [basicModelProfile, basicRules, basicTemplate, mode]);
+
+  const setBasicTemplate = useCallback((template: WorkspaceTemplate) => {
+    setBasicTemplateAuto(false);
+    setBasicTemplateState(template);
+
+    setPlan((activePlan) => {
+      const nextPlan = activePlan
+        ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, basicRules, {
+            template,
+            modelProfile: basicModelProfile
+          })
+        : activePlan;
+      planRef.current = nextPlan;
+      return nextPlan;
+    });
+  }, [basicDraft, basicModelProfile, basicRules]);
+
+  const setBasicTeamPreset = useCallback((nextPreset: WorkspaceTeamPreset) => {
+    setBasicTeamPresetState(nextPreset);
+  }, []);
+
+  const setBasicModelProfile = useCallback((nextProfile: WorkspaceModelProfile) => {
+    setBasicModelProfileState(nextProfile);
+
+    setPlan((activePlan) => {
+      const nextPlan = activePlan
+        ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, basicRules, {
+            template: basicTemplate,
+            modelProfile: nextProfile
+          })
+        : activePlan;
+      planRef.current = nextPlan;
+      return nextPlan;
+    });
+  }, [basicDraft, basicRules, basicTemplate]);
 
   const setBasicPreset = useCallback(
     (preset: WorkspaceWizardQuickSetupPreset) => {
       const nextRules = createWorkspaceWizardQuickCreateRules(preset);
       setBasicRules(nextRules);
       setPlan((activePlan) => {
-        const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan;
+        const nextPlan = activePlan
+          ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules, {
+              template: basicTemplate,
+              modelProfile: basicModelProfile
+            })
+          : activePlan;
         planRef.current = nextPlan;
         return nextPlan;
       });
     },
-    [basicDraft]
+    [basicDraft, basicModelProfile, basicTemplate]
   );
 
   const toggleBasicRule = useCallback(
@@ -988,7 +1099,12 @@ export function useWorkspaceWizardDraft({
         };
 
         setPlan((activePlan) => {
-          const nextPlan = activePlan ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules) : activePlan;
+          const nextPlan = activePlan
+            ? applyBasicInputToWorkspacePlan(activePlan, basicDraft, nextRules, {
+                template: basicTemplate,
+                modelProfile: basicModelProfile
+              })
+            : activePlan;
           planRef.current = nextPlan;
           return nextPlan;
         });
@@ -996,7 +1112,7 @@ export function useWorkspaceWizardDraft({
         return nextRules;
       });
     },
-    [basicDraft]
+    [basicDraft, basicModelProfile, basicTemplate]
   );
 
   useEffect(() => {
@@ -1008,6 +1124,10 @@ export function useWorkspaceWizardDraft({
       setHasStoredDraft(false);
       setBasicDraft(createInitialWorkspaceWizardBasicDraft());
       setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
+      setBasicTemplateAuto(true);
+      setBasicTemplateState(inferWorkspaceWizardTemplate(""));
+      setBasicTeamPresetState("solo");
+      setBasicModelProfileState("balanced");
       setNotice(null);
       setCreateProgress(null);
       setDeployProgress(null);
@@ -1026,6 +1146,10 @@ export function useWorkspaceWizardDraft({
     setHasStoredDraft(!workspaceEditId && Boolean(storedPlanId));
     setBasicDraft(createInitialWorkspaceWizardBasicDraft());
     setBasicRules(createWorkspaceWizardQuickCreateRules("fastest"));
+    setBasicTemplateAuto(true);
+    setBasicTemplateState(inferWorkspaceWizardTemplate(""));
+    setBasicTeamPresetState("solo");
+    setBasicModelProfileState("balanced");
     setNotice(null);
     setCreateProgress(null);
     setDeployProgress(null);
@@ -1090,6 +1214,9 @@ export function useWorkspaceWizardDraft({
     basicDraft,
     basicRules,
     basicPreset,
+    basicTemplate,
+    basicTeamPreset,
+    basicModelProfile,
     isPlanLoading,
     isSending,
     isSaving,
@@ -1105,6 +1232,9 @@ export function useWorkspaceWizardDraft({
     setBasicGoal,
     setBasicSource,
     setBasicName,
+    setBasicTemplate,
+    setBasicTeamPreset,
+    setBasicModelProfile,
     setBasicPreset,
     toggleBasicRule,
     setNotice,

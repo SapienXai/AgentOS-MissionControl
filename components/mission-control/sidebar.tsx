@@ -105,7 +105,8 @@ export function MissionSidebar({
   onOpenModelSetup,
   onOpenAddModels,
   onEditWorkspace,
-  onSnapshotChange
+  onSnapshotChange,
+  onAgentCreatedVisible
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
@@ -138,6 +139,7 @@ export function MissionSidebar({
   onOpenAddModels: () => void;
   onEditWorkspace: (workspaceId: string) => void;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
+  onAgentCreatedVisible?: (agentId: string) => void;
 }) {
   const [isRailCollapsed, setIsRailCollapsed] = useState(false);
   const healthTone = toneForHealth(snapshot.diagnostics.health);
@@ -852,6 +854,7 @@ export function MissionSidebar({
                           defaultWorkspaceId={activeWorkspaceId ?? snapshot.workspaces[0]?.id ?? null}
                           onRefresh={onRefresh}
                           onSnapshotChange={onSnapshotChange}
+                          onAgentCreatedVisible={onAgentCreatedVisible}
                           surfaceTheme={surfaceTheme}
                           trigger={
                             <Button

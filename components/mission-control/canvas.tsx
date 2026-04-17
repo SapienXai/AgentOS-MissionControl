@@ -51,6 +51,7 @@ export function MissionCanvas({
   activeWorkspaceId,
   selectedNodeId,
   focusedAgentId,
+  recentCreatedAgentId,
   activeChatAgentId,
   composerTargetAgentId,
   isComposerActive,
@@ -82,6 +83,7 @@ export function MissionCanvas({
   activeWorkspaceId: string | null;
   selectedNodeId: string | null;
   focusedAgentId: string | null;
+  recentCreatedAgentId: string | null;
   activeChatAgentId: string | null;
   composerTargetAgentId: string | null;
   isComposerActive: boolean;
@@ -133,6 +135,7 @@ export function MissionCanvas({
     relativeTimeReferenceMs,
     activeWorkspaceId,
     focusedAgentId,
+    recentCreatedAgentId,
     selectedNodeId,
     activeChatAgentId,
     composerTargetAgentId,
@@ -213,6 +216,7 @@ export function MissionCanvas({
       relativeTimeReferenceMs,
       activeWorkspaceId,
       focusedAgentId,
+      recentCreatedAgentId,
       selectedNodeId,
       activeChatAgentId,
       composerTargetAgentId,
@@ -254,6 +258,7 @@ export function MissionCanvas({
     snapshot,
     activeWorkspaceId,
     focusedAgentId,
+    recentCreatedAgentId,
     selectedNodeId,
     activeChatAgentId,
     composerTargetAgentId,

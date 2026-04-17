@@ -79,7 +79,6 @@ type WorkspaceWizardDraftPaneProps = {
   workspaceMode?: WorkspaceDraftMode;
   mode: WorkspaceWizardMode;
   snapshot: MissionControlSnapshot;
-  basicQuickSetup?: ReactNode;
   plan: WorkspacePlan | null;
   resolvedName: string;
   resolvedTemplate: WorkspaceTemplate;
@@ -103,7 +102,6 @@ export function WorkspaceWizardDraftPane({
   workspaceMode = "create",
   mode,
   snapshot,
-  basicQuickSetup,
   plan,
   resolvedName,
   resolvedTemplate,
@@ -266,8 +264,6 @@ export function WorkspaceWizardDraftPane({
                   onOpenBlueprintEditor={openBlueprintEditor}
                 />
               </TrackedSection>
-
-              {basicQuickSetup ? <div className="space-y-3">{basicQuickSetup}</div> : null}
             </>
           ) : null}
 

@@ -83,7 +83,8 @@ export function CommandBar({
   onOpenWorkspaceChannels,
   onMissionDispatchStart,
   onMissionDispatchFailure,
-  onMissionResponse
+  onMissionResponse,
+  onAgentCreatedVisible
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
@@ -100,6 +101,7 @@ export function CommandBar({
   onMissionDispatchStart: (event: MissionDispatchStart) => void;
   onMissionDispatchFailure: (requestId: string, message: string) => void;
   onMissionResponse: (result: MissionResponse, context: { requestId: string }) => void;
+  onAgentCreatedVisible?: (agentId: string) => void;
 }) {
   const [mission, setMission] = useState("");
   const [targetAgentId, setTargetAgentId] = useState<string>("");
@@ -686,6 +688,7 @@ export function CommandBar({
                           preferredCreatedAgentIdRef.current = agentId;
                           setTargetAgentId(agentId);
                         }}
+                        onAgentCreatedVisible={onAgentCreatedVisible}
                         surfaceTheme={surfaceTheme}
                         trigger={
                           <button

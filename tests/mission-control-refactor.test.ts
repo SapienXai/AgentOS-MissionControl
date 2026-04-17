@@ -9,9 +9,12 @@ import {
 } from "@/components/mission-control/create-agent-dialog.utils";
 import {
   createOptimisticMissionTaskRecord,
+  buildWorkspaceSelectionStorageKey,
   mergeSnapshotWithOptimisticTasks,
   resolveGatewayDraft,
-  resolveOnboardingAction
+  resolveOnboardingAction,
+  serializeWorkspaceSelection,
+  resolveWorkspaceSelection
 } from "@/components/mission-control/mission-control-shell.utils";
 import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 
@@ -64,4 +67,20 @@ test("control plane helpers normalize snapshot and onboarding fallback", () => {
 
   assert.equal(merged.tasks.length, 1);
   assert.equal(merged.tasks[0].key, "optimistic:req-1");
+});
+
+test("workspace selection helpers keep the last valid workspace", () => {
+  assert.equal(
+    buildWorkspaceSelectionStorageKey("/tmp/workspaces"),
+    "mission-control-active-workspace-id:/tmp/workspaces"
+  );
+  assert.equal(serializeWorkspaceSelection(null), "__all__");
+  assert.equal(resolveWorkspaceSelection(["workspace-a", "workspace-b"], "workspace-b"), "workspace-b");
+  assert.equal(resolveWorkspaceSelection(["workspace-a", "workspace-b"], "workspace-missing"), "workspace-a");
+  assert.equal(
+    resolveWorkspaceSelection(["workspace-a", "workspace-b"], null, "workspace-b"),
+    "workspace-b"
+  );
+  assert.equal(resolveWorkspaceSelection(["workspace-a", "workspace-b"], "__all__"), null);
+  assert.equal(resolveWorkspaceSelection([], "workspace-missing"), null);
 });

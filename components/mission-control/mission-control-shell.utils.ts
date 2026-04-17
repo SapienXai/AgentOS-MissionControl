@@ -10,6 +10,8 @@ import type {
 type UpdateRunState = "idle" | "running" | "success" | "error";
 type SurfaceTheme = "dark" | "light";
 type ModelOnboardingIntent = "auto" | "refresh" | "discover" | "set-default" | "login-provider";
+const workspaceSelectionStorageKeyPrefix = "mission-control-active-workspace-id";
+const workspaceSelectionStorageAllValue = "__all__";
 
 export type OptimisticMissionTask = {
   requestId: string;
@@ -325,6 +327,34 @@ export function resolveGatewayDraft(snapshot: MissionControlSnapshot) {
 
 export function resolveWorkspaceRootDraft(snapshot: MissionControlSnapshot) {
   return compactPath(snapshot.diagnostics.configuredWorkspaceRoot || snapshot.diagnostics.workspaceRoot);
+}
+
+export function buildWorkspaceSelectionStorageKey(workspaceRoot: string) {
+  return `${workspaceSelectionStorageKeyPrefix}:${workspaceRoot}`;
+}
+
+export function serializeWorkspaceSelection(workspaceId: string | null) {
+  return workspaceId ?? workspaceSelectionStorageAllValue;
+}
+
+export function resolveWorkspaceSelection(
+  workspaceIds: string[],
+  storedWorkspaceId: string | null,
+  currentWorkspaceId: string | null = null
+) {
+  if (storedWorkspaceId === workspaceSelectionStorageAllValue) {
+    return null;
+  }
+
+  if (storedWorkspaceId && workspaceIds.includes(storedWorkspaceId)) {
+    return storedWorkspaceId;
+  }
+
+  if (currentWorkspaceId && workspaceIds.includes(currentWorkspaceId)) {
+    return currentWorkspaceId;
+  }
+
+  return workspaceIds[0] ?? null;
 }
 
 export function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent): OpenClawModelOnboardingPhase {

@@ -157,6 +157,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const hasUnreadChat = chatUnreadCount > 0 && !data.chatOpen;
   const activeTaskCount = Math.max(0, Number(data.activeTaskCount ?? 0));
   const isAttentionActive = selected || data.composerFocused || data.taskFocused;
+  const isCreationPulse = Boolean(data.creationPulse);
   const dotTone =
     data.agent.status === "engaged"
       ? "bg-cyan-300"
@@ -241,9 +242,23 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         "agent-node relative isolate w-[272px] overflow-visible rounded-[24px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,20,26,0.96),rgba(9,11,15,0.96))] pt-0 pb-0 shadow-[0_20px_44px_rgba(0,0,0,0.34)] backdrop-blur-xl",
         data.emphasis ? "opacity-100" : "opacity-72",
         selected && "border-cyan-300/[0.42] shadow-[0_22px_48px_rgba(34,211,238,0.16)]",
+        isCreationPulse && "border-cyan-200/50 shadow-[0_24px_56px_rgba(34,211,238,0.22)]",
         isAttentionActive && "border-cyan-200/[0.54] shadow-[0_24px_56px_rgba(34,211,238,0.22)]"
       )}
     >
+      {isCreationPulse ? (
+        <motion.div
+          aria-hidden="true"
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: [0, 1, 0.72, 0], scale: [0.96, 1.01, 1.015, 1.02] }}
+          transition={{ duration: 1.7, times: [0, 0.16, 0.55, 1], ease: "easeOut" }}
+          className="pointer-events-none absolute inset-[-4px] z-[5] rounded-[28px]"
+        >
+          <div className="absolute inset-0 rounded-[28px] border border-cyan-300/60 bg-cyan-300/10 shadow-[0_0_0_1px_rgba(34,211,238,0.14),0_0_34px_rgba(34,211,238,0.28)]" />
+          <div className="absolute inset-[10px] rounded-[20px] bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.18),transparent_62%)] opacity-90" />
+        </motion.div>
+      ) : null}
+
       <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[24px]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(34,211,238,0.18),transparent_36%),radial-gradient(circle_at_84%_18%,rgba(16,185,129,0.08),transparent_28%)]" />
         <div className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full bg-[linear-gradient(180deg,rgba(125,211,252,0.9),rgba(34,211,238,0.14))]" />

@@ -4,7 +4,7 @@ import {
   EyeOff,
   RefreshCw,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
 import { AgentModelPickerDialog } from "@/components/mission-control/agent-model-picker-dialog";
@@ -38,7 +38,10 @@ import {
   resolveModelOnboardingStartPhase,
   resolveOnboardingAction,
   resolveTaskPrompt,
+  buildWorkspaceSelectionStorageKey,
   resolveWorkspaceRootDraft,
+  resolveWorkspaceSelection,
+  serializeWorkspaceSelection,
   updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
@@ -108,6 +111,7 @@ const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
+const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
 
 export function MissionControlShell({
   initialSnapshot
@@ -140,6 +144,7 @@ export function MissionControlShell({
   const [taskAbortRunState, setTaskAbortRunState] = useState<TaskAbortState>("idle");
   const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
   const missionDispatchAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const [recentCreatedAgentId, setRecentCreatedAgentId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -154,6 +159,7 @@ export function MissionControlShell({
   const [resetBackgroundLogPath, setResetBackgroundLogPath] = useState<string | null>(null);
   const [resetLog, setResetLog] = useState("");
   const [resetConfirmText, setResetConfirmText] = useState("");
+  const recentCreatedAgentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
   const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
   const [isSavingGateway, setIsSavingGateway] = useState(false);
@@ -197,6 +203,7 @@ export function MissionControlShell({
   const [initialAddModelsProvider, setInitialAddModelsProvider] = useState<AddModelsProviderId | null>(null);
   const [agentModelRequest, setAgentModelRequest] = useState<AgentModelRequest | null>(null);
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
+  const [loadedWorkspaceSelectionRoot, setLoadedWorkspaceSelectionRoot] = useState<string | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
@@ -350,6 +357,19 @@ export function MissionControlShell({
     [selectNode, uiSnapshot.agents]
   );
 
+  const handleCreatedAgentVisible = useCallback((agentId: string) => {
+    setRecentCreatedAgentId(agentId);
+
+    if (recentCreatedAgentTimeoutRef.current) {
+      clearTimeout(recentCreatedAgentTimeoutRef.current);
+    }
+
+    recentCreatedAgentTimeoutRef.current = setTimeout(() => {
+      recentCreatedAgentTimeoutRef.current = null;
+      setRecentCreatedAgentId(null);
+    }, 2400);
+  }, []);
+
   const handleAgentModelPickerOpenChange = useCallback((open: boolean) => {
     if (open) {
       return;
@@ -444,6 +464,15 @@ export function MissionControlShell({
     return () => {
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (recentCreatedAgentTimeoutRef.current) {
+        clearTimeout(recentCreatedAgentTimeoutRef.current);
+        recentCreatedAgentTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -562,6 +591,46 @@ export function MissionControlShell({
 
     selectNode(activeWorkspaceId || uiSnapshot.workspaces[0]?.id || null);
   }, [uiSnapshot, selectedNodeId, activeWorkspaceId, pendingWorkspaceOpenId, selectNode]);
+
+  useIsomorphicLayoutEffect(() => {
+    const workspaceRoot = snapshot.diagnostics.workspaceRoot;
+
+    if (loadedWorkspaceSelectionRoot === workspaceRoot) {
+      return;
+    }
+
+    const workspaceSelectionStorageKey = buildWorkspaceSelectionStorageKey(workspaceRoot);
+    const storedWorkspaceId = globalThis.localStorage?.getItem(workspaceSelectionStorageKey) ?? null;
+    const resolvedWorkspaceId = resolveWorkspaceSelection(
+      snapshot.workspaces.map((workspace) => workspace.id),
+      storedWorkspaceId,
+      activeWorkspaceId
+    );
+
+    if (resolvedWorkspaceId && resolvedWorkspaceId !== activeWorkspaceId) {
+      setActiveWorkspaceId(resolvedWorkspaceId);
+      setSelectedNodeId(resolvedWorkspaceId);
+    }
+
+    setLoadedWorkspaceSelectionRoot(workspaceRoot);
+  }, [activeWorkspaceId, loadedWorkspaceSelectionRoot, snapshot.diagnostics.workspaceRoot, snapshot.workspaces]);
+
+  useEffect(() => {
+    const workspaceRoot = snapshot.diagnostics.workspaceRoot;
+
+    if (loadedWorkspaceSelectionRoot !== workspaceRoot) {
+      return;
+    }
+
+    const workspaceSelectionStorageKey = buildWorkspaceSelectionStorageKey(workspaceRoot);
+    const storage = globalThis.localStorage;
+
+    if (typeof storage === "undefined") {
+      return;
+    }
+
+    storage.setItem(workspaceSelectionStorageKey, serializeWorkspaceSelection(activeWorkspaceId));
+  }, [activeWorkspaceId, loadedWorkspaceSelectionRoot, snapshot.diagnostics.workspaceRoot]);
 
   useEffect(() => {
     const selectedTask = uiSnapshot.tasks.find((task) => task.id === selectedNodeId);
@@ -1803,6 +1872,7 @@ export function MissionControlShell({
             activeWorkspaceId={activeWorkspaceId}
             selectedNodeId={selectedNodeId}
             focusedAgentId={focusedAgentId}
+            recentCreatedAgentId={recentCreatedAgentId}
             composerTargetAgentId={composerTargetAgentId}
             activeChatAgentId={activeChatAgentId}
             isComposerActive={isComposerActive}
@@ -2022,6 +2092,7 @@ export function MissionControlShell({
             onOpenAddModels={openAddModelsDialog}
             onEditWorkspace={openWorkspaceWizardForEdit}
             onSnapshotChange={setSnapshot}
+            onAgentCreatedVisible={handleCreatedAgentVisible}
           />
         </div>
 
@@ -2114,6 +2185,7 @@ export function MissionControlShell({
               openWorkspaceWizard("basic");
             }}
             onOpenWorkspaceChannels={openWorkspaceChannels}
+            onAgentCreatedVisible={handleCreatedAgentVisible}
             onMissionDispatchStart={(event) => {
               missionDispatchAbortControllersRef.current.set(event.requestId, event.abortController);
 

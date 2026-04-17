@@ -3,7 +3,14 @@ import {
   createPlannerMessage,
   enrichWorkspacePlan
 } from "@/lib/openclaw/planner-core";
-import type { WorkspaceCreateInput, WorkspaceCreateRules, WorkspacePlan } from "@/lib/openclaw/types";
+import type {
+  WorkspaceCreateInput,
+  WorkspaceCreateRules,
+  WorkspaceModelProfile,
+  WorkspacePlan,
+  WorkspaceTeamPreset,
+  WorkspaceTemplate
+} from "@/lib/openclaw/types";
 import { DEFAULT_WORKSPACE_RULES } from "@/lib/openclaw/workspace-presets";
 import {
   analyzeWorkspaceWizardSourceInput,
@@ -58,7 +65,11 @@ export function inferWorkspaceWizardQuickSetupPreset(
 export function applyBasicInputToWorkspacePlan(
   plan: WorkspacePlan,
   draft: WorkspaceWizardBasicDraft,
-  rulesOverride?: Partial<WorkspaceCreateRules>
+  rulesOverride?: Partial<WorkspaceCreateRules>,
+  shapeOverride?: {
+    template?: WorkspaceTemplate;
+    modelProfile?: WorkspaceModelProfile;
+  }
 ) {
   const next = structuredClone(plan);
   const sourceAnalysis = analyzeWorkspaceWizardSourceInput(draft.source);
@@ -85,8 +96,8 @@ export function applyBasicInputToWorkspacePlan(
   next.workspace.sourceMode = sourceAnalysis.createSourceMode;
   next.workspace.repoUrl = sourceAnalysis.repoUrl;
   next.workspace.existingPath = sourceAnalysis.existingPath;
-  next.workspace.template = inferWorkspaceWizardTemplate(`${goal}\n${draft.source}`);
-  next.workspace.modelProfile = next.workspace.modelProfile || "balanced";
+  next.workspace.template = shapeOverride?.template ?? inferWorkspaceWizardTemplate(`${goal}\n${draft.source}`);
+  next.workspace.modelProfile = shapeOverride?.modelProfile ?? next.workspace.modelProfile ?? "balanced";
   next.workspace.rules = normalizeWorkspaceWizardQuickCreateRules(rulesOverride ?? next.workspace.rules);
 
   next.intake.sources = next.intake.sources.filter((source) => source.id !== basicSourceId);
@@ -144,7 +155,12 @@ export function appendBasicModeImportNote(plan: WorkspacePlan, draft: WorkspaceW
   return enrichWorkspacePlan(next);
 }
 
-export function buildWorkspaceCreateInputFromPlan(plan: WorkspacePlan): WorkspaceCreateInput {
+export function buildWorkspaceCreateInputFromPlan(
+  plan: WorkspacePlan,
+  options: {
+    teamPreset?: WorkspaceTeamPreset;
+  } = {}
+): WorkspaceCreateInput {
   return {
     name: plan.workspace.name,
     brief: buildWorkspaceCreateBriefFromPlan(plan),
@@ -154,7 +170,7 @@ export function buildWorkspaceCreateInputFromPlan(plan: WorkspacePlan): Workspac
     repoUrl: plan.workspace.repoUrl,
     existingPath: plan.workspace.existingPath,
     template: plan.workspace.template,
-    teamPreset: "solo",
+    teamPreset: options.teamPreset ?? "solo",
     modelProfile: plan.workspace.modelProfile || "balanced",
     docOverrides: plan.workspace.docOverrides,
     rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules),

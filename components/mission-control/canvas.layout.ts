@@ -53,6 +53,10 @@ export function resolveNodeZIndex(
       return 60;
     }
 
+    if (node.data.creationPulse) {
+      return 58;
+    }
+
     if (isComposerActive && composerTargetAgentId === node.id) {
       return 55;
     }

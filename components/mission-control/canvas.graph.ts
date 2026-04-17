@@ -31,6 +31,7 @@ export function buildCanvasGraph(
   relativeTimeReferenceMs: number,
   activeWorkspaceId: string | null,
   focusedAgentId: string | null,
+  recentCreatedAgentId: string | null,
   selectedNodeId: string | null,
   activeChatAgentId: string | null,
   composerTargetAgentId: string | null,
@@ -138,7 +139,16 @@ export function buildCanvasGraph(
         type: "agent",
         draggable: true,
         position: agentPosition,
-        zIndex: isComposerHighlightedAgent ? 55 : isTaskFocusedAgent ? 48 : activeTaskCount > 0 ? 24 : 10,
+        zIndex:
+          recentCreatedAgentId === agent.id
+            ? 58
+            : isComposerHighlightedAgent
+              ? 55
+              : isTaskFocusedAgent
+                ? 48
+                : activeTaskCount > 0
+                  ? 24
+                  : 10,
         selected: false,
         data: {
           agent,
@@ -146,6 +156,7 @@ export function buildCanvasGraph(
           focused: focusedAgentId === agent.id,
           composerFocused: isComposerHighlightedAgent,
           taskFocused: isTaskFocusedAgent,
+          creationPulse: recentCreatedAgentId === agent.id,
           activeTaskCount,
           chatOpen: isAgentChatOpen,
           relativeTimeReferenceMs,
