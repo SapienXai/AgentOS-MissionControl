@@ -2422,7 +2422,14 @@ async function applyWorkspacePlanEdits(
     isPrimary: Boolean(agent.isPrimary),
     skillId: normalizeOptionalValue(agent.skillId) ?? null,
     modelId: normalizeOptionalValue(agent.modelId) ?? null,
-    policy: agent.policy ?? null
+    policy: agent.policy ?? null,
+    channelIds: Array.from(
+      new Set(
+        (agent.channelIds ?? [])
+          .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+          .filter((entry) => Boolean(entry))
+      )
+    )
   }));
   const teamPreset: WorkspaceTeamPreset =
     manifestAgents.length <= 1
@@ -5203,7 +5210,7 @@ async function updateManagedSurfaceRouting(
   const managedTelegramChannels = managedChannels.filter((channel) => channel.type === "telegram");
   const managedDiscordChannels = managedChannels.filter((channel) => channel.type === "discord");
 
-  const nextBindings = [
+  const nextBindings = dedupeManagedBindings([
     ...currentBindings.filter((entry) => {
       if (!isObjectRecord(entry)) {
         return true;
@@ -5247,17 +5254,30 @@ async function updateManagedSurfaceRouting(
       channel.workspaces.flatMap((workspace) =>
         workspace.groupAssignments
           .filter((assignment) => assignment.enabled !== false && assignment.agentId)
-          .map((assignment) => ({
-            agentId: assignment.agentId as string,
-            match: {
-              channel: "telegram",
-              accountId: channel.id,
-              peer: {
-                kind: "group",
-                id: assignment.chatId
+          .flatMap((assignment) => {
+            const agentId = assignment.agentId as string;
+
+            return [
+              {
+                agentId,
+                match: {
+                  channel: "telegram",
+                  accountId: channel.id
+                }
+              },
+              {
+                agentId,
+                match: {
+                  channel: "telegram",
+                  accountId: channel.id,
+                  peer: {
+                    kind: "group",
+                    id: assignment.chatId
+                  }
+                }
               }
-            }
-          }))
+            ];
+        })
       )
     ),
     ...managedDiscordChannels.flatMap((channel) =>
@@ -5268,7 +5288,7 @@ async function updateManagedSurfaceRouting(
           .filter((binding): binding is Exclude<ManagedDiscordBinding, null> => Boolean(binding))
       )
     )
-  ];
+  ]);
 
   await measureTiming(timings, "routing.write-bindings", () =>
     runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"])
@@ -5279,6 +5299,20 @@ async function updateManagedSurfaceRouting(
   await measureTiming(timings, "routing.sync-discord-settings", () =>
     syncManagedDiscordSettings(managedDiscordChannels, timings)
   );
+}
+
+function dedupeManagedBindings(bindings: unknown[]) {
+  const seen = new Set<string>();
+
+  return bindings.filter((binding) => {
+    const key = JSON.stringify(binding);
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
