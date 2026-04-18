@@ -5292,10 +5292,9 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
     ])
   );
 
-  const defaultAccountId =
-    managedChannels.find((channel) => Boolean(channel.primaryAgentId))?.id ??
-    managedChannels[0]?.id ??
-    null;
+  const defaultAccountId = await measureTiming(timings, "telegram-settings.default-account-resolve", () =>
+    resolveManagedTelegramDefaultAccountId(managedChannels, timings)
+  );
 
   if (defaultAccountId) {
     await measureTiming(timings, "telegram-settings.default-account", () =>
@@ -5332,6 +5331,49 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
       "--strict-json"
     ])
   );
+}
+
+async function resolveManagedTelegramDefaultAccountId(
+  managedChannels: WorkspaceChannelSummary[],
+  timings?: TimingCollector
+) {
+  const channelAccounts = await measureTiming(timings, "telegram-settings.read-channel-accounts", () =>
+    readChannelAccounts()
+  );
+  const telegramAccounts = channelAccounts.filter((account) => account.type === "telegram");
+  const tokenBackedAccounts = telegramAccounts.filter(
+    (account) => typeof account.metadata?.botId === "string" && account.metadata.botId.trim().length > 0
+  );
+  const managedChannelIds = new Set(managedChannels.map((channel) => channel.id));
+
+  for (const channel of managedChannels) {
+    const managedMatch = tokenBackedAccounts.find((account) => account.id === channel.id) ?? null;
+    if (managedMatch) {
+      return managedMatch.id;
+    }
+  }
+
+  if (tokenBackedAccounts.length === 1) {
+    return tokenBackedAccounts[0].id;
+  }
+
+  if (tokenBackedAccounts.length > 1) {
+    const managedMatch =
+      telegramAccounts.find(
+        (account) =>
+          managedChannelIds.has(account.id) &&
+          typeof account.metadata?.botId === "string" &&
+          account.metadata.botId.trim().length > 0
+      ) ?? null;
+
+    if (managedMatch) {
+      return managedMatch.id;
+    }
+
+    return tokenBackedAccounts[0].id;
+  }
+
+  return managedChannels.find((channel) => Boolean(channel.primaryAgentId))?.id ?? managedChannels[0]?.id ?? null;
 }
 
 async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
