@@ -1,6 +1,8 @@
 import { getAgentPresetMeta } from "@/lib/openclaw/agent-presets";
 import type { AgentHeartbeatInput, AgentBootstrapFilePath, AgentPreset } from "@/lib/openclaw/types";
 
+export type { AgentBootstrapFilePath } from "@/lib/openclaw/types";
+
 export type AgentBootstrapFileKind = "identity" | "soul" | "tools" | "heartbeat";
 
 export interface AgentBootstrapFileDraft {

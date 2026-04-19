@@ -74,18 +74,44 @@ export async function POST(request: Request) {
   const writer = stream.writable.getWriter();
   const encoder = new TextEncoder();
   let writeChain = Promise.resolve();
+  let streamClosed = false;
 
   const send = (event: OpenClawModelOnboardingStreamEvent) => {
+    if (streamClosed) {
+      return Promise.resolve();
+    }
+
     writeChain = writeChain
-      .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+      .then(() => {
+        if (streamClosed) {
+          return;
+        }
+
+        return writer.write(encoder.encode(`${JSON.stringify(event)}\n`));
+      })
       .catch(() => {});
 
     return writeChain;
   };
 
   const closeWriter = async () => {
-    await writeChain;
-    await writer.close();
+    if (streamClosed) {
+      return;
+    }
+
+    streamClosed = true;
+
+    try {
+      await writeChain;
+    } catch {
+      // Ignore late stream errors during shutdown.
+    }
+
+    try {
+      await writer.close();
+    } catch {
+      // Ignore duplicate close attempts or a closed writer.
+    }
   };
 
   void (async () => {

@@ -1,21 +1,32 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
-import { buildAgentChatPrompt, buildWorkspaceTeamPrompt } from "@/lib/openclaw/agent-chat-prompt";
+import { clearMissionControlCaches, getMissionControlSnapshot, updateAgent } from "@/lib/agentos/control-plane";
+import {
+  buildAgentChatPrompt,
+  buildWorkspaceTeamPrompt,
+  normalizeAgentChatHistory
+} from "@/lib/openclaw/agent-chat-prompt";
+import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
-import { clearMissionControlCaches, updateAgent } from "@/lib/agentos/control-plane";
 import type { MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
+import type { TranscriptTurn } from "@/lib/openclaw/domains/runtime-transcript";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const chatHistoryEntrySchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  text: z.string().min(1)
+});
+
 const chatSchema = z.object({
   message: z.string().min(1),
   rawMessage: z.string().min(1).optional(),
+  history: z.array(chatHistoryEntrySchema).optional(),
   thinking: z.enum(["off", "minimal", "low", "medium", "high"]).optional()
 });
 
@@ -42,6 +53,22 @@ type AgentChatCommandPayload = {
   result?: AgentChatPayloadResult;
 };
 
+type AgentChatStreamEvent =
+  | {
+      type: "status";
+      message: string;
+    }
+  | {
+      type: "assistant";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      message: string;
+      response?: MissionResponse;
+    };
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ agentId: string }> }
@@ -55,53 +82,207 @@ export async function POST(
     }
 
     const input = chatSchema.parse(await request.json());
-    const operatorMessage = input.message.trim();
-    let message = operatorMessage;
 
-    if (!isComposedAgentChatPrompt(operatorMessage)) {
-      const snapshot = await getMissionControlSnapshot({ includeHidden: true });
-      const agent = snapshot.agents.find((entry) => entry.id === agentId) ?? null;
-      const workspaceTeamPrompt = agent ? buildWorkspaceTeamPrompt(snapshot, agent) : null;
-      const workspaceSurfacePrompt = renderWorkspaceSurfaceCoordinationMarkdownForAgent(agentId, snapshot);
+    const stream = new TransformStream();
+    const writer = stream.writable.getWriter();
+    const encoder = new TextEncoder();
+    let writeChain = Promise.resolve();
+    let closed = false;
 
-      message = buildAgentChatPrompt([], operatorMessage, {
-        agentName: agent ? formatAgentDisplayName(agent) : agentId,
-        agentDir: agent?.agentDir,
-        workspacePath: agent?.workspacePath,
-        workspaceTeamPrompt,
-        workspaceSurfacePrompt
-      });
-    }
+    const send = (event: AgentChatStreamEvent) => {
+      if (closed) {
+        return Promise.resolve();
+      }
 
-    const result = await runOpenClawJsonStream<AgentChatCommandPayload>(
-      [
-        "agent",
-        "--agent",
-        agentId,
-        "--message",
-        message,
-        "--thinking",
-        input.thinking ?? "low",
-        "--timeout",
-        "90",
-        "--json"
-      ],
-      { timeoutMs: 120000 }
-    );
-    const response = toAgentChatResponse(agentId, result);
-    const action = readMissionControlAction(response.meta);
+      writeChain = writeChain
+        .then(() => writer.write(encoder.encode(`${JSON.stringify(event)}\n`)))
+        .catch(() => {});
 
-    if (action?.type === "rename_agent") {
-      await updateAgent({
-        id: agentId,
-        name: action.name
-      });
-    }
+      return writeChain;
+    };
 
-    clearMissionControlCaches();
+    const closeWriter = async () => {
+      if (closed) {
+        return;
+      }
 
-    return NextResponse.json(applyMissionControlActionMetadata(response, action), {
-      status: response.status === "completed" ? 200 : 202
+      closed = true;
+      await writeChain;
+
+      try {
+        await writer.close();
+      } catch {
+        // The reader may already be gone.
+      }
+    };
+
+    void (async () => {
+      let latestAssistantText = "";
+      let latestStatusMessage = "";
+      let latestTurnStatus: TranscriptTurn["status"] | null = null;
+      let keepPolling = true;
+
+      const stopPolling = () => {
+        keepPolling = false;
+      };
+
+      const wait = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+
+      const pollTranscript = async (agentId: string, sessionId: string, workspacePath?: string) => {
+        const turn = await readLatestAgentChatTurn(agentId, sessionId, workspacePath);
+
+        if (!turn) {
+          return;
+        }
+
+        const statusMessage = resolveChatStatusMessage(turn);
+        if (turn.status !== latestTurnStatus || statusMessage !== latestStatusMessage) {
+          latestTurnStatus = turn.status;
+          latestStatusMessage = statusMessage;
+          await send({
+            type: "status",
+            message: statusMessage
+          });
+        }
+
+        const currentText = typeof turn.finalText === "string" ? turn.finalText.trim() : "";
+        if (currentText && currentText !== latestAssistantText) {
+          latestAssistantText = currentText;
+          await send({
+            type: "assistant",
+            text: currentText
+          });
+        }
+      };
+
+      const handleAbort = () => {
+        stopPolling();
+      };
+
+      request.signal.addEventListener("abort", handleAbort);
+
+      try {
+        await send({
+          type: "status",
+          message: "Starting agent turn..."
+        });
+
+        const snapshot = await getMissionControlSnapshot({ includeHidden: true });
+        const agent = snapshot.agents.find((entry) => entry.id === agentId) ?? null;
+
+        if (!agent) {
+          await send({
+            type: "done",
+            ok: false,
+            message: "Agent could not be found."
+          });
+          return;
+        }
+
+        const submittedMessage = input.message.trim();
+        const rawMessage = input.rawMessage?.trim();
+        const operatorMessage = rawMessage || submittedMessage;
+        let message = submittedMessage;
+
+        if (rawMessage || !isComposedAgentChatPrompt(submittedMessage)) {
+          const workspaceTeamPrompt = buildWorkspaceTeamPrompt(snapshot, agent);
+          const workspaceSurfacePrompt = renderWorkspaceSurfaceCoordinationMarkdownForAgent(agentId, snapshot);
+          const history = normalizeAgentChatHistory(input.history ?? []).slice(-16);
+
+          message = buildAgentChatPrompt(history, operatorMessage, {
+            agentName: formatAgentDisplayName(agent),
+            agentDir: agent.agentDir,
+            workspacePath: agent.workspacePath,
+            workspaceTeamPrompt,
+            workspaceSurfacePrompt
+          });
+        }
+
+        const sessionId = globalThis.crypto.randomUUID();
+        const commandPromise = runOpenClawJsonStream<AgentChatCommandPayload>(
+          [
+            "agent",
+            "--agent",
+            agentId,
+            "--session-id",
+            sessionId,
+            "--message",
+            message,
+            "--thinking",
+            input.thinking ?? "low",
+            "--timeout",
+            "90",
+            "--json"
+          ],
+          { timeoutMs: 120000, signal: request.signal }
+        );
+
+        void (async () => {
+          while (keepPolling && !request.signal.aborted) {
+            try {
+              await pollTranscript(agentId, sessionId, agent.workspacePath);
+            } catch {
+              // Ignore transient transcript reads while the session is still booting.
+            }
+
+            await wait(250);
+          }
+        })();
+
+        const result = await commandPromise;
+        stopPolling();
+
+        try {
+          await pollTranscript(agentId, sessionId, agent.workspacePath);
+        } catch {
+          // Ignore a last transient read failure.
+        }
+
+        const response = toAgentChatResponse(agentId, result);
+        const action = readMissionControlAction(response.meta);
+
+        if (action?.type === "rename_agent") {
+          await updateAgent({
+            id: agentId,
+            name: action.name
+          });
+        }
+
+        clearMissionControlCaches();
+
+        await send({
+          type: "done",
+          ok: true,
+          message: response.summary,
+          response: applyMissionControlActionMetadata(response, action)
+        });
+      } catch (error) {
+        stopPolling();
+
+        if (request.signal.aborted) {
+          return;
+        }
+
+        await send({
+          type: "done",
+          ok: false,
+          message:
+            error instanceof Error
+              ? error.message
+              : "OpenClaw could not send the message right now. Please try again."
+        });
+      } finally {
+        stopPolling();
+        request.signal.removeEventListener("abort", handleAbort);
+        await closeWriter();
+      }
+    })();
+
+    return new Response(stream.readable, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store"
+      }
     });
   } catch (error) {
     return NextResponse.json(
@@ -123,6 +304,26 @@ function isComposedAgentChatPrompt(value: string) {
     value.includes("## Discord coordination") ||
     value.includes("You are chatting directly with the operator inside AgentOS.")
   );
+}
+
+function resolveChatStatusMessage(turn: TranscriptTurn) {
+  if (turn.status === "completed") {
+    return "Agent composed a reply.";
+  }
+
+  if (turn.status === "stalled") {
+    return "Agent hit a snag while composing the reply.";
+  }
+
+  if (turn.status === "cancelled") {
+    return "Agent reply was cancelled.";
+  }
+
+  if (turn.finalText && turn.finalText.trim().length > 0) {
+    return "Agent is finalizing the reply...";
+  }
+
+  return "Agent is thinking...";
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {

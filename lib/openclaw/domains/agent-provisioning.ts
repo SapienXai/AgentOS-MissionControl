@@ -76,6 +76,10 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function formatTelegramGroupReference(group: { chatId: string; title: string | null }) {
+  return group.title && group.title !== group.chatId ? `${group.title} (\`${group.chatId}\`)` : `\`${group.chatId}\``;
+}
+
 function findDuplicateStrings(values: string[]) {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -387,7 +391,7 @@ function buildTelegramCoordinationContext(
       });
     }
 
-    if (channel.primaryAgentId && channel.primaryAgentId !== agentId) {
+    if (channel.primaryAgentId && channel.primaryAgentId !== agentId && ownedAssignments.length === 0) {
       const primaryPeer = agentById.get(channel.primaryAgentId) ?? null;
       const peers = uniqueStrings(
         workspaceBindings.flatMap((workspace) =>
@@ -440,12 +444,20 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
 
   const lines: string[] = ["## Telegram coordination"];
 
+  lines.push(
+    "- Telegram credentials are managed by OpenClaw for the listed channels. Do not ask the operator for `TELEGRAM_BOT_TOKEN` or `channels.telegram.botToken` when sending to listed groups."
+  );
+  lines.push(
+    '- To send or post, call the `message` tool with `action: "send"`, `channel: "telegram"`, `target: "<chatId>"`, and the exact message text. Use the listed chat id as `target`.'
+  );
+  lines.push("- If sending fails, report the actual tool error instead of inventing a missing-token error.");
+
   if (coordination.primaryChannels.length > 0) {
     lines.push("- You are the public Telegram fallback for these channels:");
     for (const channel of coordination.primaryChannels) {
       const groupSummary =
         channel.groups.length > 0
-          ? channel.groups.map((group) => group.title ?? group.chatId).join(", ")
+          ? channel.groups.map(formatTelegramGroupReference).join(", ")
           : "no allowed groups yet";
       lines.push(`  - ${channel.channelName} (\`${channel.channelId}\`) · fallback groups: ${groupSummary}.`);
       if (channel.peers.length > 0) {
@@ -485,7 +497,7 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
     for (const channel of coordination.delegateChannels) {
       const groupSummary =
         channel.groups.length > 0
-          ? channel.groups.map((group) => group.title ?? group.chatId).join(", ")
+          ? channel.groups.map(formatTelegramGroupReference).join(", ")
           : "no allowed groups yet";
       lines.push(
         `  - ${channel.channelName} (\`${channel.channelId}\`) · primary ${channel.primaryAgentName} (\`${channel.primaryAgentId}\`) · groups: ${groupSummary}.`
@@ -497,7 +509,7 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
         }
       }
     }
-    lines.push("- When helping with Telegram work, return concise internal findings or draft language. Do not speak as the public Telegram agent.");
+    lines.push("- When helping with Telegram work for groups not assigned to you, return concise internal findings or draft language. Do not speak as the public Telegram agent for those unassigned groups.");
   }
 
   return lines.join("\n");

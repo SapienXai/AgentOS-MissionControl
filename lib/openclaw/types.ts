@@ -568,7 +568,6 @@ export type OpenClawOnboardingPhase =
   | "installing-cli"
   | "installing-gateway"
   | "starting-gateway"
-  | "installing-node"
   | "verifying"
   | "ready";
 

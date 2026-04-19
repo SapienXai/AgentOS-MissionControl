@@ -3190,6 +3190,10 @@ async function ensureTelegramDelegationHelper(workspacePath: string) {
   await writeTextFileEnsured(helperPath, `${renderTelegramDelegationHelperScript()}\n`);
 }
 
+function formatTelegramGroupReference(group: { chatId: string; title: string | null }) {
+  return group.title && group.title !== group.chatId ? `${group.title} (\`${group.chatId}\`)` : `\`${group.chatId}\``;
+}
+
 function describeTelegramAgentCapability(agent: OpenClawAgent | null) {
   if (!agent) {
     return "no capability snapshot";
@@ -3316,31 +3320,27 @@ function buildTelegramCoordinationContext(
       });
     }
 
-    if (workspaceBindings.length === 0 || !channel.primaryAgentId || ownedAssignments.length > 0) {
-      if (channel.primaryAgentId !== agentId) {
-        continue;
-      }
+    if (channel.primaryAgentId && channel.primaryAgentId !== agentId && ownedAssignments.length === 0) {
+      delegateChannels.push({
+        channelId: channel.id,
+        channelName: channel.name,
+        groups: fallbackGroups,
+        peers: uniqueStrings(
+          workspaceBindings.flatMap((workspace) =>
+            workspace.agentIds.filter((candidate) => candidate !== channel.primaryAgentId && candidate !== agentId)
+          )
+        ).map((peerId) => {
+          const peer = agentById.get(peerId) ?? null;
+          return {
+            agentId: peerId,
+            name: agentNameById.get(peerId) ?? peerId,
+            summary: describeTelegramAgentCapability(peer)
+          };
+        }),
+        primaryAgentId: channel.primaryAgentId,
+        primaryAgentName: agentNameById.get(channel.primaryAgentId) ?? channel.primaryAgentId
+      });
     }
-
-    delegateChannels.push({
-      channelId: channel.id,
-      channelName: channel.name,
-      groups: fallbackGroups,
-      peers: uniqueStrings(
-        workspaceBindings.flatMap((workspace) =>
-          workspace.agentIds.filter((candidate) => candidate !== channel.primaryAgentId && candidate !== agentId)
-        )
-      ).map((peerId) => {
-        const peer = agentById.get(peerId) ?? null;
-        return {
-          agentId: peerId,
-          name: agentNameById.get(peerId) ?? peerId,
-          summary: describeTelegramAgentCapability(peer)
-        };
-      }),
-      primaryAgentId: channel.primaryAgentId,
-      primaryAgentName: agentNameById.get(channel.primaryAgentId) ?? channel.primaryAgentId
-    });
   }
 
   if (primaryChannels.length === 0 && delegateChannels.length === 0) {
@@ -3372,12 +3372,20 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
 
   const lines: string[] = ["## Telegram coordination"];
 
+  lines.push(
+    "- Telegram credentials are managed by OpenClaw for the listed channels. Do not ask the operator for `TELEGRAM_BOT_TOKEN` or `channels.telegram.botToken` when sending to listed groups."
+  );
+  lines.push(
+    '- To send or post, call the `message` tool with `action: "send"`, `channel: "telegram"`, `target: "<chatId>"`, and the exact message text. Use the listed chat id as `target`.'
+  );
+  lines.push("- If sending fails, report the actual tool error instead of inventing a missing-token error.");
+
   if (coordination.primaryChannels.length > 0) {
     lines.push("- You are the public Telegram fallback for these channels:");
     for (const channel of coordination.primaryChannels) {
       const groupSummary =
         channel.groups.length > 0
-          ? channel.groups.map((group) => group.title ?? group.chatId).join(", ")
+          ? channel.groups.map(formatTelegramGroupReference).join(", ")
           : "no allowed groups yet";
       lines.push(`  - ${channel.channelName} (\`${channel.channelId}\`) · fallback groups: ${groupSummary}.`);
       if (channel.peers.length > 0) {
@@ -3417,7 +3425,7 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
     for (const channel of coordination.delegateChannels) {
       const groupSummary =
         channel.groups.length > 0
-          ? channel.groups.map((group) => group.title ?? group.chatId).join(", ")
+          ? channel.groups.map(formatTelegramGroupReference).join(", ")
           : "no allowed groups yet";
       lines.push(
         `  - ${channel.channelName} (\`${channel.channelId}\`) · primary ${channel.primaryAgentName} (\`${channel.primaryAgentId}\`) · groups: ${groupSummary}.`
@@ -3429,7 +3437,7 @@ function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationCo
         }
       }
     }
-    lines.push("- When helping with Telegram work, return concise internal findings or draft language. Do not speak as the public Telegram agent.");
+    lines.push("- When helping with Telegram work for groups not assigned to you, return concise internal findings or draft language. Do not speak as the public Telegram agent for those unassigned groups.");
   }
 
   return lines.join("\n");
@@ -5642,22 +5650,6 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
       JSON.stringify(nextGuilds),
       "--strict-json"
     ])
-  );
-}
-
-function collectTelegramRelatedAgentIds(registry: ChannelRegistry) {
-  return uniqueStrings(
-    registry.channels
-      .filter((channel) => channel.type === "telegram")
-      .flatMap((channel) => [
-        channel.primaryAgentId ?? "",
-        ...channel.workspaces.flatMap((workspace) => workspace.agentIds),
-        ...channel.workspaces.flatMap((workspace) =>
-          workspace.groupAssignments
-            .filter((assignment) => assignment.enabled !== false && assignment.agentId)
-            .map((assignment) => assignment.agentId as string)
-        )
-      ])
   );
 }
 

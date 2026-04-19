@@ -89,8 +89,6 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
       label: "Runtime ready",
       description: runtimeReady
         ? "RPC and state are ready."
-        : phase === "installing-node"
-          ? "Installing the node host service."
         : liveComplete
           ? "RPC is online; state checks continue in the background."
           : gatewayComplete
@@ -100,7 +98,6 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
         runtimeReady,
         !runtimeReady &&
           (phase === "starting-gateway" ||
-            phase === "installing-node" ||
             phase === "verifying" ||
             (gatewayComplete && phase === "detecting"))
       )

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { LoaderCircle, SendHorizontal } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -15,17 +15,28 @@ import {
   type AgentChatMessage,
   writeAgentChatMessages
 } from "@/components/mission-control/agent-chat-storage";
-import { buildAgentChatPrompt, buildWorkspaceTeamPrompt } from "@/lib/openclaw/agent-chat-prompt";
+import { consumeNdjsonStream } from "@/lib/ndjson";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = AgentChatMessage;
 
-function hasPendingReply(messages: ChatMessage[]) {
-  return messages.some((entry) => entry.role === "user" && entry.status === "sending");
-}
+type AgentChatStreamEvent =
+  | {
+      type: "status";
+      message: string;
+    }
+  | {
+      type: "assistant";
+      text: string;
+    }
+  | {
+      type: "done";
+      ok: boolean;
+      message: string;
+      response?: MissionResponse;
+    };
 
 function renderAgentReplyText(result: MissionResponse) {
   const payloadText = result.payloads
@@ -33,17 +44,6 @@ function renderAgentReplyText(result: MissionResponse) {
     .filter(Boolean)
     .join("\n\n");
   return payloadText || result.summary || "No response text was returned.";
-}
-
-function tokenizeReply(text: string) {
-  return text.match(/\S+|\s+/g) ?? [];
-}
-
-function getTypingDelay(token: string) {
-  if (/^\s+$/.test(token)) return 14;
-  if (/[.!?]$/.test(token)) return 140;
-  if (/[,:;]$/.test(token)) return 80;
-  return Math.min(80, 26 + token.length * 4);
 }
 
 function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
@@ -63,7 +63,6 @@ function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
 
 export function AgentChatDrawer({
   agent,
-  snapshot,
   surfaceTheme,
   onRefresh,
   onSnapshotChange
@@ -76,79 +75,47 @@ export function AgentChatDrawer({
 }) {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const [isAgentTyping, setIsAgentTyping] = useState(false);
+  const [isAssistantStreaming, setIsAssistantStreaming] = useState(false);
+  const [streamStatusMessage, setStreamStatusMessage] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [revealingMessageId, setRevealingMessageId] = useState<string | null>(null);
-  const [revealedText, setRevealedText] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const revealTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+  const activeRequestAbortRef = useRef<AbortController | null>(null);
+  const activeAssistantMessageIdRef = useRef<string | null>(null);
+  const latestAssistantTextRef = useRef("");
+  const assistantTextReceivedRef = useRef(false);
   const agentLabel = formatAgentDisplayName(agent);
-  const workspaceTeamPrompt = useMemo(() => buildWorkspaceTeamPrompt(snapshot, agent), [snapshot, agent]);
-  const workspaceSurfacePrompt = useMemo(
-    () => renderWorkspaceSurfaceCoordinationMarkdownForAgent(agent.id, snapshot),
-    [snapshot, agent.id]
-  );
 
-  const clearRevealTimer = () => {
-    if (revealTimerRef.current !== null) {
-      globalThis.clearTimeout(revealTimerRef.current);
-      revealTimerRef.current = null;
-    }
-  };
-
-  const startAssistantReveal = (messageId: string, text: string) => {
-    clearRevealTimer();
-
-    const tokens = tokenizeReply(text.trim());
-    if (tokens.length === 0) {
-      setRevealingMessageId(null);
-      setRevealedText("");
-      return;
-    }
-
-    const firstToken = tokens[0];
-    if (!firstToken) {
-      setRevealingMessageId(null);
-      setRevealedText("");
-      return;
-    }
-
-    let index = 1;
-    setRevealingMessageId(messageId);
-    setRevealedText(firstToken);
-
-    const step = () => {
-      if (index >= tokens.length) {
-        revealTimerRef.current = globalThis.setTimeout(() => {
-          setRevealingMessageId(null);
-          setRevealedText("");
-          revealTimerRef.current = null;
-        }, 220);
-        return;
-      }
-
-      const nextIndex = index + 1;
-      setRevealedText(tokens.slice(0, nextIndex).join(""));
-      const currentToken = tokens[index] ?? "";
-      const delay = getTypingDelay(currentToken);
-      index = nextIndex;
-      revealTimerRef.current = globalThis.setTimeout(step, delay);
-    };
-
-    revealTimerRef.current = globalThis.setTimeout(step, getTypingDelay(firstToken));
+  const persistMessages = (updater: (current: ChatMessage[]) => ChatMessage[]) => {
+    setMessages((current) => {
+      const next = updater(current).slice(-maxAgentChatMessages);
+      writeAgentChatMessages(agent.id, next);
+      return next;
+    });
   };
 
   useEffect(() => {
-    clearRevealTimer();
-    setMessages(readAgentChatMessages(agent.id));
+    activeRequestAbortRef.current?.abort();
+    activeRequestAbortRef.current = null;
+    activeAssistantMessageIdRef.current = null;
+    latestAssistantTextRef.current = "";
+    assistantTextReceivedRef.current = false;
+
+    const storedMessages = readAgentChatMessages(agent.id).map((entry) =>
+      entry.status === "sending" ? { ...entry, status: "sent" as const } : entry
+    );
+
+    setMessages(storedMessages);
     setDraft("");
     setIsSending(false);
-    setIsAgentTyping(false);
-    setRevealingMessageId(null);
-    setRevealedText("");
+    setIsAssistantStreaming(false);
+    setStreamStatusMessage(null);
     requestAnimationFrame(() => textareaRef.current?.focus());
-    return () => clearRevealTimer();
+
+    return () => {
+      activeRequestAbortRef.current?.abort();
+      activeRequestAbortRef.current = null;
+    };
   }, [agent.id]);
 
   useEffect(() => {
@@ -156,72 +123,82 @@ export function AgentChatDrawer({
   }, [agent.id, messages]);
 
   useEffect(() => {
-    if (!listRef.current) return;
-    listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages.length, agent.id, isAgentTyping, revealedText, revealingMessageId]);
-
-  const pendingReply = hasPendingReply(messages);
-  const showAgentTyping = isAgentTyping || pendingReply;
-  const canSend = Boolean(draft.trim()) && !isSending && !revealingMessageId && !pendingReply;
-
-  const renderMessageText = (entry: ChatMessage) => {
-    if (entry.role === "assistant" && entry.id === revealingMessageId) {
-      return revealedText;
+    if (!listRef.current) {
+      return;
     }
-    return entry.text;
-  };
 
-  const uiMessages = useMemo(() => {
-    if (messages.length > 0) return messages;
-    return [
-      {
-        id: "system:empty",
-        role: "system" as const,
-        text: "Start a direct chat with this agent. Messages stay in this drawer and are stored locally in your browser.",
-        createdAt: Date.now()
-      }
-    ];
-  }, [messages]);
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, agent.id, isSending, isAssistantStreaming, streamStatusMessage]);
+
+  const canSend = Boolean(draft.trim()) && !isSending && !isAssistantStreaming;
+  const showAgentTyping = isSending || isAssistantStreaming;
+  const streamingAssistantId = activeAssistantMessageIdRef.current;
+
+  const uiMessages = messages.length > 0
+    ? messages
+    : [
+        {
+          id: "system:empty",
+          role: "system" as const,
+          text: "Start a direct chat with this agent. Messages stay in this drawer and are stored locally in your browser.",
+          createdAt: Date.now()
+        }
+      ];
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || isSending || revealingMessageId || pendingReply) return;
+    if (!text || isSending || isAssistantStreaming) return;
 
+    activeRequestAbortRef.current?.abort();
+
+    const abortController = new AbortController();
+    activeRequestAbortRef.current = abortController;
+    assistantTextReceivedRef.current = false;
+    latestAssistantTextRef.current = "";
     setIsSending(true);
-    setIsAgentTyping(true);
+    setIsAssistantStreaming(false);
+    setStreamStatusMessage("Starting agent turn...");
+
     const createdAt = Date.now();
+    const userMessageId = globalThis.crypto?.randomUUID?.() || `user:${createdAt}`;
+    const assistantMessageId = globalThis.crypto?.randomUUID?.() || `assistant:${createdAt}`;
+    activeAssistantMessageIdRef.current = assistantMessageId;
+
     const userMessage: ChatMessage = {
-      id: globalThis.crypto?.randomUUID?.() || `user:${createdAt}`,
+      id: userMessageId,
       role: "user",
       text,
       createdAt,
       status: "sending"
     };
 
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      text: "",
+      createdAt: createdAt + 1
+    };
+
     const nextHistory = [...messages, userMessage].slice(-maxAgentChatMessages);
-    setMessages(nextHistory);
+    const uiHistory = [...nextHistory, assistantMessage].slice(-maxAgentChatMessages);
+    setMessages(uiHistory);
     writeAgentChatMessages(agent.id, nextHistory);
     setDraft("");
-    const promptHistory = nextHistory.flatMap((entry) =>
-      entry.role === "user" || entry.role === "assistant"
-        ? [
-            {
-              role: entry.role,
-              text: entry.text
-            }
-          ]
-        : []
-    );
+    const promptHistory = messages
+      .filter(
+        (entry): entry is ChatMessage & { role: "user" | "assistant" } =>
+          (entry.role === "user" || entry.role === "assistant") && entry.text.trim().length > 0
+      )
+      .slice(-16)
+      .map((entry) => ({
+        role: entry.role,
+        text: entry.text
+      }));
 
     const payload = {
-      message: buildAgentChatPrompt(promptHistory, text, {
-        agentName: agentLabel,
-        agentDir: agent.agentDir,
-        workspacePath: agent.workspacePath,
-        workspaceTeamPrompt,
-        workspaceSurfacePrompt
-      }),
+      message: text,
       rawMessage: text,
+      history: promptHistory,
       thinking: "low" as const
     };
 
@@ -229,52 +206,130 @@ export function AgentChatDrawer({
       const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: abortController.signal
       });
-      const result = (await response.json()) as (MissionResponse & { error?: string });
 
-      if (!response.ok || result.error) {
-        throw new Error(result.error || "OpenClaw rejected the message.");
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/x-ndjson")) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "OpenClaw rejected the message.");
       }
 
-      const assistantMessage: ChatMessage = {
-        id: globalThis.crypto?.randomUUID?.() || `assistant:${Date.now()}`,
-        role: "assistant",
-        text: renderAgentReplyText(result),
-        createdAt: Date.now(),
-        status: "sent",
-        runId: result.runId
-      };
+      let finalResponse: MissionResponse | null = null;
 
-      const finalized: ChatMessage[] = nextHistory
-        .map((entry): ChatMessage => (entry.id === userMessage.id ? { ...entry, status: "sent" as const } : entry))
-        .concat(assistantMessage)
-        .slice(-maxAgentChatMessages);
+      await consumeNdjsonStream<AgentChatStreamEvent>(response, async (event) => {
+        if (event.type === "status") {
+          setStreamStatusMessage(event.message);
+          return;
+        }
 
-      const renamedTo = readRenamedAgent(result.meta);
+        if (event.type === "assistant") {
+          assistantTextReceivedRef.current = true;
+          latestAssistantTextRef.current = event.text;
 
-      if (renamedTo && onSnapshotChange) {
-        onSnapshotChange((current) => applyAgentRename(current, agent.id, renamedTo));
+          setIsAssistantStreaming(true);
+          setStreamStatusMessage("Agent is drafting a reply...");
+
+          persistMessages((current) =>
+            current.map((entry) => {
+              if (entry.id === userMessageId) {
+                return { ...entry, status: "sent" as const };
+              }
+
+              if (entry.id === assistantMessageId) {
+                return { ...entry, text: event.text };
+              }
+
+              return entry;
+            })
+          );
+
+          return;
+        }
+
+        if (!event.ok) {
+          throw new Error(event.message);
+        }
+
+        finalResponse = event.response ?? null;
+        const finalText = finalResponse ? renderAgentReplyText(finalResponse) : latestAssistantTextRef.current;
+
+        if (finalResponse) {
+          latestAssistantTextRef.current = finalText;
+        }
+
+        persistMessages((current) =>
+          current.map((entry) => {
+            if (entry.id === userMessageId) {
+              return { ...entry, status: "sent" as const };
+            }
+
+            if (entry.id === assistantMessageId) {
+              return {
+                ...entry,
+                text: finalText,
+                status: "sent" as const,
+                runId: finalResponse?.runId ?? entry.runId
+              };
+            }
+
+            return entry;
+          })
+        );
+
+        const renamedTo = finalResponse ? readRenamedAgent(finalResponse.meta) : null;
+        if (renamedTo && onSnapshotChange) {
+          onSnapshotChange((current) => applyAgentRename(current, agent.id, renamedTo));
+        }
+
+        setStreamStatusMessage(null);
+        setIsAssistantStreaming(false);
+        setIsSending(false);
+        activeAssistantMessageIdRef.current = null;
+        activeRequestAbortRef.current = null;
+
+        void onRefresh?.().catch(() => null);
+      });
+
+      if (!finalResponse) {
+        throw new Error("OpenClaw completed without returning a response.");
       }
-
-      setMessages(finalized);
-      writeAgentChatMessages(agent.id, finalized);
-      setIsSending(false);
-      setIsAgentTyping(false);
-      startAssistantReveal(assistantMessage.id, assistantMessage.text);
-      void onRefresh?.().catch(() => null);
     } catch (error) {
+      if (abortController.signal.aborted) {
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "Unknown send error.";
       toast.error("Chat message failed.", { description: message });
 
-      const finalized: ChatMessage[] = nextHistory
-        .map((entry): ChatMessage => (entry.id === userMessage.id ? { ...entry, status: "error" as const } : entry))
-        .slice(-maxAgentChatMessages);
-      setMessages(finalized);
-      writeAgentChatMessages(agent.id, finalized);
-      setIsAgentTyping(false);
+      const partialText = assistantTextReceivedRef.current ? latestAssistantTextRef.current.trim() : "";
+
+      persistMessages((current) =>
+        current
+          .map((entry) => {
+            if (entry.id === userMessageId) {
+              return { ...entry, status: "error" as const };
+            }
+
+            if (entry.id === assistantMessageId) {
+              if (partialText.length > 0) {
+                return { ...entry, text: partialText };
+              }
+
+              return entry;
+            }
+
+            return entry;
+          })
+          .filter((entry) => entry.id !== assistantMessageId || partialText.length > 0)
+      );
     } finally {
       setIsSending(false);
+      setIsAssistantStreaming(false);
+      setStreamStatusMessage(null);
+      activeAssistantMessageIdRef.current = null;
+      activeRequestAbortRef.current = null;
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
   };
@@ -297,7 +352,8 @@ export function AgentChatDrawer({
           {uiMessages.map((entry) => {
             const isUser = entry.role === "user";
             const isSystem = entry.role === "system";
-            const isActiveAssistant = entry.role === "assistant" && entry.id === revealingMessageId;
+            const isActiveAssistant = entry.role === "assistant" && entry.id === streamingAssistantId && showAgentTyping;
+
             return (
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
                 <div
@@ -311,12 +367,12 @@ export function AgentChatDrawer({
                         ? surfaceTheme === "light"
                           ? "border-[#e3d4c8] bg-[#fff3f6] text-[#4a382c]"
                           : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] text-slate-100"
-                    : surfaceTheme === "light"
-                      ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
-                      : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
+                        : surfaceTheme === "light"
+                          ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
+                          : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{renderMessageText(entry)}</p>
+                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</p>
                   {isActiveAssistant ? (
                     <motion.span
                       aria-hidden="true"
@@ -326,7 +382,12 @@ export function AgentChatDrawer({
                     />
                   ) : null}
                   {entry.status === "sending" ? (
-                    <p className={cn("mt-1.5 text-[10px] uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500")}>
+                    <p
+                      className={cn(
+                        "mt-1.5 text-[10px] uppercase tracking-[0.18em]",
+                        surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500"
+                      )}
+                    >
                       Sending…
                     </p>
                   ) : entry.status === "error" ? (
@@ -357,8 +418,13 @@ export function AgentChatDrawer({
                 )}
               >
                 <span className="font-medium">{agentLabel}</span>
-                <span className={cn("text-[10px] uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400")}>
-                  typing
+                <span
+                  className={cn(
+                    "text-[10px] uppercase tracking-[0.18em]",
+                    surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
+                  )}
+                >
+                  {streamStatusMessage || "typing"}
                 </span>
                 <TypingDots surfaceTheme={surfaceTheme} />
               </div>
@@ -410,7 +476,11 @@ export function AgentChatDrawer({
             )}
             onClick={send}
           >
-            {isSending ? <LoaderCircle className="mr-[5px] h-[13px] w-[13px] animate-spin" /> : <SendHorizontal className="mr-[5px] h-[13px] w-[13px]" />}
+            {isSending ? (
+              <LoaderCircle className="mr-[5px] h-[13px] w-[13px] animate-spin" />
+            ) : (
+              <SendHorizontal className="mr-[5px] h-[13px] w-[13px]" />
+            )}
             Send
           </Button>
         </div>

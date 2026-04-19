@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
 import {
   getMissionControlSnapshot,
@@ -25,10 +25,8 @@ const onboardingSchema = z.object({
 });
 
 const docsUrl = "https://docs.openclaw.ai/cli/install";
-const nodeDocsUrl = "https://docs.openclaw.ai/cli/node";
 const commandTimeoutMs = 10 * 60 * 1000;
 const gatewayStatusTimeoutMs = 8_000;
-const nodeStatusTimeoutMs = 8_000;
 const readyTimeoutMs = 12_000;
 const readyPollIntervalMs = 500;
 type CommandResult = {
@@ -171,6 +169,27 @@ export async function POST(request: Request) {
       }
 
       const gatewayStatus = await readGatewayStatus(openClawBin);
+
+      if (gatewayStatus?.rpc?.ok) {
+        const readySnapshot = await loadSnapshot(true);
+
+        if (isOpenClawReady(readySnapshot)) {
+          await send({
+            type: "done",
+            ok: true,
+            phase: "ready",
+            message: "OpenClaw system setup is already complete.",
+            exitCode: 0,
+            stdout: aggregatedStdout,
+            stderr: aggregatedStderr,
+            snapshot: readySnapshot
+          });
+          await closeWriter();
+          return;
+        }
+
+        snapshot = readySnapshot;
+      }
 
       if (gatewayStatus && (await needsGatewayRegistrationRepair(gatewayStatus))) {
         await send({
@@ -324,47 +343,6 @@ export async function POST(request: Request) {
       }
 
       snapshot = await loadSnapshot(true);
-
-      const nodeStatus = await readNodeStatus(openClawBin);
-
-      if (needsNodeServiceRepair(nodeStatus)) {
-        await send({
-          type: "status",
-          phase: "installing-node",
-          message: "Installing the OpenClaw node host service..."
-        });
-
-        const nodeCommand = nodeStatus?.service?.loaded ? ["node", "restart", "--json"] : ["node", "install", "--json"];
-        const nodeRepairResult = await runCommand(openClawBin, nodeCommand, send);
-        appendOutput(nodeRepairResult);
-
-        if (nodeRepairResult.errorMessage || nodeRepairResult.timedOut || nodeRepairResult.code !== 0) {
-          await fail("installing-node", "Node host service setup failed.", {
-            exitCode: nodeRepairResult.code,
-            manualCommand: formatOpenClawCommand(openClawBin, nodeCommand),
-            docsUrl: nodeDocsUrl
-          });
-          return;
-        }
-
-        try {
-          await waitForNodeReadySnapshot(openClawBin);
-        } catch (error) {
-          aggregatedStderr = aggregatedStderr
-            ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Node host verification failed."}`
-            : error instanceof Error
-              ? error.message
-              : "Node host verification failed.";
-
-          await fail("installing-node", "Node host service did not become ready in time.", {
-            manualCommand: formatOpenClawCommand(openClawBin, nodeCommand),
-            docsUrl: nodeDocsUrl
-          });
-          return;
-        }
-
-        snapshot = await loadSnapshot(true);
-      }
 
       try {
         const runtimeSnapshot = await loadSnapshot(true);
@@ -578,28 +556,6 @@ async function readGatewayStatus(openClawBin: string) {
   return parseGatewayStatusPayload(result.stdout || result.stderr);
 }
 
-async function waitForNodeReadySnapshot(openClawBin: string) {
-  const startedAt = Date.now();
-
-  const immediateStatus = await readNodeStatus(openClawBin);
-
-  if (isNodeServiceReady(immediateStatus)) {
-    return immediateStatus;
-  }
-
-  while (Date.now() - startedAt < readyTimeoutMs) {
-    await delay(readyPollIntervalMs);
-
-    const status = await readNodeStatus(openClawBin);
-
-    if (isNodeServiceReady(status)) {
-      return status;
-    }
-  }
-
-  throw new Error(`Node host readiness check exceeded ${Math.round(readyTimeoutMs / 1000)} seconds.`);
-}
-
 function needsGatewayModeLocalRepair(payload: GatewayStatusPayload | null) {
   if (!payload || payload.rpc?.ok) {
     return false;
@@ -642,34 +598,6 @@ async function needsGatewayRegistrationRepair(payload: GatewayStatusPayload | nu
   );
 }
 
-async function readNodeStatus(openClawBin: string) {
-  const result = await runCommand(openClawBin, ["node", "status", "--json"], async () => {}, {
-    timeoutMs: nodeStatusTimeoutMs
-  });
-
-  if (result.errorMessage || result.timedOut || result.code !== 0) {
-    return null;
-  }
-
-  return parseNodeStatusPayload(result.stdout || result.stderr);
-}
-
-function isNodeServiceReady(payload: NodeStatusPayload | null) {
-  return Boolean(payload?.service?.loaded) && payload?.service?.runtime?.status === "running";
-}
-
-function needsNodeServiceRepair(payload: NodeStatusPayload | null) {
-  if (!payload?.service) {
-    return true;
-  }
-
-  if (!payload.service.loaded || payload.service.runtime?.missingUnit) {
-    return true;
-  }
-
-  return payload.service.runtime?.status !== "running";
-}
-
 async function pathExists(filePath: string) {
   try {
     await access(filePath);
@@ -699,21 +627,6 @@ type GatewayStatusPayload = {
   rpc?: {
     ok?: boolean;
     error?: string;
-  };
-};
-
-type NodeStatusPayload = {
-  service?: {
-    label?: string;
-    loaded?: boolean;
-    loadedText?: string;
-    notLoadedText?: string;
-    command?: unknown;
-    runtime?: {
-      status?: string;
-      detail?: string;
-      missingUnit?: boolean;
-    };
   };
 };
 
@@ -761,31 +674,6 @@ function parseGatewayStatusPayload(stdout: string): GatewayStatusPayload | null 
 
     try {
       return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as GatewayStatusPayload;
-    } catch {
-      return null;
-    }
-  }
-}
-
-function parseNodeStatusPayload(stdout: string): NodeStatusPayload | null {
-  const trimmed = stdout.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(trimmed) as NodeStatusPayload;
-  } catch {
-    const firstBrace = trimmed.indexOf("{");
-    const lastBrace = trimmed.lastIndexOf("}");
-
-    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as NodeStatusPayload;
     } catch {
       return null;
     }

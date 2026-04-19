@@ -9,6 +9,7 @@ const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
 
 interface CommandOptions {
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 interface StreamingCommandOptions extends CommandOptions {
@@ -63,6 +64,7 @@ export async function runOpenClawStream(
     let stderr = "";
     let finished = false;
     let timedOut = false;
+    let aborted = false;
     let callbackChain = Promise.resolve();
 
     const queueCallback = (
@@ -90,6 +92,27 @@ export async function runOpenClawStream(
       child.kill("SIGTERM");
     }, options.timeoutMs ?? 45000);
 
+    const handleAbort = () => {
+      aborted = true;
+      child.kill("SIGTERM");
+    };
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        handleAbort();
+      } else {
+        options.signal.addEventListener("abort", handleAbort);
+      }
+    }
+
+    const cleanup = () => {
+      clearTimeout(timer);
+
+      if (options.signal) {
+        options.signal.removeEventListener("abort", handleAbort);
+      }
+    };
+
     child.stdout.on("data", (chunk: Buffer | string) => {
       const text = chunk.toString();
       stdout += text;
@@ -103,7 +126,7 @@ export async function runOpenClawStream(
     });
 
     child.on("error", (error) => {
-      clearTimeout(timer);
+      cleanup();
       settle(() => {
         reject(
           createCommandError(
@@ -117,8 +140,20 @@ export async function runOpenClawStream(
     });
 
     child.on("close", (code) => {
-      clearTimeout(timer);
+      cleanup();
       settle(() => {
+        if (aborted) {
+          reject(
+            createCommandError(
+              "OpenClaw command was aborted.",
+              stdout,
+              stderr || "The command was aborted.",
+              code
+            )
+          );
+          return;
+        }
+
         if (timedOut) {
           reject(
             createCommandError(

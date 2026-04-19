@@ -16,6 +16,31 @@ export type AgentChatPromptOptions = {
   workspaceSurfacePrompt?: string | null;
 };
 
+function hasTelegramCoordination(surfacePrompt: string | null | undefined) {
+  return Boolean(surfacePrompt?.includes("## Telegram coordination"));
+}
+
+function isStaleTelegramCredentialFailure(entry: AgentChatHistoryEntry, telegramCoordinationEnabled: boolean) {
+  if (!telegramCoordinationEnabled || entry.role !== "assistant") {
+    return false;
+  }
+
+  const lowerText = entry.text.toLowerCase();
+
+  return (
+    lowerText.includes("telegram") &&
+    (lowerText.includes("telegram_bot_token") ||
+      lowerText.includes("channels.telegram.bottoken") ||
+      (lowerText.includes("bot token") &&
+        (lowerText.includes("missing") ||
+          lowerText.includes("need") ||
+          lowerText.includes("laz") ||
+          lowerText.includes("yok") ||
+          lowerText.includes("eksik") ||
+          lowerText.includes("gerek"))))
+  );
+}
+
 export function buildWorkspaceTeamPrompt(snapshot: MissionControlSnapshot, agent: OpenClawAgent) {
   const teammates = snapshot.agents
     .filter((entry) => entry.workspaceId === agent.workspaceId)
@@ -63,8 +88,10 @@ export function buildAgentChatPrompt(
   message: string,
   options: AgentChatPromptOptions
 ) {
+  const telegramCoordinationEnabled = hasTelegramCoordination(options.workspaceSurfacePrompt);
   const turns = history
     .filter((entry) => entry.role === "user" || entry.role === "assistant")
+    .filter((entry) => !isStaleTelegramCredentialFailure(entry, telegramCoordinationEnabled))
     .slice(-8)
     .map((entry) => `${entry.role === "user" ? "Operator" : "Agent"}: ${entry.text.trim()}`)
     .join("\n");
@@ -108,6 +135,12 @@ export function buildAgentChatPrompt(
 
   if (options.workspaceSurfacePrompt) {
     instructions.push(options.workspaceSurfacePrompt);
+  }
+
+  if (telegramCoordinationEnabled) {
+    instructions.push(
+      "Telegram coordination note: if earlier drawer messages say `TELEGRAM_BOT_TOKEN` or `channels.telegram.botToken` is missing for a listed Telegram channel/group, treat that as stale. Use the Telegram `message` tool instructions in the coordination section and only report an actual tool error."
+    );
   }
 
   instructions.push(`Your current display name in AgentOS is ${options.agentName}.`);
