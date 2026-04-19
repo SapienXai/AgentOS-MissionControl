@@ -5365,6 +5365,153 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
       "--strict-json"
     ])
   );
+
+  if (defaultAccountId) {
+    await measureTiming(timings, "telegram-settings.reconcile-session-stores", () =>
+      reconcileManagedTelegramSessionStores(managedChannels, defaultAccountId, timings)
+    );
+  }
+}
+
+function collectManagedTelegramSessionStoreRoots(managedChannels: WorkspaceChannelSummary[]) {
+  return uniqueStrings([
+    path.join(os.homedir(), ".openclaw", "agents"),
+    ...managedChannels.flatMap((channel) =>
+      channel.workspaces.map((workspace) => path.join(workspace.workspacePath, ".openclaw", "agents"))
+    )
+  ]);
+}
+
+function isTelegramSessionStoreEntry(value: unknown): value is Record<string, unknown> {
+  if (!isObjectRecord(value)) {
+    return false;
+  }
+
+  if (value.channel === "telegram" || value.lastChannel === "telegram") {
+    return true;
+  }
+
+  const deliveryContext = isObjectRecord(value.deliveryContext) ? value.deliveryContext : null;
+  if (deliveryContext?.channel === "telegram") {
+    return true;
+  }
+
+  const origin = isObjectRecord(value.origin) ? value.origin : null;
+  return origin?.provider === "telegram";
+}
+
+function resolveTelegramSessionStoreAccountId(value: Record<string, unknown>) {
+  const lastAccountId = normalizeOptionalValue(typeof value.lastAccountId === "string" ? value.lastAccountId : null);
+  if (lastAccountId) {
+    return lastAccountId;
+  }
+
+  const deliveryContext = isObjectRecord(value.deliveryContext) ? value.deliveryContext : null;
+  const deliveryAccountId = normalizeOptionalValue(
+    typeof deliveryContext?.accountId === "string" ? deliveryContext.accountId : null
+  );
+  if (deliveryAccountId) {
+    return deliveryAccountId;
+  }
+
+  const origin = isObjectRecord(value.origin) ? value.origin : null;
+  return normalizeOptionalValue(typeof origin?.accountId === "string" ? origin.accountId : null);
+}
+
+async function reconcileTelegramSessionStoreFile(
+  filePath: string,
+  preferredAccountId: string,
+  knownAccountIds: Set<string>,
+  timings?: TimingCollector
+) {
+  try {
+    const raw = await measureTiming(timings, `telegram-settings.read-session-store.${path.basename(filePath)}`, () =>
+      readFile(filePath, "utf8")
+    );
+    const parsed = JSON.parse(raw);
+    if (!isObjectRecord(parsed)) {
+      return false;
+    }
+
+    let changed = false;
+
+    for (const entry of Object.values(parsed)) {
+      if (!isTelegramSessionStoreEntry(entry)) {
+        continue;
+      }
+
+      const currentAccountId = resolveTelegramSessionStoreAccountId(entry);
+      if (currentAccountId && knownAccountIds.has(currentAccountId)) {
+        continue;
+      }
+
+      if (entry.lastAccountId !== preferredAccountId) {
+        entry.lastAccountId = preferredAccountId;
+        changed = true;
+      }
+
+      if (isObjectRecord(entry.deliveryContext) && entry.deliveryContext.accountId !== preferredAccountId) {
+        entry.deliveryContext.accountId = preferredAccountId;
+        changed = true;
+      }
+
+      if (isObjectRecord(entry.origin) && entry.origin.accountId !== preferredAccountId) {
+        entry.origin.accountId = preferredAccountId;
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    await measureTiming(timings, `telegram-settings.write-session-store.${path.basename(filePath)}`, () =>
+      writeTextFileEnsured(filePath, `${JSON.stringify(parsed, null, 2)}\n`)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function reconcileManagedTelegramSessionStores(
+  managedChannels: WorkspaceChannelSummary[],
+  preferredAccountId: string,
+  timings?: TimingCollector
+) {
+  const knownAccountIds = new Set(
+    (await readChannelAccounts())
+      .filter((account) => account.type === "telegram")
+      .map((account) => account.id)
+  );
+  knownAccountIds.add(preferredAccountId);
+
+  for (const root of collectManagedTelegramSessionStoreRoots(managedChannels)) {
+    let entries;
+
+    try {
+      entries = await measureTiming(timings, `telegram-settings.read-agent-root.${path.basename(root)}`, () =>
+        readdir(root, { withFileTypes: true })
+      );
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const sessionsPath = path.join(root, entry.name, "sessions", "sessions.json");
+      try {
+        await access(sessionsPath);
+      } catch {
+        continue;
+      }
+
+      await reconcileTelegramSessionStoreFile(sessionsPath, preferredAccountId, knownAccountIds, timings);
+    }
+  }
 }
 
 async function resolveManagedTelegramDefaultAccountId(
