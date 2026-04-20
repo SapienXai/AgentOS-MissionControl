@@ -406,6 +406,10 @@ export function resolveUpdateInfo(params: UpdateInfoParams) {
     return `Update registry check failed: ${params.updateError}`;
   }
 
+  if (params.currentVersion) {
+    return `Running v${params.currentVersion}. Update registry status is still loading.`;
+  }
+
   return undefined;
 }
 

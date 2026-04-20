@@ -27,7 +27,8 @@ import {
   detectOpenClaw,
   runOpenClaw,
   runOpenClawJson,
-  runOpenClawJsonStream
+  runOpenClawJsonStream,
+  resolveOpenClawVersion
 } from "@/lib/openclaw/cli";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import {
@@ -415,7 +416,7 @@ type MissionCommandPayload = {
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
 type OpenClawRuntimeState = Omit<MissionControlSnapshot["diagnostics"]["runtime"], "smokeTest">;
-type SnapshotLoadProfile = "interactive" | "background";
+type SnapshotLoadProfile = "interactive" | "refresh";
 
 type CachedPayload<T> = {
   value: T;
@@ -473,6 +474,7 @@ let modelsPayloadCache: CachedPayload<ModelsPayload> | null = null;
 let modelsStatusPayloadCache: CachedPayload<ModelsStatusPayload> | null = null;
 let sessionsPayloadCache: CachedPayload<SessionsPayload> | null = null;
 let presencePayloadCache: CachedPayload<PresencePayload> | null = null;
+let statusRefreshPromise: Promise<void> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 let snapshotGeneration = 0;
 
@@ -507,9 +509,53 @@ function loadSnapshotPairForCurrentGeneration(profile: SnapshotLoadProfile = "in
   });
 }
 
-function scheduleBackgroundSnapshotRefresh() {
-  // Full inventory hydration is intentionally not started from the readiness path.
-  // Building workspace inspector metadata can be expensive enough to block setup.
+function shouldRefreshStatusPayloadCache() {
+  return !statusPayloadCache || Date.now() - statusPayloadCache.capturedAt > SLOW_PAYLOAD_CACHE_TTL_MS;
+}
+
+function scheduleStatusPayloadRefresh() {
+  if (statusRefreshPromise || !shouldRefreshStatusPayloadCache()) {
+    return;
+  }
+
+  statusRefreshPromise = (async () => {
+    try {
+      const value = await settleStatusPayloadFromOpenClaw(15_000);
+
+      if (value.status === "fulfilled") {
+        statusPayloadCache = {
+          value: value.value,
+          capturedAt: Date.now()
+        };
+      }
+    } catch {
+      // Background refresh is best-effort.
+    } finally {
+      statusRefreshPromise = null;
+    }
+  })();
+
+  void statusRefreshPromise.catch(() => {});
+}
+
+async function settleStatusPayloadFromOpenClaw(
+  timeoutMs = 20_000
+): Promise<PromiseSettledResult<StatusPayload>> {
+  try {
+    const value = await runOpenClawJson<StatusPayload>(["status", "--json"], {
+      timeoutMs
+    });
+
+    return {
+      status: "fulfilled",
+      value
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
 }
 
 function resolveCachedPayload<T>(
@@ -804,7 +850,7 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
 
   if (!options.force && cachedSnapshot) {
     if (!snapshotPromise) {
-      snapshotPromise = loadSnapshotPairForCurrentGeneration();
+      snapshotPromise = loadSnapshotPairForCurrentGeneration("interactive");
       void snapshotPromise.catch(() => {});
       void snapshotPromise.finally(() => {
         snapshotPromise = null;
@@ -814,16 +860,27 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
     return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
   }
 
-  if (snapshotPromise) {
-    if (!options.force && cachedSnapshot) {
-      return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
-    }
+  if (options.force) {
+    snapshotGeneration += 1;
+    snapshotCache = null;
+    snapshotPromise = loadSnapshotPairForCurrentGeneration("refresh");
+    void snapshotPromise.catch(() => {});
 
+    try {
+      const nextSnapshot = await snapshotPromise;
+
+      return options.includeHidden ? nextSnapshot.full : nextSnapshot.visible;
+    } finally {
+      snapshotPromise = null;
+    }
+  }
+
+  if (snapshotPromise) {
     const pending = await snapshotPromise;
     return options.includeHidden ? pending.full : pending.visible;
   }
 
-  snapshotPromise = loadSnapshotPairForCurrentGeneration();
+  snapshotPromise = loadSnapshotPairForCurrentGeneration("interactive");
   void snapshotPromise.catch(() => {});
 
   try {
@@ -862,6 +919,8 @@ async function loadMissionControlSnapshots({
     let sessionsResult: PromiseSettledResult<SessionsPayload>;
     let presenceResult: PromiseSettledResult<PresencePayload>;
 
+    const statusCacheNeedsRefresh = shouldRefreshStatusPayloadCache();
+
     if (profile === "interactive") {
       statusResult = createDeferredPayloadResult();
       agentsResult = createDeferredPayloadResult();
@@ -870,8 +929,11 @@ async function loadMissionControlSnapshots({
       modelStatusResult = createDeferredPayloadResult();
       sessionsResult = createDeferredPayloadResult();
       presenceResult = createDeferredPayloadResult();
+      if (statusCacheNeedsRefresh) {
+        scheduleStatusPayloadRefresh();
+      }
     } else {
-      statusResult = createDeferredPayloadResult();
+      statusResult = await settleStatusPayloadFromOpenClaw(45_000);
       agentsResult = createDeferredPayloadResult();
       agentConfigResult = await settleAgentConfigFromStateFile();
       modelsResult = createDeferredPayloadResult();
@@ -936,11 +998,6 @@ async function loadMissionControlSnapshots({
     const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
     const sessions = resolvedSessions.value?.sessions ?? [];
     const presence = resolvedPresence.value ?? [];
-    const slowPayloadMissed = !resolvedAgentConfig.value;
-
-    if (profile === "interactive" && slowPayloadMissed) {
-      scheduleBackgroundSnapshotRefresh();
-    }
     const hasOpenClawSignal =
       statusResult.status === "fulfilled" ||
       agentsResult.status === "fulfilled" ||
@@ -1289,9 +1346,10 @@ async function loadMissionControlSnapshots({
       status?.securityAudit?.findings
         ?.filter((entry) => entry.severity === "warn")
         .map((entry) => entry.title || entry.detail || "Security warning") ?? [];
-    const currentVersion = normalizeOptionalValue(
-      presence[0]?.version || status?.runtimeVersion || status?.overview?.version || status?.version
+    const resolvedStatusVersion = normalizeOptionalValue(
+      status?.runtimeVersion || status?.overview?.version || status?.version
     );
+    const currentVersion = resolvedStatusVersion ?? (await resolveOpenClawVersion()) ?? undefined;
     const latestVersion = normalizeOptionalValue(status?.update?.registry?.latestVersion ?? undefined);
     const updateError = normalizeUpdateError(status?.update?.registry?.error ?? undefined);
     const updateAvailable =

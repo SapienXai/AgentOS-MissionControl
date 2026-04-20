@@ -6,6 +6,17 @@ import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
 
 type ConnectionState = "connecting" | "live" | "retrying";
 
+function isNewerSnapshot(nextSnapshot: ControlPlaneSnapshot, currentSnapshot: ControlPlaneSnapshot) {
+  const nextGeneratedAt = Date.parse(nextSnapshot.generatedAt);
+  const currentGeneratedAt = Date.parse(currentSnapshot.generatedAt);
+
+  if (Number.isNaN(nextGeneratedAt) || Number.isNaN(currentGeneratedAt)) {
+    return true;
+  }
+
+  return nextGeneratedAt >= currentGeneratedAt;
+}
+
 export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
@@ -16,7 +27,9 @@ export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
     source.addEventListener("snapshot", (event) => {
       const nextSnapshot = JSON.parse(event.data) as ControlPlaneSnapshot;
       startTransition(() => {
-        setSnapshot(nextSnapshot);
+        setSnapshot((currentSnapshot) =>
+          isNewerSnapshot(nextSnapshot, currentSnapshot) ? nextSnapshot : currentSnapshot
+        );
         setConnectionState("live");
       });
     });
@@ -46,7 +59,9 @@ export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
     const nextSnapshot = (await response.json()) as ControlPlaneSnapshot;
 
     startTransition(() => {
-      setSnapshot(nextSnapshot);
+      setSnapshot((currentSnapshot) =>
+        isNewerSnapshot(nextSnapshot, currentSnapshot) ? nextSnapshot : currentSnapshot
+      );
       setConnectionState("live");
     });
 

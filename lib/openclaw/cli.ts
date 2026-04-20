@@ -242,6 +242,15 @@ export async function runOpenClawJsonStream<T>(
   }
 }
 
+export async function resolveOpenClawVersion(): Promise<string | null> {
+  try {
+    const result = await runOpenClaw(["--version"], { timeoutMs: 5_000 });
+    return parseOpenClawVersion(result.stdout || result.stderr);
+  } catch {
+    return null;
+  }
+}
+
 export async function detectOpenClaw(): Promise<boolean> {
   try {
     await resolveOpenClawBin();
@@ -332,6 +341,18 @@ function extractFailedCommandResult(error: unknown): CommandResult | null {
   }
 
   return { stdout, stderr };
+}
+
+export function parseOpenClawVersion(output: string) {
+  const trimmed = output.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const versionMatch = trimmed.match(/\b(\d+(?:\.\d+)+)\b/);
+
+  return versionMatch?.[1] ?? null;
 }
 
 function createCommandError(message: string, stdout: string, stderr: string, code: number | null) {

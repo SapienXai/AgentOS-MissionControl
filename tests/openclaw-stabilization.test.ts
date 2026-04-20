@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { normalizeControlPlaneSnapshot } from "@/lib/agentos/acl/openclaw";
+import { parseOpenClawVersion } from "@/lib/openclaw/cli";
+import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import {
@@ -140,6 +142,18 @@ test("control plane snapshots normalize duplicates and nested registries", () =>
         enabled: true
       }
     ]
+  );
+});
+
+test("openclaw version parsing extracts the release tag", () => {
+  assert.equal(parseOpenClawVersion("OpenClaw 2026.4.15 (041266a)"), "2026.4.15");
+  assert.equal(parseOpenClawVersion("OpenClaw version unknown"), null);
+});
+
+test("update info falls back to a loading message when only the installed version is known", () => {
+  assert.equal(
+    resolveUpdateInfo({ currentVersion: "2026.4.15" }),
+    "Running v2026.4.15. Update registry status is still loading."
   );
 });
 
