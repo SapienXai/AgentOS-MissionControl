@@ -106,7 +106,7 @@ export function resolveAgentChatLatestAssistantAt(messages: AgentChatMessage[]) 
   let latest = null as number | null;
 
   for (const message of messages) {
-    if (message.role !== "assistant") {
+    if (message.role !== "assistant" || message.status !== "sent") {
       continue;
     }
 
@@ -126,7 +126,7 @@ export function resolveAgentChatUnreadCount(messages: AgentChatMessage[], lastSe
   const seenAt = typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt) ? lastSeenAt : null;
 
   return messages.reduce((count, message) => {
-    if (message.role !== "assistant") {
+    if (message.role !== "assistant" || message.status !== "sent") {
       return count;
     }
 

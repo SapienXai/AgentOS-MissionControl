@@ -3,6 +3,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -293,6 +294,7 @@ type AgentConfigPayload = Array<{
   id: string;
   name?: string;
   workspace: string;
+  agentDir?: string;
   model?: string;
   heartbeat?: {
     every?: string;
@@ -413,6 +415,12 @@ type MissionCommandPayload = {
 
 type AgentBootstrapProfile = OpenClawAgent["profile"];
 type OpenClawRuntimeState = Omit<MissionControlSnapshot["diagnostics"]["runtime"], "smokeTest">;
+type SnapshotLoadProfile = "interactive" | "background";
+
+type CachedPayload<T> = {
+  value: T;
+  capturedAt: number;
+};
 
 type BootstrapProfileReadResult = {
   fileName: string;
@@ -430,6 +438,8 @@ type WorkspaceBootstrapProfileCache = {
 const SNAPSHOT_CACHE_TTL_MS = 30_000;
 const RUNTIME_DIAGNOSTICS_CACHE_TTL_MS = 5 * 60_000;
 const GATEWAY_STATUS_STALE_GRACE_MS = 60_000;
+const SLOW_PAYLOAD_CACHE_TTL_MS = 5 * 60_000;
+const DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE = "Deferred to background refresh.";
 
 type SnapshotPair = {
   visible: MissionControlSnapshot;
@@ -456,6 +466,13 @@ let snapshotPromise: Promise<SnapshotPair> | null = null;
 let runtimeDiagnosticsCache: RuntimeDiagnosticsCacheEntry | null = null;
 let runtimeDiagnosticsPromise: Promise<OpenClawRuntimeState> | null = null;
 let gatewayStatusCache: GatewayStatusCacheEntry | null = null;
+let statusPayloadCache: CachedPayload<StatusPayload> | null = null;
+let agentPayloadCache: CachedPayload<AgentPayload> | null = null;
+let agentConfigPayloadCache: CachedPayload<AgentConfigPayload> | null = null;
+let modelsPayloadCache: CachedPayload<ModelsPayload> | null = null;
+let modelsStatusPayloadCache: CachedPayload<ModelsStatusPayload> | null = null;
+let sessionsPayloadCache: CachedPayload<SessionsPayload> | null = null;
+let presencePayloadCache: CachedPayload<PresencePayload> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 let snapshotGeneration = 0;
 
@@ -465,13 +482,20 @@ export function clearMissionControlCaches() {
   runtimeDiagnosticsCache = null;
   runtimeDiagnosticsPromise = null;
   gatewayStatusCache = null;
+  statusPayloadCache = null;
+  agentPayloadCache = null;
+  agentConfigPayloadCache = null;
+  modelsPayloadCache = null;
+  modelsStatusPayloadCache = null;
+  sessionsPayloadCache = null;
+  presencePayloadCache = null;
   runtimeHistoryCache = new Map();
 }
 
-function loadSnapshotPairForCurrentGeneration() {
+function loadSnapshotPairForCurrentGeneration(profile: SnapshotLoadProfile = "interactive") {
   const generation = snapshotGeneration;
 
-  return loadMissionControlSnapshots().then((nextSnapshot) => {
+  return loadMissionControlSnapshots({ profile }).then((nextSnapshot) => {
     if (generation === snapshotGeneration) {
       snapshotCache = {
         ...nextSnapshot,
@@ -481,6 +505,136 @@ function loadSnapshotPairForCurrentGeneration() {
 
     return nextSnapshot;
   });
+}
+
+function scheduleBackgroundSnapshotRefresh() {
+  // Full inventory hydration is intentionally not started from the readiness path.
+  // Building workspace inspector metadata can be expensive enough to block setup.
+}
+
+function resolveCachedPayload<T>(
+  result: PromiseSettledResult<T>,
+  cached: CachedPayload<T> | null,
+  writeCache: (entry: CachedPayload<T>) => void
+) {
+  if (result.status === "fulfilled") {
+    const entry = {
+      value: result.value,
+      capturedAt: Date.now()
+    };
+
+    writeCache(entry);
+
+    return {
+      value: result.value,
+      reusedCachedValue: false,
+      failed: false
+    };
+  }
+
+  if (cached && Date.now() - cached.capturedAt <= SLOW_PAYLOAD_CACHE_TTL_MS) {
+    return {
+      value: cached.value,
+      reusedCachedValue: true,
+      failed: true
+    };
+  }
+
+  return {
+    value: undefined,
+    reusedCachedValue: false,
+    failed: true
+  };
+}
+
+function createDeferredPayloadResult<T>(): PromiseSettledResult<T> {
+  return {
+    status: "rejected",
+    reason: new Error(DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE)
+  };
+}
+
+function isDeferredPayloadResult(result: PromiseSettledResult<unknown>) {
+  return (
+    result.status === "rejected" &&
+    result.reason instanceof Error &&
+    result.reason.message === DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE
+  );
+}
+
+async function settleAgentConfigFromStateFile(): Promise<PromiseSettledResult<AgentConfigPayload>> {
+  try {
+    const raw = await readFile(path.join(openClawStateRootPath, "openclaw.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      agents?: {
+        list?: unknown;
+      };
+    };
+    const list = parsed.agents?.list;
+
+    return {
+      status: "fulfilled",
+      value: Array.isArray(list) ? (list as AgentConfigPayload) : []
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
+}
+
+function describeCachedPayloadReuse(label: string, reusedCachedValue: boolean) {
+  return reusedCachedValue
+    ? `${label}: Reusing the last successful payload while a slow OpenClaw command refreshes in the background.`
+    : null;
+}
+
+function buildAgentPayloadsFromConfig(agentConfig: AgentConfigPayload): AgentPayload {
+  return agentConfig.map((entry) => ({
+    id: entry.id,
+    name: entry.name || entry.identity?.name || entry.id,
+    identityName: entry.identity?.name,
+    identityEmoji: entry.identity?.emoji,
+    identitySource: entry.identity ? "config" : undefined,
+    workspace: entry.workspace,
+    agentDir: entry.agentDir || path.join(openClawStateRootPath, "agents", entry.id, "agent"),
+    model: entry.model,
+    isDefault: Boolean(entry.default)
+  }));
+}
+
+function buildModelsPayloadFromAgentConfig(agentConfig: AgentConfigPayload): ModelsPayload {
+  const modelIds = uniqueStrings(agentConfig.map((entry) => entry.model ?? "").filter(Boolean));
+
+  return {
+    models: modelIds.map((modelId) => ({
+      key: modelId,
+      name: modelId,
+      input: "text",
+      contextWindow: null,
+      local: null,
+      available: true,
+      tags: [],
+      missing: false
+    }))
+  };
+}
+
+function buildModelStatusFromAgentConfig(agentConfig: AgentConfigPayload): ModelsStatusPayload | undefined {
+  const defaultModel =
+    agentConfig.find((entry) => entry.default)?.model ||
+    agentConfig.find((entry) => Boolean(entry.model))?.model ||
+    null;
+
+  if (!defaultModel) {
+    return undefined;
+  }
+
+  return {
+    defaultModel,
+    resolvedDefault: defaultModel
+  };
 }
 
 function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
@@ -594,6 +748,52 @@ function resolveGatewayStatus(
   };
 }
 
+async function probeLocalGatewayStatus(port = 18789): Promise<GatewayStatusPayload | null> {
+  const reachable = await probeTcpPort("127.0.0.1", port, 750);
+
+  if (!reachable) {
+    return null;
+  }
+
+  return {
+    service: {
+      label: "Local port probe",
+      loaded: true
+    },
+    gateway: {
+      bindMode: "loopback",
+      port,
+      probeUrl: `ws://127.0.0.1:${port}`
+    },
+    rpc: {
+      ok: true
+    }
+  };
+}
+
+async function probeTcpPort(host: string, port: number, timeoutMs: number) {
+  return await new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+
+    const finish = (ok: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(ok);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.once("timeout", () => finish(false));
+  });
+}
+
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
   const cachedSnapshot = snapshotCache;
   const cacheIsFresh = Boolean(cachedSnapshot && cachedSnapshot.expiresAt > Date.now());
@@ -635,8 +835,13 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
   }
 }
 
-async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
-  const openclawInstalled = await detectOpenClaw();
+async function loadMissionControlSnapshots({
+  profile = "interactive"
+}: {
+  profile?: SnapshotLoadProfile;
+} = {}): Promise<SnapshotPair> {
+  const localGatewayStatus = await probeLocalGatewayStatus();
+  const openclawInstalled = Boolean(localGatewayStatus) || await detectOpenClaw();
 
   if (!openclawInstalled) {
     return createSnapshotPair(createFallbackSnapshot("OpenClaw CLI is not installed on this machine."));
@@ -645,41 +850,97 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
   try {
     const settings = await readMissionControlSettings();
     const configuredWorkspaceRoot = normalizeConfiguredWorkspaceRootValue(settings.workspaceRoot) ?? null;
-    const [
-      gatewayStatusResult,
-      gatewayRemoteUrlResult,
-      statusResult,
-      agentsResult,
-      agentConfigResult,
-      modelsResult,
-      modelStatusResult,
-      sessionsResult,
-      presenceResult
-    ] = await Promise.allSettled([
-      runOpenClawJson<GatewayStatusPayload>(["gateway", "status", "--json"]),
-      runOpenClawJson<string>(["config", "get", GATEWAY_REMOTE_URL_CONFIG_KEY, "--json"]),
-      runOpenClawJson<StatusPayload>(["status", "--json"]),
-      runOpenClawJson<AgentPayload>(["agents", "list", "--json"]),
-      runOpenClawJson<AgentConfigPayload>(["config", "get", "agents.list", "--json"]),
-      runOpenClawJson<ModelsPayload>(["models", "list", "--json"]),
-      runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"]),
-      runOpenClawJson<SessionsPayload>(["sessions", "--all-agents", "--json"]),
-      runOpenClawJson<PresencePayload>(["gateway", "call", "system-presence", "--json"])
-    ]);
+    const [gatewayStatusResult, gatewayRemoteUrlResult] = [
+      createDeferredPayloadResult<GatewayStatusPayload>(),
+      createDeferredPayloadResult<string>()
+    ];
+    let statusResult: PromiseSettledResult<StatusPayload>;
+    let agentsResult: PromiseSettledResult<AgentPayload>;
+    let agentConfigResult: PromiseSettledResult<AgentConfigPayload>;
+    let modelsResult: PromiseSettledResult<ModelsPayload>;
+    let modelStatusResult: PromiseSettledResult<ModelsStatusPayload>;
+    let sessionsResult: PromiseSettledResult<SessionsPayload>;
+    let presenceResult: PromiseSettledResult<PresencePayload>;
 
-    const resolvedGatewayStatus = resolveGatewayStatus(gatewayStatusResult);
+    if (profile === "interactive") {
+      statusResult = createDeferredPayloadResult();
+      agentsResult = createDeferredPayloadResult();
+      agentConfigResult = await settleAgentConfigFromStateFile();
+      modelsResult = createDeferredPayloadResult();
+      modelStatusResult = createDeferredPayloadResult();
+      sessionsResult = createDeferredPayloadResult();
+      presenceResult = createDeferredPayloadResult();
+    } else {
+      statusResult = createDeferredPayloadResult();
+      agentsResult = createDeferredPayloadResult();
+      agentConfigResult = await settleAgentConfigFromStateFile();
+      modelsResult = createDeferredPayloadResult();
+      modelStatusResult = createDeferredPayloadResult();
+      sessionsResult = createDeferredPayloadResult();
+      presenceResult = createDeferredPayloadResult();
+    }
+
+    let resolvedGatewayStatus = localGatewayStatus
+      ? {
+          value: localGatewayStatus,
+          reusedCachedValue: false
+        }
+      : resolveGatewayStatus(gatewayStatusResult);
+
+    if (!resolvedGatewayStatus.value) {
+      const probedGatewayStatus = await probeLocalGatewayStatus(gatewayStatusCache?.value.gateway?.port ?? 18789);
+
+      if (probedGatewayStatus) {
+        gatewayStatusCache = {
+          value: probedGatewayStatus,
+          capturedAt: Date.now()
+        };
+        resolvedGatewayStatus = {
+          value: probedGatewayStatus,
+          reusedCachedValue: false
+        };
+      }
+    }
+
     const gatewayStatus = resolvedGatewayStatus.value;
     const configuredGatewayUrl =
       gatewayRemoteUrlResult.status === "fulfilled"
         ? normalizeOptionalValue(gatewayRemoteUrlResult.value)
         : undefined;
-    const status = statusResult.status === "fulfilled" ? statusResult.value : undefined;
-    const agentsList = agentsResult.status === "fulfilled" ? agentsResult.value : [];
-    const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
-    const models = modelsResult.status === "fulfilled" ? modelsResult.value.models : [];
-    const modelStatus = modelStatusResult.status === "fulfilled" ? modelStatusResult.value : undefined;
-    const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value.sessions : [];
-    const presence = presenceResult.status === "fulfilled" ? presenceResult.value : [];
+    const resolvedStatus = resolveCachedPayload(statusResult, statusPayloadCache, (entry) => {
+      statusPayloadCache = entry;
+    });
+    const resolvedAgentConfig = resolveCachedPayload(agentConfigResult, agentConfigPayloadCache, (entry) => {
+      agentConfigPayloadCache = entry;
+    });
+    const resolvedAgents = resolveCachedPayload(agentsResult, agentPayloadCache, (entry) => {
+      agentPayloadCache = entry;
+    });
+    const resolvedModels = resolveCachedPayload(modelsResult, modelsPayloadCache, (entry) => {
+      modelsPayloadCache = entry;
+    });
+    const resolvedModelStatus = resolveCachedPayload(modelStatusResult, modelsStatusPayloadCache, (entry) => {
+      modelsStatusPayloadCache = entry;
+    });
+    const resolvedSessions = resolveCachedPayload(sessionsResult, sessionsPayloadCache, (entry) => {
+      sessionsPayloadCache = entry;
+    });
+    const resolvedPresence = resolveCachedPayload(presenceResult, presencePayloadCache, (entry) => {
+      presencePayloadCache = entry;
+    });
+    const status = resolvedStatus.value;
+    const agentConfig = resolvedAgentConfig.value ?? [];
+    const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig);
+    const localModels = buildModelsPayloadFromAgentConfig(agentConfig);
+    const models = resolvedModels.value?.models ?? localModels.models;
+    const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
+    const sessions = resolvedSessions.value?.sessions ?? [];
+    const presence = resolvedPresence.value ?? [];
+    const slowPayloadMissed = !resolvedAgentConfig.value;
+
+    if (profile === "interactive" && slowPayloadMissed) {
+      scheduleBackgroundSnapshotRefresh();
+    }
     const hasOpenClawSignal =
       statusResult.status === "fulfilled" ||
       agentsResult.status === "fulfilled" ||
@@ -692,10 +953,19 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(agentIds, settings);
     void runtimeDiagnosticsPromise.catch(() => {});
     const dispatchRecordsPromise = readMissionDispatchRecords();
-    const [channelRegistry, channelAccountsRaw] = await Promise.all([
-      readChannelRegistry(),
-      readChannelAccounts()
-    ]);
+    const [channelRegistry, channelAccountsRaw] =
+      profile === "interactive"
+        ? [
+            normalizeChannelRegistry({
+              version: 1,
+              channels: []
+            }),
+            [] as ChannelAccountRecord[]
+          ]
+        : await Promise.all([
+            readChannelRegistry(),
+            readChannelAccounts()
+          ]);
     const channelAccounts = applyChannelAccountDisplayNames(
       mergeMissionControlSurfaceAccounts([
         ...channelAccountsRaw,
@@ -1034,6 +1304,16 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
     });
     const runtimeDiagnostics = await runtimeDiagnosticsPromise;
 
+    const snapshotIssueResults = {
+      gatewayStatus: gatewayStatusResult,
+      status: statusResult,
+      agents: agentsResult,
+      agentConfig: agentConfigResult,
+      models: modelsResult,
+      modelStatus: modelStatusResult,
+      sessions: sessionsResult,
+      presence: presenceResult
+    };
     const diagnostics = {
       installed: true,
       loaded: Boolean(gatewayStatus?.service?.loaded),
@@ -1065,17 +1345,23 @@ async function loadMissionControlSnapshots(): Promise<SnapshotPair> {
       runtime: runtimeDiagnostics,
       securityWarnings,
       issues: [
-        ...collectIssues({
-          gatewayStatus: gatewayStatusResult,
-          status: statusResult,
-          agents: agentsResult,
-          models: modelsResult,
-          modelStatus: modelStatusResult,
-          sessions: sessionsResult
-        }),
+        ...collectIssues(
+          Object.fromEntries(
+            Object.entries(snapshotIssueResults).filter(([, result]) => !isDeferredPayloadResult(result))
+          )
+        ),
         ...(gatewayStatusResult.status === "rejected" && resolvedGatewayStatus.reusedCachedValue
           ? ["gatewayStatus: Reusing the last successful gateway status after a transient OpenClaw check failure."]
           : []),
+        ...[
+          describeCachedPayloadReuse("status", resolvedStatus.reusedCachedValue),
+          describeCachedPayloadReuse("agents", resolvedAgents.reusedCachedValue),
+          describeCachedPayloadReuse("agentConfig", resolvedAgentConfig.reusedCachedValue),
+          describeCachedPayloadReuse("models", resolvedModels.reusedCachedValue),
+          describeCachedPayloadReuse("modelStatus", resolvedModelStatus.reusedCachedValue),
+          describeCachedPayloadReuse("sessions", resolvedSessions.reusedCachedValue),
+          describeCachedPayloadReuse("presence", resolvedPresence.reusedCachedValue)
+        ].filter((issue): issue is string => Boolean(issue)),
         ...runtimeDiagnostics.issues
       ]
     } satisfies MissionControlSnapshot["diagnostics"];

@@ -14,7 +14,8 @@ import {
   resolveGatewayDraft,
   resolveOnboardingAction,
   serializeWorkspaceSelection,
-  resolveWorkspaceSelection
+  resolveWorkspaceSelection,
+  shouldDeferWorkspaceSelectionHydration
 } from "@/components/mission-control/mission-control-shell.utils";
 import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 
@@ -83,4 +84,32 @@ test("workspace selection helpers keep the last valid workspace", () => {
   );
   assert.equal(resolveWorkspaceSelection(["workspace-a", "workspace-b"], "__all__"), null);
   assert.equal(resolveWorkspaceSelection([], "workspace-missing"), null);
+});
+
+test("workspace selection hydration waits for real snapshots", () => {
+  const loadingSnapshot = {
+    mode: "fallback",
+    diagnostics: {
+      loaded: true,
+      rpcOk: false
+    }
+  } as unknown as MissionControlSnapshot;
+  const fallbackSnapshot = {
+    mode: "fallback",
+    diagnostics: {
+      loaded: false,
+      rpcOk: false
+    }
+  } as unknown as MissionControlSnapshot;
+  const liveSnapshot = {
+    mode: "live",
+    diagnostics: {
+      loaded: true,
+      rpcOk: true
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(shouldDeferWorkspaceSelectionHydration(loadingSnapshot), true);
+  assert.equal(shouldDeferWorkspaceSelectionHydration(fallbackSnapshot), false);
+  assert.equal(shouldDeferWorkspaceSelectionHydration(liveSnapshot), false);
 });

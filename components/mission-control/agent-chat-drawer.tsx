@@ -9,42 +9,22 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/sonner";
 import {
+  agentChatMessageStoragePrefix,
+  agentChatStateEventName,
   markAgentChatAsSeen,
-  maxAgentChatMessages,
   readAgentChatMessages,
-  type AgentChatMessage,
-  writeAgentChatMessages
+  type AgentChatMessage
 } from "@/components/mission-control/agent-chat-storage";
-import { consumeNdjsonStream } from "@/lib/ndjson";
+import {
+  getAgentChatRunSnapshot,
+  sendAgentChatMessage,
+  type AgentChatRunSnapshot
+} from "@/components/mission-control/agent-chat-runner";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
-import type { MissionControlSnapshot, MissionResponse, OpenClawAgent } from "@/lib/agentos/contracts";
+import type { MissionControlSnapshot, OpenClawAgent } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = AgentChatMessage;
-
-type AgentChatStreamEvent =
-  | {
-      type: "status";
-      message: string;
-    }
-  | {
-      type: "assistant";
-      text: string;
-    }
-  | {
-      type: "done";
-      ok: boolean;
-      message: string;
-      response?: MissionResponse;
-    };
-
-function renderAgentReplyText(result: MissionResponse) {
-  const payloadText = result.payloads
-    .map((entry) => entry.text?.trim())
-    .filter(Boolean)
-    .join("\n\n");
-  return payloadText || result.summary || "No response text was returned.";
-}
 
 function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
   return (
@@ -64,75 +44,102 @@ function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
 export function AgentChatDrawer({
   agent,
   surfaceTheme,
+  isVisible,
   onRefresh,
   onSnapshotChange
 }: {
   agent: OpenClawAgent;
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
+  isVisible: boolean;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [isAssistantStreaming, setIsAssistantStreaming] = useState(false);
-  const [streamStatusMessage, setStreamStatusMessage] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [runSnapshot, setRunSnapshot] = useState<AgentChatRunSnapshot>(() => getAgentChatRunSnapshot(agent.id));
   const listRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const activeRequestAbortRef = useRef<AbortController | null>(null);
-  const activeAssistantMessageIdRef = useRef<string | null>(null);
-  const latestAssistantTextRef = useRef("");
-  const assistantTextReceivedRef = useRef(false);
+  const isVisibleRef = useRef(isVisible);
   const agentLabel = formatAgentDisplayName(agent);
 
-  const persistMessages = (updater: (current: ChatMessage[]) => ChatMessage[]) => {
-    setMessages((current) => {
-      const next = updater(current).slice(-maxAgentChatMessages);
-      writeAgentChatMessages(agent.id, next);
-      return next;
-    });
-  };
+  useEffect(() => {
+    isVisibleRef.current = isVisible;
+  }, [isVisible]);
 
   useEffect(() => {
-    activeRequestAbortRef.current?.abort();
-    activeRequestAbortRef.current = null;
-    activeAssistantMessageIdRef.current = null;
-    latestAssistantTextRef.current = "";
-    assistantTextReceivedRef.current = false;
+    const syncAgentChatState = () => {
+      const nextRunSnapshot = getAgentChatRunSnapshot(agent.id);
 
-    const storedMessages = readAgentChatMessages(agent.id).map((entry) =>
-      entry.status === "sending" ? { ...entry, status: "sent" as const } : entry
-    );
+      setRunSnapshot(nextRunSnapshot);
+      setMessages(readVisibleAgentChatMessages(agent.id, nextRunSnapshot.isRunning));
+    };
 
-    setMessages(storedMessages);
+    syncAgentChatState();
     setDraft("");
-    setIsSending(false);
-    setIsAssistantStreaming(false);
-    setStreamStatusMessage(null);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+
+    const handleChatStateChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ agentId?: string }>).detail;
+
+      if (!detail || detail.agentId === agent.id) {
+        syncAgentChatState();
+      }
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || !event.key.startsWith(agentChatMessageStoragePrefix)) {
+        return;
+      }
+
+      syncAgentChatState();
+    };
+
+    window.addEventListener(agentChatStateEventName, handleChatStateChange as EventListener);
+    window.addEventListener("storage", handleStorage);
 
     return () => {
-      activeRequestAbortRef.current?.abort();
-      activeRequestAbortRef.current = null;
+      window.removeEventListener(agentChatStateEventName, handleChatStateChange as EventListener);
+      window.removeEventListener("storage", handleStorage);
     };
   }, [agent.id]);
 
   useEffect(() => {
-    markAgentChatAsSeen(agent.id, messages);
-  }, [agent.id, messages]);
+    if (!isVisible) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      if (isVisibleRef.current) {
+        textareaRef.current?.focus();
+      }
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [agent.id, isVisible]);
 
   useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    markAgentChatAsSeen(agent.id, messages);
+  }, [agent.id, messages, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
     if (!listRef.current) {
       return;
     }
 
     listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, agent.id, isSending, isAssistantStreaming, streamStatusMessage]);
+  }, [messages, agent.id, runSnapshot, isVisible]);
 
-  const canSend = Boolean(draft.trim()) && !isSending && !isAssistantStreaming;
-  const showAgentTyping = isSending || isAssistantStreaming;
-  const streamingAssistantId = activeAssistantMessageIdRef.current;
+  const canSend = Boolean(draft.trim()) && !runSnapshot.isRunning;
+  const showAgentTyping = runSnapshot.isRunning;
+  const streamingAssistantId = runSnapshot.assistantMessageId;
 
   const uiMessages = messages.length > 0
     ? messages
@@ -147,190 +154,24 @@ export function AgentChatDrawer({
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || isSending || isAssistantStreaming) return;
+    if (!text || runSnapshot.isRunning) return;
 
-    activeRequestAbortRef.current?.abort();
-
-    const abortController = new AbortController();
-    activeRequestAbortRef.current = abortController;
-    assistantTextReceivedRef.current = false;
-    latestAssistantTextRef.current = "";
-    setIsSending(true);
-    setIsAssistantStreaming(false);
-    setStreamStatusMessage("Starting agent turn...");
-
-    const createdAt = Date.now();
-    const userMessageId = globalThis.crypto?.randomUUID?.() || `user:${createdAt}`;
-    const assistantMessageId = globalThis.crypto?.randomUUID?.() || `assistant:${createdAt}`;
-    activeAssistantMessageIdRef.current = assistantMessageId;
-
-    const userMessage: ChatMessage = {
-      id: userMessageId,
-      role: "user",
-      text,
-      createdAt,
-      status: "sending"
-    };
-
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      text: "",
-      createdAt: createdAt + 1
-    };
-
-    const nextHistory = [...messages, userMessage].slice(-maxAgentChatMessages);
-    const uiHistory = [...nextHistory, assistantMessage].slice(-maxAgentChatMessages);
-    setMessages(uiHistory);
-    writeAgentChatMessages(agent.id, nextHistory);
     setDraft("");
-    const promptHistory = messages
-      .filter(
-        (entry): entry is ChatMessage & { role: "user" | "assistant" } =>
-          (entry.role === "user" || entry.role === "assistant") && entry.text.trim().length > 0
-      )
-      .slice(-16)
-      .map((entry) => ({
-        role: entry.role,
-        text: entry.text
-      }));
-
-    const payload = {
-      message: text,
-      rawMessage: text,
-      history: promptHistory,
-      thinking: "low" as const
-    };
 
     try {
-      const response = await fetch(`/api/agents/${encodeURIComponent(agent.id)}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        signal: abortController.signal
+      await sendAgentChatMessage({
+        agentId: agent.id,
+        text,
+        onRefresh,
+        onSnapshotChange,
+        onError: (message) => {
+          toast.error("Chat message failed.", { description: message });
+        }
       });
-
-      const contentType = response.headers.get("content-type") || "";
-      if (!response.ok || !contentType.includes("application/x-ndjson")) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error || "OpenClaw rejected the message.");
-      }
-
-      let finalResponse: MissionResponse | null = null;
-
-      await consumeNdjsonStream<AgentChatStreamEvent>(response, async (event) => {
-        if (event.type === "status") {
-          setStreamStatusMessage(event.message);
-          return;
-        }
-
-        if (event.type === "assistant") {
-          assistantTextReceivedRef.current = true;
-          latestAssistantTextRef.current = event.text;
-
-          setIsAssistantStreaming(true);
-          setStreamStatusMessage("Agent is drafting a reply...");
-
-          persistMessages((current) =>
-            current.map((entry) => {
-              if (entry.id === userMessageId) {
-                return { ...entry, status: "sent" as const };
-              }
-
-              if (entry.id === assistantMessageId) {
-                return { ...entry, text: event.text };
-              }
-
-              return entry;
-            })
-          );
-
-          return;
-        }
-
-        if (!event.ok) {
-          throw new Error(event.message);
-        }
-
-        finalResponse = event.response ?? null;
-        const finalText = finalResponse ? renderAgentReplyText(finalResponse) : latestAssistantTextRef.current;
-
-        if (finalResponse) {
-          latestAssistantTextRef.current = finalText;
-        }
-
-        persistMessages((current) =>
-          current.map((entry) => {
-            if (entry.id === userMessageId) {
-              return { ...entry, status: "sent" as const };
-            }
-
-            if (entry.id === assistantMessageId) {
-              return {
-                ...entry,
-                text: finalText,
-                status: "sent" as const,
-                runId: finalResponse?.runId ?? entry.runId
-              };
-            }
-
-            return entry;
-          })
-        );
-
-        const renamedTo = finalResponse ? readRenamedAgent(finalResponse.meta) : null;
-        if (renamedTo && onSnapshotChange) {
-          onSnapshotChange((current) => applyAgentRename(current, agent.id, renamedTo));
-        }
-
-        setStreamStatusMessage(null);
-        setIsAssistantStreaming(false);
-        setIsSending(false);
-        activeAssistantMessageIdRef.current = null;
-        activeRequestAbortRef.current = null;
-
-        void onRefresh?.().catch(() => null);
-      });
-
-      if (!finalResponse) {
-        throw new Error("OpenClaw completed without returning a response.");
-      }
-    } catch (error) {
-      if (abortController.signal.aborted) {
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "Unknown send error.";
-      toast.error("Chat message failed.", { description: message });
-
-      const partialText = assistantTextReceivedRef.current ? latestAssistantTextRef.current.trim() : "";
-
-      persistMessages((current) =>
-        current
-          .map((entry) => {
-            if (entry.id === userMessageId) {
-              return { ...entry, status: "error" as const };
-            }
-
-            if (entry.id === assistantMessageId) {
-              if (partialText.length > 0) {
-                return { ...entry, text: partialText };
-              }
-
-              return entry;
-            }
-
-            return entry;
-          })
-          .filter((entry) => entry.id !== assistantMessageId || partialText.length > 0)
-      );
     } finally {
-      setIsSending(false);
-      setIsAssistantStreaming(false);
-      setStreamStatusMessage(null);
-      activeAssistantMessageIdRef.current = null;
-      activeRequestAbortRef.current = null;
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      if (isVisibleRef.current) {
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
     }
   };
 
@@ -388,7 +229,7 @@ export function AgentChatDrawer({
                         surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500"
                       )}
                     >
-                      Sending…
+                      {isUser ? "Sending…" : "Drafting…"}
                     </p>
                   ) : entry.status === "error" ? (
                     <p className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-rose-300">
@@ -424,7 +265,7 @@ export function AgentChatDrawer({
                     surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
                   )}
                 >
-                  {streamStatusMessage || "typing"}
+                  {runSnapshot.statusMessage || "typing"}
                 </span>
                 <TypingDots surfaceTheme={surfaceTheme} />
               </div>
@@ -476,7 +317,7 @@ export function AgentChatDrawer({
             )}
             onClick={send}
           >
-            {isSending ? (
+            {runSnapshot.isRunning ? (
               <LoaderCircle className="mr-[5px] h-[13px] w-[13px] animate-spin" />
             ) : (
               <SendHorizontal className="mr-[5px] h-[13px] w-[13px]" />
@@ -489,42 +330,14 @@ export function AgentChatDrawer({
   );
 }
 
-function readRenamedAgent(meta: MissionResponse["meta"]) {
-  const candidate = meta?.missionControlAction;
+function readVisibleAgentChatMessages(agentId: string, isRunning: boolean): ChatMessage[] {
+  return readAgentChatMessages(agentId)
+    .map((entry) => {
+      if (entry.status !== "sending" || isRunning) {
+        return entry;
+      }
 
-  if (!candidate || typeof candidate !== "object") {
-    return null;
-  }
-
-  const action = candidate as Record<string, unknown>;
-
-  if (action.type !== "rename_agent" || action.applied !== true || typeof action.name !== "string") {
-    return null;
-  }
-
-  const normalized = action.name.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function applyAgentRename(snapshot: MissionControlSnapshot, agentId: string, name: string): MissionControlSnapshot {
-  return {
-    ...snapshot,
-    agents: snapshot.agents.map((entry) =>
-      entry.id === agentId
-        ? {
-            ...entry,
-            name,
-            identityName: name
-          }
-        : entry
-    ),
-    tasks: snapshot.tasks.map((task) =>
-      task.primaryAgentId === agentId
-        ? {
-            ...task,
-            primaryAgentName: name
-          }
-        : task
-    )
-  };
+      return entry.role === "assistant" ? { ...entry, status: "error" as const } : { ...entry, status: "sent" as const };
+    })
+    .filter((entry) => entry.role !== "assistant" || entry.text.trim().length > 0);
 }

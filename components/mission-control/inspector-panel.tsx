@@ -418,7 +418,7 @@ function InspectorPanelContent({
             <div className={cn("flex-1 p-3", isChatView && "min-h-0 overflow-hidden")}>
               <AnimatePresence mode="wait">
                 <motion.div
-                  key={`${selectedNodeId || "overview"}:${visibleActiveTab}`}
+                  key={selectedNodeId || "overview"}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
@@ -460,14 +460,23 @@ function InspectorPanelContent({
                     </>
                   ) : null}
 
-                  {isChatView && selectedAgent ? (
-                    <AgentChatDrawer
-                      agent={selectedAgent}
-                      snapshot={snapshot}
-                      surfaceTheme={surfaceTheme}
-                      onRefresh={onRefresh}
-                      onSnapshotChange={onSnapshotChange}
-                    />
+                  {selectedAgent ? (
+                    <div
+                      className={cn(
+                        "min-h-0 flex-1",
+                        isChatView ? "block" : "hidden"
+                      )}
+                      aria-hidden={!isChatView}
+                    >
+                      <AgentChatDrawer
+                        agent={selectedAgent}
+                        snapshot={snapshot}
+                        surfaceTheme={surfaceTheme}
+                        isVisible={isChatView}
+                        onRefresh={onRefresh}
+                        onSnapshotChange={onSnapshotChange}
+                      />
+                    </div>
                   ) : null}
 
                   {visibleActiveTab === "output" && selectedTask ? (

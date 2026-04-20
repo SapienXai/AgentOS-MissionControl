@@ -57,6 +57,7 @@ export async function runOpenClawStream(
 
   return new Promise<CommandResult>((resolve, reject) => {
     const child = spawn(/*turbopackIgnore: true*/ openClawBin, args, {
+      detached: true,
       env: buildOpenClawEnv()
     });
 
@@ -66,6 +67,7 @@ export async function runOpenClawStream(
     let timedOut = false;
     let aborted = false;
     let callbackChain = Promise.resolve();
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
 
     const queueCallback = (
       callback: ((text: string) => Promise<void> | void) | undefined,
@@ -87,14 +89,42 @@ export async function runOpenClawStream(
       void callbackChain.finally(handler);
     };
 
+    const terminateChild = (signal: NodeJS.Signals) => {
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          child.kill(signal);
+        }
+      } else {
+        child.kill(signal);
+      }
+
+      if (signal === "SIGTERM" && !killTimer) {
+        killTimer = setTimeout(() => {
+          if (!finished) {
+            if (child.pid) {
+              try {
+                process.kill(-child.pid, "SIGKILL");
+              } catch {
+                child.kill("SIGKILL");
+              }
+            } else {
+              child.kill("SIGKILL");
+            }
+          }
+        }, 2_000);
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      terminateChild("SIGTERM");
     }, options.timeoutMs ?? 45000);
 
     const handleAbort = () => {
       aborted = true;
-      child.kill("SIGTERM");
+      terminateChild("SIGTERM");
     };
 
     if (options.signal) {
@@ -107,6 +137,11 @@ export async function runOpenClawStream(
 
     const cleanup = () => {
       clearTimeout(timer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+        killTimer = null;
+      }
 
       if (options.signal) {
         options.signal.removeEventListener("abort", handleAbort);

@@ -547,6 +547,8 @@ export type OpenClawUpdateStreamEvent =
       stdout: string;
       stderr: string;
       snapshot?: MissionControlSnapshot;
+      manualCommand?: string;
+      docsUrl?: string;
     };
 
 export type TaskDetailStreamEvent =

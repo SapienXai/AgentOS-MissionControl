@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import type { OpenClawUpdateStreamEvent } from "@/lib/agentos/contracts";
 
@@ -158,6 +158,28 @@ export async function POST(request: Request) {
         }
 
         if (code !== 0) {
+          const failureCommand = formatOpenClawCommand(openClawBin, ["update"]);
+          const failureOutput = [stdout, stderr].filter(Boolean).join("\n");
+          const needsInteractiveTty =
+            /downgrade confirmation required/i.test(failureOutput) ||
+            /interactive tty/i.test(failureOutput) ||
+            /re-?run in a tty/i.test(failureOutput) ||
+            /confirm the downgrade/i.test(failureOutput);
+
+          if (needsInteractiveTty) {
+            await send({
+              type: "done",
+              ok: false,
+              message: "OpenClaw update needs to be confirmed in a terminal.",
+              exitCode: code,
+              stdout,
+              stderr: stderr || "Downgrade confirmation required.",
+              manualCommand: failureCommand
+            });
+            await closeWriter();
+            return;
+          }
+
           await send({
             type: "done",
             ok: false,

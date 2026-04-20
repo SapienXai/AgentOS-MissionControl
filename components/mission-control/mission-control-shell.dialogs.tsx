@@ -1,6 +1,8 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, LoaderCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, LoaderCircle, SquareTerminal } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
 import {
   Dialog,
@@ -18,7 +20,6 @@ import {
   resolveUpdateResultPanelClassName
 } from "@/components/mission-control/mission-control-shell.utils";
 import type { MissionControlSnapshot, TaskRecord } from "@/lib/agentos/contracts";
-import { compactPath } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -39,6 +40,7 @@ export function MissionControlShellDialogs({
   updateStatusMessage,
   updateResultMessage,
   updateLog,
+  updateManualCommand,
   activeRuntimeCount,
   updateInstallDescriptor,
   onUpdateDialogOpenChange,
@@ -57,6 +59,7 @@ export function MissionControlShellDialogs({
   updateStatusMessage: string | null;
   updateResultMessage: string | null;
   updateLog: string;
+  updateManualCommand: string | null;
   activeRuntimeCount: number;
   updateInstallDescriptor: string | null;
   onUpdateDialogOpenChange: (open: boolean) => void;
@@ -66,6 +69,61 @@ export function MissionControlShellDialogs({
   const isUpdateFinished = updateRunState === "success" || updateRunState === "error";
   const updateDialogTitle = resolveUpdateDialogTitle(updateRunState);
   const updateDialogDescription = resolveUpdateDialogDescription(updateRunState);
+  const [isOpeningUpdateTerminal, setIsOpeningUpdateTerminal] = useState(false);
+  const canOpenUpdateTerminal = Boolean(updateManualCommand?.trim().startsWith("openclaw "));
+
+  const copyUpdateCommand = async () => {
+    if (!updateManualCommand) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(updateManualCommand);
+      toast.success("Command copied.", {
+        description: "Open Terminal and paste it."
+      });
+    } catch (error) {
+      toast.error("Could not copy command.", {
+        description: error instanceof Error ? error.message : "Clipboard access is unavailable."
+      });
+    }
+  };
+
+  const openUpdateTerminal = async () => {
+    if (!updateManualCommand || !canOpenUpdateTerminal) {
+      return;
+    }
+
+    setIsOpeningUpdateTerminal(true);
+
+    try {
+      const response = await fetch("/api/system/open-terminal", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          command: updateManualCommand
+        })
+      });
+
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok || result?.error) {
+        throw new Error(result?.error || "Unable to open Terminal.");
+      }
+
+      toast.success("Terminal opened.", {
+        description: "Confirm the update there, then return to AgentOS."
+      });
+    } catch (error) {
+      toast.error("Could not open Terminal.", {
+        description: error instanceof Error ? error.message : "Open Terminal manually and run the command."
+      });
+    } finally {
+      setIsOpeningUpdateTerminal(false);
+    }
+  };
 
   return (
     <>
@@ -318,6 +376,82 @@ export function MissionControlShellDialogs({
                   {updateLog || "No command output was captured."}
                 </pre>
               </div>
+
+              {updateManualCommand ? (
+                <div
+                  className={cn(
+                    "rounded-[20px] border px-4 py-3",
+                    surfaceTheme === "light"
+                      ? "border-[#e3d4c8] bg-[#fffaf6]"
+                      : "border-white/8 bg-white/[0.03]"
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "text-[10px] uppercase tracking-[0.24em]",
+                      surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                    )}
+                  >
+                    {canOpenUpdateTerminal ? "Terminal" : "Manual"}
+                  </p>
+                  {canOpenUpdateTerminal ? (
+                    <p
+                      className={cn(
+                        "mt-1 text-sm leading-6",
+                        surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400"
+                      )}
+                    >
+                      Open Terminal and run this command to confirm the update.
+                    </p>
+                  ) : null}
+                  <p
+                    className={cn(
+                      "mt-2 break-all font-mono text-[11px] leading-5",
+                      surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                    )}
+                  >
+                    {updateManualCommand}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        void copyUpdateCommand();
+                      }}
+                      className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
+                    >
+                      <Copy className="mr-1.5 h-3 w-3" />
+                      Copy command
+                    </Button>
+                    {canOpenUpdateTerminal ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          void openUpdateTerminal();
+                        }}
+                        disabled={isOpeningUpdateTerminal}
+                        className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
+                      >
+                        {isOpeningUpdateTerminal ? (
+                          <>
+                            <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
+                            Opening...
+                          </>
+                        ) : (
+                          <>
+                            <SquareTerminal className="mr-1.5 h-3 w-3" />
+                            Open Terminal
+                          </>
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>
@@ -369,7 +503,7 @@ export function MissionControlShellDialogs({
                   </p>
                   <p className="mt-2 text-sm font-medium leading-6 text-inherit">{updateInstallDescriptor || "unknown"}</p>
                   <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
-                    {compactPath(snapshot.diagnostics.updateRoot || "") || "Install root unavailable"}
+                    {snapshot.diagnostics.updateRoot ? "Install root detected." : "Install root unavailable."}
                   </p>
                 </div>
               </div>

@@ -357,6 +357,10 @@ export function resolveWorkspaceSelection(
   return workspaceIds[0] ?? null;
 }
 
+export function shouldDeferWorkspaceSelectionHydration(snapshot: Pick<MissionControlSnapshot, "mode" | "diagnostics">) {
+  return snapshot.mode === "fallback" && snapshot.diagnostics.loaded && !snapshot.diagnostics.rpcOk;
+}
+
 export function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent): OpenClawModelOnboardingPhase {
   if (intent === "refresh") {
     return "refreshing";

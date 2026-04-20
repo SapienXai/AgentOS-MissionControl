@@ -42,6 +42,7 @@ import {
   resolveWorkspaceRootDraft,
   resolveWorkspaceSelection,
   serializeWorkspaceSelection,
+  shouldDeferWorkspaceSelectionHydration,
   updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
@@ -169,6 +170,7 @@ export function MissionControlShell({
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
   const [updateResultMessage, setUpdateResultMessage] = useState<string | null>(null);
   const [updateLog, setUpdateLog] = useState("");
+  const [updateManualCommand, setUpdateManualCommand] = useState<string | null>(null);
   const [onboardingRunState, setOnboardingRunState] = useState<UpdateRunState>("idle");
   const [onboardingPhase, setOnboardingPhase] = useState<OpenClawOnboardingPhase | null>(null);
   const [onboardingStatusMessage, setOnboardingStatusMessage] = useState<string | null>(null);
@@ -524,8 +526,16 @@ export function MissionControlShell({
       return;
     }
 
+    if (shouldDeferWorkspaceSelectionHydration(snapshot)) {
+      return;
+    }
+
     setActiveWorkspaceId(snapshot.workspaces[0]?.id ?? null);
-  }, [snapshot.workspaces, activeWorkspaceId, pendingWorkspaceOpenId]);
+  }, [
+    activeWorkspaceId,
+    pendingWorkspaceOpenId,
+    snapshot
+  ]);
 
   useEffect(() => {
     if (optimisticMissionTasks.length === 0) {
@@ -599,6 +609,10 @@ export function MissionControlShell({
       return;
     }
 
+    if (shouldDeferWorkspaceSelectionHydration(snapshot)) {
+      return;
+    }
+
     const workspaceSelectionStorageKey = buildWorkspaceSelectionStorageKey(workspaceRoot);
     const storedWorkspaceId = globalThis.localStorage?.getItem(workspaceSelectionStorageKey) ?? null;
     const resolvedWorkspaceId = resolveWorkspaceSelection(
@@ -613,7 +627,15 @@ export function MissionControlShell({
     }
 
     setLoadedWorkspaceSelectionRoot(workspaceRoot);
-  }, [activeWorkspaceId, loadedWorkspaceSelectionRoot, snapshot.diagnostics.workspaceRoot, snapshot.workspaces]);
+  }, [
+    activeWorkspaceId,
+    loadedWorkspaceSelectionRoot,
+    snapshot.diagnostics.loaded,
+    snapshot.diagnostics.rpcOk,
+    snapshot.diagnostics.workspaceRoot,
+    snapshot.mode,
+    snapshot.workspaces
+  ]);
 
   useEffect(() => {
     const workspaceRoot = snapshot.diagnostics.workspaceRoot;
@@ -855,6 +877,7 @@ export function MissionControlShell({
     setUpdateStatusMessage(null);
     setUpdateResultMessage(null);
     setUpdateLog("");
+    setUpdateManualCommand(null);
   };
 
   const appendUpdateLog = (text: string) => {
@@ -1024,6 +1047,7 @@ export function MissionControlShell({
     setUpdateStatusMessage("Starting OpenClaw update...");
     setUpdateResultMessage(null);
     setUpdateLog("");
+    setUpdateManualCommand(null);
 
     try {
       const response = await fetch("/api/update", {
@@ -1078,6 +1102,7 @@ export function MissionControlShell({
               setUpdateStatusMessage(null);
               setUpdateResultMessage(event.message);
               setUpdateRunState(event.ok ? "success" : "error");
+              setUpdateManualCommand(event.manualCommand ?? null);
 
               if (event.snapshot) {
                 setSnapshot(event.snapshot);
@@ -1109,6 +1134,7 @@ export function MissionControlShell({
           setUpdateStatusMessage(null);
           setUpdateResultMessage(event.message);
           setUpdateRunState(event.ok ? "success" : "error");
+          setUpdateManualCommand(event.manualCommand ?? null);
 
           if (event.snapshot) {
             setSnapshot(event.snapshot);
@@ -2423,6 +2449,7 @@ export function MissionControlShell({
           updateStatusMessage={updateStatusMessage}
           updateResultMessage={updateResultMessage}
           updateLog={updateLog}
+          updateManualCommand={updateManualCommand}
           activeRuntimeCount={activeRuntimeCount}
           updateInstallDescriptor={updateInstallDescriptor}
           onUpdateDialogOpenChange={(open) => {
