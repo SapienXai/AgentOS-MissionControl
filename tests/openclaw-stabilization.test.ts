@@ -10,6 +10,7 @@ import {
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
+import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/service";
 import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
 import type {
   ChannelRegistry,
@@ -154,6 +155,44 @@ test("update info falls back to a loading message when only the installed versio
   assert.equal(
     resolveUpdateInfo({ currentVersion: "2026.4.15" }),
     "Running v2026.4.15. Update registry status is still loading."
+  );
+});
+
+test("session catalog entries preserve task-like sessions when chatType is missing", () => {
+  assert.equal(
+    inferSessionKindFromCatalogEntry(
+      {
+        updatedAt: 1776455964086,
+        systemPromptReport: {
+          source: "run"
+        }
+      },
+      "agent:faros-strategist:main"
+    ),
+    "task"
+  );
+  assert.equal(
+    inferSessionKindFromCatalogEntry(
+      {
+        chatType: "direct",
+        deliveryContext: {
+          to: "heartbeat"
+        }
+      },
+      "agent:key2web3-telegram-admin:main"
+    ),
+    "direct"
+  );
+  assert.equal(
+    inferSessionKindFromCatalogEntry(
+      {
+        chatType: "group",
+        channel: "telegram",
+        groupId: "-1001646245594"
+      },
+      "agent:faros-strategist:telegram:group:-1001646245594"
+    ),
+    "group"
   );
 });
 
