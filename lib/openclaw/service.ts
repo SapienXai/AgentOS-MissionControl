@@ -123,6 +123,7 @@ import {
   parseWorkspaceProjectManifestAgent,
   readWorkspaceProjectManifest,
   normalizeChannelRegistry,
+  parseWorkspaceChannelSummary,
   uniqueByChatId
 } from "@/lib/openclaw/domains/workspace-manifest";
 import type {
@@ -648,6 +649,34 @@ async function settleSessionsPayloadFromSessionCatalogs(
       value: {
         sessions
       }
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
+}
+
+async function settleChannelRegistryFromLocalFile(): Promise<PromiseSettledResult<ChannelRegistry>> {
+  try {
+    const raw = await readFile(channelRegistryPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const registryInput = isObjectRecord(parsed)
+      ? parsed
+      : { version: 1, channels: [] as unknown[] };
+    const channels = Array.isArray(registryInput.channels)
+      ? registryInput.channels
+          .map((entry) => parseWorkspaceChannelSummary(entry))
+          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
+      : [];
+
+    return {
+      status: "fulfilled",
+      value: normalizeChannelRegistry({
+        version: 1,
+        channels
+      })
     };
   } catch (error) {
     return {
@@ -1204,19 +1233,18 @@ async function loadMissionControlSnapshots({
     const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(agentIds, settings);
     void runtimeDiagnosticsPromise.catch(() => {});
     const dispatchRecordsPromise = readMissionDispatchRecords();
-    const [channelRegistry, channelAccountsRaw] =
+    const channelRegistryResult = await settleChannelRegistryFromLocalFile();
+    const channelRegistry =
+      channelRegistryResult.status === "fulfilled"
+        ? channelRegistryResult.value
+        : normalizeChannelRegistry({
+            version: 1,
+            channels: []
+          });
+    const channelAccountsRaw =
       profile === "interactive"
-        ? [
-            normalizeChannelRegistry({
-              version: 1,
-              channels: []
-            }),
-            [] as ChannelAccountRecord[]
-          ]
-        : await Promise.all([
-            readChannelRegistry(),
-            readChannelAccounts()
-          ]);
+        ? ([] as ChannelAccountRecord[])
+        : await readChannelAccounts();
     const channelAccounts = applyChannelAccountDisplayNames(
       mergeMissionControlSurfaceAccounts([
         ...channelAccountsRaw,
@@ -1627,6 +1655,9 @@ async function loadMissionControlSnapshots({
       diagnostics,
       channelAccounts,
       channelRegistry,
+      ...(isDeferredPayloadResult(channelRegistryResult)
+        ? {}
+        : {}),
       presence: presence.map((entry) => ({
         host: entry.host,
         ip: entry.ip,
