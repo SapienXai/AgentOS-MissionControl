@@ -89,9 +89,15 @@ export function readAgentChatLastSeenAt(agentId: string): number | null {
 export function writeAgentChatLastSeenAt(agentId: string, lastSeenAt: number | null) {
   try {
     const key = getLastSeenStorageKey(agentId);
+    const nextValue = typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt) ? String(lastSeenAt) : null;
+    const currentValue = globalThis.localStorage?.getItem(key) ?? null;
 
-    if (typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt)) {
-      globalThis.localStorage?.setItem(key, String(lastSeenAt));
+    if (currentValue === nextValue) {
+      return;
+    }
+
+    if (nextValue !== null) {
+      globalThis.localStorage?.setItem(key, nextValue);
     } else {
       globalThis.localStorage?.removeItem(key);
     }
