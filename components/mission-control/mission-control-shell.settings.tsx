@@ -19,7 +19,7 @@ import type {
   MissionControlSnapshot,
   ResetTarget
 } from "@/lib/agentos/contracts";
-import { isOpenClawMissionReady } from "@/lib/openclaw/readiness";
+import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -80,7 +80,7 @@ export function MissionControlShellSettingsPanel({
   onOpenUpdateDialog,
   onOpenResetDialog
 }: MissionControlShellSettingsPanelProps) {
-  const isOpenClawReady = isOpenClawMissionReady(snapshot);
+  const isOpenClawReady = isOpenClawOnboardingModelReady(snapshot);
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
   const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion);

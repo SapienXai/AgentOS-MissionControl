@@ -1,6 +1,6 @@
 import { formatModelLabel } from "@/lib/openclaw/presenters";
 import {
-  isOpenClawMissionReady,
+  isOpenClawOnboardingModelReady,
   isOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import { isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
@@ -256,7 +256,7 @@ export function resolveModelPhaseLabel(
   phase: OpenClawModelOnboardingPhase | null,
   snapshot: MissionControlSnapshot
 ) {
-  if (isOpenClawMissionReady(snapshot)) {
+  if (isOpenClawOnboardingModelReady(snapshot)) {
     return "ready";
   }
 

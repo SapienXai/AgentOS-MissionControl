@@ -5,7 +5,7 @@ import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
 import {
-  isOpenClawMissionReady,
+  isOpenClawOnboardingModelReady,
   isOpenClawOnboardingSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
@@ -91,7 +91,7 @@ export function OpenClawOnboarding({
   canDismiss: boolean;
 }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
-  const modelReady = isOpenClawMissionReady(snapshot);
+  const modelReady = isOpenClawOnboardingModelReady(snapshot);
   const showLaunchpad = modelReady && showReadyState;
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;

@@ -8,6 +8,10 @@ export function isOpenClawOnboardingSystemReady(snapshot: MissionControlSnapshot
   return snapshot.diagnostics.installed && snapshot.diagnostics.rpcOk;
 }
 
+export function isOpenClawOnboardingModelReady(snapshot: MissionControlSnapshot) {
+  return isOpenClawOnboardingSystemReady(snapshot) && snapshot.diagnostics.modelReadiness.ready;
+}
+
 export function isOpenClawRuntimeSmokeTestReady(snapshot: MissionControlSnapshot) {
   return snapshot.diagnostics.runtime.smokeTest.status === "passed";
 }
@@ -18,7 +22,7 @@ export function isOpenClawSystemReady(snapshot: MissionControlSnapshot) {
 
 export function isOpenClawMissionReady(snapshot: MissionControlSnapshot) {
   return isOpenClawSystemReady(snapshot) &&
-    snapshot.diagnostics.modelReadiness.ready &&
+    isOpenClawOnboardingModelReady(snapshot) &&
     isOpenClawRuntimeSmokeTestReady(snapshot);
 }
 

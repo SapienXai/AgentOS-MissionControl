@@ -47,7 +47,7 @@ import {
 } from "@/components/mission-control/mission-control-shell.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
 import {
-  isOpenClawMissionReady as resolveOpenClawMissionReady,
+  isOpenClawOnboardingModelReady as resolveOpenClawSetupReady,
   isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
@@ -192,7 +192,7 @@ export function MissionControlShell({
   const [isOnboardingForcedOpen, setIsOnboardingForcedOpen] = useState(false);
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
   const [hasSeenMissionReady, setHasSeenMissionReady] = useState(() =>
-    resolveOpenClawMissionReady(initialSnapshot)
+    resolveOpenClawSetupReady(initialSnapshot)
   );
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
@@ -242,7 +242,7 @@ export function MissionControlShell({
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
   const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
-  const isOpenClawReady = resolveOpenClawMissionReady(snapshot);
+  const isOpenClawReady = resolveOpenClawSetupReady(snapshot);
   const updateInstallDescriptor = [
     snapshot.diagnostics.updatePackageManager,
     snapshot.diagnostics.updateInstallKind
@@ -809,6 +809,38 @@ export function MissionControlShell({
       setHasSeenMissionReady(true);
     }
   }, [isOpenClawReady]);
+
+  useEffect(() => {
+    const preferredModelId =
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+      snapshot.diagnostics.modelReadiness.defaultModel ||
+      snapshot.diagnostics.modelReadiness.recommendedModelId ||
+      "";
+
+    if (!preferredModelId) {
+      return;
+    }
+
+    if (!selectedOnboardingModelId.trim()) {
+      setSelectedOnboardingModelId(preferredModelId);
+      return;
+    }
+
+    const selectedModelStillVisible =
+      snapshot.models.some((model) => model.id === selectedOnboardingModelId) ||
+      discoveredModels.some((model) => model.id === selectedOnboardingModelId);
+
+    if (!selectedModelStillVisible) {
+      setSelectedOnboardingModelId(preferredModelId);
+    }
+  }, [
+    discoveredModels,
+    selectedOnboardingModelId,
+    snapshot.diagnostics.modelReadiness.defaultModel,
+    snapshot.diagnostics.modelReadiness.recommendedModelId,
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel,
+    snapshot.models
+  ]);
 
   useEffect(() => {
     if (snapshot.mode !== "fallback" || snapshot.diagnostics.installed) {
