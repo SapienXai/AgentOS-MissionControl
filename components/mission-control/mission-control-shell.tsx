@@ -849,6 +849,14 @@ export function MissionControlShell({
         return;
       }
 
+      if (
+        isOnboardingForcedOpen &&
+        onboardingRunState === "idle" &&
+        modelOnboardingRunState === "idle"
+      ) {
+        return;
+      }
+
       if (onboardingRunState !== "idle" || modelOnboardingRunState !== "idle") {
         setOnboardingRunState("success");
         setOnboardingPhase("ready");
@@ -867,7 +875,13 @@ export function MissionControlShell({
     }
 
     setShowOnboardingReadyState(false);
-  }, [isOpenClawReady, isOnboardingDismissed, onboardingRunState, modelOnboardingRunState]);
+  }, [
+    isOnboardingForcedOpen,
+    isOpenClawReady,
+    isOnboardingDismissed,
+    onboardingRunState,
+    modelOnboardingRunState
+  ]);
 
   const resetUpdateDialogState = () => {
     if (updateRunState === "running") {
