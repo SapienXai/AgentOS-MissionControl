@@ -82,10 +82,12 @@ export function OpenClawOnboardingProviderFlow({
   );
 
   useEffect(() => {
-    if (selectedProviderId && selectedProviderId !== activeProviderId) {
-      setActiveProviderId(selectedProviderId);
+    if (selectedProviderId) {
+      setActiveProviderId((currentProviderId) =>
+        currentProviderId === selectedProviderId ? currentProviderId : selectedProviderId
+      );
     }
-  }, [activeProviderId, selectedProviderId]);
+  }, [selectedProviderId]);
 
   useEffect(() => {
     void ensureProviderStatus(activeProviderId);
@@ -369,6 +371,9 @@ export function OpenClawOnboardingProviderFlow({
                 detail={connection.detail}
                 onClick={() => {
                   setActiveProviderId(provider.id);
+                  if (selectedProviderId && selectedProviderId !== provider.id) {
+                    onSelectedModelIdChange("");
+                  }
                 }}
               />
             </div>

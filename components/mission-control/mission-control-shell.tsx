@@ -823,23 +823,12 @@ export function MissionControlShell({
 
     if (!selectedOnboardingModelId.trim()) {
       setSelectedOnboardingModelId(preferredModelId);
-      return;
-    }
-
-    const selectedModelStillVisible =
-      snapshot.models.some((model) => model.id === selectedOnboardingModelId) ||
-      discoveredModels.some((model) => model.id === selectedOnboardingModelId);
-
-    if (!selectedModelStillVisible) {
-      setSelectedOnboardingModelId(preferredModelId);
     }
   }, [
-    discoveredModels,
     selectedOnboardingModelId,
     snapshot.diagnostics.modelReadiness.defaultModel,
     snapshot.diagnostics.modelReadiness.recommendedModelId,
-    snapshot.diagnostics.modelReadiness.resolvedDefaultModel,
-    snapshot.models
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel
   ]);
 
   useEffect(() => {
