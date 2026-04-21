@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+import path from "node:path";
 import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
@@ -62,31 +64,46 @@ type CommandResult = {
   errorMessage?: string;
 };
 
-function resolveDemoWorkspaceName(snapshot: MissionControlSnapshot) {
-  const baseName = "Demo Workspace";
-  const usedNames = new Set(snapshot.workspaces.map((workspace) => workspace.name.trim().toLowerCase()));
-
-  if (!usedNames.has(baseName.toLowerCase())) {
-    return baseName;
+async function pathExists(targetPath: string) {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
-
-  let suffix = 2;
-
-  while (usedNames.has(`${baseName} ${suffix}`.toLowerCase())) {
-    suffix += 1;
-  }
-
-  return `${baseName} ${suffix}`;
 }
 
-function buildDemoWorkspaceInput(
+async function resolveDemoWorkspaceIdentity(snapshot: MissionControlSnapshot) {
+  const baseName = "Demo Workspace";
+  const workspaceRoot =
+    snapshot.diagnostics.configuredWorkspaceRoot ??
+    snapshot.diagnostics.workspaceRoot;
+  const usedNames = new Set(snapshot.workspaces.map((workspace) => workspace.name.trim().toLowerCase()));
+
+  let suffix = 1;
+
+  while (true) {
+    const name = suffix === 1 ? baseName : `${baseName} ${suffix}`;
+    const directory = suffix === 1 ? "demo-workspace" : `demo-workspace-${suffix}`;
+    const targetPath = path.join(workspaceRoot, directory);
+
+    if (!usedNames.has(name.toLowerCase()) && !(await pathExists(targetPath))) {
+      return { name, directory };
+    }
+
+    suffix += 1;
+  }
+}
+
+async function buildDemoWorkspaceInput(
   snapshot: MissionControlSnapshot,
   modelId: string
-): WorkspaceCreateInput {
-  const name = resolveDemoWorkspaceName(snapshot);
+): Promise<WorkspaceCreateInput> {
+  const { name, directory } = await resolveDemoWorkspaceIdentity(snapshot);
 
   return {
     name,
+    directory,
     brief: "A starter demo workspace created automatically after onboarding.",
     modelId,
     sourceMode: "empty",
@@ -432,7 +449,7 @@ export async function POST(request: Request) {
             message: "Creating a demo workspace and starter agent..."
           });
 
-          const demoWorkspaceInput = buildDemoWorkspaceInput(snapshot, input.modelId);
+          const demoWorkspaceInput = await buildDemoWorkspaceInput(snapshot, input.modelId);
           let lastProgressMessage = "";
 
           try {
@@ -461,6 +478,24 @@ export async function POST(request: Request) {
             createdWorkspaceId = createdWorkspace.workspaceId;
             snapshot = await getMissionControlSnapshot({ force: true });
           } catch (error) {
+            const recoveredSnapshot = await getMissionControlSnapshot({ force: true });
+
+            if (recoveredSnapshot.workspaces.length > 0) {
+              await send({
+                type: "done",
+                ok: true,
+                phase: "ready",
+                message: "Default model saved. Existing workspace is ready.",
+                exitCode: 0,
+                stdout: aggregatedStdout,
+                stderr: aggregatedStderr,
+                snapshot: recoveredSnapshot,
+                workspaceId: recoveredSnapshot.workspaces[0]?.id
+              });
+              await closeWriter();
+              return;
+            }
+
             aggregatedStderr = aggregatedStderr
               ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Demo workspace creation failed."}`
               : error instanceof Error

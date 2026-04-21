@@ -740,7 +740,7 @@ function buildAgentPayloadsFromConfig(agentConfig: AgentConfigPayload): AgentPay
     identityName: entry.identity?.name,
     identityEmoji: entry.identity?.emoji,
     identitySource: entry.identity ? "config" : undefined,
-    workspace: entry.workspace,
+    workspace: normalizeOptionalValue(entry.workspace) ?? "",
     agentDir: entry.agentDir || path.join(openClawStateRootPath, "agents", entry.id, "agent"),
     model: entry.model,
     isDefault: Boolean(entry.default)
@@ -1361,7 +1361,10 @@ async function loadMissionControlSnapshots({
       }
     );
     const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...annotatedLiveSessionRuntimes]);
-    const workspacePaths = Array.from(new Set(agentsList.map((agent) => agent.workspace)));
+    const workspaceBoundAgents = agentsList.filter(
+      (agent): agent is AgentPayload[number] & { workspace: string } => Boolean(agent.workspace)
+    );
+    const workspacePaths = Array.from(new Set(workspaceBoundAgents.map((agent) => agent.workspace)));
 
     await Promise.all(
       workspacePaths.map(async (workspacePath) => {
@@ -1379,7 +1382,7 @@ async function loadMissionControlSnapshots({
     );
 
     const agentEntries = await Promise.all(
-      agentsList.map(async (rawAgent) => {
+      workspaceBoundAgents.map(async (rawAgent) => {
         const configured = configByAgent.get(rawAgent.id);
         const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
         const workspaceId = workspaceIdFromPath(rawAgent.workspace);
