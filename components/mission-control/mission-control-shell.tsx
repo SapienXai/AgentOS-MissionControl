@@ -207,6 +207,7 @@ export function MissionControlShell({
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
   const [loadedWorkspaceSelectionRoot, setLoadedWorkspaceSelectionRoot] = useState<string | null>(null);
   const fallbackSnapshotRecoveryKeyRef = useRef<string | null>(null);
+  const hydratedOnboardingModelIdRef = useRef<string | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
@@ -821,7 +822,11 @@ export function MissionControlShell({
       return;
     }
 
-    if (!selectedOnboardingModelId.trim()) {
+    if (
+      !selectedOnboardingModelId.trim() &&
+      hydratedOnboardingModelIdRef.current !== preferredModelId
+    ) {
+      hydratedOnboardingModelIdRef.current = preferredModelId;
       setSelectedOnboardingModelId(preferredModelId);
     }
   }, [
