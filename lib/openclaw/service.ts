@@ -7,7 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { createErrorSnapshot, createFallbackSnapshot } from "@/lib/openclaw/fallback";
+import { createErrorSnapshot } from "@/lib/openclaw/fallback";
 import {
   DEFAULT_AGENT_PRESET,
   formatAgentPresetLabel,
@@ -1177,7 +1177,13 @@ async function loadMissionControlSnapshots({
   const openclawInstalled = Boolean(localGatewayStatus) || await detectOpenClaw();
 
   if (!openclawInstalled) {
-    return createSnapshotPair(createFallbackSnapshot("OpenClaw CLI is not installed on this machine."));
+    return createSnapshotPair(
+      createErrorSnapshot("OpenClaw CLI is not installed on this machine.", {
+        installed: false,
+        loaded: false,
+        rpcOk: false
+      })
+    );
   }
 
   try {

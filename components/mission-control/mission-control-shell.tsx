@@ -847,7 +847,7 @@ export function MissionControlShell({
       return;
     }
 
-    const recoveryKey = `${snapshot.generatedAt}:${snapshot.diagnostics.issues.join("|")}`;
+    const recoveryKey = `${snapshot.mode}:${snapshot.diagnostics.installed ? "installed" : "missing"}:${snapshot.diagnostics.issues.join("|")}`;
 
     if (fallbackSnapshotRecoveryKeyRef.current === recoveryKey) {
       return;
@@ -859,7 +859,6 @@ export function MissionControlShell({
     refreshSnapshot,
     snapshot.diagnostics.installed,
     snapshot.diagnostics.issues,
-    snapshot.generatedAt,
     snapshot.mode
   ]);
 
