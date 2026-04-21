@@ -45,6 +45,7 @@ export function OpenClawOnboarding({
   snapshot,
   surfaceTheme,
   stage,
+  showReadyState,
   systemActionLabel,
   systemActionDescription,
   systemPhase,
@@ -58,14 +59,17 @@ export function OpenClawOnboarding({
   onRunModelSetDefault,
   onOpenAddModels,
   onOpenWorkspaceCreate,
+  onEnterAgentOS,
   onContinueToModels,
   onBackToSystem,
+  onSelectStage,
   onDismiss,
   canDismiss
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
   stage: WizardStage;
+  showReadyState: boolean;
   systemActionLabel: string;
   systemActionDescription: string;
   systemPhase: OpenClawOnboardingPhase | null;
@@ -79,13 +83,16 @@ export function OpenClawOnboarding({
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenWorkspaceCreate: () => void;
+  onEnterAgentOS: () => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
+  onSelectStage: (stage: WizardStage) => void;
   onDismiss: () => void;
   canDismiss: boolean;
 }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
   const modelReady = isOpenClawMissionReady(snapshot);
+  const showLaunchpad = modelReady && showReadyState;
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;
   const defaultModelLabel =
@@ -98,11 +105,11 @@ export function OpenClawOnboarding({
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
-  const heroLine = modelReady
+  const heroLine = showLaunchpad
     ? "AGENTOS : OpenClaw is ready. Choose your first action below."
     : "AGENTOS : Bring your local OpenClaw online.";
   const openSurfaceLabel = hasWorkspaces ? "Open demo surface" : "Create workspace";
-  const topBadgeLabel = modelReady ? "Launchpad" : "Welcome";
+  const topBadgeLabel = showLaunchpad ? "Launchpad" : "Welcome";
   const stageStatusCopy =
     stageRun.statusMessage ||
     stageRun.resultMessage ||
@@ -186,12 +193,18 @@ export function OpenClawOnboarding({
 
         <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
           {wizardSteps.map((step) => (
-            <div
+            <button
+              type="button"
               key={step.id}
+              onClick={() => onSelectStage(step.id as WizardStage)}
               className={cn(
-                "rounded-[14px] border px-2.5 py-2",
+                "rounded-[14px] border px-2.5 py-2 text-left transition-colors hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+                surfaceTheme === "light"
+                  ? "focus-visible:ring-[#c8946f] focus-visible:ring-offset-[#fff7f1]"
+                  : "focus-visible:ring-white/70 focus-visible:ring-offset-[#060a12]",
                 stepContainerClassName(step.state, surfaceTheme)
               )}
+              aria-pressed={stage === step.id}
             >
               <div className="flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5">
@@ -230,11 +243,11 @@ export function OpenClawOnboarding({
                       : "Pending"}
                 </span>
               </div>
-            </div>
+            </button>
           ))}
         </div>
 
-        {modelReady ? (
+        {showLaunchpad ? (
           <LaunchpadStage
             surfaceTheme={surfaceTheme}
             workspaceCount={workspaceCount}
@@ -273,7 +286,7 @@ export function OpenClawOnboarding({
           )}
         >
           <div className="flex flex-wrap items-center gap-2">
-            {modelReady ? (
+            {showLaunchpad ? (
               <span
                 className={cn(
                   "rounded-full border px-2 py-0.5 text-[8px] uppercase tracking-[0.16em]",
@@ -298,7 +311,7 @@ export function OpenClawOnboarding({
               </Button>
             ) : null}
 
-            {canDismiss && !modelReady ? (
+            {canDismiss && !showLaunchpad ? (
               <button
                 type="button"
                 onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}
@@ -313,7 +326,7 @@ export function OpenClawOnboarding({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {modelReady ? (
+            {showLaunchpad ? (
               <>
                 <Button
                   type="button"
@@ -326,7 +339,7 @@ export function OpenClawOnboarding({
                 </Button>
                 <Button
                   type="button"
-                  onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}
+                  onClick={hasWorkspaces ? onEnterAgentOS : onOpenWorkspaceCreate}
                   className={cn(
                     "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
                     surfaceTheme === "light"
@@ -356,8 +369,8 @@ export function OpenClawOnboarding({
                   type="button"
                   onClick={() => {
                     if (stage === "system") {
-                      if (onboardingSystemReady && modelReady) {
-                        onDismiss();
+                      if (primaryAction.kind === "dismiss") {
+                        onEnterAgentOS();
                         return;
                       }
 
@@ -370,8 +383,8 @@ export function OpenClawOnboarding({
                       return;
                     }
 
-                    if (modelReady) {
-                      onDismiss();
+                    if (primaryAction.kind === "dismiss") {
+                      onEnterAgentOS();
                       return;
                     }
 

@@ -1491,18 +1491,30 @@ export function MissionControlShell({
     setIsSettingsOpen(false);
     setOnboardingStage(resolvedStage);
     setIsOnboardingDismissed(false);
-    setShowOnboardingReadyState(false);
+    setShowOnboardingReadyState(stage === undefined && isOpenClawReady);
     setIsOnboardingForcedOpen(true);
   };
 
-  const dismissOnboarding = () => {
+  const dismissOnboarding = useCallback(() => {
     setIsOnboardingForcedOpen(false);
     setShowOnboardingReadyState(false);
+    setIsOnboardingDismissed(true);
+  }, []);
 
-    if (!isOpenClawReady) {
-      setIsOnboardingDismissed(true);
+  const enterAgentOS = useCallback(() => {
+    const targetWorkspaceId =
+      (activeWorkspaceId && snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId)
+        ? activeWorkspaceId
+        : snapshot.workspaces[0]?.id) ?? null;
+
+    if (targetWorkspaceId) {
+      setActiveWorkspaceId(targetWorkspaceId);
+      setPendingWorkspaceOpenId(null);
+      selectNode(targetWorkspaceId);
     }
-  };
+
+    dismissOnboarding();
+  }, [activeWorkspaceId, dismissOnboarding, selectNode, snapshot.workspaces]);
 
   const controlGateway = async (action: GatewayControlAction) => {
     setGatewayControlAction(action);
@@ -2354,6 +2366,7 @@ export function MissionControlShell({
             snapshot={snapshot}
             surfaceTheme={surfaceTheme}
             stage={onboardingStage}
+            showReadyState={showOnboardingReadyState}
             systemActionLabel={onboardingAction.label}
             systemActionDescription={onboardingAction.description}
             systemPhase={onboardingPhase}
@@ -2380,8 +2393,13 @@ export function MissionControlShell({
             onRunSystemSetup={runOpenClawOnboarding}
             onRunModelSetDefault={runModelSetDefault}
             onOpenAddModels={openAddModelsDialog}
+            onEnterAgentOS={enterAgentOS}
             onContinueToModels={() => setOnboardingStage("models")}
             onBackToSystem={() => setOnboardingStage("system")}
+            onSelectStage={(stage) => {
+              setShowOnboardingReadyState(false);
+              setOnboardingStage(stage);
+            }}
             onOpenWorkspaceCreate={() => {
               dismissOnboarding();
               openWorkspaceWizard("basic");
