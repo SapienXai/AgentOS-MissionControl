@@ -99,6 +99,10 @@ export function OpenClawOnboarding({
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
     "Ready";
+  const defaultModelId =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    null;
   const systemPhaseForSteps = onboardingSystemReady ? "ready" : systemPhase;
   const wizardSteps = buildWizardSteps(stage, onboardingSystemReady, modelReady);
   const systemSteps = buildSystemSteps(snapshot, systemPhaseForSteps);
@@ -132,7 +136,8 @@ export function OpenClawOnboarding({
     systemReady: onboardingSystemReady,
     modelReady,
     systemActionLabel,
-    selectedModelId
+    selectedModelId,
+    defaultModelId
   });
 
   return (

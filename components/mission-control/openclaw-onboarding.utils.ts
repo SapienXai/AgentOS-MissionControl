@@ -113,6 +113,7 @@ export function resolvePrimaryAction(params: {
   modelReady: boolean;
   systemActionLabel: string;
   selectedModelId: string;
+  defaultModelId?: string | null;
 }) {
   if (params.stage === "system") {
     if (params.systemReady && params.modelReady) {
@@ -126,12 +127,15 @@ export function resolvePrimaryAction(params: {
     return { kind: "system" as const, label: params.systemActionLabel };
   }
 
-  if (params.modelReady) {
-    return { kind: "dismiss" as const, label: "Enter AgentOS" };
+  const selectedModelId = params.selectedModelId.trim();
+  const defaultModelId = params.defaultModelId?.trim() ?? "";
+
+  if (selectedModelId && selectedModelId !== defaultModelId) {
+    return { kind: "set-default" as const, label: "Set as default" };
   }
 
-  if (params.selectedModelId) {
-    return { kind: "set-default" as const, label: "Set as default" };
+  if (params.modelReady) {
+    return { kind: "dismiss" as const, label: "Enter AgentOS" };
   }
 
   return { kind: "select-model" as const, label: "Select a model" };

@@ -291,11 +291,42 @@ test("model onboarding requires an explicit selection before verification", () =
       systemReady: true,
       modelReady: false,
       systemActionLabel: "Continue",
-      selectedModelId: "openrouter/google/gemma-4-31b-it:free"
+      selectedModelId: "openrouter/google/gemma-4-31b-it:free",
+      defaultModelId: "openai/gpt-5.4"
     }),
     {
       kind: "set-default",
       label: "Set as default"
+    }
+  );
+
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: true,
+      systemActionLabel: "Continue",
+      selectedModelId: "openai-codex/gpt-5.4",
+      defaultModelId: "openai/gpt-5.4"
+    }),
+    {
+      kind: "set-default",
+      label: "Set as default"
+    }
+  );
+
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: true,
+      systemActionLabel: "Continue",
+      selectedModelId: "openai/gpt-5.4",
+      defaultModelId: "openai/gpt-5.4"
+    }),
+    {
+      kind: "dismiss",
+      label: "Enter AgentOS"
     }
   );
 
