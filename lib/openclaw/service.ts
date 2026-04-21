@@ -759,17 +759,101 @@ function buildModelsPayloadFromFallbackSources(
   ]);
 
   return {
-    models: modelIds.map((modelId) => ({
-      key: modelId,
-      name: modelId,
-      input: "text",
-      contextWindow: null,
-      local: null,
-      available: true,
-      tags: [],
-      missing: false
-    }))
+    models: modelIds.map((modelId) => {
+      const fallbackMetadata = inferFallbackModelMetadata(modelId);
+
+      return {
+        key: modelId,
+        name: modelId,
+        input: "text",
+        contextWindow: fallbackMetadata.contextWindow,
+        local: fallbackMetadata.local,
+        available: true,
+        tags: [],
+        missing: false
+      };
+    })
   };
+}
+
+export function inferFallbackModelMetadata(modelId: string): {
+  contextWindow: number | null;
+  local: boolean | null;
+} {
+  const normalized = modelId.trim().toLowerCase();
+  const provider = normalized.split("/", 1)[0] || "";
+  const route = normalized.includes("/") ? normalized.slice(provider.length + 1) : normalized;
+
+  if (provider === "ollama") {
+    return {
+      contextWindow: inferOllamaContextWindow(route),
+      local: true
+    };
+  }
+
+  if (provider === "openai" || provider === "openai-codex") {
+    return {
+      contextWindow: route.startsWith("gpt-5") ? 272000 : null,
+      local: false
+    };
+  }
+
+  if (provider === "anthropic") {
+    return {
+      contextWindow: 200000,
+      local: false
+    };
+  }
+
+  if (provider === "gemini") {
+    return {
+      contextWindow: 1000000,
+      local: false
+    };
+  }
+
+  if (provider === "deepseek") {
+    return {
+      contextWindow: 64000,
+      local: false
+    };
+  }
+
+  if (provider === "mistral") {
+    return {
+      contextWindow: 128000,
+      local: false
+    };
+  }
+
+  if (provider === "openrouter" || provider === "xai") {
+    return {
+      contextWindow: null,
+      local: false
+    };
+  }
+
+  return {
+    contextWindow: null,
+    local: null
+  };
+}
+
+function inferOllamaContextWindow(route: string) {
+  if (route.includes("qwen3.5")) {
+    return 262144;
+  }
+
+  if (
+    route.includes("qwen") ||
+    route.includes("llama3.2") ||
+    route.includes("llama3.3") ||
+    route.includes("deepseek-r1")
+  ) {
+    return 131072;
+  }
+
+  return 131072;
 }
 
 function buildModelStatusFromAgentConfig(agentConfig: AgentConfigPayload): ModelsStatusPayload | undefined {

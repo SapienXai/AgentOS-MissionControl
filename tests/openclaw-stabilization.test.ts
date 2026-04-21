@@ -17,7 +17,7 @@ import {
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
-import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/service";
+import { inferFallbackModelMetadata, inferSessionKindFromCatalogEntry } from "@/lib/openclaw/service";
 import {
   resolveInitialOnboardingProviderId
 } from "@/components/mission-control/openclaw-onboarding.utils";
@@ -218,6 +218,28 @@ test("openrouter selection keeps openrouter auth prioritized", () => {
   assert.equal(resolveRequiredLoginProvider(snapshot, undefined), "openrouter");
 });
 
+test("ollama never requires provider auth handoff", () => {
+  const snapshot = {
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: "ollama/llama3.2",
+        defaultModel: "ollama/llama3.2",
+        preferredLoginProvider: "ollama",
+        authProviders: [
+          {
+            provider: "ollama",
+            connected: false,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveRequiredLoginProvider(snapshot, "ollama/llama3.2"), null);
+  assert.equal(resolveRequiredLoginProvider(snapshot, undefined), null);
+});
+
 test("mission control snapshots prefer live data over fallback snapshots", () => {
   const current = {
     generatedAt: "2026-04-21T10:00:00.000Z",
@@ -371,6 +393,55 @@ test("remote provider connection depends on auth rather than configured models",
     readiness.authProviders.find((provider) => provider.provider === "openrouter")?.connected,
     false
   );
+});
+
+test("ollama is treated as a local provider without auth login", () => {
+  const readiness = resolveModelReadiness(
+    [
+      {
+        key: "ollama/llama3.2",
+        local: true,
+        available: true,
+        missing: false
+      }
+    ],
+    {
+      defaultModel: "ollama/llama3.2",
+      resolvedDefault: "ollama/llama3.2",
+      auth: {
+        providers: [
+          {
+            provider: "ollama",
+            profiles: {
+              count: 0
+            }
+          }
+        ],
+        oauth: {
+          providers: []
+        },
+        missingProvidersInUse: ["ollama"],
+        unusableProfiles: []
+      }
+    } as never
+  );
+
+  const ollamaProvider = readiness.authProviders.find((provider) => provider.provider === "ollama");
+
+  assert.equal(ollamaProvider?.connected, true);
+  assert.equal(ollamaProvider?.canLogin, false);
+  assert.equal(readiness.preferredLoginProvider, null);
+});
+
+test("fallback model metadata keeps local and context hints", () => {
+  assert.deepEqual(inferFallbackModelMetadata("ollama/qwen3.5:9b"), {
+    contextWindow: 262144,
+    local: true
+  });
+  assert.deepEqual(inferFallbackModelMetadata("openai-codex/gpt-5.4-mini"), {
+    contextWindow: 272000,
+    local: false
+  });
 });
 
 test("update info falls back to a loading message when only the installed version is known", () => {

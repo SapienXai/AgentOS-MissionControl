@@ -196,6 +196,7 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
   const authProviders = providerIds.map((provider) => {
     const providerModels = models.filter((model) => (model.key.split("/")[0] || "unknown") === provider);
     const hasRemoteRoute = providerModels.some((model) => model.local !== true);
+    const canLogin = provider !== "ollama" && hasRemoteRoute;
     const providerAuth = authProviderMap.get(provider);
     const oauthStatus = oauthProviderMap.get(provider);
     const connected =
@@ -208,7 +209,9 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
       detail = "OAuth connected";
     } else if ((providerAuth?.profiles?.count ?? 0) > 0) {
       detail = `${providerAuth?.profiles?.count} auth profile${providerAuth?.profiles?.count === 1 ? "" : "s"}`;
-    } else if (providerModels.some((model) => model.local)) {
+    } else if (provider === "ollama" && connected) {
+      detail = "Local Ollama model detected.";
+    } else if (provider === "ollama") {
       detail = "Install or pull a local model to unlock this route.";
     } else if (hasRemoteRoute) {
       detail = resolveProviderSetupDetail(provider);
@@ -217,7 +220,7 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
     return {
       provider,
       connected,
-      canLogin: hasRemoteRoute,
+      canLogin,
       detail
     };
   });

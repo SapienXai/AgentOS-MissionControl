@@ -410,6 +410,15 @@ export async function POST(request: Request) {
       };
 
       const runProviderLogin = async (provider: string) => {
+        if (provider.trim().toLowerCase() === "ollama") {
+          await send({
+            type: "status",
+            phase: "verifying",
+            message: "Ollama is local. No provider auth is required."
+          });
+          return true;
+        }
+
         const authHandoff = resolveProviderAuthHandoff(provider, openClawBin);
 
         await send({
@@ -725,6 +734,10 @@ export function resolveRequiredLoginProvider(
   const defaultModelId = snapshot.diagnostics.modelReadiness.resolvedDefaultModel ?? snapshot.diagnostics.modelReadiness.defaultModel;
   const preferredProvider = resolveModelProvider(preferredModelId) ?? resolveModelProvider(defaultModelId);
 
+  if (preferredProvider === "ollama") {
+    return null;
+  }
+
   if (preferredProvider === "openrouter") {
     const openrouterProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
       (provider) => provider.provider === "openrouter"
@@ -747,7 +760,8 @@ export function resolveRequiredLoginProvider(
     return preferredProvider;
   }
 
-  return snapshot.diagnostics.modelReadiness.preferredLoginProvider;
+  const preferredLoginProvider = snapshot.diagnostics.modelReadiness.preferredLoginProvider;
+  return preferredLoginProvider === "ollama" ? null : preferredLoginProvider;
 }
 
 function resolveVerificationFailure(
