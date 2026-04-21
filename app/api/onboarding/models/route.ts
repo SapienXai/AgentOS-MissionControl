@@ -6,18 +6,24 @@ import { z } from "zod";
 import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import {
   isOpenClawMissionReady,
-  isOpenClawSystemReady
+  isOpenClawOnboardingSystemReady
 } from "@/lib/openclaw/readiness";
 import {
   ensureOpenClawRuntimeSmokeTest,
+  createWorkspaceProject,
   getMissionControlSnapshot
 } from "@/lib/agentos/control-plane";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
-  OpenClawModelOnboardingStreamEvent
+  OpenClawModelOnboardingStreamEvent,
+  WorkspaceCreateInput
 } from "@/lib/agentos/contracts";
+import {
+  DEFAULT_WORKSPACE_RULES,
+  buildDefaultWorkspaceAgents
+} from "@/lib/openclaw/workspace-presets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,6 +61,46 @@ type CommandResult = {
   timedOut: boolean;
   errorMessage?: string;
 };
+
+function resolveDemoWorkspaceName(snapshot: MissionControlSnapshot) {
+  const baseName = "Demo Workspace";
+  const usedNames = new Set(snapshot.workspaces.map((workspace) => workspace.name.trim().toLowerCase()));
+
+  if (!usedNames.has(baseName.toLowerCase())) {
+    return baseName;
+  }
+
+  let suffix = 2;
+
+  while (usedNames.has(`${baseName} ${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${baseName} ${suffix}`;
+}
+
+function buildDemoWorkspaceInput(
+  snapshot: MissionControlSnapshot,
+  modelId: string
+): WorkspaceCreateInput {
+  const name = resolveDemoWorkspaceName(snapshot);
+
+  return {
+    name,
+    brief: "A starter demo workspace created automatically after onboarding.",
+    modelId,
+    sourceMode: "empty",
+    template: "software",
+    teamPreset: "solo",
+    modelProfile: "balanced",
+    rules: {
+      ...DEFAULT_WORKSPACE_RULES,
+      kickoffMission: false
+    },
+    agents: buildDefaultWorkspaceAgents("software", "solo", name),
+    contextSources: []
+  };
+}
 
 export async function POST(request: Request) {
   let input: ModelOnboardingInput;
@@ -377,28 +423,72 @@ export async function POST(request: Request) {
         }
 
         snapshot = await getMissionControlSnapshot({ force: true });
+        let createdWorkspaceId: string | null = null;
 
-        if (!isModelReady(snapshot)) {
-          const provider = resolveRequiredLoginProvider(snapshot, input.modelId);
+        if (snapshot.workspaces.length === 0) {
+          await send({
+            type: "status",
+            phase: "verifying",
+            message: "Creating a demo workspace and starter agent..."
+          });
 
-          if (provider) {
-            if (!(await runProviderLogin(provider))) {
-              return;
-            }
+          const demoWorkspaceInput = buildDemoWorkspaceInput(snapshot, input.modelId);
+          let lastProgressMessage = "";
 
+          try {
+            const createdWorkspace = await createWorkspaceProject(demoWorkspaceInput, {
+              onProgress: async (progress) => {
+                const activeStep =
+                  progress.steps.find((step) => step.status === "active") ??
+                  progress.steps.find((step) => step.status === "done");
+                const nextProgressMessage =
+                  activeStep?.detail?.trim() || activeStep?.label?.trim() || progress.description.trim();
+
+                if (!nextProgressMessage || nextProgressMessage === lastProgressMessage) {
+                  return;
+                }
+
+                lastProgressMessage = nextProgressMessage;
+
+                await send({
+                  type: "status",
+                  phase: "verifying",
+                  message: nextProgressMessage
+                });
+              }
+            });
+
+            createdWorkspaceId = createdWorkspace.workspaceId;
             snapshot = await getMissionControlSnapshot({ force: true });
+          } catch (error) {
+            aggregatedStderr = aggregatedStderr
+              ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Demo workspace creation failed."}`
+              : error instanceof Error
+                ? error.message
+                : "Demo workspace creation failed.";
+
+            await fail("verifying", "Default model was saved, but the demo workspace could not be created.", {
+              snapshot,
+              docsUrl
+            });
+            return;
           }
         }
 
         await send({
-          type: "status",
-          phase: "verifying",
-          message: "Verifying the selected model..."
+          type: "done",
+          ok: true,
+          phase: "ready",
+          message: createdWorkspaceId
+            ? "Default model saved. Demo workspace is ready."
+            : "Default model saved. Onboarding is complete.",
+          exitCode: 0,
+          stdout: aggregatedStdout,
+          stderr: aggregatedStderr,
+          snapshot,
+          workspaceId: createdWorkspaceId ?? undefined
         });
-        await verifyReady(
-          "The selected model was saved, but AgentOS still cannot verify it.",
-          input.modelId
-        );
+        await closeWriter();
         return;
       }
 
@@ -565,7 +655,7 @@ async function runCommand(
 }
 
 function isSystemReady(snapshot: MissionControlSnapshot) {
-  return isOpenClawSystemReady(snapshot);
+  return isOpenClawOnboardingSystemReady(snapshot);
 }
 
 function isModelReady(snapshot: MissionControlSnapshot) {
@@ -593,11 +683,24 @@ function buildModelManualCommand(
   return formatOpenClawCommand(commandBin || "openclaw", ["models", "status", "--json"]);
 }
 
-function resolveRequiredLoginProvider(
+export function resolveRequiredLoginProvider(
   snapshot: MissionControlSnapshot,
   preferredModelId?: string | null
 ) {
-  const preferredProvider = resolveModelProvider(preferredModelId);
+  const defaultModelId = snapshot.diagnostics.modelReadiness.resolvedDefaultModel ?? snapshot.diagnostics.modelReadiness.defaultModel;
+  const preferredProvider = resolveModelProvider(preferredModelId) ?? resolveModelProvider(defaultModelId);
+
+  if (preferredProvider === "openrouter") {
+    const openrouterProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
+      (provider) => provider.provider === "openrouter"
+    );
+
+    if (openrouterProvider && !openrouterProvider.connected && openrouterProvider.canLogin) {
+      return "openrouter";
+    }
+
+    return null;
+  }
 
   if (
     preferredProvider &&

@@ -370,6 +370,10 @@ export function resolveModelOnboardingStartPhase(intent: ModelOnboardingIntent):
     return "discovering";
   }
 
+  if (intent === "set-default") {
+    return "configuring-default";
+  }
+
   return "detecting";
 }
 
@@ -395,6 +399,14 @@ export function resolveModelOnboardingActionCopy(intent: ModelOnboardingIntent) 
       statusMessage: "Refreshing...",
       successTitle: "Model setup refreshed.",
       errorTitle: "Model refresh failed."
+    };
+  }
+
+  if (intent === "set-default") {
+    return {
+      statusMessage: "Saving default model...",
+      successTitle: "Default model saved.",
+      errorTitle: "Default model save failed."
     };
   }
 

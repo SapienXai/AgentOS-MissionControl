@@ -419,6 +419,7 @@ export interface RelationshipRecord {
 
 export interface MissionControlSnapshot {
   generatedAt: string;
+  revision?: number;
   mode: "live" | "fallback";
   diagnostics: GatewayDiagnostics;
   presence: PresenceRecord[];
@@ -626,6 +627,7 @@ export type OpenClawModelOnboardingStreamEvent =
       stdout: string;
       stderr: string;
       snapshot?: MissionControlSnapshot;
+      workspaceId?: string;
       manualCommand?: string;
       docsUrl?: string;
       discoveredModels?: DiscoveredModelCandidate[];

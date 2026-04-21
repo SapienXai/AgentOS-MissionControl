@@ -7,7 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { createFallbackSnapshot } from "@/lib/openclaw/fallback";
+import { createErrorSnapshot, createFallbackSnapshot } from "@/lib/openclaw/fallback";
 import {
   DEFAULT_AGENT_PRESET,
   formatAgentPresetLabel,
@@ -346,6 +346,7 @@ type ModelsPayload = {
 type ModelsStatusPayload = {
   defaultModel?: string | null;
   resolvedDefault?: string | null;
+  allowed?: string[];
   auth?: {
     providers?: Array<{
       provider?: string;
@@ -504,7 +505,7 @@ export function clearMissionControlCaches() {
 function loadSnapshotPairForCurrentGeneration(profile: SnapshotLoadProfile = "interactive") {
   const generation = snapshotGeneration;
 
-  return loadMissionControlSnapshots({ profile }).then((nextSnapshot) => {
+  return loadMissionControlSnapshots({ profile, generation }).then((nextSnapshot) => {
     if (generation === snapshotGeneration) {
       snapshotCache = {
         ...nextSnapshot,
@@ -550,6 +551,46 @@ async function settleStatusPayloadFromOpenClaw(
 ): Promise<PromiseSettledResult<StatusPayload>> {
   try {
     const value = await runOpenClawJson<StatusPayload>(["status", "--json"], {
+      timeoutMs
+    });
+
+    return {
+      status: "fulfilled",
+      value
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
+}
+
+async function settleGatewayStatusPayloadFromOpenClaw(
+  timeoutMs = 20_000
+): Promise<PromiseSettledResult<GatewayStatusPayload>> {
+  try {
+    const value = await runOpenClawJson<GatewayStatusPayload>(["gateway", "status", "--json"], {
+      timeoutMs
+    });
+
+    return {
+      status: "fulfilled",
+      value
+    };
+  } catch (error) {
+    return {
+      status: "rejected",
+      reason: error
+    };
+  }
+}
+
+async function settleModelStatusPayloadFromOpenClaw(
+  timeoutMs = 20_000
+): Promise<PromiseSettledResult<ModelsStatusPayload>> {
+  try {
+    const value = await runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"], {
       timeoutMs
     });
 
@@ -706,8 +747,16 @@ function buildAgentPayloadsFromConfig(agentConfig: AgentConfigPayload): AgentPay
   }));
 }
 
-function buildModelsPayloadFromAgentConfig(agentConfig: AgentConfigPayload): ModelsPayload {
-  const modelIds = uniqueStrings(agentConfig.map((entry) => entry.model ?? "").filter(Boolean));
+function buildModelsPayloadFromFallbackSources(
+  agentConfig: AgentConfigPayload,
+  modelStatus?: ModelsStatusPayload
+): ModelsPayload {
+  const modelIds = uniqueStrings([
+    ...agentConfig.map((entry) => entry.model ?? "").filter(Boolean),
+    ...(modelStatus?.allowed ?? []).filter(Boolean),
+    modelStatus?.resolvedDefault ?? "",
+    modelStatus?.defaultModel ?? ""
+  ]);
 
   return {
     models: modelIds.map((modelId) => ({
@@ -1118,9 +1167,11 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
 }
 
 async function loadMissionControlSnapshots({
-  profile = "interactive"
+  profile = "interactive",
+  generation = snapshotGeneration
 }: {
   profile?: SnapshotLoadProfile;
+  generation?: number;
 } = {}): Promise<SnapshotPair> {
   const localGatewayStatus = await probeLocalGatewayStatus();
   const openclawInstalled = Boolean(localGatewayStatus) || await detectOpenClaw();
@@ -1132,10 +1183,8 @@ async function loadMissionControlSnapshots({
   try {
     const settings = await readMissionControlSettings();
     const configuredWorkspaceRoot = normalizeConfiguredWorkspaceRootValue(settings.workspaceRoot) ?? null;
-    const [gatewayStatusResult, gatewayRemoteUrlResult] = [
-      createDeferredPayloadResult<GatewayStatusPayload>(),
-      createDeferredPayloadResult<string>()
-    ];
+    const gatewayRemoteUrlResult = createDeferredPayloadResult<string>();
+    let gatewayStatusResult: PromiseSettledResult<GatewayStatusPayload>;
     let statusResult: PromiseSettledResult<StatusPayload>;
     let agentsResult: PromiseSettledResult<AgentPayload>;
     let agentConfigResult: PromiseSettledResult<AgentConfigPayload>;
@@ -1144,23 +1193,39 @@ async function loadMissionControlSnapshots({
     let presenceResult: PromiseSettledResult<PresencePayload>;
 
     const statusCacheNeedsRefresh = shouldRefreshStatusPayloadCache();
+    const gatewayStatusCacheNeedsRefresh =
+      !gatewayStatusCache || Date.now() - gatewayStatusCache.capturedAt > GATEWAY_STATUS_STALE_GRACE_MS;
+    const modelStatusCacheNeedsRefresh =
+      !modelsStatusPayloadCache || Date.now() - modelsStatusPayloadCache.capturedAt > SLOW_PAYLOAD_CACHE_TTL_MS;
 
     if (profile === "interactive") {
-      statusResult = createDeferredPayloadResult();
+      const shouldHydrateGatewayStatus = !localGatewayStatus && gatewayStatusCacheNeedsRefresh;
+      const shouldHydrateStatus = !localGatewayStatus && statusCacheNeedsRefresh;
+      const shouldHydrateModelStatus = modelStatusCacheNeedsRefresh;
+
+      gatewayStatusResult = shouldHydrateGatewayStatus
+        ? await settleGatewayStatusPayloadFromOpenClaw(15_000)
+        : createDeferredPayloadResult();
+      statusResult = shouldHydrateStatus
+        ? await settleStatusPayloadFromOpenClaw(15_000)
+        : createDeferredPayloadResult();
       agentsResult = createDeferredPayloadResult();
       agentConfigResult = await settleAgentConfigFromStateFile();
       modelsResult = createDeferredPayloadResult();
-      modelStatusResult = createDeferredPayloadResult();
+      modelStatusResult = shouldHydrateModelStatus
+        ? await settleModelStatusPayloadFromOpenClaw(15_000)
+        : createDeferredPayloadResult();
       presenceResult = createDeferredPayloadResult();
-      if (statusCacheNeedsRefresh) {
+      if (statusCacheNeedsRefresh && !shouldHydrateStatus) {
         scheduleStatusPayloadRefresh();
       }
     } else {
       statusResult = await settleStatusPayloadFromOpenClaw(45_000);
+      gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw(45_000);
       agentsResult = createDeferredPayloadResult();
       agentConfigResult = await settleAgentConfigFromStateFile();
       modelsResult = createDeferredPayloadResult();
-      modelStatusResult = createDeferredPayloadResult();
+      modelStatusResult = await settleModelStatusPayloadFromOpenClaw(45_000);
       presenceResult = createDeferredPayloadResult();
     }
 
@@ -1216,9 +1281,9 @@ async function loadMissionControlSnapshots({
     const status = resolvedStatus.value;
     const agentConfig = resolvedAgentConfig.value ?? [];
     const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig);
-    const localModels = buildModelsPayloadFromAgentConfig(agentConfig);
-    const models = resolvedModels.value?.models ?? localModels.models;
     const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
+    const localModels = buildModelsPayloadFromFallbackSources(agentConfig, modelStatus);
+    const models = resolvedModels.value?.models ?? localModels.models;
     const sessions = resolvedSessions.value?.sessions ?? [];
     const presence = resolvedPresence.value ?? [];
     const hasOpenClawSignal =
@@ -1651,6 +1716,7 @@ async function loadMissionControlSnapshots({
     const generatedAt = new Date().toISOString();
     const sharedSnapshotFields = {
       generatedAt,
+      revision: generation,
       mode: "live" as const,
       diagnostics,
       channelAccounts,
@@ -1698,7 +1764,14 @@ async function loadMissionControlSnapshots({
     };
   } catch (error) {
     return createSnapshotPair(
-      createFallbackSnapshot(error instanceof Error ? error.message : "Unknown OpenClaw error.")
+      createErrorSnapshot(
+        error instanceof Error ? error.message : "Unknown OpenClaw error.",
+        {
+          installed: openclawInstalled,
+          loaded: Boolean(localGatewayStatus?.service?.loaded),
+          rpcOk: Boolean(localGatewayStatus?.rpc?.ok)
+        }
+      )
     );
   }
 }

@@ -9,19 +9,28 @@ import {
 } from "@/lib/openclaw/workspace-docs";
 import type { MissionControlSnapshot } from "@/lib/openclaw/types";
 
-export function createLoadingSnapshot(reason: string): MissionControlSnapshot {
+function createTransientSnapshot(
+  reason: string,
+  options: {
+    installed: boolean;
+    loaded: boolean;
+    rpcOk: boolean;
+    health: MissionControlSnapshot["diagnostics"]["health"];
+  }
+): MissionControlSnapshot {
   const now = Date.now();
   const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
   const stateRoot = path.join(os.homedir(), ".openclaw");
 
   return {
     generatedAt: new Date(now).toISOString(),
+    revision: 0,
     mode: "fallback",
     diagnostics: {
-      installed: true,
-      loaded: true,
-      rpcOk: false,
-      health: "degraded",
+      installed: options.installed,
+      loaded: options.loaded,
+      rpcOk: options.rpcOk,
+      health: options.health,
       workspaceRoot,
       configuredWorkspaceRoot: null,
       dashboardUrl: "http://127.0.0.1:18789/",
@@ -76,6 +85,31 @@ export function createLoadingSnapshot(reason: string): MissionControlSnapshot {
   };
 }
 
+export function createLoadingSnapshot(reason: string): MissionControlSnapshot {
+  return createTransientSnapshot(reason, {
+    installed: true,
+    loaded: true,
+    rpcOk: false,
+    health: "degraded"
+  });
+}
+
+export function createErrorSnapshot(
+  reason: string,
+  options: {
+    installed: boolean;
+    loaded: boolean;
+    rpcOk: boolean;
+  }
+): MissionControlSnapshot {
+  return createTransientSnapshot(reason, {
+    installed: options.installed,
+    loaded: options.loaded,
+    rpcOk: options.rpcOk,
+    health: options.rpcOk ? "healthy" : options.installed ? "degraded" : "offline"
+  });
+}
+
 export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
   const now = Date.now();
   const workspaceRoot = path.join(os.homedir(), "Documents", "Shared", "projects");
@@ -86,6 +120,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
 
   return {
     generatedAt: new Date(now).toISOString(),
+    revision: 0,
     mode: "fallback",
     diagnostics: {
       installed: false,

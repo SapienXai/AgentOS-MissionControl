@@ -125,7 +125,7 @@ export function CanvasTopBar({
           {isOffline ? (
             <motion.button
               type="button"
-              onClick={() => onOpenSetupWizard("system")}
+              onClick={() => onOpenSetupWizard()}
               title="System is offline. Open the setup wizard."
               aria-label="System is offline. Open the setup wizard."
               whileHover={{ scale: 1.03, y: -1 }}

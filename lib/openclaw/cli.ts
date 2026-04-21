@@ -2,8 +2,13 @@ import "server-only";
 
 import { spawn } from "node:child_process";
 
+import {
+  getOpenClawLocalPrefixBinPath,
+  getOpenClawUserLocalBinPath
+} from "@/lib/openclaw/install";
+
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
-let resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
+let resolvedOpenClawBin = "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
 
@@ -265,20 +270,23 @@ export function formatOpenClawCommand(command: string, args: string[]) {
 }
 
 export async function resolveOpenClawBin(): Promise<string> {
-  if (resolvedOpenClawBin) {
-    return resolvedOpenClawBin;
-  }
+  const candidates = getOpenClawBinCandidates();
 
   if (resolveOpenClawBinPromise) {
     return resolveOpenClawBinPromise;
   }
 
   resolveOpenClawBinPromise = (async () => {
-    const candidate = process.env.OPENCLAW_BIN?.trim() || OPENCLAW_BIN;
+    if (resolvedOpenClawBin) {
+      return resolvedOpenClawBin;
+    }
 
-    if (await canExecuteOpenClaw(candidate)) {
-      resolvedOpenClawBin = candidate;
-      return candidate;
+    for (const candidate of candidates) {
+      if (await canExecuteOpenClaw(candidate)) {
+        resolvedOpenClawBin = candidate;
+        process.env.OPENCLAW_BIN = candidate;
+        return candidate;
+      }
     }
 
     throw new Error("OpenClaw CLI is not installed or could not be resolved.");
@@ -292,8 +300,19 @@ export async function resolveOpenClawBin(): Promise<string> {
 }
 
 export function resetOpenClawBinCache() {
-  resolvedOpenClawBin = process.env.OPENCLAW_BIN || "";
+  resolvedOpenClawBin = "";
   resolveOpenClawBinPromise = null;
+}
+
+export function getOpenClawBinCandidates() {
+  const candidates = [
+    process.env.OPENCLAW_BIN?.trim() || "",
+    "openclaw",
+    getOpenClawLocalPrefixBinPath(),
+    getOpenClawUserLocalBinPath()
+  ];
+
+  return Array.from(new Set(candidates.filter((candidate) => Boolean(candidate))));
 }
 
 function parseJsonOutput<T>(text: string): T {

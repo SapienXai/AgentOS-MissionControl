@@ -5,8 +5,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
+import {
+  OPENCLAW_INSTALL_DOCS_URL,
+  getOpenClawInstallCommand,
+  getOpenClawLocalPrefix,
+  getOpenClawLocalPrefixBinPath
+} from "@/lib/openclaw/install";
 import {
   getMissionControlSnapshot,
   touchOpenClawRuntimeStateAccess
@@ -24,7 +30,7 @@ const onboardingSchema = z.object({
   intent: z.literal("auto")
 });
 
-const docsUrl = "https://docs.openclaw.ai/cli/install";
+const docsUrl = OPENCLAW_INSTALL_DOCS_URL;
 const commandTimeoutMs = 10 * 60 * 1000;
 const gatewayStatusTimeoutMs = 8_000;
 const readyTimeoutMs = 12_000;
@@ -149,23 +155,48 @@ export async function POST(request: Request) {
         message: "Checking local OpenClaw status..."
       });
 
-      let openClawBin: string;
+      let resolveErrorMessage: string | null = null;
+      let openClawBin = await resolveOpenClawBin().catch((error) => {
+        resolveErrorMessage = error instanceof Error ? error.message : "OpenClaw CLI could not be resolved.";
+        return null;
+      });
 
-      try {
-        openClawBin = await resolveOpenClawBin();
-      } catch (error) {
-        const currentSnapshot = await loadSnapshot();
-        aggregatedStderr = aggregatedStderr
-          ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "OpenClaw CLI could not be resolved."}`
-          : error instanceof Error
-            ? error.message
-            : "OpenClaw CLI could not be resolved.";
+      if (!openClawBin) {
+        const installCommand = getOpenClawInstallCommand();
 
-        await fail("detecting", "OpenClaw CLI could not be resolved.", {
-          snapshot: currentSnapshot,
-          docsUrl
-        });
-        return;
+        if (process.platform === "win32") {
+          const currentSnapshot = await loadSnapshot();
+
+          aggregatedStderr = resolveErrorMessage || "OpenClaw CLI could not be resolved.";
+
+          await fail("installing-cli", "OpenClaw CLI could not be resolved.", {
+            snapshot: currentSnapshot,
+            manualCommand: installCommand,
+            docsUrl
+          });
+          return;
+        }
+
+        const installedOpenClawBin = await installOpenClawCli(send, appendOutput, installCommand);
+
+        if (!installedOpenClawBin) {
+          const currentSnapshot = await loadSnapshot();
+
+          aggregatedStderr = resolveErrorMessage
+            ? aggregatedStderr
+              ? `${resolveErrorMessage}\n${aggregatedStderr}`
+              : resolveErrorMessage
+            : aggregatedStderr;
+
+          await fail("installing-cli", "OpenClaw CLI installation failed.", {
+            snapshot: currentSnapshot,
+            manualCommand: installCommand,
+            docsUrl
+          });
+          return;
+        }
+
+        openClawBin = installedOpenClawBin;
       }
 
       const gatewayStatus = await readGatewayStatus(openClawBin);
@@ -476,6 +507,34 @@ async function runCommand(
       });
     });
   });
+}
+
+async function installOpenClawCli(
+  send: (event: OpenClawOnboardingStreamEvent) => Promise<unknown>,
+  appendOutput: (result: CommandResult) => void,
+  installCommand: string
+) {
+  await send({
+    type: "status",
+    phase: "installing-cli",
+    message: `Installing OpenClaw into ${getOpenClawLocalPrefix()}...`
+  });
+
+  const installResult = await runCommand("bash", ["-lc", installCommand], send);
+  appendOutput(installResult);
+
+  if (installResult.errorMessage || installResult.timedOut || installResult.code !== 0) {
+    return null;
+  }
+
+  process.env.OPENCLAW_BIN = getOpenClawLocalPrefixBinPath();
+  resetOpenClawBinCache();
+
+  try {
+    return await resolveOpenClawBin();
+  } catch {
+    return null;
+  }
 }
 
 async function waitForReadySnapshot() {

@@ -57,9 +57,6 @@ export function ModelPicker({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-display text-[0.84rem] text-white">Select models to add</p>
-          <p className="mt-1 text-[10px] leading-[0.98rem] text-slate-400">
-            Found {models.length} model{models.length === 1 ? "" : "s"} for this provider.
-          </p>
         </div>
         <Badge variant="muted" className="px-1.5 py-0.5 text-[9px] tracking-[0.12em]">
           {models.filter((model) => model.alreadyAdded).length} already added

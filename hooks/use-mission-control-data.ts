@@ -6,7 +6,22 @@ import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
 
 type ConnectionState = "connecting" | "live" | "retrying";
 
-function isNewerSnapshot(nextSnapshot: ControlPlaneSnapshot, currentSnapshot: ControlPlaneSnapshot) {
+export function isNewerSnapshot(nextSnapshot: ControlPlaneSnapshot, currentSnapshot: ControlPlaneSnapshot) {
+  const nextRevision = nextSnapshot.revision ?? 0;
+  const currentRevision = currentSnapshot.revision ?? 0;
+
+  if (nextRevision !== currentRevision) {
+    return nextRevision > currentRevision;
+  }
+
+  if (currentSnapshot.mode === "live" && nextSnapshot.mode === "fallback") {
+    return false;
+  }
+
+  if (currentSnapshot.mode === "fallback" && nextSnapshot.mode === "live") {
+    return true;
+  }
+
   const nextGeneratedAt = Date.parse(nextSnapshot.generatedAt);
   const currentGeneratedAt = Date.parse(currentSnapshot.generatedAt);
 

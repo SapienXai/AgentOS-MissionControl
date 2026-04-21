@@ -399,7 +399,7 @@ export function MissionControlShellSettingsPanel({
             type="button"
             size="sm"
             variant="secondary"
-            onClick={() => onOpenSetupWizard(snapshot.diagnostics.rpcOk ? "models" : "system")}
+            onClick={() => onOpenSetupWizard()}
             className={settingsSecondaryButtonStyles}
           >
             Open wizard

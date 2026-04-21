@@ -179,6 +179,23 @@ export function AddModelsDialog({
   const activeConnection = activeProviderId
     ? resolveConnectionDetail(snapshot, providerDrafts, activeProviderId)
     : null;
+  const showLoadingHero =
+    Boolean(activeProviderId && activeDescriptor) &&
+    (activeDraft.flowState === "discovery-loading" ||
+      (activeDraft.flowState === "connecting" && !activeDraft.manualCommand) ||
+      (activeDraft.statusMessage?.startsWith("Checking ") === true && !activeConnection?.connected));
+  const loadingHeroTitle =
+    activeDraft.flowState === "discovery-loading"
+      ? `Discovering ${activeDescriptor?.shortLabel ?? "provider"} models...`
+      : activeDraft.flowState === "connecting"
+        ? activeDraft.statusMessage || `Connecting ${activeDescriptor?.shortLabel ?? "provider"}...`
+        : activeDraft.statusMessage || `Checking ${activeDescriptor?.shortLabel ?? "provider"}...`;
+  const loadingHeroCopy =
+    activeDraft.flowState === "discovery-loading"
+      ? "Pulling the provider catalog into AgentOS."
+      : activeDraft.flowState === "connecting"
+        ? "Preparing the provider connection."
+        : "Checking provider status before discovery.";
   const shouldShowDiscoveryCta = Boolean(activeProviderId && activeDescriptor);
   const isDiscovering = activeDraft.flowState === "discovery-loading";
   const discoveryActionLabel =
@@ -632,16 +649,9 @@ export function AddModelsDialog({
                 <div className="rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,18,32,0.96),rgba(6,10,18,0.98))] p-3">
                   {activeProviderId && activeDescriptor ? (
                     <>
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="font-display text-[0.88rem] text-white">{activeDescriptor.label}</p>
-                          <p className="mt-1 max-w-[520px] text-[10px] leading-[0.98rem] text-slate-400">
-                            {activeDescriptor.connectKind === "oauth"
-                              ? "Use your account login, then discover the models that are ready to add."
-                              : activeDescriptor.connectKind === "local"
-                                ? "Check the local runtime first, then add the models already available on this machine."
-                                : "Connect the provider, review the discovered catalog, and add only the models you want."}
-                          </p>
                         </div>
                         <Badge
                           variant={activeConnection?.connected ? "success" : "muted"}
@@ -679,7 +689,7 @@ export function AddModelsDialog({
                         ))}
                       </div>
 
-                      {activeDraft.statusMessage ? (
+                      {activeDraft.statusMessage && !showLoadingHero ? (
                         <div className="mt-3 rounded-[16px] border border-white/10 bg-white/[0.04] px-3 py-2">
                           <p className="text-[11px] text-slate-200">{activeDraft.statusMessage}</p>
                         </div>
@@ -691,63 +701,170 @@ export function AddModelsDialog({
                         </div>
                       ) : null}
 
-                      {activeProviderId === "openai-codex" ? (
-                        <div className="mt-4 rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="font-display text-[0.88rem] text-white">Connect your ChatGPT account</p>
-                              <p className="mt-1 max-w-[500px] text-[10px] leading-[0.98rem] text-slate-400">
-                                This uses OpenClaw&apos;s account-based login flow. No API key is required.
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              className="h-8 rounded-full px-3 text-[10px]"
-                              disabled={activeDraft.flowState === "connecting" && !activeDraft.manualCommand}
-                              onClick={() => {
-                                void connectProvider(activeProviderId);
-                              }}
-                            >
-                              {activeDraft.flowState === "connecting" && !activeDraft.manualCommand ? (
-                                <>
-                                  <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                  Connecting...
-                                </>
-                              ) : (
-                                "Connect ChatGPT"
-                              )}
-                            </Button>
-                          </div>
-
-                          {activeDraft.manualCommand ? (
-                            <div className="mt-3 rounded-[16px] border border-cyan-300/15 bg-cyan-300/[0.07] p-3">
+                      {!showLoadingHero ? (
+                        <>
+                          {activeProviderId === "openai-codex" ? (
+                            <div className="mt-4 rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
-                                  <p className="text-[11px] font-medium text-cyan-50">Finish sign-in in Terminal</p>
-                                  <p className="mt-1 max-w-[480px] text-[10px] leading-[0.98rem] text-cyan-100/80">
-                                    Open Terminal, complete the provider login, then return here and check discovery.
+                                  <p className="font-display text-[0.88rem] text-white">Connect your ChatGPT account</p>
+                                  <p className="mt-1 max-w-[500px] text-[10px] leading-[0.98rem] text-slate-400">
+                                    This uses OpenClaw&apos;s account-based login flow. No API key is required.
                                   </p>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  className="h-8 rounded-full px-3 text-[10px]"
+                                  disabled={activeDraft.flowState === "connecting" && !activeDraft.manualCommand}
+                                  onClick={() => {
+                                    void connectProvider(activeProviderId);
+                                  }}
+                                >
+                                  {activeDraft.flowState === "connecting" && !activeDraft.manualCommand ? (
+                                    <>
+                                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                      Connecting...
+                                    </>
+                                  ) : (
+                                    "Connect ChatGPT"
+                                  )}
+                                </Button>
+                              </div>
+
+                              {activeDraft.manualCommand ? (
+                                <div className="mt-3 rounded-[16px] border border-cyan-300/15 bg-cyan-300/[0.07] p-3">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                      <p className="text-[11px] font-medium text-cyan-50">Finish sign-in in Terminal</p>
+                                      <p className="mt-1 max-w-[480px] text-[10px] leading-[0.98rem] text-cyan-100/80">
+                                        Open Terminal, complete the provider login, then return here and check discovery.
+                                      </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        className="h-7 rounded-full px-2.5 text-[10px]"
+                                        disabled={isOpeningTerminal}
+                                        onClick={() => {
+                                          void openTerminal(activeDraft.manualCommand || "");
+                                        }}
+                                      >
+                                        {isOpeningTerminal ? (
+                                          <>
+                                            <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
+                                            Opening...
+                                          </>
+                                        ) : (
+                                          <>
+                                            <SquareTerminal className="mr-1.5 h-3 w-3" />
+                                            Open Terminal
+                                          </>
+                                        )}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 rounded-full px-2.5 text-[10px]"
+                                        onClick={() => {
+                                          void copyText(activeDraft.manualCommand || "");
+                                        }}
+                                      >
+                                        <Copy className="mr-1.5 h-3 w-3" />
+                                        Copy command
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 rounded-full px-2.5 text-[10px]"
+                                        onClick={() => {
+                                          void discoverProvider(activeProviderId);
+                                        }}
+                                      >
+                                        <RefreshCw className="mr-1.5 h-3 w-3" />
+                                        I&apos;ve connected it
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2.5 overflow-x-auto rounded-[14px] border border-white/10 bg-slate-950/60 px-3 py-2">
+                                    <code className="text-[10px] text-slate-200">{activeDraft.manualCommand}</code>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {activeDescriptor.connectKind === "apiKey" ? (
+                            <div className="mt-4 rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
+                              <div className="flex flex-wrap items-end gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <label className="block text-[9px] uppercase tracking-[0.16em] text-slate-500">
+                                    API key
+                                  </label>
+                                  <Input
+                                    type="password"
+                                    value={activeDraft.apiKey}
+                                    onChange={(event) => updateDraft(activeProviderId, { apiKey: event.target.value })}
+                                    placeholder={activeProviderId === "openrouter" ? "sk-or-v1-..." : "Paste API key"}
+                                    className="mt-1.5 h-8 text-[11px]"
+                                  />
+                                </div>
+                                <Button
+                                  type="button"
+                                  className="h-8 rounded-full px-3 text-[10px]"
+                                  disabled={activeDraft.flowState === "connecting" || !activeDraft.apiKey.trim()}
+                                  onClick={() => {
+                                    void connectProvider(activeProviderId);
+                                  }}
+                                >
+                                  {activeDraft.flowState === "connecting" ? (
+                                    <>
+                                      <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                      Connecting...
+                                    </>
+                                  ) : (
+                                    `Connect ${activeDescriptor.shortLabel}`
+                                  )}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {shouldShowDiscoveryCta ? (
+                            <div className="mt-4 rounded-[24px] border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(17,28,47,0.98),rgba(10,16,28,0.98))] p-4 shadow-[0_18px_42px_rgba(7,11,20,0.28)]">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="font-display text-[0.92rem] text-white">
+                                    {isDiscovering ? "Discovering models..." : discoveryActionLabel}
+                                  </p>
+                                  <p className="mt-1 max-w-[520px] text-[11px] leading-[1rem] text-slate-400">
+                                    {isDiscovering
+                                      ? "OpenClaw is pulling the provider catalog into this workspace."
+                                      : discoveryDescription}
+                                  </p>
+                                </div>
+                                <div className="flex shrink-0 flex-wrap gap-2">
                                   <Button
                                     type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    className="h-7 rounded-full px-2.5 text-[10px]"
-                                    disabled={isOpeningTerminal}
+                                    variant="default"
+                                    className="h-11 rounded-full px-5 text-[12px] font-medium"
+                                    disabled={isDiscovering}
                                     onClick={() => {
-                                      void openTerminal(activeDraft.manualCommand || "");
+                                      void discoverProvider(activeProviderId);
                                     }}
                                   >
-                                    {isOpeningTerminal ? (
+                                    {isDiscovering ? (
                                       <>
-                                        <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
-                                        Opening...
+                                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                                        Discovering...
                                       </>
                                     ) : (
                                       <>
-                                        <SquareTerminal className="mr-1.5 h-3 w-3" />
-                                        Open Terminal
+                                        <RefreshCw className="mr-2 h-4 w-4" />
+                                        {discoveryButtonLabel}
                                       </>
                                     )}
                                   </Button>
@@ -755,178 +872,99 @@ export function AddModelsDialog({
                                     type="button"
                                     variant="ghost"
                                     size="sm"
-                                    className="h-7 rounded-full px-2.5 text-[10px]"
+                                    className="h-11 rounded-full px-4 text-[10px]"
                                     onClick={() => {
-                                      void copyText(activeDraft.manualCommand || "");
+                                      void runStatus(activeProviderId);
                                     }}
                                   >
-                                    <Copy className="mr-1.5 h-3 w-3" />
-                                    Copy command
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 rounded-full px-2.5 text-[10px]"
-                                    onClick={() => {
-                                      void discoverProvider(activeProviderId);
-                                    }}
-                                  >
-                                    <RefreshCw className="mr-1.5 h-3 w-3" />
-                                    I&apos;ve connected it
+                                    Refresh status
                                   </Button>
                                 </div>
                               </div>
-                              <div className="mt-2.5 overflow-x-auto rounded-[14px] border border-white/10 bg-slate-950/60 px-3 py-2">
-                                <code className="text-[10px] text-slate-200">{activeDraft.manualCommand}</code>
-                              </div>
                             </div>
                           ) : null}
-                        </div>
-                      ) : null}
 
-                      {activeDescriptor.connectKind === "apiKey" ? (
-                        <div className="mt-4 rounded-[20px] border border-white/10 bg-white/[0.03] p-3">
-                          <div className="flex flex-wrap items-end gap-3">
-                            <div className="min-w-0 flex-1">
-                              <label className="block text-[9px] uppercase tracking-[0.16em] text-slate-500">
-                                API key
-                              </label>
-                              <Input
-                                type="password"
-                                value={activeDraft.apiKey}
-                                onChange={(event) => updateDraft(activeProviderId, { apiKey: event.target.value })}
-                                placeholder={activeProviderId === "openrouter" ? "sk-or-v1-..." : "Paste API key"}
-                                className="mt-1.5 h-8 text-[11px]"
+                          {activeDraft.emptyState ? (
+                            <EmptyStateCard
+                              emptyState={activeDraft.emptyState}
+                              onCopyCommand={(command) => {
+                                void copyText(command);
+                              }}
+                            />
+                          ) : null}
+
+                          {activeDraft.models.length > 0 ? (
+                            <div className="mt-5">
+                              <ModelPicker
+                                provider={activeProviderId}
+                                models={activeDraft.models}
+                                selectedModelIds={activeDraft.selectedModelIds}
+                                search={activeDraft.search}
+                                onSearchChange={(value) => updateDraft(activeProviderId, { search: value })}
+                                onToggleModel={(modelId) => {
+                                  const selected = activeDraft.selectedModelIds.includes(modelId);
+                                  updateDraft(activeProviderId, {
+                                    selectedModelIds: selected
+                                      ? activeDraft.selectedModelIds.filter((entry) => entry !== modelId)
+                                      : [...activeDraft.selectedModelIds, modelId]
+                                  });
+                                }}
+                                onAddSelected={() => {
+                                  void addSelectedModels(activeProviderId);
+                                }}
+                                isAdding={
+                                  activeDraft.flowState === "connecting" &&
+                                  activeDraft.statusMessage === "Adding selected models..."
+                                }
                               />
                             </div>
-                            <Button
-                              type="button"
-                              className="h-8 rounded-full px-3 text-[10px]"
-                              disabled={activeDraft.flowState === "connecting" || !activeDraft.apiKey.trim()}
-                              onClick={() => {
-                                void connectProvider(activeProviderId);
-                              }}
+                          ) : null}
+
+                          {activeDraft.flowState === "add-success" ? (
+                            <div className="mt-3 flex items-center gap-2.5 rounded-[16px] border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2">
+                              <CircleCheckBig className="h-3.5 w-3.5 text-emerald-200" />
+                              <p className="text-[11px] text-emerald-50">
+                                {activeDraft.statusMessage || "Models were added successfully."}
+                              </p>
+                            </div>
+                          ) : null}
+
+                          {activeDraft.docsUrl ? (
+                            <a
+                              href={activeDraft.docsUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-3 inline-flex text-[10px] text-slate-300 underline underline-offset-4"
                             >
-                              {activeDraft.flowState === "connecting" ? (
-                                <>
-                                  <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                  Connecting...
-                                </>
-                              ) : (
-                                `Connect ${activeDescriptor.shortLabel}`
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {shouldShowDiscoveryCta ? (
-                        <div className="mt-4 rounded-[24px] border border-cyan-300/20 bg-[linear-gradient(180deg,rgba(17,28,47,0.98),rgba(10,16,28,0.98))] p-4 shadow-[0_18px_42px_rgba(7,11,20,0.28)]">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="font-display text-[0.92rem] text-white">
-                                {isDiscovering ? "Discovering models..." : discoveryActionLabel}
-                              </p>
-                              <p className="mt-1 max-w-[520px] text-[11px] leading-[1rem] text-slate-400">
-                                {isDiscovering
-                                  ? "OpenClaw is pulling the provider catalog into this workspace."
-                                  : discoveryDescription}
-                              </p>
+                              OpenClaw model docs
+                            </a>
+                          ) : null}
+                        </>
+                      ) : (
+                        <div className="mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-[24px] border border-cyan-300/20 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.16),rgba(8,15,28,0.98)_70%)] px-4 py-10 text-center shadow-[0_22px_52px_rgba(7,11,20,0.32)]">
+                          <div className="relative flex max-w-[340px] flex-col items-center">
+                            <div className="absolute inset-x-8 top-8 h-px bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent blur-sm animate-pulse" />
+                            <div className="absolute inset-x-8 bottom-8 h-px bg-gradient-to-r from-transparent via-cyan-200/30 to-transparent blur-sm animate-pulse [animation-delay:180ms]" />
+                            <div className="absolute left-8 top-8 h-24 w-24 rounded-full border border-cyan-300/15 bg-cyan-300/[0.04] blur-[1px] animate-pulse" />
+                            <div className="absolute right-10 top-14 h-16 w-16 rounded-full border border-cyan-300/10 bg-cyan-300/[0.03] blur-[1px] animate-pulse [animation-delay:120ms]" />
+                            <div className="absolute bottom-10 left-1/2 h-20 w-20 -translate-x-1/2 rounded-full border border-cyan-300/10 bg-cyan-300/[0.03] blur-[1px] animate-pulse [animation-delay:240ms]" />
+                            <div className="relative mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.08] shadow-[0_0_0_8px_rgba(34,211,238,0.05)]">
+                              <LoaderCircle className="h-8 w-8 animate-spin text-cyan-200" />
                             </div>
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                variant="default"
-                                className="h-11 rounded-full px-5 text-[12px] font-medium"
-                                disabled={isDiscovering}
-                                onClick={() => {
-                                  void discoverProvider(activeProviderId);
-                                }}
-                              >
-                                {isDiscovering ? (
-                                  <>
-                                    <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                                    Discovering...
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    {discoveryButtonLabel}
-                                  </>
-                                )}
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-11 rounded-full px-4 text-[10px]"
-                                onClick={() => {
-                                  void runStatus(activeProviderId);
-                                }}
-                              >
-                                Refresh status
-                              </Button>
+                            <p className="font-display text-[1.1rem] leading-[1.2rem] tracking-[0.01em] text-white">
+                              {loadingHeroTitle}
+                            </p>
+                            <p className="mt-2 max-w-[280px] text-[11px] leading-[1rem] text-slate-400">
+                              {loadingHeroCopy}
+                            </p>
+                            <div className="mt-4 flex gap-1.5">
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300/90" />
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300/60 [animation-delay:120ms]" />
+                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300/30 [animation-delay:240ms]" />
                             </div>
                           </div>
                         </div>
-                      ) : null}
-
-                      {activeDraft.emptyState ? (
-                        <EmptyStateCard
-                          emptyState={activeDraft.emptyState}
-                          onCopyCommand={(command) => {
-                            void copyText(command);
-                          }}
-                        />
-                      ) : null}
-
-                      {activeDraft.models.length > 0 ? (
-                        <div className="mt-5">
-                          <ModelPicker
-                            provider={activeProviderId}
-                            models={activeDraft.models}
-                            selectedModelIds={activeDraft.selectedModelIds}
-                            search={activeDraft.search}
-                            onSearchChange={(value) => updateDraft(activeProviderId, { search: value })}
-                            onToggleModel={(modelId) => {
-                              const selected = activeDraft.selectedModelIds.includes(modelId);
-                              updateDraft(activeProviderId, {
-                                selectedModelIds: selected
-                                  ? activeDraft.selectedModelIds.filter((entry) => entry !== modelId)
-                                  : [...activeDraft.selectedModelIds, modelId]
-                              });
-                            }}
-                            onAddSelected={() => {
-                              void addSelectedModels(activeProviderId);
-                            }}
-                            isAdding={
-                              activeDraft.flowState === "connecting" &&
-                              activeDraft.statusMessage === "Adding selected models..."
-                            }
-                          />
-                        </div>
-                      ) : null}
-
-                      {activeDraft.flowState === "add-success" ? (
-                        <div className="mt-3 flex items-center gap-2.5 rounded-[16px] border border-emerald-300/20 bg-emerald-300/[0.08] px-3 py-2">
-                          <CircleCheckBig className="h-3.5 w-3.5 text-emerald-200" />
-                          <p className="text-[11px] text-emerald-50">
-                            {activeDraft.statusMessage || "Models were added successfully."}
-                          </p>
-                        </div>
-                      ) : null}
-
-                      {activeDraft.docsUrl ? (
-                        <a
-                          href={activeDraft.docsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-3 inline-flex text-[10px] text-slate-300 underline underline-offset-4"
-                        >
-                          OpenClaw model docs
-                        </a>
-                      ) : null}
+                      )}
                     </>
                   ) : (
                     <div className="flex min-h-[180px] items-center justify-center rounded-[20px] border border-dashed border-white/10 bg-white/[0.02] px-4 py-6 text-center">
@@ -1091,12 +1129,18 @@ function resolveConnectionDetail(
     };
   }
 
+  const connected = Boolean(readinessProvider?.connected);
+
   return {
     provider: providerId,
-    connected: Boolean(readinessProvider?.connected || localModelCount > 0),
+    connected,
     canConnect: true,
     needsTerminal: providerId === "openai-codex",
-    detail: readinessProvider?.detail || getModelProviderDescriptor(providerId).helperText
+    detail: connected
+      ? readinessProvider?.detail || getModelProviderDescriptor(providerId).helperText
+      : localModelCount > 0
+        ? `${localModelCount} model${localModelCount === 1 ? "" : "s"} are already saved in AgentOS. Connect ${getModelProviderDescriptor(providerId).shortLabel} to use them.`
+        : getModelProviderDescriptor(providerId).helperText
   };
 }
 

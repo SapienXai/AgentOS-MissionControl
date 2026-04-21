@@ -2,16 +2,34 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { normalizeControlPlaneSnapshot } from "@/lib/agentos/acl/openclaw";
-import { parseOpenClawVersion } from "@/lib/openclaw/cli";
+import { getOpenClawBinCandidates, parseOpenClawVersion } from "@/lib/openclaw/cli";
+import {
+  getOpenClawInstallCommand,
+  getOpenClawLocalPrefixBinPath,
+  getOpenClawUserLocalBinPath
+} from "@/lib/openclaw/install";
+import { resolveRequiredLoginProvider } from "@/app/api/onboarding/models/route";
 import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
+import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import {
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
 import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/service";
-import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
+import {
+  resolveInitialOnboardingProviderId
+} from "@/components/mission-control/openclaw-onboarding.utils";
+import { isNewerSnapshot } from "@/hooks/use-mission-control-data";
+import {
+  resolvePrimaryAction
+} from "@/components/mission-control/openclaw-onboarding.utils";
+import {
+  resolveModelOnboardingActionCopy,
+  resolveModelOnboardingStartPhase
+} from "@/components/mission-control/mission-control-shell.utils";
+import type { ControlPlaneSnapshot, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import type {
   ChannelRegistry,
   RuntimeOutputRecord,
@@ -149,6 +167,179 @@ test("control plane snapshots normalize duplicates and nested registries", () =>
 test("openclaw version parsing extracts the release tag", () => {
   assert.equal(parseOpenClawVersion("OpenClaw 2026.4.15 (041266a)"), "2026.4.15");
   assert.equal(parseOpenClawVersion("OpenClaw version unknown"), null);
+});
+
+test("openclaw resolver considers local prefix fallbacks", () => {
+  const candidates = getOpenClawBinCandidates().map((candidate) => candidate.replaceAll("\\", "/"));
+
+  assert.ok(candidates.includes(getOpenClawLocalPrefixBinPath().replaceAll("\\", "/")));
+  assert.ok(candidates.includes(getOpenClawUserLocalBinPath().replaceAll("\\", "/")));
+});
+
+test("openclaw onboarding uses the official installer command", () => {
+  const command = getOpenClawInstallCommand();
+
+  if (process.platform === "win32") {
+    assert.match(command, /install\.ps1/);
+    assert.match(command, /-NoOnboard/);
+    return;
+  }
+
+  assert.match(command, /install-cli\.sh/);
+  assert.match(command, /--no-onboard/);
+  assert.match(command, /\$HOME\/\.openclaw/);
+});
+
+test("openrouter selection keeps openrouter auth prioritized", () => {
+  const snapshot = {
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: "openrouter/google/gemma-4-31b-it:free",
+        authProviders: [
+          {
+            provider: "openrouter",
+            connected: false,
+            canLogin: true
+          },
+          {
+            provider: "openai-codex",
+            connected: false,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(
+    resolveRequiredLoginProvider(snapshot, "openrouter/google/gemma-4-31b-it:free"),
+    "openrouter"
+  );
+  assert.equal(resolveRequiredLoginProvider(snapshot, undefined), "openrouter");
+});
+
+test("mission control snapshots prefer live data over fallback snapshots", () => {
+  const current = {
+    generatedAt: "2026-04-21T10:00:00.000Z",
+    revision: 1,
+    mode: "live"
+  } as ControlPlaneSnapshot;
+  const fallback = {
+    generatedAt: "2026-04-21T10:00:01.000Z",
+    revision: 1,
+    mode: "fallback"
+  } as ControlPlaneSnapshot;
+  const refreshed = {
+    generatedAt: "2026-04-21T10:00:02.000Z",
+    revision: 2,
+    mode: "live"
+  } as ControlPlaneSnapshot;
+
+  assert.equal(isNewerSnapshot(fallback, current), false);
+  assert.equal(isNewerSnapshot(refreshed, current), true);
+});
+
+test("onboarding starts on the selected or recommended provider", () => {
+  const snapshot = {
+    diagnostics: {
+      modelReadiness: {
+        recommendedModelId: "anthropic/claude-3-7-sonnet",
+        preferredLoginProvider: "openrouter",
+        authProviders: [
+          {
+            provider: "openrouter",
+            connected: false,
+            canLogin: true,
+            detail: null
+          },
+          {
+            provider: "openai-codex",
+            connected: false,
+            canLogin: true,
+            detail: null
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(
+    resolveInitialOnboardingProviderId(snapshot, "openrouter/google/gemma-4-31b-it:free"),
+    "openrouter"
+  );
+  assert.equal(resolveInitialOnboardingProviderId(snapshot, undefined), "anthropic");
+});
+
+test("model onboarding requires an explicit selection before verification", () => {
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: false,
+      systemActionLabel: "Continue",
+      selectedModelId: ""
+    }),
+    {
+      kind: "select-model",
+      label: "Select a model"
+    }
+  );
+
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: false,
+      systemActionLabel: "Continue",
+      selectedModelId: "openrouter/google/gemma-4-31b-it:free"
+    }),
+    {
+      kind: "set-default",
+      label: "Set as default"
+    }
+  );
+
+  assert.equal(resolveModelOnboardingStartPhase("set-default"), "configuring-default");
+  assert.deepEqual(resolveModelOnboardingActionCopy("set-default"), {
+    statusMessage: "Saving default model...",
+    successTitle: "Default model saved.",
+    errorTitle: "Default model save failed."
+  });
+});
+
+test("remote provider connection depends on auth rather than configured models", () => {
+  const readiness = resolveModelReadiness(
+    [
+      {
+        key: "openrouter/google/gemma-4-31b-it:free",
+        local: false,
+        available: true,
+        missing: false
+      }
+    ],
+    {
+      auth: {
+        providers: [
+          {
+            provider: "openrouter",
+            profiles: {
+              count: 0
+            }
+          }
+        ],
+        oauth: {
+          providers: []
+        },
+        missingProvidersInUse: [],
+        unusableProfiles: []
+      }
+    } as never
+  );
+
+  assert.equal(
+    readiness.authProviders.find((provider) => provider.provider === "openrouter")?.connected,
+    false
+  );
 });
 
 test("update info falls back to a loading message when only the installed version is known", () => {

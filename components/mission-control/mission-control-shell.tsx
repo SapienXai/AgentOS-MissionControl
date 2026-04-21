@@ -206,6 +206,7 @@ export function MissionControlShell({
   const [agentModelRequest, setAgentModelRequest] = useState<AgentModelRequest | null>(null);
   const [pendingWorkspaceOpenId, setPendingWorkspaceOpenId] = useState<string | null>(null);
   const [loadedWorkspaceSelectionRoot, setLoadedWorkspaceSelectionRoot] = useState<string | null>(null);
+  const fallbackSnapshotRecoveryKeyRef = useRef<string | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
@@ -254,7 +255,7 @@ export function MissionControlShell({
     !isOnboardingDismissed &&
     !isOpenClawReady &&
     !hasActiveMissionWork &&
-    (!hasSeenMissionReady || snapshot.diagnostics.health === "offline");
+    !hasSeenMissionReady;
   const shouldShowOnboarding =
     shouldAutoShowOnboarding || showOnboardingReadyState || isOnboardingForcedOpen;
   const scopedTasks = uiSnapshot.tasks.filter(
@@ -805,34 +806,30 @@ export function MissionControlShell({
 
   useEffect(() => {
     if (isOpenClawReady) {
-      setIsOnboardingDismissed(false);
-    }
-  }, [isOpenClawReady]);
-
-  useEffect(() => {
-    if (isOpenClawReady) {
       setHasSeenMissionReady(true);
     }
   }, [isOpenClawReady]);
 
   useEffect(() => {
-    setSelectedOnboardingModelId((current) => {
-      const availableModelIds = snapshot.models
-        .filter((model) => model.available !== false && !model.missing)
-        .map((model) => model.id);
-      const recommendedModelId = snapshot.diagnostics.modelReadiness.recommendedModelId;
+    if (snapshot.mode !== "fallback" || snapshot.diagnostics.installed) {
+      return;
+    }
 
-      if (current && availableModelIds.includes(current)) {
-        return current;
-      }
+    const recoveryKey = `${snapshot.generatedAt}:${snapshot.diagnostics.issues.join("|")}`;
 
-      if (recommendedModelId && availableModelIds.includes(recommendedModelId)) {
-        return recommendedModelId;
-      }
+    if (fallbackSnapshotRecoveryKeyRef.current === recoveryKey) {
+      return;
+    }
 
-      return availableModelIds[0] || "";
-    });
-  }, [snapshot.models, snapshot.diagnostics.modelReadiness.recommendedModelId]);
+    fallbackSnapshotRecoveryKeyRef.current = recoveryKey;
+    void refreshSnapshot({ force: true }).catch(() => {});
+  }, [
+    refreshSnapshot,
+    snapshot.diagnostics.installed,
+    snapshot.diagnostics.issues,
+    snapshot.generatedAt,
+    snapshot.mode
+  ]);
 
   useEffect(() => {
     if (onboardingRunState === "success" || isOpenClawOnboardingSystemReady) {
@@ -840,14 +837,18 @@ export function MissionControlShell({
       return;
     }
 
-    if (!isOpenClawOnboardingSystemReady) {
-      setOnboardingStage("system");
+    if (modelOnboardingRunState === "running" || modelOnboardingRunState === "success") {
       return;
     }
-  }, [isOpenClawOnboardingSystemReady, onboardingRunState]);
+  }, [isOpenClawOnboardingSystemReady, modelOnboardingRunState, onboardingRunState]);
 
   useEffect(() => {
     if (isOpenClawReady) {
+      if (isOnboardingDismissed) {
+        setShowOnboardingReadyState(false);
+        return;
+      }
+
       if (onboardingRunState !== "idle" || modelOnboardingRunState !== "idle") {
         setOnboardingRunState("success");
         setOnboardingPhase("ready");
@@ -866,7 +867,7 @@ export function MissionControlShell({
     }
 
     setShowOnboardingReadyState(false);
-  }, [isOpenClawReady, onboardingRunState, modelOnboardingRunState]);
+  }, [isOpenClawReady, isOnboardingDismissed, onboardingRunState, modelOnboardingRunState]);
 
   const resetUpdateDialogState = () => {
     if (updateRunState === "running") {
@@ -1364,6 +1365,20 @@ export function MissionControlShell({
                 toast.success(actionCopy.successTitle, {
                   description: event.message
                 });
+
+                if (payload.intent === "set-default") {
+                  dismissOnboarding();
+                  const createdWorkspaceId =
+                    event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
+
+                  if (createdWorkspaceId) {
+                    setPendingWorkspaceOpenId(createdWorkspaceId);
+                    setActiveWorkspaceId(createdWorkspaceId);
+                    selectNode(createdWorkspaceId);
+                  } else if ((event.snapshot?.workspaces.length ?? 0) === 0) {
+                    openWorkspaceWizard("basic");
+                  }
+                }
               } else if (event.phase === "authenticating" && event.manualCommand) {
                 toast.message("Continue in terminal.", {
                   description: event.message
@@ -1398,6 +1413,19 @@ export function MissionControlShell({
           if (event.snapshot) {
             setSnapshot(event.snapshot);
           }
+
+          if (event.ok && payload.intent === "set-default") {
+            dismissOnboarding();
+            const createdWorkspaceId = event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
+
+            if (createdWorkspaceId) {
+              setPendingWorkspaceOpenId(createdWorkspaceId);
+              setActiveWorkspaceId(createdWorkspaceId);
+              selectNode(createdWorkspaceId);
+            } else if ((event.snapshot?.workspaces.length ?? 0) === 0) {
+              openWorkspaceWizard("basic");
+            }
+          }
         }
       }
 
@@ -1414,13 +1442,6 @@ export function MissionControlShell({
         description: error instanceof Error ? error.message : "Unknown model onboarding error."
       });
     }
-  };
-
-  const runModelAutoOnboarding = async () => {
-    await runModelOnboarding({
-      intent: "auto",
-      modelId: selectedOnboardingModelId || undefined
-    });
   };
 
   const runModelRefresh = async () => {
@@ -1445,20 +1466,30 @@ export function MissionControlShell({
   const runModelSetDefault = async (modelId?: string) => {
     const targetModelId = modelId || selectedOnboardingModelId;
 
-    if (targetModelId) {
-      await runModelOnboarding({
-        intent: "set-default",
-        modelId: targetModelId
-      });
+    if (!targetModelId) {
       return;
     }
 
-    await runModelAutoOnboarding();
+    await runModelOnboarding({
+      intent: "set-default",
+      modelId: targetModelId
+    });
   };
 
-  const openSetupWizard = (stage: OnboardingWizardStage = isOpenClawOnboardingSystemReady ? "models" : "system") => {
+  const openSetupWizard = (stage?: OnboardingWizardStage) => {
+    const hasModelSetupProgress =
+      snapshot.workspaces.length > 0 ||
+      Boolean(snapshot.diagnostics.modelReadiness.defaultModel || snapshot.diagnostics.modelReadiness.resolvedDefaultModel) ||
+      hasSeenMissionReady;
+
+    const resolvedStage =
+      stage ??
+      (hasModelSetupProgress || snapshot.diagnostics.modelReadiness.ready || isOpenClawOnboardingSystemReady
+        ? "models"
+        : "system");
+
     setIsSettingsOpen(false);
-    setOnboardingStage(stage);
+    setOnboardingStage(resolvedStage);
     setIsOnboardingDismissed(false);
     setShowOnboardingReadyState(false);
     setIsOnboardingForcedOpen(true);
@@ -2117,7 +2148,7 @@ export function MissionControlShell({
             onRunModelDiscover={runModelDiscover}
             onRunModelSetDefault={runModelSetDefault}
             onConnectModelProvider={runModelProviderLogin}
-            onOpenModelSetup={() => openSetupWizard(isOpenClawOnboardingSystemReady ? "models" : "system")}
+            onOpenModelSetup={() => openSetupWizard()}
             onOpenAddModels={openAddModelsDialog}
             onEditWorkspace={openWorkspaceWizardForEdit}
             onSnapshotChange={setSnapshot}
@@ -2347,9 +2378,6 @@ export function MissionControlShell({
             discoveredModels={discoveredModels}
             onSelectedModelIdChange={setSelectedOnboardingModelId}
             onRunSystemSetup={runOpenClawOnboarding}
-            onRunModelAutoSetup={runModelAutoOnboarding}
-            onRunModelDiscover={runModelDiscover}
-            onRunModelRefresh={runModelRefresh}
             onRunModelSetDefault={runModelSetDefault}
             onOpenAddModels={openAddModelsDialog}
             onContinueToModels={() => setOnboardingStage("models")}

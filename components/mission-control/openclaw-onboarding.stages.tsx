@@ -1,23 +1,24 @@
 "use client";
 
-import { ArrowRight, Check, Copy, LoaderCircle, Plus, RefreshCw, SquareTerminal } from "lucide-react";
-import { useState } from "react";
+import { ArrowRight, Check, Copy, LoaderCircle, SquareTerminal } from "lucide-react";
+import { motion } from "motion/react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import type { DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type { OpenClawModelOnboardingPhase } from "@/lib/agentos/contracts";
 import {
-  ghostActionClassName,
-  formatProviderLabel,
   secondaryActionClassName,
   stepBadgeClassName,
   stepContainerClassName,
   stepIconClassName,
+  resolveSelectedModelLabel,
   type StageRunDetails,
   type SurfaceTheme,
-  type StepState,
-  resolveSelectedModelLabel
+  type StepState
 } from "@/components/mission-control/openclaw-onboarding.utils";
+import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/openclaw-onboarding-provider-flow";
 import { cn } from "@/lib/utils";
 
 export function SystemStage({
@@ -129,13 +130,9 @@ export function ModelStage({
   showDetails,
   phaseLabel,
   run,
+  modelPhase,
   selectedModelId,
-  availableModels,
-  discoveredModels,
   onSelectedModelIdChange,
-  onRunModelDiscover,
-  onRunModelRefresh,
-  onRunModelSetDefault,
   onOpenAddModels
 }: {
   snapshot: MissionControlSnapshot;
@@ -144,266 +141,66 @@ export function ModelStage({
   showDetails: boolean;
   phaseLabel: string;
   run: StageRunDetails;
+  modelPhase: OpenClawModelOnboardingPhase | null;
   selectedModelId: string;
-  availableModels: Array<{ id: string; name: string; provider: string }>;
-  discoveredModels: DiscoveredModelCandidate[];
   onSelectedModelIdChange: (value: string) => void;
-  onRunModelDiscover: () => void;
-  onRunModelRefresh: () => void;
-  onRunModelSetDefault: (modelId?: string) => void;
-  onOpenAddModels: () => void;
-}) {
-  const modelReadiness = snapshot.diagnostics.modelReadiness;
-  const [detailsOpen, setDetailsOpen] = useState(() => discoveredModels.length > 0);
-  const connectedProviders = modelReadiness.authProviders.filter((provider) => provider.connected);
-  const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
-  const defaultModelLabel = modelReadiness.resolvedDefaultModel || modelReadiness.defaultModel || "Not set";
-  const summaryLead = selectedModelId ? `Selected: ${selectedModelLabel ?? defaultModelLabel}` : `Default: ${defaultModelLabel}`;
-  const summaryCopy = `${summaryLead} · ${modelReadiness.availableModelCount}/${modelReadiness.totalModelCount} routes · ${connectedProviders.length} connected`;
-  const hasAdvancedDetails =
-    modelReadiness.issues.length > 0 || connectedProviders.length > 0 || discoveredModels.length > 0;
-  const handleRunModelDiscover = () => {
-    setDetailsOpen(true);
-    onRunModelDiscover();
-  };
+  onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
+  }) {
+  const [detailsOpen, setDetailsOpen] = useState(true);
+  const availableModels = useMemo(
+    () => snapshot.models.filter((model) => model.available !== false && !model.missing),
+    [snapshot.models]
+  );
+  const selectedModelLabel = useMemo(
+    () => resolveSelectedModelLabel(selectedModelId, availableModels),
+    [availableModels, selectedModelId]
+  );
+  const buildScene = useMemo(
+    () =>
+      resolveWorkspaceBuildScene({
+        statusCopy,
+        run,
+        selectedModelLabel,
+        phase: modelPhase
+      }),
+    [modelPhase, run, selectedModelLabel, statusCopy]
+  );
 
   return (
     <>
       <div className="mt-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p
-              className={cn(
-                "text-[7px] uppercase tracking-[0.18em]",
-                surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-              )}
-            >
-              Step 2
-            </p>
-            <h2 className={cn("mt-1 text-[13px] font-medium", surfaceTheme === "light" ? "text-[#33251c]" : "text-white")}>
-              Model setup
-            </h2>
-          </div>
-
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onRunModelRefresh}
-            disabled={run.runState === "running"}
-            className={secondaryActionClassName(surfaceTheme)}
-          >
-            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-            Refresh
-          </Button>
-        </div>
-
-        <p
-          className={cn(
-            "mt-1 text-[10px] leading-[0.95rem]",
-            surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400"
-          )}
-        >
-          Pick the default model.
+        <p className={cn("text-[11px] font-medium", surfaceTheme === "light" ? "text-[#33251c]" : "text-white")}>
+          Step 2: Model setup
         </p>
       </div>
 
-      <div
-        className={cn(
-          "mt-2.5 rounded-[12px] border px-2.5 py-2.5",
-          surfaceTheme === "light"
-            ? "border-[#e5d5c9] bg-[#fffaf6]"
-            : "border-white/8 bg-[rgba(255,255,255,0.02)]"
-        )}
-      >
-        <label className="block">
-          <span
-            className={cn(
-              "text-[7px] uppercase tracking-[0.16em]",
-              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-            )}
-          >
-            Default model
-          </span>
-          <select
-            value={selectedModelId}
-            onChange={(event) => onSelectedModelIdChange(event.target.value)}
-            className={cn(
-              "mt-1.5 h-9 w-full rounded-[12px] border px-2.5 text-[11px] outline-none",
-              surfaceTheme === "light"
-                ? "border-[#dccabd] bg-white text-[#33251c]"
-                : "border-white/10 bg-white/[0.04] text-slate-100"
-            )}
-          >
-            <option value="">Auto choose</option>
-            {availableModels.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name} · {model.provider}
-              </option>
-            ))}
-          </select>
-        </label>
+      {buildScene ? (
+        <WorkspaceBuildScene
+          surfaceTheme={surfaceTheme}
+          statusCopy={statusCopy}
+          phaseLabel={phaseLabel}
+          buildScene={buildScene}
+        />
+      ) : (
+        <>
+          <OpenClawOnboardingProviderFlow
+            snapshot={snapshot}
+            selectedModelId={selectedModelId}
+            onSelectedModelIdChange={onSelectedModelIdChange}
+            onOpenAddModels={onOpenAddModels}
+          />
 
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onOpenAddModels}
-            className={secondaryActionClassName(surfaceTheme)}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add models
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={handleRunModelDiscover}
-            disabled={run.runState === "running"}
-            className={secondaryActionClassName(surfaceTheme)}
-          >
-            {discoveredModels.length > 0 ? "Scan again" : "Discover models"}
-          </Button>
-          {hasAdvancedDetails ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDetailsOpen((current) => !current)}
-              aria-expanded={detailsOpen}
-              className={ghostActionClassName(surfaceTheme)}
-            >
-              {detailsOpen ? "Hide details" : "Show details"}
-            </Button>
-          ) : null}
-        </div>
-
-        <p
-          className={cn(
-            "mt-2 text-[9px] leading-[0.95rem]",
-            surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
-          )}
-        >
-          {summaryCopy}
-        </p>
-
-        {detailsOpen ? (
-          <div className="mt-2.5 space-y-2">
-            {modelReadiness.issues.length > 0 ? (
-              <div className="space-y-1">
-                {modelReadiness.issues.map((issue) => (
-                  <p
-                    key={issue}
-                    className={cn(
-                      "rounded-[10px] border px-2 py-1.5 text-[9px] leading-[0.85rem]",
-                      surfaceTheme === "light"
-                        ? "border-amber-200 bg-amber-50 text-amber-800"
-                        : "border-amber-300/20 bg-amber-300/10 text-amber-100"
-                    )}
-                  >
-                    {issue}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-
-            {connectedProviders.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {connectedProviders.map((provider) => (
-                  <span
-                    key={provider.provider}
-                    className={cn(
-                      "rounded-full border px-2 py-0.5 text-[9px]",
-                      surfaceTheme === "light"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
-                    )}
-                  >
-                    {formatProviderLabel(provider.provider)}
-                    {provider.detail ? ` · ${provider.detail}` : ""}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {discoveredModels.length > 0 ? (
-              <div className="space-y-1.5">
-                <p
-                  className={cn(
-                    "text-[7px] uppercase tracking-[0.16em]",
-                    surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
-                  )}
-                >
-                  Routes
-                </p>
-                <div className="space-y-1.5">
-                  {discoveredModels.slice(0, 3).map((model) => (
-                    <div
-                      key={model.modelId}
-                      className={cn(
-                        "flex items-center justify-between gap-2 rounded-[12px] border px-2 py-1.5",
-                        surfaceTheme === "light"
-                          ? "border-[#eadcd0] bg-[#fff7f2]"
-                          : "border-white/10 bg-white/[0.03]"
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <p
-                          className={cn(
-                            "truncate text-[10px]",
-                            surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white"
-                          )}
-                        >
-                          {model.name}
-                        </p>
-                        <p
-                          className={cn(
-                            "mt-0.5 text-[8px] leading-[0.85rem]",
-                            surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
-                          )}
-                        >
-                          {formatProviderLabel(model.provider)}
-                          {model.isFree ? " · free" : ""}
-                          {model.supportsTools ? " · tools" : ""}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => onRunModelSetDefault(model.modelId)}
-                        disabled={run.runState === "running"}
-                        className={secondaryActionClassName(surfaceTheme)}
-                      >
-                        Use
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <p
-                  className={cn(
-                    "text-[9px] leading-[0.95rem]",
-                    surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-500"
-                  )}
-                >
-                  Configured routes only. Missing credentials will hand you off to OpenClaw.
-                </p>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      <StageConsole
-        surfaceTheme={surfaceTheme}
-        statusCopy={statusCopy}
-        showDetails={showDetails}
-        phaseLabel={phaseLabel}
-        detailsOpen={detailsOpen}
-        onDetailsOpenChange={setDetailsOpen}
-        run={run}
-      />
+          <StageConsole
+            surfaceTheme={surfaceTheme}
+            statusCopy={statusCopy}
+            showDetails={showDetails}
+            phaseLabel={phaseLabel}
+            detailsOpen={detailsOpen}
+            onDetailsOpenChange={setDetailsOpen}
+            run={run}
+          />
+        </>
+      )}
     </>
   );
 }
@@ -805,4 +602,528 @@ function StageConsole({
       ) : null}
     </div>
   );
+}
+
+type WorkspaceBuildSceneState = {
+  stepIndex: number;
+  steps: Array<{
+    id: string;
+    label: string;
+    detail: string;
+    state: "pending" | "current" | "done";
+  }>;
+  logLines: string[];
+  headline: string;
+  summary: string;
+  selectedModelLabel: string | null;
+};
+
+function WorkspaceBuildScene({
+  surfaceTheme,
+  statusCopy,
+  phaseLabel,
+  buildScene
+}: {
+  surfaceTheme: SurfaceTheme;
+  statusCopy: string;
+  phaseLabel: string;
+  buildScene: WorkspaceBuildSceneState;
+}) {
+  const isLight = surfaceTheme === "light";
+
+  return (
+    <div
+      className={cn(
+        "mt-3 overflow-hidden rounded-[24px] border",
+        isLight
+          ? "border-[#e1d4c6] bg-[linear-gradient(180deg,rgba(255,251,247,0.96),rgba(248,241,233,0.98))]"
+          : "border-cyan-300/18 bg-[radial-gradient(circle_at_top,rgba(12,24,40,0.98),rgba(5,10,18,0.98)_72%)]"
+      )}
+    >
+      <div className="relative isolate min-h-[440px] overflow-hidden px-4 py-4 sm:px-5 sm:py-5">
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0",
+            isLight
+              ? "bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.96),transparent_30%),radial-gradient(circle_at_80%_10%,rgba(221,182,152,0.18),transparent_24%),linear-gradient(135deg,rgba(255,255,255,0.06),transparent_30%,rgba(218,193,176,0.12)_58%,transparent_72%)]"
+              : "bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.16),transparent_24%),radial-gradient(circle_at_82%_12%,rgba(56,189,248,0.11),transparent_20%),linear-gradient(135deg,rgba(255,255,255,0.03),transparent_34%,rgba(34,211,238,0.05)_58%,transparent_74%)]"
+          )}
+        />
+        <motion.div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -left-12 top-8 h-36 w-36 rounded-full blur-3xl",
+            isLight ? "bg-[#f1b27d]/25" : "bg-cyan-300/12"
+          )}
+          animate={{ x: [0, 16, 0], y: [0, -10, 0], opacity: [0.55, 0.8, 0.55] }}
+          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <motion.div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute right-0 top-24 h-44 w-44 rounded-full blur-3xl",
+            isLight ? "bg-[#f9d8b6]/22" : "bg-sky-300/10"
+          )}
+          animate={{ x: [0, -18, 0], y: [0, 8, 0], opacity: [0.35, 0.7, 0.35] }}
+          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+        />
+
+        <div className="relative z-[1] flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "text-[9px] uppercase tracking-[0.24em]",
+                isLight ? "text-[#8f6f5d]" : "text-cyan-200/70"
+              )}
+            >
+              Building
+            </p>
+            <h3
+              className={cn(
+                "mt-1 text-[18px] font-medium tracking-[-0.03em] sm:text-[22px]",
+                isLight ? "text-[#231a15]" : "text-white"
+              )}
+            >
+              Creating your demo workspace
+            </h3>
+            <p
+              className={cn(
+                "mt-1 max-w-[42rem] text-[11px] leading-[1rem] sm:text-[12px] sm:leading-[1.05rem]",
+                isLight ? "text-[#6f5a4c]" : "text-slate-300"
+              )}
+            >
+              {statusCopy}
+            </p>
+          </div>
+
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2.5 py-1 text-[8px] uppercase tracking-[0.16em]",
+                isLight ? "border-[#d9c3b1] bg-white/70 text-[#8b6f5c]" : "border-cyan-300/18 bg-cyan-300/10 text-cyan-100"
+              )}
+            >
+              {phaseLabel}
+            </span>
+            {buildScene.selectedModelLabel ? (
+              <span
+                className={cn(
+                  "inline-flex max-w-[220px] truncate rounded-full border px-2.5 py-1 text-[9px]",
+                  isLight ? "border-[#ead8c8] bg-white text-[#5a4638]" : "border-white/10 bg-white/[0.04] text-slate-200"
+                )}
+              >
+                Default model: {buildScene.selectedModelLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="relative z-[1] mt-5 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+          <div
+            className={cn(
+              "relative min-h-[290px] overflow-hidden rounded-[28px] border",
+              isLight
+                ? "border-[#ead8c8] bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(252,246,239,0.98))] shadow-[0_18px_50px_rgba(165,126,98,0.08)]"
+                : "border-white/10 bg-[linear-gradient(180deg,rgba(9,16,28,0.98),rgba(5,10,18,0.98))] shadow-[0_18px_50px_rgba(0,0,0,0.3)]"
+            )}
+          >
+            <div
+              className={cn(
+                "absolute inset-0 opacity-80",
+                isLight
+                  ? "bg-[linear-gradient(rgba(116,85,65,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(116,85,65,0.05)_1px,transparent_1px)] bg-[size:28px_28px]"
+                  : "bg-[linear-gradient(rgba(56,189,248,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(56,189,248,0.08)_1px,transparent_1px)] bg-[size:28px_28px]"
+              )}
+            />
+            <motion.div
+              aria-hidden="true"
+              className={cn(
+                "absolute inset-x-0 top-0 h-px",
+                isLight ? "bg-gradient-to-r from-transparent via-[#caa789] to-transparent" : "bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent"
+              )}
+              animate={{ opacity: [0.4, 1, 0.4] }}
+              transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+            />
+
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="relative flex flex-col items-center text-center">
+                <motion.div
+                  className={cn(
+                    "absolute h-56 w-56 rounded-full border",
+                    isLight ? "border-[#d8bda5]/45" : "border-cyan-200/14"
+                  )}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 28, repeat: Infinity, ease: "linear" }}
+                />
+                <motion.div
+                  className={cn(
+                    "absolute h-40 w-40 rounded-full border",
+                    isLight ? "border-[#e2c4ad]/65" : "border-cyan-200/16"
+                  )}
+                  animate={{ rotate: -360 }}
+                  transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
+                />
+                <motion.div
+                  className={cn(
+                    "absolute h-24 w-24 rounded-full border",
+                    isLight ? "border-[#f0d8c8] bg-white/90" : "border-cyan-300/18 bg-cyan-300/[0.08]"
+                  )}
+                  animate={{ scale: [1, 1.04, 1], opacity: [0.75, 1, 0.75] }}
+                  transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut" }}
+                />
+
+                <div
+                  className={cn(
+                    "relative flex h-24 w-24 items-center justify-center rounded-full border shadow-[0_0_0_14px_rgba(255,255,255,0.03)]",
+                    isLight
+                      ? "border-[#d7b9a0] bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.98),rgba(246,232,219,0.98))] text-[#7c5b46]"
+                      : "border-cyan-300/24 bg-[radial-gradient(circle_at_top,rgba(16,30,48,0.96),rgba(7,12,21,0.98))] text-cyan-100"
+                  )}
+                >
+                  <LoaderCircle className="h-10 w-10 animate-spin" />
+                </div>
+
+                <p className={cn("mt-5 text-[9px] uppercase tracking-[0.22em]", isLight ? "text-[#9a7d69]" : "text-cyan-200/70")}>
+                  Workspace fabric
+                </p>
+                <p className={cn("mt-1 text-[18px] font-medium tracking-[-0.03em]", isLight ? "text-[#281d17]" : "text-white")}>
+                  {buildScene.headline}
+                </p>
+                <p className={cn("mt-2 max-w-[28rem] text-[11px] leading-[1rem]", isLight ? "text-[#6a5547]" : "text-slate-300")}>
+                  {buildScene.summary}
+                </p>
+
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[9px]",
+                      isLight ? "border-[#dec8b8] bg-white text-[#634d3d]" : "border-white/10 bg-white/[0.04] text-slate-200"
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", isLight ? "bg-[#c98a5f]" : "bg-cyan-300")} />
+                    Building workspace
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[9px]",
+                      isLight ? "border-[#dec8b8] bg-white text-[#634d3d]" : "border-white/10 bg-white/[0.04] text-slate-200"
+                    )}
+                  >
+                    <span className={cn("h-1.5 w-1.5 rounded-full", isLight ? "bg-emerald-500" : "bg-emerald-300")} />
+                    Default model locked
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="absolute inset-x-5 bottom-5">
+              <div
+                className={cn(
+                  "relative h-2 overflow-hidden rounded-full border",
+                  isLight ? "border-[#dec8b8] bg-white/90" : "border-white/10 bg-white/[0.04]"
+                )}
+              >
+                <motion.div
+                  className={cn(
+                    "absolute inset-y-0 left-0 w-1/3 rounded-full",
+                    isLight
+                      ? "bg-gradient-to-r from-[#b97b4c] via-[#f1c59b] to-[#e39e69]"
+                      : "bg-gradient-to-r from-cyan-400 via-sky-200 to-cyan-500"
+                  )}
+                  animate={{ x: ["-15%", "125%"] }}
+                  transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-col gap-3">
+            {buildScene.steps.map((step, index) => (
+              <motion.div
+                key={step.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: index * 0.05 }}
+                className={cn(
+                  "rounded-[18px] border px-3 py-2.5",
+                  step.state === "current"
+                    ? isLight
+                      ? "border-[#d9b79f] bg-white shadow-[0_10px_28px_rgba(185,122,77,0.08)]"
+                      : "border-cyan-300/24 bg-white/[0.05] shadow-[0_10px_28px_rgba(0,0,0,0.18)]"
+                    : step.state === "done"
+                      ? isLight
+                        ? "border-[#e7d5c6] bg-[rgba(255,255,255,0.76)]"
+                        : "border-white/10 bg-white/[0.03]"
+                      : isLight
+                        ? "border-[#eadccf] bg-[rgba(255,250,246,0.8)]"
+                        : "border-white/8 bg-white/[0.02]"
+                )}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div
+                    className={cn(
+                      "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[10px] font-medium",
+                      step.state === "current"
+                        ? isLight
+                          ? "border-[#c78e61] bg-[#f7e6d7] text-[#6b4d39]"
+                          : "border-cyan-300/28 bg-cyan-300/12 text-cyan-50"
+                        : step.state === "done"
+                          ? isLight
+                            ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                            : "border-emerald-300/25 bg-emerald-300/12 text-emerald-200"
+                          : isLight
+                            ? "border-[#e2d4c7] bg-white text-[#9a7f6c]"
+                            : "border-white/10 bg-white/[0.03] text-slate-400"
+                    )}
+                  >
+                    {step.state === "done" ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className={cn("text-[11px] font-medium", isLight ? "text-[#2b1f18]" : "text-white")}>
+                          {step.label}
+                        </p>
+                        <p
+                          className={cn(
+                            "mt-0.5 text-[9px] leading-[0.95rem]",
+                            isLight ? "text-[#7c6554]" : "text-slate-400"
+                          )}
+                        >
+                          {step.detail}
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[7px] uppercase tracking-[0.14em]",
+                          step.state === "current"
+                            ? isLight
+                              ? "bg-[#f1dfd0] text-[#835f48]"
+                              : "bg-cyan-300/12 text-cyan-100"
+                            : step.state === "done"
+                              ? isLight
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-emerald-300/12 text-emerald-200"
+                              : isLight
+                                ? "bg-[#f6ece3] text-[#a0826e]"
+                                : "bg-white/[0.04] text-slate-500"
+                        )}
+                      >
+                        {step.state === "done" ? "Ready" : step.state === "current" ? "Building" : "Queued"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+
+            <div
+              className={cn(
+                "mt-auto rounded-[20px] border p-3",
+                isLight ? "border-[#ead8c8] bg-white" : "border-white/10 bg-white/[0.03]"
+              )}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p
+                  className={cn(
+                    "text-[8px] uppercase tracking-[0.18em]",
+                    isLight ? "text-[#8f6f5d]" : "text-cyan-200/60"
+                  )}
+                >
+                  Live build feed
+                </p>
+                <span className={cn("text-[9px]", isLight ? "text-[#8a6f5e]" : "text-slate-400")}>
+                  {phaseLabel}
+                </span>
+              </div>
+
+              <div className="mt-2 space-y-1.5">
+                {buildScene.logLines.length > 0 ? (
+                  buildScene.logLines.slice(-4).map((line, index) => (
+                    <motion.div
+                      key={`${line}-${index}`}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.25, delay: index * 0.04 }}
+                      className={cn(
+                        "flex items-start gap-2 rounded-[14px] border px-2.5 py-2 text-[10px] leading-[0.98rem]",
+                        index === buildScene.logLines.length - 1
+                          ? isLight
+                            ? "border-[#d8b79e] bg-[#fff7f0] text-[#5a4638]"
+                            : "border-cyan-300/18 bg-cyan-300/[0.06] text-slate-100"
+                          : isLight
+                            ? "border-[#eee0d3] bg-[#fffdfb] text-[#735d4e]"
+                            : "border-white/8 bg-white/[0.02] text-slate-300"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "mt-1 h-1.5 w-1.5 shrink-0 rounded-full",
+                          index === buildScene.logLines.length - 1
+                            ? isLight
+                              ? "bg-[#c98758]"
+                              : "bg-cyan-300"
+                            : isLight
+                              ? "bg-[#e3c8b2]"
+                              : "bg-slate-500"
+                        )}
+                      />
+                      <span className="min-w-0">{line}</span>
+                    </motion.div>
+                  ))
+                ) : (
+                  <div
+                    className={cn(
+                      "rounded-[14px] border border-dashed px-2.5 py-3 text-[10px]",
+                      isLight ? "border-[#e8d7c8] text-[#7e6453]" : "border-white/10 text-slate-400"
+                    )}
+                  >
+                    Waiting for the first build signal...
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function resolveWorkspaceBuildScene({
+  statusCopy,
+  run,
+  selectedModelLabel,
+  phase
+}: {
+  statusCopy: string;
+  run: StageRunDetails;
+  selectedModelLabel: string | null;
+  phase: OpenClawModelOnboardingPhase | null;
+}): WorkspaceBuildSceneState | null {
+  const combinedText = `${statusCopy}\n${run.log}`.toLowerCase();
+  const hasTerminalAuth =
+    Boolean(run.manualCommand) || /terminal|sign-in|login|oauth|api key|provider auth/.test(combinedText);
+  const isWorkspaceProvisioningPhase = phase === "verifying";
+  const hasBuildSignal =
+    isWorkspaceProvisioningPhase &&
+    (
+      /creating a demo workspace/.test(combinedText) ||
+      /resolving workspace settings and reserving the target directory/.test(combinedText) ||
+      /preparing workspace folder/.test(combinedText) ||
+      /checking input and target path/.test(combinedText) ||
+      /reserved target directory/.test(combinedText) ||
+      /creating a fresh workspace folder/.test(combinedText) ||
+      /fresh workspace folder created at/.test(combinedText) ||
+      /preparing an empty workspace scaffold/.test(combinedText) ||
+      /generating workspace docs/.test(combinedText) ||
+      /scaffolding workspace files/.test(combinedText) ||
+      /workspace files and starter docs are in place/.test(combinedText) ||
+      /workspace bootstrap is wrapping up without a kickoff mission/.test(combinedText) ||
+      /creating the first workspace agent/.test(combinedText) ||
+      /provisioning the first workspace agent/.test(combinedText) ||
+      /creating agent \d+ of \d+/.test(combinedText) ||
+      /linked to the workspace/.test(combinedText) ||
+      /finalizing workspace bootstrap/.test(combinedText) ||
+      /workspace bootstrap finished/.test(combinedText) ||
+      /demo workspace is ready/.test(combinedText)
+    );
+
+  if (run.runState !== "running" || hasTerminalAuth || !hasBuildSignal) {
+    return null;
+  }
+
+  const stepIndex = resolveWorkspaceBuildSceneStepIndex(combinedText);
+  const steps = [
+    {
+      id: "model",
+      label: "Default model",
+      detail: selectedModelLabel
+        ? `${selectedModelLabel} is now the route powering the workspace.`
+        : "The selected route is being saved locally."
+    },
+    {
+      id: "path",
+      label: "Workspace shell",
+      detail: "Validating the destination and preparing the workspace folder."
+    },
+    {
+      id: "scaffold",
+      label: "Workspace scaffold",
+      detail: "Writing docs, memory, and the bootstrap metadata."
+    },
+    {
+      id: "agent",
+      label: "Starter agent",
+      detail: "Provisioning the first agent and wiring it into the workspace."
+    },
+    {
+      id: "handoff",
+      label: "Canvas handoff",
+      detail: "Refreshing the graph and selecting the new workspace."
+    }
+  ].map((step, index) => ({
+    ...step,
+    state: index < stepIndex ? "done" : index === stepIndex ? "current" : "pending"
+  })) as WorkspaceBuildSceneState["steps"];
+
+  return {
+    stepIndex,
+    steps,
+    logLines: extractBuildLogLines(run.log),
+    headline: "Building your demo workspace",
+    summary: "Workspace files, the first agent, and the initial canvas handoff are being assembled in real time.",
+    selectedModelLabel
+  };
+}
+
+function resolveWorkspaceBuildSceneStepIndex(combinedText: string) {
+  if (
+    /resolving workspace settings/.test(combinedText) ||
+    /checking input and target path/.test(combinedText) ||
+    /reserved target directory/.test(combinedText) ||
+    /creating a demo workspace/.test(combinedText)
+  ) {
+    return 1;
+  }
+
+  if (
+    /preparing workspace folder/.test(combinedText) ||
+    /creating a fresh workspace folder/.test(combinedText) ||
+    /preparing an empty workspace scaffold/.test(combinedText) ||
+    /scaffolding workspace files/.test(combinedText) ||
+    /fresh workspace folder created at/.test(combinedText) ||
+    /generating workspace docs/.test(combinedText) ||
+    /workspace files and starter docs are in place/.test(combinedText)
+  ) {
+    return 2;
+  }
+
+  if (
+    /creating the first workspace agent/.test(combinedText) ||
+    /provisioning the first workspace agent/.test(combinedText) ||
+    /creating agent \d+ of \d+/.test(combinedText) ||
+    /linked to the workspace/.test(combinedText)
+  ) {
+    return 3;
+  }
+
+  if (
+    /finalizing workspace bootstrap/.test(combinedText) ||
+    /workspace bootstrap is wrapping up without a kickoff mission/.test(combinedText) ||
+    /workspace bootstrap finished/.test(combinedText) ||
+    /demo workspace is ready/.test(combinedText)
+  ) {
+    return 4;
+  }
+
+  return 1;
+}
+
+function extractBuildLogLines(log: string) {
+  return log
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^>\s*/, ""))
+    .filter((line) => Boolean(line))
+    .slice(-4);
 }

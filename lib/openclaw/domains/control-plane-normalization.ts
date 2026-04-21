@@ -199,9 +199,9 @@ export function resolveModelReadiness(models: ModelLike[], modelStatus?: ModelSt
     const providerAuth = authProviderMap.get(provider);
     const oauthStatus = oauthProviderMap.get(provider);
     const connected =
-      providerModels.some((model) => isReadyModelRecord(model)) ||
-      (providerAuth?.profiles?.count ?? 0) > 0 ||
-      oauthStatus?.status === "ok";
+      provider === "ollama"
+        ? providerModels.some((model) => model.local)
+        : (providerAuth?.profiles?.count ?? 0) > 0 || oauthStatus?.status === "ok";
     let detail: string | null = null;
 
     if (oauthStatus?.status === "ok") {

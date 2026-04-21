@@ -535,17 +535,18 @@ function buildFileBasedConnectionStatus(
     ...Object.values(config.auth?.profiles ?? {}),
     ...Object.values(authProfiles.profiles ?? {})
   ].filter((entry) => entry.provider === provider).length;
+  const connected = providerAuthCount > 0;
 
   return {
     provider,
-    connected: providerAuthCount > 0 || configuredCount > 0,
+    connected,
     canConnect: true,
     needsTerminal: descriptor.connectKind === "oauth",
     detail:
-      providerAuthCount > 0
+      connected
         ? `${configuredCount} configured model${configuredCount === 1 ? "" : "s"} in AgentOS.`
         : configuredCount > 0
-          ? `${configuredCount} configured model${configuredCount === 1 ? "" : "s"} in AgentOS.`
+          ? `${configuredCount} configured model${configuredCount === 1 ? "" : "s"} are already saved in AgentOS. Connect ${descriptor.shortLabel} to use them.`
           : descriptor.helperText
   };
 }

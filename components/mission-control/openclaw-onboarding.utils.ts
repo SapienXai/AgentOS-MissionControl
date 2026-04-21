@@ -3,7 +3,9 @@ import {
   isOpenClawMissionReady,
   isOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
+import { isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
 import type {
+  AddModelsProviderId,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
   OpenClawOnboardingPhase
@@ -111,7 +113,6 @@ export function resolvePrimaryAction(params: {
   modelReady: boolean;
   systemActionLabel: string;
   selectedModelId: string;
-  availableModelIds: string[];
 }) {
   if (params.stage === "system") {
     if (params.systemReady && params.modelReady) {
@@ -129,15 +130,11 @@ export function resolvePrimaryAction(params: {
     return { kind: "dismiss" as const, label: "Enter AgentOS" };
   }
 
-  if (params.selectedModelId && params.availableModelIds.includes(params.selectedModelId)) {
-    return { kind: "set-default" as const, label: "Use selected model" };
-  }
-
   if (params.selectedModelId) {
-    return { kind: "set-default" as const, label: "Use selected model" };
+    return { kind: "set-default" as const, label: "Set as default" };
   }
 
-  return { kind: "auto" as const, label: "Auto configure models" };
+  return { kind: "select-model" as const, label: "Select a model" };
 }
 
 export function resolveSelectedModelLabel(
@@ -165,7 +162,7 @@ export function resolveStageDescription(
     return `Selected model: ${selectedModelLabel}.`;
   }
 
-  return "Choose or connect a usable model route.";
+  return "Choose a provider, connect it, and then pick a model.";
 }
 
 export function resolveStepState(complete: boolean, current: boolean): StepState {
@@ -313,6 +310,52 @@ export function formatProviderLabel(provider: string) {
     .split("-")
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
     .join(" ");
+}
+
+export function resolveModelProvider(modelId?: string | null) {
+  const normalized = modelId?.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const [provider] = normalized.split("/", 1);
+  return provider || null;
+}
+
+export function resolveInitialOnboardingProviderId(
+  snapshot: MissionControlSnapshot,
+  selectedModelId?: string | null
+): AddModelsProviderId {
+  const selectedProvider = resolveModelProvider(selectedModelId);
+
+  if (isAddModelsProviderId(selectedProvider)) {
+    return selectedProvider;
+  }
+
+  const recommendedProvider = resolveModelProvider(snapshot.diagnostics.modelReadiness.recommendedModelId);
+
+  if (isAddModelsProviderId(recommendedProvider)) {
+    return recommendedProvider;
+  }
+
+  const preferredLoginProvider = snapshot.diagnostics.modelReadiness.preferredLoginProvider;
+
+  if (isAddModelsProviderId(preferredLoginProvider)) {
+    return preferredLoginProvider;
+  }
+
+  const connectedProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
+    (provider): provider is (typeof snapshot.diagnostics.modelReadiness.authProviders)[number] & {
+      provider: AddModelsProviderId;
+    } => provider.connected && isAddModelsProviderId(provider.provider)
+  )?.provider;
+
+  if (connectedProvider) {
+    return connectedProvider;
+  }
+
+  return "openrouter";
 }
 
 export function stepContainerClassName(state: StepState, surfaceTheme: SurfaceTheme) {

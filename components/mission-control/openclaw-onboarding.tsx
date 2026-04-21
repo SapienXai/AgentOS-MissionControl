@@ -10,6 +10,7 @@ import {
 } from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
+  AddModelsProviderId,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
   OpenClawOnboardingPhase
@@ -54,9 +55,6 @@ export function OpenClawOnboarding({
   discoveredModels,
   onSelectedModelIdChange,
   onRunSystemSetup,
-  onRunModelAutoSetup,
-  onRunModelDiscover,
-  onRunModelRefresh,
   onRunModelSetDefault,
   onOpenAddModels,
   onOpenWorkspaceCreate,
@@ -78,11 +76,8 @@ export function OpenClawOnboarding({
   discoveredModels: DiscoveredModelCandidate[];
   onSelectedModelIdChange: (value: string) => void;
   onRunSystemSetup: () => void;
-  onRunModelAutoSetup: () => void;
-  onRunModelDiscover: () => void;
-  onRunModelRefresh: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
-  onOpenAddModels: () => void;
+  onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenWorkspaceCreate: () => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
@@ -101,17 +96,12 @@ export function OpenClawOnboarding({
   const wizardSteps = buildWizardSteps(stage, onboardingSystemReady, modelReady);
   const systemSteps = buildSystemSteps(snapshot, systemPhaseForSteps);
   const availableModels = snapshot.models.filter((model) => model.available !== false && !model.missing);
-  const selectableDiscoveredModels = discoveredModels.filter(
-    (model) => !availableModels.some((availableModel) => availableModel.id === model.modelId)
-  );
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
-  const heroTitle = modelReady ? "OpenClaw is ready." : "Bring your local OpenClaw online.";
-  const heroDescription = modelReady
-    ? "Choose your first action below."
-    : stage === "system"
-      ? "Set up the system, then pick a default model."
-      : "Pick the default model and verify readiness.";
+  const heroLine = modelReady
+    ? "AGENTOS : OpenClaw is ready. Choose your first action below."
+    : "AGENTOS : Bring your local OpenClaw online.";
+  const openSurfaceLabel = hasWorkspaces ? "Open demo surface" : "Create workspace";
   const topBadgeLabel = modelReady ? "Launchpad" : "Welcome";
   const stageStatusCopy =
     stageRun.statusMessage ||
@@ -135,8 +125,7 @@ export function OpenClawOnboarding({
     systemReady: onboardingSystemReady,
     modelReady,
     systemActionLabel,
-    selectedModelId,
-    availableModelIds: availableModels.map((model) => model.id)
+    selectedModelId
   });
 
   return (
@@ -187,27 +176,11 @@ export function OpenClawOnboarding({
         <div className="mt-3">
           <p
             className={cn(
-              "text-[7px] uppercase tracking-[0.18em]",
-              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+              "whitespace-nowrap text-[9px] leading-[1rem] tracking-[0.08em]",
+              surfaceTheme === "light" ? "text-[#33251c]" : "text-slate-100"
             )}
           >
-            AgentOS
-          </p>
-          <h1
-            className={cn(
-              "mt-1 font-display text-[1.12rem] leading-[1.25rem]",
-              surfaceTheme === "light" ? "text-[#33251c]" : "text-white"
-            )}
-          >
-            {heroTitle}
-          </h1>
-          <p
-            className={cn(
-              "mt-1.5 text-[11px] leading-[1.05rem]",
-              surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-300"
-            )}
-          >
-            {heroDescription}
+            {heroLine}
           </p>
         </div>
 
@@ -284,17 +257,9 @@ export function OpenClawOnboarding({
             showDetails={showDetails}
             phaseLabel={phaseLabel}
             run={stageRun}
+            modelPhase={modelPhase}
             selectedModelId={selectedModelId}
-            availableModels={availableModels.map((model) => ({
-              id: model.id,
-              name: model.name,
-              provider: model.provider
-            }))}
-            discoveredModels={selectableDiscoveredModels}
             onSelectedModelIdChange={onSelectedModelIdChange}
-            onRunModelDiscover={onRunModelDiscover}
-            onRunModelRefresh={onRunModelRefresh}
-            onRunModelSetDefault={onRunModelSetDefault}
             onOpenAddModels={onOpenAddModels}
           />
         )}
@@ -336,13 +301,13 @@ export function OpenClawOnboarding({
             {canDismiss && !modelReady ? (
               <button
                 type="button"
-                onClick={onDismiss}
+                onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}
                 className={cn(
                   "text-[9px] uppercase tracking-[0.16em] transition-colors",
                   surfaceTheme === "light" ? "text-[#8f7664] hover:text-[#6f5949]" : "text-slate-500 hover:text-slate-300"
                 )}
               >
-                Open demo surface
+                {openSurfaceLabel}
               </button>
             ) : null}
           </div>
@@ -376,22 +341,14 @@ export function OpenClawOnboarding({
             ) : (
               <>
                 {stage === "models" && !modelReady ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={onRunModelAutoSetup}
-                    disabled={modelRun.runState === "running"}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onOpenAddModels()}
                     className={secondaryActionClassName(surfaceTheme)}
                   >
-                    {modelRun.runState === "running" ? (
-                      <>
-                        <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        Working...
-                      </>
-                    ) : (
-                      "Auto configure"
-                    )}
+                    Open full Add Models
                   </Button>
                 ) : null}
 
@@ -419,13 +376,13 @@ export function OpenClawOnboarding({
                     }
 
                     if (primaryAction.kind === "set-default") {
-                      onRunModelSetDefault();
+                      onRunModelSetDefault(selectedModelId || undefined);
                       return;
                     }
 
-                    onRunModelAutoSetup();
+                    return;
                   }}
-                  disabled={stageRun.runState === "running"}
+                  disabled={stageRun.runState === "running" || primaryAction.kind === "select-model"}
                   className={cn(
                     "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
                     surfaceTheme === "light"
