@@ -35,6 +35,7 @@ export type MissionControlShellSettingsPanelProps = {
   isSavingGateway: boolean;
   isSavingWorkspaceRoot: boolean;
   isCheckingForUpdates: boolean;
+  updateRunState: UpdateRunState;
   selectedModelId: string;
   modelOnboardingRunState: UpdateRunState;
   gatewayControlAction: GatewayControlAction | null;
@@ -62,6 +63,7 @@ export function MissionControlShellSettingsPanel({
   isSavingGateway,
   isSavingWorkspaceRoot,
   isCheckingForUpdates,
+  updateRunState,
   selectedModelId,
   modelOnboardingRunState,
   gatewayControlAction,
@@ -83,6 +85,7 @@ export function MissionControlShellSettingsPanel({
   const isOpenClawReady = isOpenClawOnboardingModelReady(snapshot);
   const isGatewayControlRunning = gatewayControlAction !== null;
   const isModelActionRunning = modelOnboardingRunState === "running";
+  const isUpdateRunning = updateRunState === "running";
   const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion);
   const settingsSecondaryButtonStyles = settingsButtonClassName(surfaceTheme, "secondary");
   const settingsPrimaryButtonStyles = settingsButtonClassName(surfaceTheme, "primary");
@@ -257,7 +260,16 @@ export function MissionControlShellSettingsPanel({
             hasUpdateAvailable ? settingsWarningSolidButtonStyles : settingsSecondaryButtonStyles
           )}
         >
-          {hasUpdateAvailable ? "Update now" : "Review update"}
+          {isUpdateRunning ? (
+            <>
+              <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" />
+              View progress
+            </>
+          ) : hasUpdateAvailable ? (
+            "Update now"
+          ) : (
+            "Review update"
+          )}
         </button>
       </div>
 

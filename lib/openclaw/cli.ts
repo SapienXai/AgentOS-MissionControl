@@ -3,11 +3,13 @@ import "server-only";
 import { spawn } from "node:child_process";
 
 import {
+  getOpenClawBundledNodeBinPath,
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
 } from "@/lib/openclaw/install";
 
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
+const initialOpenClawBinEnv = process.env.OPENCLAW_BIN?.trim() || "";
 let resolvedOpenClawBin = "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
@@ -300,16 +302,24 @@ export async function resolveOpenClawBin(): Promise<string> {
 }
 
 export function resetOpenClawBinCache() {
+  if (!initialOpenClawBinEnv && process.env.OPENCLAW_BIN === resolvedOpenClawBin) {
+    delete process.env.OPENCLAW_BIN;
+  }
+
   resolvedOpenClawBin = "";
   resolveOpenClawBinPromise = null;
 }
 
 export function getOpenClawBinCandidates() {
+  const envBin = process.env.OPENCLAW_BIN?.trim() || "";
+  const bundledNodeBin = getOpenClawBundledNodeBinPath();
+  const localPrefixBin = getOpenClawLocalPrefixBinPath();
   const candidates = [
-    process.env.OPENCLAW_BIN?.trim() || "",
-    "openclaw",
-    getOpenClawLocalPrefixBinPath(),
-    getOpenClawUserLocalBinPath()
+    envBin && envBin !== localPrefixBin ? envBin : "",
+    bundledNodeBin,
+    localPrefixBin,
+    getOpenClawUserLocalBinPath(),
+    "openclaw"
   ];
 
   return Array.from(new Set(candidates.filter((candidate) => Boolean(candidate))));

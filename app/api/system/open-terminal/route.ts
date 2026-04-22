@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const input = openTerminalSchema.parse(await request.json());
     const command = input.command.trim();
 
-    if (!command.startsWith("openclaw ")) {
+    if (!isOpenClawCommand(command)) {
       throw new Error("Only OpenClaw commands can be opened from AgentOS.");
     }
 
@@ -39,6 +39,11 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+function isOpenClawCommand(command: string) {
+  const executable = command.trim().split(/\s+/, 1)[0];
+  return executable === "openclaw" || executable.endsWith("/openclaw");
 }
 
 async function openMacTerminal(command: string) {

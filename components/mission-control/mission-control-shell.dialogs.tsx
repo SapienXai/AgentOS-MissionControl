@@ -70,7 +70,7 @@ export function MissionControlShellDialogs({
   const updateDialogTitle = resolveUpdateDialogTitle(updateRunState);
   const updateDialogDescription = resolveUpdateDialogDescription(updateRunState);
   const [isOpeningUpdateTerminal, setIsOpeningUpdateTerminal] = useState(false);
-  const canOpenUpdateTerminal = Boolean(updateManualCommand?.trim().startsWith("openclaw "));
+  const canOpenUpdateTerminal = isOpenClawTerminalCommand(updateManualCommand);
 
   const copyUpdateCommand = async () => {
     if (!updateManualCommand) {
@@ -259,7 +259,7 @@ export function MissionControlShellDialogs({
       >
         <DialogContent
           className={cn(
-            "max-w-[468px] gap-5 p-5 sm:p-6",
+            "max-h-[calc(100vh-48px)] max-w-[468px] gap-5 overflow-y-auto p-5 sm:p-6",
             surfaceTheme === "light"
               ? "border-[#d7c5b7] bg-[rgba(252,247,241,0.98)] text-[#4a382c] shadow-[0_30px_80px_rgba(161,125,101,0.2)]"
               : "border-white/10 bg-slate-950/94 text-slate-100"
@@ -313,7 +313,7 @@ export function MissionControlShellDialogs({
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <div
                     className={cn(
                       "rounded-[18px] border px-3 py-3",
@@ -325,6 +325,19 @@ export function MissionControlShellDialogs({
                     </p>
                     <p className="mt-2 font-display text-lg text-inherit">
                       v{snapshot.diagnostics.version || snapshot.diagnostics.latestVersion || "unknown"}
+                    </p>
+                  </div>
+                  <div
+                    className={cn(
+                      "rounded-[18px] border px-3 py-3",
+                      surfaceTheme === "light" ? "border-white/70 bg-white/70" : "border-white/10 bg-slate-950/30"
+                    )}
+                  >
+                    <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
+                      Latest reported
+                    </p>
+                    <p className="mt-2 font-display text-lg text-inherit">
+                      v{snapshot.diagnostics.latestVersion || snapshot.diagnostics.version || "unknown"}
                     </p>
                   </div>
                   <div
@@ -579,10 +592,9 @@ export function MissionControlShellDialogs({
               onClick={() => {
                 onUpdateDialogOpenChange(false);
               }}
-              disabled={isUpdateRunning}
               className={surfaceTheme === "light" ? "border-[#d9c9bc] bg-[#f5ebe3] text-[#6c5647] hover:bg-[#eddccf]" : ""}
             >
-              {isUpdateFinished ? "Done" : "Cancel"}
+              {isUpdateRunning ? "Run in background" : isUpdateFinished ? "Done" : "Cancel"}
             </Button>
             {isUpdateFinished ? null : (
               <Button
@@ -613,4 +625,9 @@ export function MissionControlShellDialogs({
       </Dialog>
     </>
   );
+}
+
+function isOpenClawTerminalCommand(command: string | null) {
+  const executable = command?.trim().split(/\s+/, 1)[0];
+  return executable === "openclaw" || Boolean(executable?.endsWith("/openclaw"));
 }

@@ -16,6 +16,16 @@ export function getOpenClawLocalPrefixBinPath() {
   return path.join(getOpenClawLocalPrefix(), "bin", process.platform === "win32" ? "openclaw.cmd" : "openclaw");
 }
 
+export function getOpenClawBundledNodeBinPath() {
+  return path.join(
+    getOpenClawLocalPrefix(),
+    "tools",
+    "node",
+    "bin",
+    process.platform === "win32" ? "openclaw.cmd" : "openclaw"
+  );
+}
+
 export function getOpenClawUserLocalBinPath() {
   return path.join(os.homedir(), ".local", "bin", process.platform === "win32" ? "openclaw.cmd" : "openclaw");
 }

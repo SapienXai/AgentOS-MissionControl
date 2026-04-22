@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { normalizeControlPlaneSnapshot } from "@/lib/agentos/acl/openclaw";
 import { getOpenClawBinCandidates, parseOpenClawVersion } from "@/lib/openclaw/cli";
 import {
+  getOpenClawBundledNodeBinPath,
   getOpenClawInstallCommand,
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
@@ -171,9 +172,31 @@ test("openclaw version parsing extracts the release tag", () => {
 
 test("openclaw resolver considers local prefix fallbacks", () => {
   const candidates = getOpenClawBinCandidates().map((candidate) => candidate.replaceAll("\\", "/"));
+  const bundledNodeBinIndex = candidates.indexOf(getOpenClawBundledNodeBinPath().replaceAll("\\", "/"));
+  const localPrefixBinIndex = candidates.indexOf(getOpenClawLocalPrefixBinPath().replaceAll("\\", "/"));
 
+  assert.notEqual(bundledNodeBinIndex, -1);
+  assert.notEqual(localPrefixBinIndex, -1);
+  assert.ok(bundledNodeBinIndex < localPrefixBinIndex);
   assert.ok(candidates.includes(getOpenClawLocalPrefixBinPath().replaceAll("\\", "/")));
   assert.ok(candidates.includes(getOpenClawUserLocalBinPath().replaceAll("\\", "/")));
+});
+
+test("openclaw resolver does not let the managed wrapper shadow the bundled node install", () => {
+  const previousOpenClawBin = process.env.OPENCLAW_BIN;
+  process.env.OPENCLAW_BIN = getOpenClawLocalPrefixBinPath();
+
+  try {
+    const candidates = getOpenClawBinCandidates().map((candidate) => candidate.replaceAll("\\", "/"));
+
+    assert.equal(candidates[0], getOpenClawBundledNodeBinPath().replaceAll("\\", "/"));
+  } finally {
+    if (previousOpenClawBin === undefined) {
+      delete process.env.OPENCLAW_BIN;
+    } else {
+      process.env.OPENCLAW_BIN = previousOpenClawBin;
+    }
+  }
 });
 
 test("openclaw onboarding uses the official installer command", () => {

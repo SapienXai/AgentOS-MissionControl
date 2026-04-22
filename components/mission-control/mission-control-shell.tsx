@@ -218,6 +218,7 @@ export function MissionControlShell({
   const fallbackSnapshotRecoveryKeyRef = useRef<string | null>(null);
   const hydratedOnboardingModelIdRef = useRef<string | null>(null);
   const modelOperationToastIdRef = useRef<string | number | null>(null);
+  const updateOperationToastIdRef = useRef<string | number | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
@@ -1092,12 +1093,68 @@ export function MissionControlShell({
   }, [isSettingsOpen]);
 
   const runOpenClawUpdate = async () => {
+    if (updateRunState === "running") {
+      setIsUpdateDialogOpen(true);
+      return;
+    }
+
+    const updateUpdateToast = (description: string) => {
+      updateOperationToastIdRef.current = toast.loading("Updating OpenClaw...", {
+        id: updateOperationToastIdRef.current ?? undefined,
+        description,
+        duration: Infinity,
+        action: {
+          label: "View",
+          onClick: () => setIsUpdateDialogOpen(true)
+        }
+      });
+    };
+    const completeUpdateToast = (ok: boolean, description: string) => {
+      const toastOptions = {
+        id: updateOperationToastIdRef.current ?? undefined,
+        description,
+        duration: ok ? 6000 : 10000,
+        action: {
+          label: "View details",
+          onClick: () => setIsUpdateDialogOpen(true)
+        }
+      };
+
+      if (ok) {
+        toast.success("OpenClaw updated.", toastOptions);
+      } else {
+        toast.error("OpenClaw update failed.", toastOptions);
+      }
+
+      updateOperationToastIdRef.current = null;
+    };
+    let sawUpdateCommandOutput = false;
+    const appendUpdateDoneLog = (event: Extract<OpenClawUpdateStreamEvent, { type: "done" }>) => {
+      appendUpdateLog(`\n> ${event.message}\n`);
+
+      if (sawUpdateCommandOutput) {
+        return;
+      }
+
+      const stdout = event.stdout.trimEnd();
+      const stderr = event.stderr.trimEnd();
+
+      if (stdout) {
+        appendUpdateLog(`\n[stdout]\n${stdout}\n`);
+      }
+
+      if (stderr) {
+        appendUpdateLog(`\n[stderr]\n${stderr}\n`);
+      }
+    };
+
     setIsUpdateDialogOpen(true);
     setUpdateRunState("running");
     setUpdateStatusMessage("Starting OpenClaw update...");
     setUpdateResultMessage(null);
     setUpdateLog("");
     setUpdateManualCommand(null);
+    updateUpdateToast("Starting OpenClaw update...");
 
     try {
       const response = await fetch("/api/update", {
@@ -1145,10 +1202,13 @@ export function MissionControlShell({
             if (event.type === "status") {
               setUpdateStatusMessage(event.message);
               appendUpdateLog(`\n> ${event.message}\n`);
+              updateUpdateToast(event.message);
             } else if (event.type === "log") {
+              sawUpdateCommandOutput = true;
               appendUpdateLog(event.text);
             } else {
               sawDone = true;
+              appendUpdateDoneLog(event);
               setUpdateStatusMessage(null);
               setUpdateResultMessage(event.message);
               setUpdateRunState(event.ok ? "success" : "error");
@@ -1159,13 +1219,9 @@ export function MissionControlShell({
               }
 
               if (event.ok) {
-                toast.success("OpenClaw updated.", {
-                  description: event.message
-                });
+                completeUpdateToast(true, event.message);
               } else {
-                toast.error("OpenClaw update failed.", {
-                  description: event.message
-                });
+                completeUpdateToast(false, event.message);
               }
             }
           }
@@ -1181,6 +1237,7 @@ export function MissionControlShell({
 
         if (event.type === "done") {
           sawDone = true;
+          appendUpdateDoneLog(event);
           setUpdateStatusMessage(null);
           setUpdateResultMessage(event.message);
           setUpdateRunState(event.ok ? "success" : "error");
@@ -1189,6 +1246,8 @@ export function MissionControlShell({
           if (event.snapshot) {
             setSnapshot(event.snapshot);
           }
+
+          completeUpdateToast(event.ok, event.message);
         }
       }
 
@@ -1199,9 +1258,7 @@ export function MissionControlShell({
       setUpdateRunState("error");
       setUpdateStatusMessage(null);
       setUpdateResultMessage(error instanceof Error ? error.message : "OpenClaw update failed.");
-      toast.error("OpenClaw update failed.", {
-        description: error instanceof Error ? error.message : "Unknown update error."
-      });
+      completeUpdateToast(false, error instanceof Error ? error.message : "Unknown update error.");
     }
   };
 
@@ -1366,7 +1423,8 @@ export function MissionControlShell({
 
       const toastOptions = {
         id: modelOperationToastIdRef.current ?? undefined,
-        description
+        description,
+        duration: variant === "message" ? Infinity : 6000
       };
 
       if (variant === "success") {
@@ -2238,6 +2296,7 @@ export function MissionControlShell({
           isSavingGateway={isSavingGateway}
           isSavingWorkspaceRoot={isSavingWorkspaceRoot}
           isCheckingForUpdates={isCheckingForUpdates}
+          updateRunState={updateRunState}
           selectedModelId={selectedOnboardingModelId}
           modelOnboardingRunState={modelOnboardingRunState}
           gatewayControlAction={gatewayControlAction}
@@ -2258,7 +2317,9 @@ export function MissionControlShell({
           onRunModelSetDefault={runModelSetDefault}
           onOpenAddModels={openAddModelsDialog}
           onOpenUpdateDialog={() => {
-            resetUpdateDialogState();
+            if (updateRunState === "idle") {
+              resetUpdateDialogState();
+            }
             setIsUpdateDialogOpen(true);
           }}
           onOpenResetDialog={(target) => {
@@ -2654,6 +2715,7 @@ export function MissionControlShell({
           updateInstallDescriptor={updateInstallDescriptor}
           onUpdateDialogOpenChange={(open) => {
             if (updateRunState === "running") {
+              setIsUpdateDialogOpen(open);
               return;
             }
 
