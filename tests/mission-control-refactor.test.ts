@@ -12,6 +12,7 @@ import {
   buildWorkspaceSelectionStorageKey,
   mergeSnapshotWithOptimisticTasks,
   resolveGatewayDraft,
+  resolveOpenClawInstallSummary,
   resolveOnboardingAction,
   serializeWorkspaceSelection,
   resolveWorkspaceSelection,
@@ -68,6 +69,34 @@ test("control plane helpers normalize snapshot and onboarding fallback", () => {
 
   assert.equal(merged.tasks.length, 1);
   assert.equal(merged.tasks[0].key, "optimistic:req-1");
+});
+
+test("install summary reflects the active install family and root", () => {
+  const localPrefixSnapshot = {
+    diagnostics: {
+      updateRoot: "/Users/kazimakgul/.openclaw/lib/node_modules/openclaw",
+      updateInstallKind: "package",
+      updatePackageManager: "npm"
+    }
+  } as unknown as MissionControlSnapshot;
+  const gitSnapshot = {
+    diagnostics: {
+      updateRoot: "/Users/kazimakgul/openclaw",
+      updateInstallKind: "git",
+      updatePackageManager: "pnpm"
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveOpenClawInstallSummary(localPrefixSnapshot).label, "Local prefix · npm");
+  assert.equal(
+    resolveOpenClawInstallSummary(localPrefixSnapshot).detail,
+    "Install root: ~/.openclaw/lib/node_modules/openclaw · Updater: npm"
+  );
+  assert.equal(resolveOpenClawInstallSummary(gitSnapshot).label, "Git checkout");
+  assert.equal(
+    resolveOpenClawInstallSummary(gitSnapshot).detail,
+    "Install root: ~/openclaw · Updater: pnpm"
+  );
 });
 
 test("workspace selection helpers keep the last valid workspace", () => {

@@ -38,6 +38,7 @@ import {
   resolveModelOnboardingActionCopy,
   resolveModelOnboardingStartPhase,
   resolveOnboardingAction,
+  resolveOpenClawInstallSummary,
   resolveTaskPrompt,
   buildWorkspaceSelectionStorageKey,
   resolveWorkspaceRootDraft,
@@ -255,12 +256,7 @@ export function MissionControlShell({
   ).length;
   const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
   const isOpenClawReady = resolveOpenClawSetupReady(snapshot);
-  const updateInstallDescriptor = [
-    snapshot.diagnostics.updatePackageManager,
-    snapshot.diagnostics.updateInstallKind
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
   const shouldAutoShowOnboarding =
@@ -2325,6 +2321,7 @@ export function MissionControlShell({
           onOpenResetDialog={(target) => {
             void openResetDialog(target);
           }}
+          installSummary={openClawInstallSummary}
         />
       </div>
 
@@ -2712,7 +2709,7 @@ export function MissionControlShell({
           updateLog={updateLog}
           updateManualCommand={updateManualCommand}
           activeRuntimeCount={activeRuntimeCount}
-          updateInstallDescriptor={updateInstallDescriptor}
+          updateInstallSummary={openClawInstallSummary}
           onUpdateDialogOpenChange={(open) => {
             if (updateRunState === "running") {
               setIsUpdateDialogOpen(open);

@@ -19,7 +19,11 @@ import {
   resolveUpdateResultIconWrapClassName,
   resolveUpdateResultPanelClassName
 } from "@/components/mission-control/mission-control-shell.utils";
-import type { MissionControlSnapshot, TaskRecord } from "@/lib/agentos/contracts";
+import type {
+  MissionControlSnapshot,
+  TaskRecord
+} from "@/lib/agentos/contracts";
+import type { OpenClawInstallSummary } from "@/components/mission-control/mission-control-shell.utils";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -42,7 +46,7 @@ export function MissionControlShellDialogs({
   updateLog,
   updateManualCommand,
   activeRuntimeCount,
-  updateInstallDescriptor,
+  updateInstallSummary,
   onUpdateDialogOpenChange,
   onRunOpenClawUpdate
 }: {
@@ -61,7 +65,7 @@ export function MissionControlShellDialogs({
   updateLog: string;
   updateManualCommand: string | null;
   activeRuntimeCount: number;
-  updateInstallDescriptor: string | null;
+  updateInstallSummary: OpenClawInstallSummary;
   onUpdateDialogOpenChange: (open: boolean) => void;
   onRunOpenClawUpdate: () => void;
 }) {
@@ -347,9 +351,12 @@ export function MissionControlShellDialogs({
                     )}
                   >
                     <p className={surfaceTheme === "light" ? "text-[10px] uppercase tracking-[0.22em] text-[#8d725f]" : "text-[10px] uppercase tracking-[0.22em] text-slate-500"}>
-                      Install mode
+                      Detected install
                     </p>
-                    <p className="mt-2 text-sm font-medium text-inherit">{updateInstallDescriptor || "unknown"}</p>
+                    <p className="mt-2 text-sm font-medium text-inherit">{updateInstallSummary.label}</p>
+                    <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
+                      {updateInstallSummary.detail}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -512,11 +519,13 @@ export function MissionControlShellDialogs({
                       surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
                     )}
                   >
-                    Install mode
+                    Detected install
                   </p>
-                  <p className="mt-2 text-sm font-medium leading-6 text-inherit">{updateInstallDescriptor || "unknown"}</p>
+                  <p className="mt-2 text-sm font-medium leading-6 text-inherit">
+                    {updateInstallSummary.label}
+                  </p>
                   <p className={surfaceTheme === "light" ? "mt-1 text-xs text-[#8b7262]" : "mt-1 text-xs text-slate-400"}>
-                    {snapshot.diagnostics.updateRoot ? "Install root detected." : "Install root unavailable."}
+                    {updateInstallSummary.detail}
                   </p>
                 </div>
               </div>

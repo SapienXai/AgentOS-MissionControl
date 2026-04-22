@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { OpenClawInstallSummary } from "@/components/mission-control/mission-control-shell.utils";
 import type {
   AddModelsProviderId,
   MissionControlSnapshot,
@@ -53,6 +54,7 @@ export type MissionControlShellSettingsPanelProps = {
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenUpdateDialog: () => void;
   onOpenResetDialog: (target: ResetTarget) => void;
+  installSummary: OpenClawInstallSummary;
 };
 
 export function MissionControlShellSettingsPanel({
@@ -80,7 +82,8 @@ export function MissionControlShellSettingsPanel({
   onRunModelSetDefault,
   onOpenAddModels,
   onOpenUpdateDialog,
-  onOpenResetDialog
+  onOpenResetDialog,
+  installSummary
 }: MissionControlShellSettingsPanelProps) {
   const isOpenClawReady = isOpenClawOnboardingModelReady(snapshot);
   const isGatewayControlRunning = gatewayControlAction !== null;
@@ -320,6 +323,41 @@ export function MissionControlShellSettingsPanel({
           {snapshot.diagnostics.updateInfo?.trim() ||
             "No additional update message was returned in the latest OpenClaw status snapshot."}
         </p>
+        <div
+          className={cn(
+            "mt-2 rounded-[14px] border px-2.5 py-2",
+            surfaceTheme === "light"
+              ? "border-[#ead8c8] bg-white"
+              : "border-white/8 bg-white/[0.03]"
+          )}
+        >
+          <p
+            className={cn(
+              "text-[8px] uppercase tracking-[0.18em]",
+              surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+            )}
+          >
+            Detected install
+          </p>
+          <p
+            className={cn(
+              "mt-1.5 truncate font-display text-[0.86rem]",
+              surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
+            )}
+            title={installSummary.label}
+          >
+            {installSummary.label}
+          </p>
+          <p
+            className={cn(
+              "mt-1 text-[10px] leading-[1.05rem]",
+              surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+            )}
+            title={installSummary.root || undefined}
+          >
+            {installSummary.detail}
+          </p>
+        </div>
         <div className="mt-3">
           <Button
             type="button"

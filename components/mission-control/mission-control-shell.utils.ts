@@ -96,6 +96,98 @@ export function resolveUpdateResultIconWrapClassName(runState: UpdateRunState, s
     : "border-rose-300/25 bg-rose-300/10 text-rose-200";
 }
 
+export type OpenClawInstallSummary = {
+  label: string;
+  detail: string;
+  root: string | null;
+};
+
+function isLocalPrefixRoot(root: string | null) {
+  return Boolean(root && /[\\/]\.openclaw([\\/]|$)/.test(root));
+}
+
+function isNodeModulesRoot(root: string | null) {
+  return Boolean(root && /[\\/]node_modules[\\/]/.test(root));
+}
+
+function formatPackageManagerLabel(packageManager: string | null) {
+  return packageManager?.trim() || null;
+}
+
+function resolveOpenClawInstallLabel(params: {
+  root: string | null;
+  installKind: string | null;
+  packageManager: string | null;
+}) {
+  const { root, installKind, packageManager } = params;
+  const managerLabel = formatPackageManagerLabel(packageManager);
+
+  if (installKind === "git") {
+    return "Git checkout";
+  }
+
+  if (installKind === "package") {
+    if (isLocalPrefixRoot(root)) {
+      return managerLabel ? `Local prefix · ${managerLabel}` : "Local prefix";
+    }
+
+    if (isNodeModulesRoot(root)) {
+      return managerLabel ? `${managerLabel} package` : "Package install";
+    }
+
+    return managerLabel ? `${managerLabel} package` : "Package install";
+  }
+
+  if (isLocalPrefixRoot(root)) {
+    return managerLabel ? `Local prefix · ${managerLabel}` : "Local prefix";
+  }
+
+  if (isNodeModulesRoot(root)) {
+    return managerLabel ? `${managerLabel} package` : "Package install";
+  }
+
+  if (managerLabel) {
+    return `${managerLabel} package`;
+  }
+
+  if (root) {
+    return "Detected install";
+  }
+
+  return "Install unavailable";
+}
+
+export function resolveOpenClawInstallSummary(snapshot: Pick<MissionControlSnapshot, "diagnostics">): OpenClawInstallSummary {
+  const root = snapshot.diagnostics.updateRoot?.trim() || null;
+  const installKind = snapshot.diagnostics.updateInstallKind?.trim().toLowerCase() || null;
+  const packageManager = snapshot.diagnostics.updatePackageManager?.trim().toLowerCase() || null;
+  const label = resolveOpenClawInstallLabel({
+    root,
+    installKind,
+    packageManager
+  });
+
+  const detailParts: string[] = [];
+
+  if (root) {
+    detailParts.push(`Install root: ${compactPath(root)}`);
+  }
+
+  if (packageManager) {
+    detailParts.push(`Updater: ${packageManager}`);
+  }
+
+  if (detailParts.length === 0) {
+    detailParts.push("Install root unavailable.");
+  }
+
+  return {
+    label,
+    detail: detailParts.join(" · "),
+    root
+  };
+}
+
 export function resolveTaskPrompt(task: TaskRecord) {
   if (task.mission?.trim()) {
     return task.mission.trim();
