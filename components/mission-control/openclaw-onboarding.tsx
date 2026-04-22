@@ -38,7 +38,8 @@ import {
 import {
   LaunchpadStage,
   ModelStage,
-  SystemStage
+  SystemStage,
+  type ModelSwitchFeedback
 } from "@/components/mission-control/openclaw-onboarding.stages";
 
 export function OpenClawOnboarding({
@@ -52,9 +53,11 @@ export function OpenClawOnboarding({
   modelPhase,
   systemRun,
   modelRun,
+  modelSwitchFeedback,
   selectedModelId,
   discoveredModels,
   onSelectedModelIdChange,
+  onClearModelSwitchFeedback,
   onRunSystemSetup,
   onRunModelSetDefault,
   onOpenAddModels,
@@ -76,9 +79,11 @@ export function OpenClawOnboarding({
   modelPhase: OpenClawModelOnboardingPhase | null;
   systemRun: StageRunDetails;
   modelRun: StageRunDetails;
+  modelSwitchFeedback: ModelSwitchFeedback;
   selectedModelId: string;
   discoveredModels: DiscoveredModelCandidate[];
   onSelectedModelIdChange: (value: string) => void;
+  onClearModelSwitchFeedback: () => void;
   onRunSystemSetup: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
@@ -277,7 +282,9 @@ export function OpenClawOnboarding({
             run={stageRun}
             modelPhase={modelPhase}
             selectedModelId={selectedModelId}
+            modelSwitchFeedback={modelSwitchFeedback}
             onSelectedModelIdChange={onSelectedModelIdChange}
+            onClearModelSwitchFeedback={onClearModelSwitchFeedback}
             onOpenAddModels={onOpenAddModels}
           />
         )}

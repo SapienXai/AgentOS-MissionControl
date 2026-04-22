@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Check, Copy, LoaderCircle, SquareTerminal } from "lucide-react";
+import { ArrowRight, Check, Copy, LoaderCircle, Route, SquareTerminal } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 
@@ -19,7 +19,15 @@ import {
   type StepState
 } from "@/components/mission-control/openclaw-onboarding.utils";
 import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/openclaw-onboarding-provider-flow";
+import { formatModelLabel } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
+
+export type ModelSwitchFeedback = {
+  phase: "idle" | "saving" | "success" | "error";
+  previousModelId: string | null;
+  nextModelId: string | null;
+  message: string | null;
+};
 
 export function SystemStage({
   steps,
@@ -132,7 +140,9 @@ export function ModelStage({
   run,
   modelPhase,
   selectedModelId,
+  modelSwitchFeedback,
   onSelectedModelIdChange,
+  onClearModelSwitchFeedback,
   onOpenAddModels
 }: {
   snapshot: MissionControlSnapshot;
@@ -143,9 +153,11 @@ export function ModelStage({
   run: StageRunDetails;
   modelPhase: OpenClawModelOnboardingPhase | null;
   selectedModelId: string;
+  modelSwitchFeedback: ModelSwitchFeedback;
   onSelectedModelIdChange: (value: string) => void;
+  onClearModelSwitchFeedback: () => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
-  }) {
+}) {
   const [detailsOpen, setDetailsOpen] = useState(true);
   const availableModels = useMemo(
     () => snapshot.models.filter((model) => model.available !== false && !model.missing),
@@ -154,6 +166,15 @@ export function ModelStage({
   const selectedModelLabel = useMemo(
     () => resolveSelectedModelLabel(selectedModelId, availableModels),
     [availableModels, selectedModelId]
+  );
+  const defaultModelId =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    null;
+  const defaultModelLabel = resolveModelDisplayLabel(defaultModelId, availableModels);
+  const switchTargetLabel = resolveModelDisplayLabel(selectedModelId, availableModels);
+  const hasPendingModelSwitch = Boolean(
+    selectedModelId.trim() && selectedModelId.trim() !== (defaultModelId?.trim() ?? "")
   );
   const buildScene = useMemo(
     () =>
@@ -181,8 +202,35 @@ export function ModelStage({
           phaseLabel={phaseLabel}
           buildScene={buildScene}
         />
+      ) : modelSwitchFeedback.phase !== "idle" ? (
+        <>
+          <ModelSwitchScene
+            surfaceTheme={surfaceTheme}
+            feedback={modelSwitchFeedback}
+            defaultModelLabel={resolveModelDisplayLabel(modelSwitchFeedback.previousModelId, availableModels)}
+            nextModelLabel={resolveModelDisplayLabel(modelSwitchFeedback.nextModelId, availableModels)}
+            onChangeAgain={onClearModelSwitchFeedback}
+          />
+
+          <StageConsole
+            surfaceTheme={surfaceTheme}
+            statusCopy={statusCopy}
+            showDetails={showDetails}
+            phaseLabel={phaseLabel}
+            detailsOpen={detailsOpen}
+            onDetailsOpenChange={setDetailsOpen}
+            run={run}
+          />
+        </>
       ) : (
         <>
+          <ModelDefaultSummary
+            surfaceTheme={surfaceTheme}
+            defaultModelLabel={defaultModelLabel}
+            switchTargetLabel={switchTargetLabel}
+            hasPendingModelSwitch={hasPendingModelSwitch}
+          />
+
           <OpenClawOnboardingProviderFlow
             snapshot={snapshot}
             selectedModelId={selectedModelId}
@@ -203,6 +251,276 @@ export function ModelStage({
       )}
     </>
   );
+}
+
+function ModelDefaultSummary({
+  surfaceTheme,
+  defaultModelLabel,
+  switchTargetLabel,
+  hasPendingModelSwitch
+}: {
+  surfaceTheme: SurfaceTheme;
+  defaultModelLabel: string | null;
+  switchTargetLabel: string | null;
+  hasPendingModelSwitch: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "mt-2 rounded-[14px] border px-2.5 py-2",
+        surfaceTheme === "light"
+          ? "border-[#e8d8ca] bg-[#fffaf6]"
+          : "border-white/8 bg-white/[0.03]"
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p
+            className={cn(
+              "text-[7px] uppercase tracking-[0.16em]",
+              surfaceTheme === "light" ? "text-[#9a7a65]" : "text-slate-500"
+            )}
+          >
+            Current default
+          </p>
+          <p className={cn("mt-1 truncate text-[10px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
+            {defaultModelLabel ?? "Not set"}
+          </p>
+        </div>
+
+        {hasPendingModelSwitch ? (
+          <div className="min-w-0 text-right">
+            <p
+              className={cn(
+                "text-[7px] uppercase tracking-[0.16em]",
+                surfaceTheme === "light" ? "text-[#9a7a65]" : "text-slate-500"
+              )}
+            >
+              Switch to
+            </p>
+            <p className={cn("mt-1 truncate text-[10px]", surfaceTheme === "light" ? "text-[#7a4d2d]" : "text-cyan-100")}>
+              {switchTargetLabel}
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ModelSwitchScene({
+  surfaceTheme,
+  feedback,
+  defaultModelLabel,
+  nextModelLabel,
+  onChangeAgain
+}: {
+  surfaceTheme: SurfaceTheme;
+  feedback: ModelSwitchFeedback;
+  defaultModelLabel: string | null;
+  nextModelLabel: string | null;
+  onChangeAgain: () => void;
+}) {
+  const isLight = surfaceTheme === "light";
+  const isRunning = feedback.phase === "saving";
+  const isSuccess = feedback.phase === "success";
+  const isError = feedback.phase === "error";
+  const title = isSuccess
+    ? "Default model updated"
+    : isError
+      ? "Default model could not be changed"
+      : "Switching default model";
+  const detail = feedback.message ||
+    (isSuccess
+      ? "AgentOS will use this route for new actions."
+      : isError
+        ? "Review the log below, then try again."
+        : "Saving the route, refreshing OpenClaw config, and updating AgentOS.");
+  const steps = [
+    "Saving model route",
+    "Refreshing OpenClaw config",
+    "Verifying selected provider",
+    "Updating AgentOS snapshot"
+  ];
+
+  return (
+    <div
+      className={cn(
+        "mt-3 overflow-hidden rounded-[22px] border",
+        isLight
+          ? "border-[#e1d0c2] bg-[linear-gradient(180deg,rgba(255,250,246,0.98),rgba(248,240,232,0.98))]"
+          : "border-cyan-300/16 bg-[radial-gradient(circle_at_top,rgba(16,28,44,0.98),rgba(6,10,18,0.98)_72%)]"
+      )}
+    >
+      <div className="relative isolate min-h-[300px] overflow-hidden px-4 py-4 text-center">
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-0",
+            isLight
+              ? "bg-[radial-gradient(circle_at_50%_0%,rgba(232,186,151,0.22),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.4),transparent_48%)]"
+              : "bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.18),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.04),transparent_48%)]"
+          )}
+        />
+
+        <div className="relative z-[1] flex flex-col items-center">
+          <div className="relative flex h-20 w-20 items-center justify-center">
+            {isRunning ? (
+              <>
+                <motion.div
+                  aria-hidden="true"
+                  className={cn("absolute h-20 w-20 rounded-full border", isLight ? "border-[#d1a98b]" : "border-cyan-200/24")}
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+                />
+                <motion.div
+                  aria-hidden="true"
+                  className={cn("absolute h-14 w-14 rounded-full border border-dashed", isLight ? "border-[#c8946f]" : "border-cyan-200/40")}
+                  animate={{ rotate: -360 }}
+                  transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                />
+              </>
+            ) : null}
+            <span
+              className={cn(
+                "relative z-[1] inline-flex h-12 w-12 items-center justify-center rounded-full border",
+                isSuccess
+                  ? isLight
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                    : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
+                  : isError
+                    ? isLight
+                      ? "border-rose-300 bg-rose-50 text-rose-700"
+                      : "border-rose-300/25 bg-rose-300/10 text-rose-200"
+                    : isLight
+                      ? "border-[#d7b59a] bg-white text-[#9a6a48]"
+                      : "border-cyan-300/20 bg-cyan-300/10 text-cyan-100"
+              )}
+            >
+              {isSuccess ? <Check className="h-5 w-5" /> : isRunning ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Route className="h-5 w-5" />}
+            </span>
+          </div>
+
+          <p
+            className={cn(
+              "mt-3 text-[8px] uppercase tracking-[0.22em]",
+              isLight ? "text-[#94735e]" : "text-cyan-200/70"
+            )}
+          >
+            Model route
+          </p>
+          <h3 className={cn("mt-1 text-[17px] font-medium tracking-[-0.03em]", isLight ? "text-[#2d2118]" : "text-white")}>
+            {title}
+          </h3>
+          <p className={cn("mt-1 max-w-[320px] text-[10px] leading-[1rem]", isLight ? "text-[#6d5647]" : "text-slate-300")}>
+            {detail}
+          </p>
+
+          <div
+            className={cn(
+              "mt-4 grid w-full gap-2 rounded-[16px] border px-3 py-3 text-left",
+              isLight ? "border-[#ead8c8] bg-white/70" : "border-white/8 bg-white/[0.04]"
+            )}
+          >
+            <ModelSwitchLine label="Previous" value={defaultModelLabel ?? "Not set"} surfaceTheme={surfaceTheme} muted />
+            <ModelSwitchLine label="New default" value={nextModelLabel ?? "Not selected"} surfaceTheme={surfaceTheme} />
+          </div>
+
+          {isRunning ? (
+            <div className="mt-4 grid w-full gap-1.5 text-left">
+              {steps.map((step, index) => (
+                <div
+                  key={step}
+                  className={cn(
+                    "flex items-center gap-2 rounded-[12px] border px-2.5 py-2",
+                    isLight ? "border-[#ead8c8] bg-white/55" : "border-white/8 bg-white/[0.03]"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-flex h-4 w-4 items-center justify-center rounded-full border text-[8px]",
+                      index === 0
+                        ? isLight
+                          ? "border-[#c8946f] bg-[#f8eadf] text-[#8c5d3d]"
+                          : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"
+                        : isLight
+                          ? "border-[#e0cec0] bg-white text-[#9a7f6c]"
+                          : "border-white/10 bg-white/[0.03] text-slate-500"
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+                  <p className={cn("text-[10px]", isLight ? "text-[#5f4b3e]" : "text-slate-300")}>{step}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {!isRunning ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={onChangeAgain}
+              className={cn("mt-4 h-8 rounded-full px-3 text-[10px]", secondaryActionClassName(surfaceTheme))}
+            >
+              Change again
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModelSwitchLine({
+  label,
+  value,
+  surfaceTheme,
+  muted = false
+}: {
+  label: string;
+  value: string;
+  surfaceTheme: SurfaceTheme;
+  muted?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span
+        className={cn(
+          "text-[7px] uppercase tracking-[0.16em]",
+          surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+        )}
+      >
+        {label}
+      </span>
+      <span
+        className={cn(
+          "min-w-0 truncate text-right text-[10px]",
+          muted
+            ? surfaceTheme === "light"
+              ? "text-[#8a7261]"
+              : "text-slate-400"
+            : surfaceTheme === "light"
+              ? "text-[#3e2f24]"
+              : "text-white"
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function resolveModelDisplayLabel(
+  modelId: string | null | undefined,
+  availableModels: Array<{ id: string; name: string; provider: string }>
+) {
+  if (!modelId?.trim()) {
+    return null;
+  }
+
+  return resolveSelectedModelLabel(modelId, availableModels) ?? formatModelLabel(modelId);
 }
 
 export function LaunchpadStage({

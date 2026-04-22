@@ -13,6 +13,7 @@ import { CommandBar } from "@/components/mission-control/command-bar";
 import { InspectorPanel } from "@/components/mission-control/inspector-panel";
 import { MissionControlShellDialogs } from "@/components/mission-control/mission-control-shell.dialogs";
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
+import type { ModelSwitchFeedback } from "@/components/mission-control/openclaw-onboarding.stages";
 import { ResetDialog } from "@/components/mission-control/reset-dialog";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
@@ -113,6 +114,12 @@ const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
 const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
+const initialModelSwitchFeedback: ModelSwitchFeedback = {
+  phase: "idle",
+  previousModelId: null,
+  nextModelId: null,
+  message: null
+};
 
 export function MissionControlShell({
   initialSnapshot
@@ -188,6 +195,8 @@ export function MissionControlShell({
   const [modelOnboardingLog, setModelOnboardingLog] = useState("");
   const [modelOnboardingManualCommand, setModelOnboardingManualCommand] = useState<string | null>(null);
   const [modelOnboardingDocsUrl, setModelOnboardingDocsUrl] = useState<string | null>(null);
+  const [modelSwitchFeedback, setModelSwitchFeedback] =
+    useState<ModelSwitchFeedback>(initialModelSwitchFeedback);
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
   const [isOnboardingForcedOpen, setIsOnboardingForcedOpen] = useState(false);
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
@@ -208,6 +217,7 @@ export function MissionControlShell({
   const [loadedWorkspaceSelectionRoot, setLoadedWorkspaceSelectionRoot] = useState<string | null>(null);
   const fallbackSnapshotRecoveryKeyRef = useRef<string | null>(null);
   const hydratedOnboardingModelIdRef = useRef<string | null>(null);
+  const modelOperationToastIdRef = useRef<string | number | null>(null);
   const activeChatAgentId =
     isInspectorOpen && activeInspectorTab === "chat" ? selectedNodeId : null;
   const uiSnapshot = useMemo(
@@ -1328,6 +1338,48 @@ export function MissionControlShell({
       | { intent: Extract<ModelOnboardingIntent, "login-provider">; provider: string }
   ) => {
     const actionCopy = resolveModelOnboardingActionCopy(payload.intent);
+    const previousDefaultModelId =
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+      snapshot.diagnostics.modelReadiness.defaultModel ||
+      null;
+    const shouldAutoEnterAfterSetDefault =
+      payload.intent === "set-default" && snapshot.workspaces.length === 0;
+    const updateSetDefaultToast = (description: string) => {
+      if (payload.intent !== "set-default") {
+        return;
+      }
+
+      modelOperationToastIdRef.current = toast.loading("Setting default model...", {
+        id: modelOperationToastIdRef.current ?? undefined,
+        description,
+        duration: Infinity
+      });
+    };
+    const completeSetDefaultToast = (
+      variant: "success" | "message" | "error",
+      title: string,
+      description: string
+    ) => {
+      if (payload.intent !== "set-default") {
+        return false;
+      }
+
+      const toastOptions = {
+        id: modelOperationToastIdRef.current ?? undefined,
+        description
+      };
+
+      if (variant === "success") {
+        toast.success(title, toastOptions);
+      } else if (variant === "message") {
+        toast.message(title, toastOptions);
+      } else {
+        toast.error(title, toastOptions);
+      }
+
+      modelOperationToastIdRef.current = null;
+      return true;
+    };
 
     setIsOnboardingDismissed(false);
     setOnboardingStage("models");
@@ -1338,6 +1390,17 @@ export function MissionControlShell({
     setModelOnboardingManualCommand(null);
     setModelOnboardingDocsUrl(null);
     setModelOnboardingLog("");
+    setModelSwitchFeedback(
+      payload.intent === "set-default"
+        ? {
+            phase: "saving",
+            previousModelId: previousDefaultModelId,
+            nextModelId: payload.modelId,
+            message: actionCopy.statusMessage
+          }
+        : initialModelSwitchFeedback
+    );
+    updateSetDefaultToast(actionCopy.statusMessage);
 
     try {
       const response = await fetch("/api/onboarding/models", {
@@ -1384,6 +1447,15 @@ export function MissionControlShell({
               setModelOnboardingPhase(event.phase);
               setModelOnboardingStatusMessage(event.message);
               appendModelOnboardingLog(`\n> ${event.message}\n`);
+              if (payload.intent === "set-default") {
+                updateSetDefaultToast(event.message);
+                setModelSwitchFeedback({
+                  phase: "saving",
+                  previousModelId: previousDefaultModelId,
+                  nextModelId: payload.modelId,
+                  message: event.message
+                });
+              }
             } else if (event.type === "log") {
               appendModelOnboardingLog(event.text);
             } else {
@@ -1395,17 +1467,27 @@ export function MissionControlShell({
               setModelOnboardingDocsUrl(event.docsUrl ?? null);
               setModelOnboardingRunState(event.ok ? "success" : "error");
               applyDiscoveredModels(event.discoveredModels);
+              if (payload.intent === "set-default") {
+                setModelSwitchFeedback({
+                  phase: event.ok ? "success" : "error",
+                  previousModelId: previousDefaultModelId,
+                  nextModelId: payload.modelId,
+                  message: event.message
+                });
+              }
 
               if (event.snapshot) {
                 setSnapshot(event.snapshot);
               }
 
               if (event.ok) {
-                toast.success(actionCopy.successTitle, {
-                  description: event.message
-                });
+                if (!completeSetDefaultToast("success", actionCopy.successTitle, event.message)) {
+                  toast.success(actionCopy.successTitle, {
+                    description: event.message
+                  });
+                }
 
-                if (payload.intent === "set-default") {
+                if (payload.intent === "set-default" && shouldAutoEnterAfterSetDefault) {
                   dismissOnboarding();
                   const createdWorkspaceId =
                     event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
@@ -1419,13 +1501,17 @@ export function MissionControlShell({
                   }
                 }
               } else if (event.phase === "authenticating" && event.manualCommand) {
-                toast.message("Continue in terminal.", {
-                  description: event.message
-                });
+                if (!completeSetDefaultToast("message", "Continue in terminal.", event.message)) {
+                  toast.message("Continue in terminal.", {
+                    description: event.message
+                  });
+                }
               } else {
-                toast.error(actionCopy.errorTitle, {
-                  description: event.message
-                });
+                if (!completeSetDefaultToast("error", actionCopy.errorTitle, event.message)) {
+                  toast.error(actionCopy.errorTitle, {
+                    description: event.message
+                  });
+                }
               }
             }
           }
@@ -1448,12 +1534,28 @@ export function MissionControlShell({
           setModelOnboardingDocsUrl(event.docsUrl ?? null);
           setModelOnboardingRunState(event.ok ? "success" : "error");
           applyDiscoveredModels(event.discoveredModels);
+          if (payload.intent === "set-default") {
+            setModelSwitchFeedback({
+              phase: event.ok ? "success" : "error",
+              previousModelId: previousDefaultModelId,
+              nextModelId: payload.modelId,
+              message: event.message
+            });
+          }
 
           if (event.snapshot) {
             setSnapshot(event.snapshot);
           }
 
-          if (event.ok && payload.intent === "set-default") {
+          if (event.ok) {
+            completeSetDefaultToast("success", actionCopy.successTitle, event.message);
+          } else if (event.phase === "authenticating" && event.manualCommand) {
+            completeSetDefaultToast("message", "Continue in terminal.", event.message);
+          } else {
+            completeSetDefaultToast("error", actionCopy.errorTitle, event.message);
+          }
+
+          if (event.ok && payload.intent === "set-default" && shouldAutoEnterAfterSetDefault) {
             dismissOnboarding();
             const createdWorkspaceId = event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
 
@@ -1472,14 +1574,25 @@ export function MissionControlShell({
         throw new Error("Model onboarding stream ended unexpectedly.");
       }
     } catch (error) {
+      if (payload.intent === "set-default") {
+        setModelSwitchFeedback({
+          phase: "error",
+          previousModelId: previousDefaultModelId,
+          nextModelId: payload.modelId,
+          message: error instanceof Error ? error.message : "Default model save failed."
+        });
+      }
+      const errorMessage = error instanceof Error ? error.message : "Unknown model onboarding error.";
       setModelOnboardingRunState("error");
       setModelOnboardingStatusMessage(null);
       setModelOnboardingResultMessage(
         error instanceof Error ? error.message : "Model onboarding failed."
       );
-      toast.error(actionCopy.errorTitle, {
-        description: error instanceof Error ? error.message : "Unknown model onboarding error."
-      });
+      if (!completeSetDefaultToast("error", actionCopy.errorTitle, errorMessage)) {
+        toast.error(actionCopy.errorTitle, {
+          description: errorMessage
+        });
+      }
     }
   };
 
@@ -2426,9 +2539,11 @@ export function MissionControlShell({
               manualCommand: modelOnboardingManualCommand,
               docsUrl: modelOnboardingDocsUrl
             }}
+            modelSwitchFeedback={modelSwitchFeedback}
             selectedModelId={selectedOnboardingModelId}
             discoveredModels={discoveredModels}
             onSelectedModelIdChange={setSelectedOnboardingModelId}
+            onClearModelSwitchFeedback={() => setModelSwitchFeedback(initialModelSwitchFeedback)}
             onRunSystemSetup={runOpenClawOnboarding}
             onRunModelSetDefault={runModelSetDefault}
             onOpenAddModels={openAddModelsDialog}
