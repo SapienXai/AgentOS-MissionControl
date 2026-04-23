@@ -1,6 +1,6 @@
 {
   "name": "@sapienx/agentos",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "AgentOS control plane launcher",
   "type": "module",
   "bin": {
