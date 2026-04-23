@@ -79,6 +79,7 @@ export type RuntimeNodeData = Record<string, unknown> & {
 
 export type TaskNodeData = Record<string, unknown> & {
   task: TaskRecord;
+  workspacePath?: string;
   emphasis: boolean;
   relativeTimeReferenceMs: number;
   pendingCreation?: boolean;

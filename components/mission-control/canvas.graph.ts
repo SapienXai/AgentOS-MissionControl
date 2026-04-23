@@ -255,6 +255,7 @@ export function buildCanvasGraph(
           selected: false,
           data: {
             task,
+            workspacePath: workspace.path,
             emphasis: isFocusMode ? true : !activeWorkspaceId || activeWorkspaceId === workspace.id,
             relativeTimeReferenceMs,
             pendingCreation: isBootstrapTask,

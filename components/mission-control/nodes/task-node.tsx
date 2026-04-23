@@ -427,6 +427,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
                             url={"url" in event ? event.url : null}
                             filePath={"filePath" in event ? event.filePath : null}
                             displayPath={"displayPath" in event ? event.displayPath : null}
+                            basePath={data.workspacePath}
                             compact
                           />
                         </div>

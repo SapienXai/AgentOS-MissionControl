@@ -12,20 +12,45 @@ export const dynamic = "force-dynamic";
 const execFileAsync = promisify(execFile);
 
 const revealSchema = z.object({
-  path: z.string().min(1)
+  path: z.string().min(1),
+  basePath: z.string().min(1).optional().nullable()
 });
 
 export async function POST(request: Request) {
   try {
     const payload = revealSchema.parse(await request.json());
-    const targetPath = path.resolve(payload.path);
+    const rawTargetPath = payload.path.trim();
+    const basePath = payload.basePath?.trim();
+    const targetPath =
+      path.isAbsolute(rawTargetPath) || !basePath
+        ? rawTargetPath
+        : path.resolve(basePath, rawTargetPath);
+
+    if (!path.isAbsolute(rawTargetPath) && !basePath) {
+      throw new Error("Workspace path is required for relative file paths.");
+    }
 
     if (!path.isAbsolute(targetPath)) {
       throw new Error("File path must be absolute.");
     }
 
-    await access(targetPath);
-    await revealFile(targetPath);
+    if (basePath && !path.isAbsolute(basePath)) {
+      throw new Error("Base path must be absolute.");
+    }
+
+    const resolvedTargetPath = path.resolve(targetPath);
+
+    if (basePath) {
+      const resolvedBasePath = path.resolve(basePath);
+      const relativeToBase = path.relative(resolvedBasePath, resolvedTargetPath);
+
+      if (relativeToBase.startsWith("..") || path.isAbsolute(relativeToBase)) {
+        throw new Error("File path must stay within the workspace.");
+      }
+    }
+
+    await access(resolvedTargetPath);
+    await revealFile(resolvedTargetPath);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

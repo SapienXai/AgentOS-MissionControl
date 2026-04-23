@@ -13,6 +13,7 @@ type InteractiveContentProps = {
   url?: string | null;
   filePath?: string | null;
   displayPath?: string | null;
+  basePath?: string | null;
   compact?: boolean;
 };
 
@@ -34,6 +35,7 @@ export function InteractiveContent({
   url,
   filePath,
   displayPath,
+  basePath,
   compact = false
 }: InteractiveContentProps) {
   const urls = collectUrls(text, url);
@@ -85,7 +87,7 @@ export function InteractiveContent({
               )}
             onClick={(event) => {
               event.stopPropagation();
-                void revealLocalFile(reference.path);
+                void revealLocalFile(reference.path, basePath);
               }}
             >
               <FolderOpenDot className={cn("h-3 w-3 shrink-0", compact && "h-2.5 w-2.5")} />
@@ -283,14 +285,14 @@ function summarizeUrl(value: string) {
   }
 }
 
-async function revealLocalFile(targetPath: string) {
+async function revealLocalFile(targetPath: string, basePath?: string | null) {
   try {
     const response = await fetch("/api/files/reveal", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ path: targetPath })
+      body: JSON.stringify({ path: targetPath, basePath: basePath ?? null })
     });
     const payload = (await response.json()) as { error?: string };
 

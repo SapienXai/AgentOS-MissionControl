@@ -482,6 +482,7 @@ function InspectorPanelContent({
                   {visibleActiveTab === "output" && selectedTask ? (
                     <TaskFeedContent
                       task={selectedTask}
+                      basePath={resolveTaskWorkspacePath(snapshot, selectedTask, effectiveTaskDetail?.runs)}
                       taskDetail={effectiveTaskDetail}
                       taskDetailLoading={taskDetailLoading}
                       taskDetailError={resolvedTaskDetailError}
@@ -491,6 +492,7 @@ function InspectorPanelContent({
                   {visibleActiveTab === "output" && selectedRuntime ? (
                     <RuntimeOutputContent
                       runtime={selectedRuntime}
+                      basePath={snapshot.workspaces.find((entry) => entry.id === selectedRuntime.workspaceId)?.path}
                       runtimeOutput={resolvedRuntimeOutput}
                       runtimeOutputLoading={runtimeOutputLoading}
                       runtimeOutputError={resolvedRuntimeOutputError}
@@ -856,6 +858,7 @@ function WorkspaceContent({
       <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
         <InspectorCreatedFileList
           files={createdFiles}
+          basePath={workspace.path}
           emptyLabel="No file artifacts have been detected in recent workspace runs."
         />
       </InfoCard>
@@ -1240,6 +1243,7 @@ function AgentContent({
       <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
         <InspectorCreatedFileList
           files={createdFiles}
+          basePath={agent.workspacePath}
           emptyLabel="No file artifacts have been detected for this agent yet."
         />
       </InfoCard>
@@ -1349,13 +1353,14 @@ function TaskContent({
   const selectedTask = snapshot.tasks.find((entry) => entry.id === taskId) ?? task;
   const isAborted = isTaskAborted(selectedTask);
   const canAbortTask = Boolean(onAbortTask) && isTaskAbortable(selectedTask);
-  const workspace = snapshot.workspaces.find((entry) => entry.id === task?.workspaceId);
-  const primaryAgent = snapshot.agents.find((entry) => entry.id === task?.primaryAgentId);
   const runs =
     taskDetail?.runs ??
     snapshot.runtimes
       .filter((runtime) => task?.runtimeIds.includes(runtime.id))
       .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+  const workspacePath = resolveTaskWorkspacePath(snapshot, selectedTask, runs);
+  const workspace = resolveTaskWorkspace(snapshot, selectedTask, runs);
+  const primaryAgent = snapshot.agents.find((entry) => entry.id === selectedTask?.primaryAgentId);
   const createdFiles =
     taskDetail?.createdFiles ??
     dedupeCreatedFiles(runs.flatMap((runtime) => extractCreatedFilesFromRuntime(runtime)));
@@ -1378,15 +1383,17 @@ function TaskContent({
   return (
     <>
       <InfoCard icon={FolderGit2} title="Mission" value={isAborted ? "aborted" : selectedTask.status}>
-        <TaskTextPanel label="Original prompt" text={originalPrompt} />
+        <TaskTextPanel label="Original prompt" text={originalPrompt} basePath={workspacePath} />
         <TaskTextPanel
           label="Sent to OpenClaw"
           text={routedPromptChanged ? routedPrompt : "Same as original prompt."}
+          basePath={workspacePath}
           subtle={!routedPromptChanged}
         />
         <TaskTextPanel
           label="Latest task output"
           text={latestOutput || "Waiting for the first OpenClaw update."}
+          basePath={workspacePath}
           subtle={!latestOutput}
         />
         <InspectorMetricGrid
@@ -1434,7 +1441,7 @@ function TaskContent({
         ) : null}
       </InfoCard>
 
-      <TaskIntegrityCard task={selectedTask} integrity={integrity} />
+      <TaskIntegrityCard task={selectedTask} integrity={integrity} basePath={workspacePath} />
 
       <InfoCard icon={TerminalSquare} title="Runner logs" value={String(runnerLogs.length)}>
         {runnerLogFile ? (
@@ -1446,6 +1453,7 @@ function TaskContent({
                 className="text-[12.5px] leading-5 text-slate-100"
                 filePath={runnerLogFile.path}
                 displayPath={runnerLogFile.displayPath}
+                basePath={workspacePath}
               />
             </div>
             <p className="mt-2 text-[11px] text-slate-400">
@@ -1502,6 +1510,7 @@ function TaskContent({
       <InfoCard icon={FileJson} title="Artifacts" value={String(createdFiles.length)}>
         <InspectorCreatedFileList
           files={createdFiles}
+          basePath={workspacePath}
           emptyLabel="This task has not produced a detectable file artifact yet."
         />
       </InfoCard>
@@ -1517,10 +1526,12 @@ function TaskContent({
 
 function TaskIntegrityCard({
   task,
-  integrity
+  integrity,
+  basePath
 }: {
   task: MissionControlSnapshot["tasks"][number];
   integrity: TaskDetailRecord["integrity"];
+  basePath?: string | null;
 }) {
   const isAborted = isTaskAborted(task);
   const isOptimisticPending = Boolean(task.metadata.optimistic) && !isAborted && task.status !== "stalled";
@@ -1569,6 +1580,7 @@ function TaskIntegrityCard({
               className="text-[12.5px] leading-5 text-slate-100"
               filePath={integrity.outputDir}
               displayPath={integrity.outputDirRelative || integrity.outputDir}
+              basePath={basePath}
             />
           </div>
           <p className="mt-2 text-[11px] text-slate-400">
@@ -1593,6 +1605,7 @@ function TaskIntegrityCard({
             <InteractiveContent
               text={integrity.finalResponseText}
               className="text-[12.5px] leading-5 text-slate-100"
+              basePath={basePath}
             />
           ) : (
             <p className="text-[12.5px] leading-5 text-slate-400">No final response was captured.</p>
@@ -1654,11 +1667,13 @@ function TaskIntegrityCard({
 
 function TaskFeedContent({
   task,
+  basePath,
   taskDetail,
   taskDetailLoading,
   taskDetailError
 }: {
   task: MissionControlSnapshot["tasks"][number];
+  basePath?: string | null;
   taskDetail: TaskDetailRecord | null;
   taskDetailLoading: boolean;
   taskDetailError: string | null;
@@ -1718,6 +1733,7 @@ function TaskFeedContent({
                 url={event.url}
                 filePath={event.filePath}
                 displayPath={event.displayPath}
+                basePath={basePath}
               />
             </div>
           </div>
@@ -1745,6 +1761,7 @@ function TaskFilesContent({
     taskDetail?.createdFiles ??
     dedupeCreatedFiles(runs.flatMap((runtime) => extractCreatedFilesFromRuntime(runtime)));
   const integrity = taskDetail?.integrity ?? createOptimisticTaskIntegrity(task);
+  const workspacePath = resolveTaskWorkspacePath(snapshot, task, runs);
 
   return (
     <InfoCard icon={FileJson} title="Files" value={String(createdFiles.length)}>
@@ -1758,6 +1775,7 @@ function TaskFilesContent({
               className="text-[12.5px] leading-5 text-slate-100"
               filePath={integrity.outputDir}
               displayPath={integrity.outputDirRelative || integrity.outputDir}
+              basePath={workspacePath}
             />
           </div>
           <p className="mt-2 text-[11px] text-slate-400">
@@ -1769,6 +1787,7 @@ function TaskFilesContent({
       ) : null}
       <InspectorCreatedFileList
         files={createdFiles}
+        basePath={workspacePath}
         emptyLabel="This task has not produced a detectable file artifact yet."
       />
     </InfoCard>
@@ -1785,6 +1804,60 @@ function createOptimisticTaskDetail(task: MissionControlSnapshot["tasks"][number
     warnings: task.status === "stalled" || isTaskAborted(task) ? [task.subtitle] : [],
     integrity: createOptimisticTaskIntegrity(task)
   };
+}
+
+function resolveTaskWorkspacePath(
+  snapshot: MissionControlSnapshot,
+  task: MissionControlSnapshot["tasks"][number],
+  runs: MissionControlSnapshot["runtimes"] = []
+) {
+  return resolveTaskWorkspace(snapshot, task, runs)?.path ?? resolveTaskAgentWorkspacePath(snapshot, task, runs);
+}
+
+function resolveTaskWorkspace(
+  snapshot: MissionControlSnapshot,
+  task: MissionControlSnapshot["tasks"][number],
+  runs: MissionControlSnapshot["runtimes"] = []
+) {
+  const workspaceIds = [
+    task.workspaceId,
+    ...runs.map((runtime) => runtime.workspaceId),
+    task.primaryAgentId ? snapshot.agents.find((agent) => agent.id === task.primaryAgentId)?.workspaceId : undefined,
+    ...runs.map((runtime) =>
+      runtime.agentId ? snapshot.agents.find((agent) => agent.id === runtime.agentId)?.workspaceId : undefined
+    )
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  for (const workspaceId of workspaceIds) {
+    const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+
+    if (workspace) {
+      return workspace;
+    }
+  }
+
+  return null;
+}
+
+function resolveTaskAgentWorkspacePath(
+  snapshot: MissionControlSnapshot,
+  task: MissionControlSnapshot["tasks"][number],
+  runs: MissionControlSnapshot["runtimes"] = []
+) {
+  const agentIds = [
+    task.primaryAgentId,
+    ...runs.map((runtime) => runtime.agentId)
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  for (const agentId of agentIds) {
+    const workspacePath = snapshot.agents.find((agent) => agent.id === agentId)?.workspacePath;
+
+    if (workspacePath) {
+      return workspacePath;
+    }
+  }
+
+  return undefined;
 }
 
 function createOptimisticTaskIntegrity(
@@ -1957,6 +2030,7 @@ function RuntimeContent({
   const createdFiles = dedupeCreatedFiles(runtimeOutput?.createdFiles ?? (runtime ? extractCreatedFilesFromRuntime(runtime) : []));
   const runtimeWarnings = runtimeOutput?.warnings ?? (runtime ? extractWarningsFromRuntime(runtime) : []);
   const runtimeWarningSummary = runtimeOutput?.warningSummary ?? runtimeWarnings[0] ?? null;
+  const runtimeBasePath = runtime ? snapshot.workspaces.find((entry) => entry.id === runtime.workspaceId)?.path : undefined;
 
   if (!runtime) {
     return null;
@@ -1985,6 +2059,7 @@ function RuntimeContent({
           <InteractiveContent
             text={runtimeOutput?.finalText || runtimeOutput?.errorMessage || "No assistant output has been recorded for this runtime yet."}
             className="text-[13px] leading-5 text-slate-100"
+            basePath={runtimeBasePath}
           />
         ) : null}
         {runtimeWarningSummary ? (
@@ -2001,6 +2076,7 @@ function RuntimeContent({
       <InfoCard icon={FileJson} title="Created files" value={String(createdFiles.length)}>
         <InspectorCreatedFileList
           files={createdFiles}
+          basePath={snapshot.workspaces.find((entry) => entry.id === runtime.workspaceId)?.path}
           emptyLabel="This runtime has not produced a detectable file artifact."
         />
       </InfoCard>
@@ -2030,11 +2106,13 @@ function RuntimeFilesContent({
 
 function RuntimeOutputContent({
   runtime,
+  basePath,
   runtimeOutput,
   runtimeOutputLoading,
   runtimeOutputError
 }: {
   runtime: MissionControlSnapshot["runtimes"][number];
+  basePath?: string | null;
   runtimeOutput: RuntimeOutputRecord | null;
   runtimeOutputLoading: boolean;
   runtimeOutputError: string | null;
@@ -2074,6 +2152,7 @@ function RuntimeOutputContent({
       <InfoCard icon={FileJson} title="Created files" value={String(runtimeOutput.createdFiles.length)}>
         <InspectorCreatedFileList
           files={runtimeOutput.createdFiles}
+          basePath={basePath}
           emptyLabel="This runtime transcript does not include a successful file creation."
         />
       </InfoCard>
@@ -2100,6 +2179,7 @@ function RuntimeOutputContent({
         <InteractiveContent
           text={runtimeOutput.finalText || runtimeOutput.errorMessage || "No assistant output has been recorded for this runtime yet."}
           className="text-[13px] leading-5 text-slate-100"
+          basePath={basePath}
         />
         {runtimeOutput.finalTimestamp ? (
           <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
@@ -2138,7 +2218,7 @@ function RuntimeOutputContent({
                   </span>
                 </div>
                 <div className="mt-2">
-                  <InteractiveContent text={item.text} className="text-[12.5px] leading-5 text-slate-100" />
+                  <InteractiveContent text={item.text} className="text-[12.5px] leading-5 text-slate-100" basePath={basePath} />
                 </div>
               </div>
             ))}
@@ -2290,10 +2370,12 @@ function InfoCard({
 function TaskTextPanel({
   label,
   text,
+  basePath,
   subtle = false
 }: {
   label: string;
   text: string;
+  basePath?: string | null;
   subtle?: boolean;
 }) {
   return (
@@ -2303,6 +2385,7 @@ function TaskTextPanel({
         <InteractiveContent
           text={text}
           className={cn("text-[12.5px] leading-5", subtle ? "text-slate-400" : "text-slate-100")}
+          basePath={basePath}
         />
       </div>
     </div>
@@ -2311,9 +2394,11 @@ function TaskTextPanel({
 
 function InspectorCreatedFileList({
   files,
+  basePath,
   emptyLabel
 }: {
   files: RuntimeCreatedFile[];
+  basePath?: string | null;
   emptyLabel: string;
 }) {
   if (files.length === 0) {
@@ -2322,22 +2407,32 @@ function InspectorCreatedFileList({
 
   return (
     <div className="space-y-2">
-      {files.map((file) => (
-        <button
-          key={file.path}
-          type="button"
-          onClick={() => void revealLocalFile(file.path)}
-          className="w-full rounded-[14px] border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2 text-left transition-all hover:border-cyan-300/28 hover:bg-cyan-400/[0.08]"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate font-mono text-[12px] text-cyan-100">{file.displayPath}</p>
-              <p className="truncate text-[11px] text-slate-400">{compactPath(file.path)}</p>
+      {files.map((file) => {
+        const canReveal = isAbsoluteLocalPath(file.path) || Boolean(basePath);
+
+        return (
+          <button
+            key={file.path}
+            type="button"
+            disabled={!canReveal}
+            onClick={() => void revealLocalFile(file.path, basePath)}
+            className={cn(
+              "w-full rounded-[14px] border border-cyan-300/12 bg-[linear-gradient(180deg,rgba(11,18,32,0.86),rgba(8,13,24,0.82))] px-3 py-2 text-left transition-all",
+              canReveal
+                ? "hover:border-cyan-300/28 hover:bg-cyan-400/[0.08]"
+                : "cursor-not-allowed opacity-60"
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-[12px] text-cyan-100">{file.displayPath}</p>
+                <p className="truncate text-[11px] text-slate-400">{compactPath(file.path)}</p>
+              </div>
+              <Badge variant="muted">{canReveal ? "reveal" : "relative"}</Badge>
             </div>
-            <Badge variant="muted">reveal</Badge>
-          </div>
-        </button>
-      ))}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -2507,14 +2602,18 @@ function taskFeedBadgeVariant(
   }
 }
 
-async function revealLocalFile(targetPath: string) {
+function isAbsoluteLocalPath(targetPath: string) {
+  return targetPath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(targetPath);
+}
+
+async function revealLocalFile(targetPath: string, basePath?: string | null) {
   try {
     const response = await fetch("/api/files/reveal", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ path: targetPath })
+      body: JSON.stringify({ path: targetPath, basePath: basePath ?? null })
     });
     const payload = (await response.json()) as { error?: string };
 
