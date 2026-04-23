@@ -1,9 +1,15 @@
+import { stripMissionRouting } from "@/lib/openclaw/presenters";
 import type { RuntimeRecord, TaskRecord } from "@/lib/openclaw/types";
 
 const missionRuntimeSlackMs = 1_500;
+const retryPromptPrefixPattern = /^\[Retry after[^\]]+\]\s*/i;
 
 function normalizeMissionText(value: string) {
-  return value.replace(/\s+/g, " ").trim().toLowerCase();
+  return stripMissionRouting(value)
+    .replace(retryPromptPrefixPattern, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 export function matchesMissionText(candidate: string, mission: string) {

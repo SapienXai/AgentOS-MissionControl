@@ -40,17 +40,21 @@ export function annotateMissionDispatchMetadata(
         : null;
     const matchedRuntime = observedRuntime ?? matchMissionDispatchToRuntime(record, annotated);
 
-    if (!matchedRuntime) {
+    const runtimesToAnnotate = resolveMissionDispatchAnnotationRuntimes(record, annotated, matchedRuntime);
+
+    if (runtimesToAnnotate.length === 0) {
       continue;
     }
 
-    const runtimeIndex = runtimeIndexById.get(matchedRuntime.id);
+    for (const runtime of runtimesToAnnotate) {
+      const runtimeIndex = runtimeIndexById.get(runtime.id);
 
-    if (typeof runtimeIndex !== "number") {
-      continue;
+      if (typeof runtimeIndex !== "number") {
+        continue;
+      }
+
+      annotated[runtimeIndex] = annotateRuntimeWithMissionDispatch(annotated[runtimeIndex], record);
     }
-
-    annotated[runtimeIndex] = annotateRuntimeWithMissionDispatch(matchedRuntime, record);
   }
 
   return annotated;
@@ -165,15 +169,21 @@ export function scoreMissionDispatchRuntimeMatch(
     return 10_000;
   }
 
+  const sessionMatches = Boolean(options.sessionId && runtime.sessionId === options.sessionId);
+
   if (
     options.effectiveStatus === "completed" ||
     options.effectiveStatus === "stalled" ||
     options.effectiveStatus === "cancelled"
   ) {
-    return runtimeDispatchId === record.id ? 500 : null;
+    if (runtimeDispatchId === record.id) {
+      return 500;
+    }
+
+    return sessionMatches ? 420 : null;
   }
 
-  if (options.sessionId && runtime.sessionId !== options.sessionId) {
+  if (options.sessionId && !sessionMatches) {
     return null;
   }
 
@@ -182,14 +192,14 @@ export function scoreMissionDispatchRuntimeMatch(
     submittedAt: options.submittedAt
   });
 
-  if (runtime.source === "turn" && !missionMatches) {
+  if (runtime.source === "turn" && !missionMatches && !sessionMatches) {
     return null;
   }
 
   let score = 0;
   score += runtime.source === "turn" ? 400 : runtime.source === "session" ? 40 : 20;
   score += missionMatches ? 240 : 0;
-  score += options.sessionId && runtime.sessionId === options.sessionId ? 120 : 0;
+  score += sessionMatches ? 120 : 0;
   score += runtimeDispatchId === record.id ? 80 : 0;
 
   return score;
@@ -229,7 +239,7 @@ export function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, recor
       dispatchRunnerStartedAt: record.runner.startedAt,
       dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
       dispatchObservedAt: record.observation.observedAt,
-      mission: runtimeMission ? runtime.metadata.mission : record.mission,
+      mission: record.mission,
       routedMission: record.routedMission
     }
   };
@@ -350,6 +360,45 @@ function resolveRuntimeMissionText(runtime: RuntimeRecord) {
 
   const normalized = stripMissionRouting(mission);
   return normalized.length > 0 ? normalized : null;
+}
+
+function resolveMissionDispatchAnnotationRuntimes(
+  record: MissionDispatchRecordLike,
+  runtimes: RuntimeRecord[],
+  matchedRuntime: RuntimeRecord | null | undefined
+) {
+  const selected = new Map<string, RuntimeRecord>();
+
+  if (matchedRuntime) {
+    selected.set(matchedRuntime.id, matchedRuntime);
+  }
+
+  const sessionId = extractMissionDispatchSessionId(record);
+
+  if (!sessionId) {
+    return Array.from(selected.values());
+  }
+
+  const submittedAt = Date.parse(record.submittedAt);
+  const earliestRuntimeAt = Number.isNaN(submittedAt) ? 0 : submittedAt - 1500;
+
+  for (const runtime of runtimes) {
+    if (isSyntheticDispatchRuntime(runtime)) {
+      continue;
+    }
+
+    if (runtime.agentId !== record.agentId || runtime.sessionId !== sessionId) {
+      continue;
+    }
+
+    if ((runtime.updatedAt ?? 0) < earliestRuntimeAt) {
+      continue;
+    }
+
+    selected.set(runtime.id, runtime);
+  }
+
+  return Array.from(selected.values());
 }
 
 function isMissionDispatchTerminalStatus(status: string) {

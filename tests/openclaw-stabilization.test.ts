@@ -9,11 +9,13 @@ import {
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
 } from "@/lib/openclaw/install";
-import { resolveRequiredLoginProvider } from "@/app/api/onboarding/models/route";
+import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
 import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
+import { annotateMissionDispatchMetadata } from "@/lib/openclaw/domains/mission-dispatch-runtime";
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
+import { buildTaskRecords } from "@/lib/openclaw/domains/task-records";
 import {
   extractKickoffProgressMessages,
   resolveWorkspaceBootstrapInput,
@@ -669,6 +671,102 @@ test("mission dispatch runtime output merges into a mission payload", () => {
       ]
     }
   });
+});
+
+test("mission dispatch groups direct session turns into one task card", () => {
+  const submittedAt = "2026-04-13T00:00:00.000Z";
+  const dispatchRecord = {
+    id: "dispatch-1",
+    status: "completed",
+    agentId: "agent-1",
+    sessionId: "session-1",
+    mission: "Create the Faros document",
+    routedMission: "Create the Faros document\n\nTask output routing:\n- Put outputs under deliverables/run/",
+    thinking: "medium",
+    workspaceId: "workspace-1",
+    workspacePath: "/tmp/workspace-1",
+    submittedAt,
+    updatedAt: "2026-04-13T00:01:00.000Z",
+    outputDir: "/tmp/workspace-1/deliverables/run",
+    outputDirRelative: "deliverables/run",
+    notesDirRelative: "memory",
+    runner: {
+      pid: null,
+      childPid: null,
+      startedAt: submittedAt,
+      finishedAt: "2026-04-13T00:01:00.000Z",
+      lastHeartbeatAt: "2026-04-13T00:01:00.000Z",
+      logPath: null
+    },
+    observation: {
+      runtimeId: null,
+      observedAt: null
+    },
+    result: null,
+    error: null
+  } as const;
+  const runtimes = [
+    {
+      id: "runtime:session-1:turn-1",
+      source: "turn",
+      key: "agent:agent-1:main:turn:turn-1",
+      title: "Create the Faros document",
+      subtitle: "Planning work",
+      status: "completed",
+      updatedAt: Date.parse("2026-04-13T00:00:20.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      metadata: {
+        kind: "direct",
+        chatType: "direct",
+        turnId: "turn-1",
+        turnPrompt:
+          "[Retry after the previous model attempt failed or timed out]\n\nCreate the Faros document\n\nTask output routing:\n- Put outputs under deliverables/run/"
+      }
+    },
+    {
+      id: "runtime:session-1:turn-2",
+      source: "turn",
+      key: "agent:agent-1:main:turn:turn-2",
+      title: "Create the Faros document",
+      subtitle: "Wrote the deliverable",
+      status: "completed",
+      updatedAt: Date.parse("2026-04-13T00:00:50.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      metadata: {
+        kind: "direct",
+        chatType: "direct",
+        turnId: "turn-2",
+        turnPrompt: "Create the Faros document\n\nTask output routing:\n- Put outputs under deliverables/run/",
+        createdFiles: [
+          {
+            path: "/tmp/workspace-1/deliverables/run/faros.md",
+            displayPath: "deliverables/run/faros.md"
+          }
+        ]
+      }
+    }
+  ] as unknown as RuntimeRecord[];
+
+  const annotated = annotateMissionDispatchMetadata(runtimes, [dispatchRecord]);
+  const tasks = buildTaskRecords(annotated, [
+    {
+      id: "agent-1",
+      name: "Research Lead"
+    }
+  ] as Parameters<typeof buildTaskRecords>[1]);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].key, "dispatch:dispatch-1");
+  assert.equal(tasks[0].dispatchId, "dispatch-1");
+  assert.equal(tasks[0].runtimeCount, 2);
+  assert.deepEqual(tasks[0].runtimeIds.sort(), ["runtime:session-1:turn-1", "runtime:session-1:turn-2"]);
+  assert.equal(tasks[0].artifactCount, 1);
 });
 
 test("kickoff progress parser hides terminal control and auth-profile noise", () => {

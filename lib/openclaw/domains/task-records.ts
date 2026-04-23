@@ -154,6 +154,10 @@ function selectTaskSignalRuntimes(runtimes: RuntimeRecord[]) {
 }
 
 function isDirectChatRuntime(runtime: RuntimeRecord) {
+  if (typeof runtime.metadata.dispatchId === "string" && runtime.metadata.dispatchId.trim()) {
+    return false;
+  }
+
   if (typeof runtime.metadata.chatType === "string" && runtime.metadata.chatType === "direct") {
     return true;
   }

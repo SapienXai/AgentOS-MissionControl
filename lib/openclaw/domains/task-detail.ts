@@ -110,16 +110,11 @@ function matchesDispatchRecordRuntime(runtime: RuntimeRecord, dispatchRecord: Mi
   }
 
   const dispatchSessionId = extractMissionDispatchSessionId(dispatchRecord);
-  return Boolean(
-    dispatchSessionId &&
-      runtime.sessionId === dispatchSessionId &&
-      runtime.agentId === dispatchRecord.agentId &&
-      !isDirectChatRuntime(runtime)
-  );
-}
+  if (dispatchSessionId && runtime.sessionId === dispatchSessionId && runtime.agentId === dispatchRecord.agentId) {
+    return true;
+  }
 
-function isDirectChatRuntime(runtime: RuntimeRecord) {
-  return typeof runtime.metadata.kind === "string" && runtime.metadata.kind === "direct";
+  return false;
 }
 
 function uniqueStrings(values: string[]) {
