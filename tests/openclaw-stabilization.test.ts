@@ -16,6 +16,7 @@ import { annotateMissionDispatchMetadata } from "@/lib/openclaw/domains/mission-
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import { buildTaskRecords } from "@/lib/openclaw/domains/task-records";
+import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import {
   extractKickoffProgressMessages,
   resolveWorkspaceBootstrapInput,
@@ -214,6 +215,19 @@ test("openclaw onboarding uses the official installer command", () => {
   assert.match(command, /install-cli\.sh/);
   assert.match(command, /--no-onboard/);
   assert.match(command, /\$HOME\/\.openclaw/);
+});
+
+test("openclaw terminal command detection accepts quoted binary paths", () => {
+  assert.equal(isOpenClawTerminalCommand("openclaw models auth login --provider openai-codex"), true);
+  assert.equal(
+    isOpenClawTerminalCommand("'/Users/kazim akgul/.openclaw/bin/openclaw' models auth login --provider openai-codex"),
+    true
+  );
+  assert.equal(
+    isOpenClawTerminalCommand('"/Users/kazim akgul/.openclaw/bin/openclaw" models auth login --provider openai-codex'),
+    true
+  );
+  assert.equal(isOpenClawTerminalCommand("node /tmp/whatever.js"), false);
 });
 
 test("openrouter selection keeps openrouter auth prioritized", () => {

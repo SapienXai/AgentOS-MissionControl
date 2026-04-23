@@ -24,6 +24,7 @@ import type {
   TaskRecord
 } from "@/lib/agentos/contracts";
 import type { OpenClawInstallSummary } from "@/components/mission-control/mission-control-shell.utils";
+import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { cn } from "@/lib/utils";
 
 type SurfaceTheme = "dark" | "light";
@@ -634,9 +635,4 @@ export function MissionControlShellDialogs({
       </Dialog>
     </>
   );
-}
-
-function isOpenClawTerminalCommand(command: string | null) {
-  const executable = command?.trim().split(/\s+/, 1)[0];
-  return executable === "openclaw" || Boolean(executable?.endsWith("/openclaw"));
 }

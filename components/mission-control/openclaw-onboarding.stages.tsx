@@ -20,6 +20,7 @@ import {
 } from "@/components/mission-control/openclaw-onboarding.utils";
 import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/openclaw-onboarding-provider-flow";
 import { formatModelLabel } from "@/lib/openclaw/presenters";
+import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { cn } from "@/lib/utils";
 
 export type ModelSwitchFeedback = {
@@ -1081,7 +1082,7 @@ function StageConsole({
   run: StageRunDetails;
 }) {
   const [isOpeningTerminal, setIsOpeningTerminal] = useState(false);
-  const canOpenTerminal = Boolean(run.manualCommand?.trim().startsWith("openclaw "));
+  const canOpenTerminal = isOpenClawTerminalCommand(run.manualCommand);
 
   const copyCommand = async () => {
     if (!run.manualCommand) {

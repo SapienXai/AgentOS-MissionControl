@@ -27,6 +27,7 @@ import {
   normalizeAddModelsProviderId
 } from "@/lib/openclaw/model-provider-registry";
 import { getModelProviderAdapter } from "@/lib/openclaw/model-provider-adapters";
+import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { cn } from "@/lib/utils";
 
 type ProviderDraft = {
@@ -297,7 +298,7 @@ export function OpenClawOnboardingProviderFlow({
   }
 
   async function openTerminal(command: string) {
-    if (!command.trim().startsWith("openclaw ")) {
+    if (!isOpenClawTerminalCommand(command)) {
       await copyText(command);
       return;
     }

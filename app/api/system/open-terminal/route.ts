@@ -4,6 +4,8 @@ import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,7 @@ export async function POST(request: Request) {
     const input = openTerminalSchema.parse(await request.json());
     const command = input.command.trim();
 
-    if (!isOpenClawCommand(command)) {
+    if (!isOpenClawTerminalCommand(command)) {
       throw new Error("Only OpenClaw commands can be opened from AgentOS.");
     }
 
@@ -39,11 +41,6 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-}
-
-function isOpenClawCommand(command: string) {
-  const executable = command.trim().split(/\s+/, 1)[0];
-  return executable === "openclaw" || executable.endsWith("/openclaw");
 }
 
 async function openMacTerminal(command: string) {
