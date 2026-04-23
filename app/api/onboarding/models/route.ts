@@ -593,7 +593,7 @@ function buildModelManualCommand(
   return formatOpenClawCommand(commandBin || "openclaw", ["models", "status", "--json"]);
 }
 
-export function resolveRequiredLoginProvider(
+function resolveRequiredLoginProvider(
   snapshot: MissionControlSnapshot,
   preferredModelId?: string | null
 ) {
