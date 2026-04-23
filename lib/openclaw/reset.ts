@@ -27,6 +27,9 @@ const execFileAsync = promisify(execFile);
 const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "settings.json");
 const plannerRootPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "planner");
+const missionDispatchesRootPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "dispatches");
+const channelRegistryPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "channel-registry.json");
+const telegramRouterRootPath = path.join(/*turbopackIgnore: true*/ missionControlRootPath, "telegram-router");
 const plannerRuntimeWorkspacePath = path.join(
   /*turbopackIgnore: true*/ plannerRootPath,
   "runtime-workspace"
@@ -38,9 +41,17 @@ const openClawDefaultWorkspacePath = path.join(
 );
 const browserStorageKeys = [
   "mission-control-surface-theme",
+  "mission-control-hidden-runtime-ids",
+  "mission-control-hidden-task-keys",
+  "mission-control-locked-task-keys",
   "mission-control-workspace-plan-id",
   "mission-control-recent-prompts",
-  "mission-control-composer-draft:*"
+  "mission-control-node-positions",
+  "mission-control-node-positions:v2:*",
+  "mission-control-active-workspace-id:*",
+  "mission-control-composer-draft:*",
+  "mission-control-agent-chat:v1:*",
+  "mission-control-agent-chat-seen:v1:*"
 ] as const;
 const liveAgentStatuses = new Set(["engaged", "monitoring", "ready"]);
 
@@ -79,7 +90,7 @@ export async function getResetPreview(target: ResetTarget): Promise<ResetPreview
     generatedAt: new Date().toISOString(),
     summary,
     workspaces,
-    missionControlPaths: [missionControlSettingsPath, plannerRootPath],
+    missionControlPaths: resolveMissionControlResetPaths(target),
     browserStorageKeys: [...browserStorageKeys],
     openClawPaths:
       target === "full-uninstall"
@@ -394,20 +405,53 @@ async function runMissionControlReset(
     }
   }
 
+  await removeMissionControlState(preview.target, emit);
+}
+
+async function removeMissionControlState(
+  target: ResetTarget,
+  emit: (event: ResetStreamEvent) => Promise<void>
+) {
+  const paths = resolveMissionControlResetPaths(target);
+
   await emit({
     type: "status",
     phase: "mission-control-state",
-    message: "Removing AgentOS planner and settings state..."
+    message:
+      target === "full-uninstall"
+        ? "Removing all AgentOS local state..."
+        : "Removing AgentOS planner and settings state..."
   });
 
-  await rm(plannerRootPath, { recursive: true, force: true });
-  await rm(missionControlSettingsPath, { force: true });
-  await removePathIfEmpty(missionControlRootPath);
+  for (const targetPath of paths) {
+    await rm(targetPath, { recursive: true, force: true });
+  }
+
+  if (target !== "full-uninstall") {
+    await removePathIfEmpty(missionControlRootPath);
+  }
 
   await emit({
     type: "log",
-    text: `Removed AgentOS state under ${missionControlRootPath}`
+    text:
+      target === "full-uninstall"
+        ? `Removed AgentOS state root: ${missionControlRootPath}`
+        : `Removed AgentOS state under ${missionControlRootPath}`
   });
+}
+
+function resolveMissionControlResetPaths(target: ResetTarget) {
+  if (target === "full-uninstall") {
+    return [missionControlRootPath];
+  }
+
+  return [
+    missionControlSettingsPath,
+    plannerRootPath,
+    missionDispatchesRootPath,
+    channelRegistryPath,
+    telegramRouterRootPath
+  ];
 }
 
 async function detectPackageActions(

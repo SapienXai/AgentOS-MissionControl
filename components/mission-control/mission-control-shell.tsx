@@ -2000,10 +2000,20 @@ export function MissionControlShell({
 
     const exactKeys = [
       "mission-control-surface-theme",
+      "mission-control-hidden-runtime-ids",
+      "mission-control-hidden-task-keys",
+      "mission-control-locked-task-keys",
       "mission-control-workspace-plan-id",
-      "mission-control-recent-prompts"
+      "mission-control-recent-prompts",
+      "mission-control-node-positions"
     ];
-    const prefixKeys = ["mission-control-composer-draft:"];
+    const prefixKeys = [
+      "mission-control-active-workspace-id:",
+      "mission-control-node-positions:v2:",
+      "mission-control-composer-draft:",
+      "mission-control-agent-chat:v1:",
+      "mission-control-agent-chat-seen:v1:"
+    ];
 
     for (const key of exactKeys) {
       globalThis.localStorage.removeItem(key);
@@ -2020,6 +2030,10 @@ export function MissionControlShell({
         globalThis.localStorage.removeItem(key);
       }
     }
+
+    setHiddenRuntimeIds([]);
+    setHiddenTaskKeys([]);
+    setLockedTaskKeys([]);
   };
 
   const resetResetDialogState = () => {

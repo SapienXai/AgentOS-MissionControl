@@ -71,8 +71,8 @@ export function ResetDialog({
     target === "full-uninstall" ? "Full Uninstall" : "Reset AgentOS";
   const description =
     target === "full-uninstall"
-      ? "Remove AgentOS state, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS CLI installs."
-      : "Remove AgentOS-managed workspaces, attached agents, planner state, and browser state.";
+      ? "Remove AgentOS state, task history, OpenClaw service and local state, then attempt to remove detected OpenClaw and AgentOS CLI installs."
+      : "Remove AgentOS-managed workspaces, attached agents, task history, planner state, and browser state.";
   const dangerButtonClassName =
     surfaceTheme === "light"
       ? "border-rose-400/80 bg-rose-600 text-white hover:bg-rose-700"
