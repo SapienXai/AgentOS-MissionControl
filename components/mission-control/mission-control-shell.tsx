@@ -44,6 +44,7 @@ import {
   resolveWorkspaceRootDraft,
   resolveWorkspaceSelection,
   serializeWorkspaceSelection,
+  shouldShowOnboardingLaunchpad,
   shouldDeferWorkspaceSelectionHydration,
   updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
@@ -267,10 +268,14 @@ export function MissionControlShell({
   const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
+  const shouldShowLaunchpadReadyState = shouldShowOnboardingLaunchpad(snapshot, {
+    hasSeenMissionReady,
+    modelSwitchSucceeded: modelSwitchFeedback.phase === "success"
+  });
   const shouldAutoShowOnboarding =
     !isOnboardingDismissed &&
     !hasActiveMissionWork &&
-    !hasSeenMissionReady;
+    !shouldShowLaunchpadReadyState;
   const shouldShowOnboarding =
     shouldAutoShowOnboarding || showOnboardingReadyState || isOnboardingForcedOpen;
   const scopedTasks = uiSnapshot.tasks.filter(
@@ -1787,21 +1792,13 @@ export function MissionControlShell({
   ]);
 
   const openSetupWizard = (stage?: OnboardingWizardStage) => {
-    const hasModelSetupProgress =
-      snapshot.workspaces.length > 0 ||
-      Boolean(snapshot.diagnostics.modelReadiness.defaultModel || snapshot.diagnostics.modelReadiness.resolvedDefaultModel) ||
-      hasSeenMissionReady;
-
-    const resolvedStage =
-      stage ??
-      (hasModelSetupProgress || snapshot.diagnostics.modelReadiness.ready || isOpenClawOnboardingSystemReady
-        ? "models"
-        : "system");
+    const systemReady = resolveOpenClawSystemReady(snapshot);
+    const resolvedStage = stage ?? (systemReady ? "models" : "system");
 
     setIsSettingsOpen(false);
     setOnboardingStage(resolvedStage);
     setIsOnboardingDismissed(false);
-    setShowOnboardingReadyState(stage === undefined && modelSwitchFeedback.phase === "success");
+    setShowOnboardingReadyState(stage === undefined && shouldShowLaunchpadReadyState);
     setIsOnboardingForcedOpen(true);
   };
 

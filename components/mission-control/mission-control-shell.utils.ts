@@ -543,3 +543,31 @@ export function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
     description: "Start the local gateway and wait for RPC."
   };
 }
+
+export function hasWorkspaceBackedModelSetup(snapshot: MissionControlSnapshot) {
+  const defaultModel =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    null;
+
+  return snapshot.workspaces.length > 0 && Boolean(defaultModel);
+}
+
+export function shouldShowOnboardingLaunchpad(
+  snapshot: MissionControlSnapshot,
+  options: {
+    hasSeenMissionReady?: boolean;
+    modelSwitchSucceeded?: boolean;
+  } = {}
+) {
+  if (!isOpenClawOnboardingSystemReady(snapshot)) {
+    return false;
+  }
+
+  return (
+    snapshot.diagnostics.modelReadiness.ready ||
+    Boolean(options.hasSeenMissionReady) ||
+    Boolean(options.modelSwitchSucceeded) ||
+    hasWorkspaceBackedModelSetup(snapshot)
+  );
+}

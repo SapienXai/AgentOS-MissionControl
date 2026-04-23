@@ -15,6 +15,7 @@ import {
   resolveOpenClawInstallSummary,
   resolveOnboardingAction,
   serializeWorkspaceSelection,
+  shouldShowOnboardingLaunchpad,
   resolveWorkspaceSelection,
   shouldDeferWorkspaceSelectionHydration
 } from "@/components/mission-control/mission-control-shell.utils";
@@ -180,6 +181,49 @@ test("initial onboarding model stays blank until a connected provider can justif
   assert.equal(resolveInitialOnboardingModelId(staleDefaultSnapshot), null);
   assert.equal(resolveInitialOnboardingModelId(connectedSnapshot), null);
   assert.equal(resolveInitialOnboardingModelId(workspaceSnapshot), "openai-codex/gpt-5.4");
+});
+
+test("onboarding launchpad requires real readiness or a workspace-backed default", () => {
+  const detectedDefaultOnly = {
+    workspaces: [],
+    diagnostics: {
+      installed: true,
+      rpcOk: true,
+      modelReadiness: {
+        ready: false,
+        resolvedDefaultModel: "openai/gpt-5.4",
+        defaultModel: "openai/gpt-5.4"
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+  const workspaceBackedDefault = {
+    ...detectedDefaultOnly,
+    workspaces: [
+      {
+        id: "workspace-1"
+      }
+    ]
+  } as unknown as MissionControlSnapshot;
+  const readyModel = {
+    ...detectedDefaultOnly,
+    diagnostics: {
+      ...detectedDefaultOnly.diagnostics,
+      modelReadiness: {
+        ...detectedDefaultOnly.diagnostics.modelReadiness,
+        ready: true
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(shouldShowOnboardingLaunchpad(detectedDefaultOnly), false);
+  assert.equal(shouldShowOnboardingLaunchpad(workspaceBackedDefault), true);
+  assert.equal(shouldShowOnboardingLaunchpad(readyModel), true);
+  assert.equal(
+    shouldShowOnboardingLaunchpad(detectedDefaultOnly, {
+      modelSwitchSucceeded: true
+    }),
+    true
+  );
 });
 
 test("workspace selection helpers keep the last valid workspace", () => {
