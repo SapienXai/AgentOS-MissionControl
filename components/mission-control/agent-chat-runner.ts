@@ -27,6 +27,7 @@ type AgentChatStreamEvent =
     };
 
 type ActiveAgentChatRun = {
+  userMessageId: string;
   assistantMessageId: string;
   statusMessage: string | null;
   promise: Promise<void>;
@@ -34,6 +35,7 @@ type ActiveAgentChatRun = {
 
 export type AgentChatRunSnapshot = {
   isRunning: boolean;
+  userMessageId: string | null;
   assistantMessageId: string | null;
   statusMessage: string | null;
 };
@@ -53,6 +55,7 @@ export function getAgentChatRunSnapshot(agentId: string): AgentChatRunSnapshot {
 
   return {
     isRunning: Boolean(run),
+    userMessageId: run?.userMessageId ?? null,
     assistantMessageId: run?.assistantMessageId ?? null,
     statusMessage: run?.statusMessage ?? null
   };
@@ -98,6 +101,7 @@ export function sendAgentChatMessage({
   };
 
   const run: ActiveAgentChatRun = {
+    userMessageId,
     assistantMessageId,
     statusMessage: "Starting agent turn...",
     promise: Promise.resolve()
@@ -180,6 +184,10 @@ async function runAgentChatTurn({
       const errorPayload = (await response.json().catch(() => null)) as { error?: string } | null;
       throw new Error(errorPayload?.error || "OpenClaw rejected the message.");
     }
+
+    updateAgentChatMessages(agentId, (current) =>
+      current.map((entry) => (entry.id === userMessageId ? { ...entry, status: "sent" as const } : entry))
+    );
 
     let finalResponse: MissionResponse | null = null;
 

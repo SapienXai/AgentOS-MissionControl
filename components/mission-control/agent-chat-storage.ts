@@ -15,6 +15,12 @@ export const agentChatLastSeenStoragePrefix = "mission-control-agent-chat-seen:v
 export const agentChatStateEventName = "mission-control-agent-chat-state-change";
 export const maxAgentChatMessages = 60;
 
+export type AgentChatVisibleRunSnapshot = {
+  isRunning: boolean;
+  userMessageId: string | null;
+  assistantMessageId: string | null;
+};
+
 function getChatStorageKey(agentId: string) {
   return `${agentChatMessageStoragePrefix}:${agentId}`;
 }
@@ -58,6 +64,36 @@ export function readAgentChatMessages(agentId: string): AgentChatMessage[] {
   } catch {
     return [];
   }
+}
+
+export function normalizeAgentChatMessagesForDisplay(
+  messages: readonly AgentChatMessage[],
+  runSnapshot: AgentChatVisibleRunSnapshot
+) {
+  const activeMessageIds = new Set(
+    [runSnapshot.userMessageId, runSnapshot.assistantMessageId].filter(
+      (value): value is string => typeof value === "string" && value.length > 0
+    )
+  );
+
+  return messages
+    .map((entry) => {
+      if (entry.status !== "sending") {
+        return entry;
+      }
+
+      if (runSnapshot.isRunning && activeMessageIds.has(entry.id)) {
+        return entry;
+      }
+
+      return entry.role === "assistant" ? { ...entry, status: "error" as const } : { ...entry, status: "sent" as const };
+    })
+    .filter(
+      (entry) =>
+        entry.role !== "assistant" ||
+        entry.text.trim().length > 0 ||
+        (runSnapshot.isRunning && entry.id === runSnapshot.assistantMessageId)
+    );
 }
 
 export function writeAgentChatMessages(agentId: string, messages: AgentChatMessage[]) {

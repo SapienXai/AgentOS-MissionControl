@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { LoaderCircle, SendHorizontal } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +12,7 @@ import {
   agentChatMessageStoragePrefix,
   agentChatStateEventName,
   markAgentChatAsSeen,
+  normalizeAgentChatMessagesForDisplay,
   readAgentChatMessages,
   type AgentChatMessage
 } from "@/components/mission-control/agent-chat-storage";
@@ -58,6 +59,8 @@ export function AgentChatDrawer({
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [runSnapshot, setRunSnapshot] = useState<AgentChatRunSnapshot>(() => getAgentChatRunSnapshot(agent.id));
+  const [revealingAssistantId, setRevealingAssistantId] = useState<string | null>(null);
+  const [revealedAssistantTextById, setRevealedAssistantTextById] = useState<Record<string, string>>({});
   const listRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isVisibleRef = useRef(isVisible);
@@ -72,11 +75,13 @@ export function AgentChatDrawer({
       const nextRunSnapshot = getAgentChatRunSnapshot(agent.id);
 
       setRunSnapshot(nextRunSnapshot);
-      setMessages(readVisibleAgentChatMessages(agent.id, nextRunSnapshot.isRunning));
+      setMessages(readVisibleAgentChatMessages(agent.id, nextRunSnapshot));
     };
 
     syncAgentChatState();
     setDraft("");
+    setRevealingAssistantId(null);
+    setRevealedAssistantTextById({});
 
     const handleChatStateChange = (event: Event) => {
       const detail = (event as CustomEvent<{ agentId?: string }>).detail;
@@ -102,6 +107,48 @@ export function AgentChatDrawer({
       window.removeEventListener("storage", handleStorage);
     };
   }, [agent.id]);
+
+  useEffect(() => {
+    if (runSnapshot.assistantMessageId) {
+      setRevealingAssistantId(runSnapshot.assistantMessageId);
+    }
+  }, [runSnapshot.assistantMessageId]);
+
+  useEffect(() => {
+    const assistantId = runSnapshot.assistantMessageId ?? revealingAssistantId;
+    if (!assistantId) {
+      return;
+    }
+
+    const assistantMessage = messages.find((entry) => entry.id === assistantId && entry.role === "assistant");
+    const targetText = assistantMessage?.text ?? "";
+    if (!targetText.trim()) {
+      return;
+    }
+
+    const revealedText = revealedAssistantTextById[assistantId] ?? "";
+    if (revealedText === targetText) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRevealedAssistantTextById((current) => {
+        const currentText = current[assistantId] ?? "";
+        const nextText = revealNextAssistantText(targetText, currentText);
+
+        if (nextText === currentText) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [assistantId]: nextText
+        };
+      });
+    }, 42);
+
+    return () => window.clearTimeout(timer);
+  }, [messages, revealedAssistantTextById, revealingAssistantId, runSnapshot.assistantMessageId]);
 
   useEffect(() => {
     if (!isVisible) {
@@ -138,7 +185,6 @@ export function AgentChatDrawer({
   }, [messages, agent.id, runSnapshot, isVisible]);
 
   const canSend = Boolean(draft.trim()) && !runSnapshot.isRunning;
-  const showAgentTyping = runSnapshot.isRunning;
   const streamingAssistantId = runSnapshot.assistantMessageId;
 
   const uiMessages = messages.length > 0
@@ -193,13 +239,23 @@ export function AgentChatDrawer({
           {uiMessages.map((entry) => {
             const isUser = entry.role === "user";
             const isSystem = entry.role === "system";
-            const isActiveAssistant = entry.role === "assistant" && entry.id === streamingAssistantId && showAgentTyping;
+            const isAssistant = entry.role === "assistant";
+            const isActiveAssistant =
+              isAssistant && entry.id === streamingAssistantId && runSnapshot.isRunning;
+            const isPendingAssistant = isActiveAssistant && !entry.text.trim();
+            const revealedAssistantText = isAssistant ? revealedAssistantTextById[entry.id] : undefined;
+            const visibleAssistantText = revealedAssistantText ?? entry.text;
+            const isRevealingAssistant =
+              isAssistant && Boolean(revealedAssistantText) && visibleAssistantText !== entry.text;
+            const isPendingUser = entry.role === "user" && entry.id === runSnapshot.userMessageId && runSnapshot.isRunning;
+            const showInlineStatus = entry.status === "sending" && isPendingUser;
 
             return (
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
                 <div
                   className={cn(
                     "min-w-0 max-w-[92%] rounded-[18px] border px-3 py-2 text-[13px] leading-5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
+                    isPendingUser && "opacity-85",
                     isSystem
                       ? surfaceTheme === "light"
                         ? "border-[#e3d4c8] bg-[#fffaf6] text-[#6c5647]"
@@ -213,16 +269,49 @@ export function AgentChatDrawer({
                           : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
                   )}
                 >
-                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.text}</p>
-                  {isActiveAssistant ? (
-                    <motion.span
-                      aria-hidden="true"
-                      animate={{ opacity: [0.2, 1, 0.2] }}
-                      transition={{ duration: 0.9, repeat: Infinity, ease: "easeInOut" }}
-                      className="ml-0.5 inline-block h-[1em] w-[1px] translate-y-[2px] bg-current"
-                    />
-                  ) : null}
-                  {entry.status === "sending" ? (
+                  {isPendingAssistant ? (
+                    <>
+                      <div
+                        className={cn(
+                          "text-[9px] uppercase tracking-[0.24em]",
+                          surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
+                        )}
+                      >
+                        {agentLabel}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-3">
+                        <span className="min-w-0 flex-1 text-[12px] leading-5 text-inherit">
+                          {runSnapshot.statusMessage || "Typing..."}
+                        </span>
+                        <TypingDots surfaceTheme={surfaceTheme} />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {isAssistant ? (
+                        <div
+                          className={cn(
+                            "text-[9px] uppercase tracking-[0.24em]",
+                            surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
+                          )}
+                        >
+                          {agentLabel}
+                        </div>
+                      ) : null}
+                      <p className={cn("whitespace-pre-wrap break-words [overflow-wrap:anywhere]", isAssistant && "mt-1")}>
+                        {isAssistant ? visibleAssistantText : entry.text}
+                      </p>
+                      {isActiveAssistant || isRevealingAssistant ? (
+                        <motion.span
+                          aria-hidden="true"
+                          animate={{ opacity: [0.2, 1, 0.2] }}
+                          transition={{ duration: 0.9, repeat: Infinity, ease: "easeInOut" }}
+                          className="ml-0.5 inline-block h-[1em] w-[1px] translate-y-[2px] bg-current"
+                        />
+                      ) : null}
+                    </>
+                  )}
+                  {!isPendingAssistant && showInlineStatus ? (
                     <p
                       className={cn(
                         "mt-1.5 text-[10px] uppercase tracking-[0.18em]",
@@ -231,7 +320,7 @@ export function AgentChatDrawer({
                     >
                       {isUser ? "Sending…" : "Drafting…"}
                     </p>
-                  ) : entry.status === "error" ? (
+                  ) : !isPendingAssistant && entry.status === "error" ? (
                     <p className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-rose-300">
                       Failed to send
                     </p>
@@ -241,37 +330,6 @@ export function AgentChatDrawer({
             );
           })}
         </div>
-
-        <AnimatePresence initial={false}>
-          {showAgentTyping ? (
-            <motion.div
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 4 }}
-              className="mt-2 flex justify-start"
-            >
-              <div
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-[18px] border px-3 py-2 text-[12px] leading-5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
-                  surfaceTheme === "light"
-                    ? "border-[#e3d4c8] bg-[#fffaf6] text-[#4a382c]"
-                    : "border-cyan-300/12 bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))] text-slate-100"
-                )}
-              >
-                <span className="font-medium">{agentLabel}</span>
-                <span
-                  className={cn(
-                    "text-[10px] uppercase tracking-[0.18em]",
-                    surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
-                  )}
-                >
-                  {runSnapshot.statusMessage || "typing"}
-                </span>
-                <TypingDots surfaceTheme={surfaceTheme} />
-              </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
       </div>
 
       <div
@@ -330,14 +388,18 @@ export function AgentChatDrawer({
   );
 }
 
-function readVisibleAgentChatMessages(agentId: string, isRunning: boolean): ChatMessage[] {
-  return readAgentChatMessages(agentId)
-    .map((entry) => {
-      if (entry.status !== "sending" || isRunning) {
-        return entry;
-      }
+function readVisibleAgentChatMessages(agentId: string, runSnapshot: AgentChatRunSnapshot): ChatMessage[] {
+  return normalizeAgentChatMessagesForDisplay(readAgentChatMessages(agentId), runSnapshot);
+}
 
-      return entry.role === "assistant" ? { ...entry, status: "error" as const } : { ...entry, status: "sent" as const };
-    })
-    .filter((entry) => entry.role !== "assistant" || entry.text.trim().length > 0);
+function revealNextAssistantText(targetText: string, currentText: string) {
+  const safeCurrent = targetText.startsWith(currentText) ? currentText : "";
+  const remainingText = targetText.slice(safeCurrent.length);
+  const nextWord = remainingText.match(/^\s*\S+\s*/)?.[0];
+
+  if (!nextWord) {
+    return targetText;
+  }
+
+  return targetText.slice(0, safeCurrent.length + nextWord.length);
 }
