@@ -1,13 +1,13 @@
 "use client";
 
-import { ArrowRight, Check, Copy, LoaderCircle, Route, SquareTerminal } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Copy, LoaderCircle, Route, SquareTerminal } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import type { AddModelsProviderId, MissionControlSnapshot } from "@/lib/agentos/contracts";
-import type { OpenClawModelOnboardingPhase } from "@/lib/agentos/contracts";
+import type { OpenClawModelOnboardingPhase, OperationProgressSnapshot } from "@/lib/agentos/contracts";
 import {
   secondaryActionClassName,
   stepBadgeClassName,
@@ -591,16 +591,31 @@ function resolveModelDisplayLabel(
 export function LaunchpadStage({
   surfaceTheme,
   workspaceCount,
-  defaultModelLabel
+  defaultModelLabel,
+  createProgress,
+  createRunState
 }: {
   surfaceTheme: SurfaceTheme;
   workspaceCount: number;
   defaultModelLabel: string;
+  createProgress: OperationProgressSnapshot | null;
+  createRunState: "idle" | "running" | "success" | "error";
 }) {
   const hasWorkspaces = workspaceCount > 0;
+  const isBuildingWorkspace = createRunState === "running" && Boolean(createProgress);
+  const hasWorkspaceCreateError = createRunState === "error" && Boolean(createProgress);
+  const showBuildScene = Boolean(createProgress) && (isBuildingWorkspace || hasWorkspaceCreateError);
   const launchSummary = hasWorkspaces
     ? `You already have ${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"} online. Use AgentOS to inspect them or create another workspace for a new mission.`
-    : "No workspace exists yet. Create one first so the live system has a place to keep context and deliverables.";
+    : isBuildingWorkspace
+      ? "AgentOS Workspace is being provisioned now. The scaffold and starter agent are being built in the background."
+      : hasWorkspaceCreateError
+        ? "The first workspace creation needs attention. Review the output, then try again."
+        : "No workspace exists yet. Create one first so the live system has a place to keep context and deliverables.";
+  const modelMetricLabel = hasWorkspaces ? "Default model" : "Detected default";
+  const modelMetricDetail = hasWorkspaces
+    ? "Usable model route selected"
+    : "Detected on this machine, not yet confirmed by a workspace.";
 
   return (
     <>
@@ -651,60 +666,353 @@ export function LaunchpadStage({
           </div>
         </div>
 
-        <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-          <LaunchpadMetric
-            surfaceTheme={surfaceTheme}
-            label="System"
-            value="Online"
-            detail="CLI, gateway, and runtime access verified"
-          />
-          <LaunchpadMetric
-            surfaceTheme={surfaceTheme}
-            label="Default model"
-            value={defaultModelLabel}
-            detail="Usable model route selected"
-          />
-          <LaunchpadMetric
-            surfaceTheme={surfaceTheme}
-            label="Runtime"
-            value="Smoke test passed"
-            detail="A live agent turn was verified"
-          />
-          <LaunchpadMetric
-            surfaceTheme={surfaceTheme}
-            label="Workspaces"
-            value={String(workspaceCount)}
-            detail={hasWorkspaces ? "Ready for mission planning" : "Create one to begin"}
-          />
+        {!showBuildScene ? (
+          <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+            <LaunchpadMetric
+              surfaceTheme={surfaceTheme}
+              label="System"
+              value="Online"
+              detail="CLI, gateway, and runtime access verified"
+            />
+            <LaunchpadMetric
+              surfaceTheme={surfaceTheme}
+              label={modelMetricLabel}
+              value={defaultModelLabel}
+              detail={modelMetricDetail}
+            />
+            <LaunchpadMetric
+              surfaceTheme={surfaceTheme}
+              label="Runtime"
+              value="Smoke test passed"
+              detail="A live agent turn was verified"
+            />
+            <LaunchpadMetric
+              surfaceTheme={surfaceTheme}
+              label="Workspaces"
+              value={String(workspaceCount)}
+              detail={hasWorkspaces ? "Ready for mission planning" : "Create one to begin"}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      {showBuildScene ? (
+        <LaunchpadBuildScene surfaceTheme={surfaceTheme} progress={createProgress!} runState={createRunState} />
+      ) : (
+        <div
+          className={cn(
+            "mt-2.5 rounded-[12px] border px-2.5 py-2",
+            surfaceTheme === "light" ? "border-[#e5d5c9] bg-[#fffaf6]" : "border-white/8 bg-[rgba(255,255,255,0.02)]"
+          )}
+        >
+          <p
+            className={cn(
+              "text-[7px] uppercase tracking-[0.16em]",
+              surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+            )}
+          >
+            Next step
+          </p>
+          <p
+            className={cn(
+              "mt-1 text-[11px] leading-[1rem]",
+              surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
+            )}
+          >
+            {hasWorkspaces
+              ? "Open AgentOS to inspect the live graph, or create another workspace if you want a separate mission lane."
+              : "Create the first workspace now. That is the shortest path from a ready system to a real mission."}
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function LaunchpadBuildScene({
+  surfaceTheme,
+  progress,
+  runState
+}: {
+  surfaceTheme: SurfaceTheme;
+  progress: OperationProgressSnapshot;
+  runState: "idle" | "running" | "success" | "error";
+}) {
+  const isLight = surfaceTheme === "light";
+  const activeStep = progress.steps.find((step) => step.status === "active") ?? progress.steps[0] ?? null;
+  const isError = runState === "error";
+
+  return (
+    <div
+      className={cn(
+        "relative mt-2.5 overflow-hidden rounded-[18px] border px-2.5 py-2.5",
+        isLight
+          ? isError
+            ? "border-rose-200 bg-[linear-gradient(180deg,rgba(255,248,247,0.98),rgba(252,242,242,0.96))]"
+            : "border-[#dcc7b8] bg-[linear-gradient(180deg,rgba(255,251,248,0.98),rgba(249,243,236,0.96))]"
+          : isError
+            ? "border-rose-300/18 bg-[radial-gradient(circle_at_top,rgba(49,18,24,0.95),rgba(12,8,14,0.98)_72%)]"
+            : "border-cyan-300/16 bg-[radial-gradient(circle_at_top,rgba(11,21,34,0.98),rgba(5,10,18,0.98)_72%)]"
+      )}
+    >
+      <div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute inset-0",
+          isLight
+            ? "bg-[radial-gradient(circle_at_20%_0%,rgba(255,255,255,0.95),transparent_28%),radial-gradient(circle_at_84%_18%,rgba(201,148,111,0.14),transparent_22%)]"
+            : isError
+              ? "bg-[radial-gradient(circle_at_20%_0%,rgba(251,113,133,0.14),transparent_26%),radial-gradient(circle_at_84%_18%,rgba(248,113,113,0.08),transparent_22%)]"
+              : "bg-[radial-gradient(circle_at_20%_0%,rgba(34,211,238,0.12),transparent_26%),radial-gradient(circle_at_84%_18%,rgba(59,130,246,0.08),transparent_22%)]"
+        )}
+      />
+      <motion.div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute -left-8 top-5 h-24 w-24 rounded-full blur-3xl",
+          isLight ? "bg-[#efc6a8]/20" : isError ? "bg-rose-300/10" : "bg-cyan-300/10"
+        )}
+        animate={{ x: [0, 10, 0], y: [0, -6, 0], opacity: [0.45, 0.75, 0.45] }}
+        transition={{ duration: 7.5, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        aria-hidden="true"
+        className={cn(
+          "pointer-events-none absolute -right-4 top-8 h-28 w-28 rounded-full blur-3xl",
+          isLight ? "bg-[#f6d9c2]/18" : isError ? "bg-rose-300/8" : "bg-sky-300/8"
+        )}
+        animate={{ x: [0, -12, 0], y: [0, 8, 0], opacity: [0.35, 0.7, 0.35] }}
+        transition={{ duration: 9.5, repeat: Infinity, ease: "easeInOut" }}
+      />
+
+      <div className="relative z-[1] flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2">
+          <motion.div
+            className={cn(
+              "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
+              isLight
+                ? isError
+                  ? "border-rose-300 bg-white text-rose-700"
+                  : "border-[#d9b59a] bg-white text-[#8b6d5a]"
+                : isError
+                  ? "border-rose-300/25 bg-rose-300/10 text-rose-100"
+                  : "border-cyan-200/20 bg-cyan-300/10 text-cyan-100"
+            )}
+            animate={{ scale: [1, 1.06, 1], opacity: [0.82, 1, 0.82] }}
+            transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            {isError ? <AlertTriangle className="h-3.5 w-3.5" /> : <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
+          </motion.div>
+
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "text-[7px] uppercase tracking-[0.18em]",
+                isLight ? (isError ? "text-rose-600/75" : "text-[#977b69]") : isError ? "text-rose-200/75" : "text-cyan-200/70"
+              )}
+            >
+              {isError ? "Needs attention" : "Building"}
+            </p>
+            <h3
+              className={cn(
+                "mt-1 text-[13px] font-medium",
+                isLight ? (isError ? "text-rose-950" : "text-[#281d17]") : isError ? "text-rose-50" : "text-white"
+              )}
+            >
+              {isError ? "Workspace creation needs attention" : progress.title}
+            </h3>
+            <p
+              className={cn(
+                "mt-1 text-[10px] leading-[0.95rem]",
+                isLight ? (isError ? "text-rose-700" : "text-[#6f5a4c]") : isError ? "text-rose-100/80" : "text-slate-300"
+              )}
+            >
+              {isError
+                ? "Review the captured output and retry when the workspace state is clean."
+                : progress.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-[8px] uppercase tracking-[0.16em]",
+              isLight
+                ? isError
+                  ? "border-rose-200 bg-white text-rose-700"
+                  : "border-[#dcc7b8] bg-white/75 text-[#8b6f5c]"
+                : isError
+                  ? "border-rose-300/20 bg-rose-300/8 text-rose-100"
+                  : "border-cyan-300/16 bg-cyan-300/10 text-cyan-100"
+            )}
+          >
+            {isError ? "Error" : `${progress.percent}%`}
+          </span>
+          {activeStep ? (
+            <span
+              className={cn(
+                "max-w-[140px] truncate rounded-full border px-2 py-0.5 text-[7px] uppercase tracking-[0.14em]",
+                isLight
+                  ? isError
+                    ? "border-rose-200 bg-white text-rose-700"
+                    : "border-[#e9d7ca] bg-white text-[#8b6f5c]"
+                  : isError
+                    ? "border-rose-300/18 bg-rose-300/8 text-rose-100"
+                    : "border-white/10 bg-white/[0.04] text-slate-300"
+              )}
+            >
+              {activeStep.label}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div
-        className={cn(
-          "mt-2.5 rounded-[12px] border px-2.5 py-2",
-          surfaceTheme === "light" ? "border-[#e5d5c9] bg-[#fffaf6]" : "border-white/8 bg-[rgba(255,255,255,0.02)]"
-        )}
-      >
-        <p
+      <div className="relative z-[1] mt-2.5 h-1.5 overflow-hidden rounded-full bg-white/8">
+        <motion.div
           className={cn(
-            "text-[7px] uppercase tracking-[0.16em]",
-            surfaceTheme === "light" ? "text-[#977b69]" : "text-slate-500"
+            "h-full rounded-full transition-[width] duration-500 ease-out",
+            isLight ? (isError ? "bg-rose-300/85" : "bg-amber-300/85") : isError ? "bg-rose-300/85" : "bg-cyan-300/85"
           )}
-        >
-          Next step
-        </p>
-        <p
-          className={cn(
-            "mt-1 text-[11px] leading-[1rem]",
-            surfaceTheme === "light" ? "text-[#5f4b3e]" : "text-slate-300"
-          )}
-        >
-          {hasWorkspaces
-            ? "Open AgentOS to inspect the live graph, or create another workspace if you want a separate mission lane."
-            : "Create the first workspace now. That is the shortest path from a ready system to a real mission."}
-        </p>
+          style={{ width: `${progress.percent}%` }}
+        />
       </div>
-    </>
+
+      <div className="relative z-[1] mt-2.5 space-y-1.5">
+        {progress.steps.map((step, index) => {
+          const isActive = step.status === "active";
+          const stepTone =
+            step.status === "done"
+              ? isLight
+                ? "border-emerald-200 bg-emerald-50/75"
+                : "border-emerald-400/20 bg-emerald-400/10"
+              : isActive
+                ? isLight
+                  ? "border-[#d9bca5] bg-white"
+                  : "border-cyan-300/18 bg-cyan-300/[0.05]"
+                : isLight
+                  ? "border-[#eadccc] bg-white/70"
+                  : "border-white/6 bg-white/[0.03]";
+          const iconTone =
+            step.status === "done"
+              ? isLight
+                ? "border-emerald-300 bg-emerald-100 text-emerald-700"
+                : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
+              : isActive
+                ? isLight
+                  ? "border-[#d5b9a5] bg-[#f5ebe3] text-[#8b6d5a]"
+                  : "border-cyan-200/20 bg-cyan-300/10 text-cyan-100"
+                : isLight
+                  ? "border-[#e1ccc0] bg-white text-[#9a7f6c]"
+                  : "border-white/8 bg-white/[0.03] text-slate-400";
+
+          return (
+            <div
+              key={step.id}
+              className={cn(
+                "relative overflow-hidden rounded-[12px] border px-2.5 py-1.5",
+                stepTone
+              )}
+            >
+              {isActive ? (
+                <motion.div
+                  aria-hidden="true"
+                  className={cn(
+                    "pointer-events-none absolute inset-y-0 left-0 w-1/3 blur-[1px]",
+                    isLight
+                      ? "bg-gradient-to-r from-transparent via-[#d9b08d]/24 to-transparent"
+                      : isError
+                        ? "bg-gradient-to-r from-transparent via-rose-300/10 to-transparent"
+                        : "bg-gradient-to-r from-transparent via-cyan-200/12 to-transparent"
+                  )}
+                  animate={{ x: ["-25%", "230%"] }}
+                  transition={{ duration: 1.7, repeat: Infinity, ease: "linear" }}
+                />
+              ) : null}
+
+              <div className="relative z-[1] flex items-start gap-1.5">
+                <span
+                  className={cn(
+                    "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[9px] font-medium",
+                    iconTone
+                  )}
+                >
+                  {step.status === "done" ? (
+                    <Check className="h-2.5 w-2.5" />
+                  ) : isActive ? (
+                    <LoaderCircle className="h-2.5 w-2.5 animate-spin" />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-1">
+                    <p className={cn("text-[10px]", isLight ? "text-[#3e2f24]" : "text-white")}>{step.label}</p>
+                    <span className={cn("text-[7px] tabular-nums", isLight ? "text-[#8f7664]" : "text-slate-400")}>
+                      {step.percent}%
+                    </span>
+                  </div>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-[8px] leading-[0.82rem]",
+                      isLight ? "text-[#8f7664]" : "text-slate-500"
+                    )}
+                  >
+                    {step.detail || step.description}
+                  </p>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/8">
+                    <motion.div
+                      className={cn(
+                        "h-full rounded-full transition-[width] duration-500 ease-out",
+                        step.status === "done"
+                          ? isLight
+                            ? "bg-emerald-300/85"
+                            : "bg-emerald-300/85"
+                          : isActive
+                            ? isLight
+                              ? isError
+                                ? "bg-rose-300/85"
+                                : "bg-amber-300/85"
+                              : isError
+                                ? "bg-rose-300/85"
+                                : "bg-cyan-300/85"
+                            : "bg-transparent"
+                      )}
+                      style={{ width: `${Math.max(step.percent, isActive ? 10 : 0)}%` }}
+                    />
+                  </div>
+                  {isActive && step.activities.length > 0 ? (
+                    <div className="mt-1 space-y-0.5">
+                      {step.activities.slice(-2).map((activity) => (
+                        <div
+                          key={activity.id}
+                          className={cn(
+                            "flex items-start gap-1.5 text-[8px] leading-[0.9rem]",
+                            isLight ? "text-[#705b4d]" : "text-slate-300"
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full",
+                              activity.status === "done" && "bg-emerald-300",
+                              activity.status === "active" && "bg-cyan-300",
+                              activity.status === "error" && "bg-rose-300",
+                              activity.status === "pending" && (isLight ? "bg-[#c9b4a2]" : "bg-slate-500")
+                            )}
+                          />
+                          <span className="min-w-0">{activity.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

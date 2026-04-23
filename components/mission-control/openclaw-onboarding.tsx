@@ -10,7 +10,8 @@ import type {
   AddModelsProviderId,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
-  OpenClawOnboardingPhase
+  OpenClawOnboardingPhase,
+  OperationProgressSnapshot
 } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 import {
@@ -59,11 +60,14 @@ export function OpenClawOnboarding({
   onRunModelSetDefault,
   onOpenAddModels,
   onOpenWorkspaceCreate,
+  onCreateWorkspace,
   onEnterAgentOS,
   onContinueToModels,
   onBackToSystem,
   onSelectStage,
   onDismiss,
+  launchpadCreateProgress,
+  launchpadCreateRunState,
   canDismiss
 }: {
   snapshot: MissionControlSnapshot;
@@ -85,16 +89,20 @@ export function OpenClawOnboarding({
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenWorkspaceCreate: () => void;
+  onCreateWorkspace: () => void;
   onEnterAgentOS: () => void;
   onContinueToModels: () => void;
   onBackToSystem: () => void;
   onSelectStage: (stage: WizardStage) => void;
   onDismiss: () => void;
+  launchpadCreateProgress: OperationProgressSnapshot | null;
+  launchpadCreateRunState: "idle" | "running" | "success" | "error";
   canDismiss: boolean;
   }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
   const modelReady = modelSwitchFeedback.phase === "success" || showReadyState;
   const showLaunchpad = modelReady && showReadyState;
+  const isLaunchpadBuilding = launchpadCreateRunState === "running";
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;
   const defaultModelLabel =
@@ -112,10 +120,24 @@ export function OpenClawOnboarding({
   const selectedModelLabel = resolveSelectedModelLabel(selectedModelId, availableModels);
   const stageRun = stage === "system" ? systemRun : modelRun;
   const heroLine = showLaunchpad
-    ? "AGENTOS : OpenClaw is ready. Choose your first action below."
+    ? hasWorkspaces
+      ? "AGENTOS : OpenClaw is ready. Choose your first action below."
+      : isLaunchpadBuilding
+        ? "AGENTOS : Building AgentOS Workspace."
+        : launchpadCreateRunState === "error"
+          ? "AGENTOS : Workspace creation needs attention."
+          : "AGENTOS : OpenClaw is ready. Create the first workspace below."
     : "AGENTOS : Bring your local OpenClaw online.";
   const openSurfaceLabel = hasWorkspaces ? "Open demo surface" : "Create workspace";
-  const topBadgeLabel = showLaunchpad ? "Launchpad" : "Welcome";
+  const topBadgeLabel = showLaunchpad
+    ? hasWorkspaces
+      ? "Launchpad"
+      : isLaunchpadBuilding
+        ? "Building"
+        : launchpadCreateRunState === "error"
+          ? "Needs attention"
+          : "Launchpad"
+    : "Welcome";
   const stageStatusCopy =
     stageRun.statusMessage ||
     stageRun.resultMessage ||
@@ -259,6 +281,8 @@ export function OpenClawOnboarding({
             surfaceTheme={surfaceTheme}
             workspaceCount={workspaceCount}
             defaultModelLabel={defaultModelLabel}
+            createProgress={launchpadCreateProgress}
+            createRunState={launchpadCreateRunState}
           />
         ) : stage === "system" ? (
           <SystemStage
@@ -304,7 +328,13 @@ export function OpenClawOnboarding({
                     : "border-emerald-300/20 bg-emerald-300/10 text-emerald-200"
                 )}
               >
-                Setup complete
+                {hasWorkspaces
+                  ? "Setup complete"
+                  : launchpadCreateRunState === "running"
+                    ? "Building workspace"
+                    : launchpadCreateRunState === "error"
+                      ? "Needs attention"
+                      : "Ready"}
               </span>
             ) : stage === "models" ? (
               <Button
@@ -337,28 +367,58 @@ export function OpenClawOnboarding({
           <div className="flex flex-wrap items-center gap-2">
             {showLaunchpad ? (
               <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={hasWorkspaces ? onOpenWorkspaceCreate : onDismiss}
-                  className={secondaryActionClassName(surfaceTheme)}
-                >
-                  {hasWorkspaces ? "Create workspace" : "Skip to dashboard"}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={hasWorkspaces ? onEnterAgentOS : onOpenWorkspaceCreate}
-                  className={cn(
-                    "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
-                    surfaceTheme === "light"
-                      ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                      : "bg-white text-slate-950 hover:bg-white/92"
-                  )}
-                >
-                  {hasWorkspaces ? "Enter AgentOS" : "Create first workspace"}
-                  <ArrowRight className="ml-1.5 h-3 w-3" />
-                </Button>
+                {hasWorkspaces ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={onOpenWorkspaceCreate}
+                      className={secondaryActionClassName(surfaceTheme)}
+                    >
+                      Create workspace
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={onEnterAgentOS}
+                      className={cn(
+                        "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
+                        surfaceTheme === "light"
+                          ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                          : "bg-white text-slate-950 hover:bg-white/92"
+                      )}
+                    >
+                      Enter AgentOS
+                      <ArrowRight className="ml-1.5 h-3 w-3" />
+                    </Button>
+                  </>
+                ) : isLaunchpadBuilding ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[9px] uppercase tracking-[0.16em]",
+                      surfaceTheme === "light"
+                        ? "border-[#d8c0b0] bg-white/85 text-[#8d725f]"
+                        : "border-white/10 bg-white/[0.06] text-slate-300"
+                    )}
+                  >
+                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                    Building workspace
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    onClick={onCreateWorkspace}
+                    className={cn(
+                      "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
+                      surfaceTheme === "light"
+                        ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                        : "bg-white text-slate-950 hover:bg-white/92"
+                    )}
+                  >
+                    Create Workspace
+                    <ArrowRight className="ml-1.5 h-3 w-3" />
+                  </Button>
+                )}
               </>
             ) : (
               <>

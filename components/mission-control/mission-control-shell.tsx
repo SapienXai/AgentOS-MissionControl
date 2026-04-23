@@ -49,6 +49,11 @@ import {
 } from "@/components/mission-control/mission-control-shell.utils";
 import { resolveInitialOnboardingModelId } from "@/components/mission-control/openclaw-onboarding.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
+import { consumeNdjsonStream } from "@/lib/ndjson";
+import {
+  buildWorkspaceCreateProgressTemplate,
+  createPendingOperationProgressSnapshot
+} from "@/lib/openclaw/operation-progress";
 import {
   isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
@@ -61,10 +66,13 @@ import type {
   OpenClawModelOnboardingStreamEvent,
   OpenClawOnboardingPhase,
   OpenClawOnboardingStreamEvent,
+  OperationProgressSnapshot,
   ResetPreview,
   ResetStreamEvent,
   ResetTarget,
   OpenClawUpdateStreamEvent,
+  WorkspaceCreateResult,
+  WorkspaceCreateStreamEvent,
   TaskRecord
 } from "@/lib/agentos/contracts";
 import { normalizeAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
@@ -168,6 +176,9 @@ export function MissionControlShell({
   const [resetBackgroundLogPath, setResetBackgroundLogPath] = useState<string | null>(null);
   const [resetLog, setResetLog] = useState("");
   const [resetConfirmText, setResetConfirmText] = useState("");
+  const [launchpadWorkspaceCreateRunState, setLaunchpadWorkspaceCreateRunState] = useState<UpdateRunState>("idle");
+  const [launchpadWorkspaceCreateProgress, setLaunchpadWorkspaceCreateProgress] =
+    useState<OperationProgressSnapshot | null>(null);
   const recentCreatedAgentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
   const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
@@ -906,6 +917,8 @@ export function MissionControlShell({
     setModelSwitchFeedback(initialModelSwitchFeedback);
     setShowOnboardingReadyState(false);
     setHasSeenMissionReady(false);
+    setLaunchpadWorkspaceCreateRunState("idle");
+    setLaunchpadWorkspaceCreateProgress(null);
     hydratedOnboardingModelIdRef.current = null;
   };
 
@@ -1644,6 +1657,135 @@ export function MissionControlShell({
     });
   };
 
+  const dismissOnboarding = useCallback(() => {
+    setIsOnboardingForcedOpen(false);
+    setShowOnboardingReadyState(false);
+    setIsOnboardingDismissed(true);
+    setLaunchpadWorkspaceCreateRunState("idle");
+    setLaunchpadWorkspaceCreateProgress(null);
+  }, []);
+
+  const runLaunchpadWorkspaceCreate = useCallback(async () => {
+    if (launchpadWorkspaceCreateRunState === "running") {
+      return null;
+    }
+
+    const targetModelId =
+      selectedOnboardingModelId.trim() ||
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+      snapshot.diagnostics.modelReadiness.defaultModel ||
+      null;
+
+    if (!targetModelId) {
+      toast.error("Choose a model first.", {
+        description: "OpenClaw needs a usable default model before it can create the first workspace."
+      });
+      return null;
+    }
+
+    setLaunchpadWorkspaceCreateRunState("running");
+    setLaunchpadWorkspaceCreateProgress(
+      createPendingOperationProgressSnapshot(
+        buildWorkspaceCreateProgressTemplate({
+          sourceMode: "empty",
+          agentCount: 1,
+          kickoffMission: true
+        })
+      )
+    );
+
+    try {
+      const response = await fetch("/api/workspaces", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "AgentOS Workspace",
+          brief: "First workspace created from the AgentOS launchpad.",
+          modelId: targetModelId,
+          sourceMode: "empty",
+          template: "software",
+          teamPreset: "solo",
+          modelProfile: "balanced",
+          rules: {
+            workspaceOnly: true,
+            generateStarterDocs: true,
+            generateMemory: true,
+            kickoffMission: true
+          },
+          stream: true
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "OpenClaw could not create the workspace.");
+      }
+
+      let createdResult: WorkspaceCreateResult | null = null;
+      let createError: string | null = null;
+
+      await consumeNdjsonStream<WorkspaceCreateStreamEvent>(response, async (event) => {
+        if (event.type === "progress") {
+          setLaunchpadWorkspaceCreateProgress(event.progress);
+          return;
+        }
+
+        if (event.progress) {
+          setLaunchpadWorkspaceCreateProgress(event.progress);
+        }
+
+        if (event.ok) {
+          createdResult = event.result;
+        } else {
+          createError = event.error;
+        }
+      });
+
+      if (createError || !createdResult) {
+        throw new Error(createError || "OpenClaw could not create the workspace.");
+      }
+
+      const result = createdResult as WorkspaceCreateResult;
+      setLaunchpadWorkspaceCreateRunState("success");
+      setPendingWorkspaceOpenId(result.workspaceId);
+      setActiveWorkspaceId(result.workspaceId);
+      selectNode(result.workspaceId);
+
+      await refresh().catch(() => {});
+
+      dismissOnboarding();
+
+      toast.success("Workspace created.", {
+        description: `${result.agentIds.length} agent${result.agentIds.length === 1 ? "" : "s"} created at ${result.workspacePath}`
+      });
+
+      if (result.kickoffError) {
+        toast.message("Workspace created, but kickoff needs attention.", {
+          description: result.kickoffError
+        });
+      }
+
+      return result;
+    } catch (error) {
+      setLaunchpadWorkspaceCreateRunState("error");
+      const message = error instanceof Error ? error.message : "Unknown workspace error.";
+      toast.error("Workspace creation failed.", {
+        description: message
+      });
+      return null;
+    }
+  }, [
+    dismissOnboarding,
+    launchpadWorkspaceCreateRunState,
+    refresh,
+    selectedOnboardingModelId,
+    selectNode,
+    snapshot.diagnostics.modelReadiness.defaultModel,
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel
+  ]);
+
   const openSetupWizard = (stage?: OnboardingWizardStage) => {
     const hasModelSetupProgress =
       snapshot.workspaces.length > 0 ||
@@ -1662,12 +1804,6 @@ export function MissionControlShell({
     setShowOnboardingReadyState(stage === undefined && modelSwitchFeedback.phase === "success");
     setIsOnboardingForcedOpen(true);
   };
-
-  const dismissOnboarding = useCallback(() => {
-    setIsOnboardingForcedOpen(false);
-    setShowOnboardingReadyState(false);
-    setIsOnboardingDismissed(true);
-  }, []);
 
   const enterAgentOS = useCallback(() => {
     const targetWorkspaceId =
@@ -2576,12 +2712,15 @@ export function MissionControlShell({
             onRunModelSetDefault={runModelSetDefault}
             onOpenAddModels={openAddModelsDialog}
             onEnterAgentOS={enterAgentOS}
+            onCreateWorkspace={runLaunchpadWorkspaceCreate}
             onContinueToModels={() => setOnboardingStage("models")}
             onBackToSystem={() => setOnboardingStage("system")}
             onSelectStage={(stage) => {
               setShowOnboardingReadyState(false);
               setOnboardingStage(stage);
             }}
+            launchpadCreateProgress={launchpadWorkspaceCreateProgress}
+            launchpadCreateRunState={launchpadWorkspaceCreateRunState}
             onOpenWorkspaceCreate={() => {
               dismissOnboarding();
               openWorkspaceWizard("basic");
@@ -2590,7 +2729,8 @@ export function MissionControlShell({
             canDismiss={
               !showOnboardingReadyState &&
               onboardingRunState !== "running" &&
-              modelOnboardingRunState !== "running"
+              modelOnboardingRunState !== "running" &&
+              launchpadWorkspaceCreateRunState !== "running"
             }
           />
         ) : null}
