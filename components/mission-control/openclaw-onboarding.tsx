@@ -4,10 +4,7 @@ import { ArrowLeft, ArrowRight, Check, LoaderCircle, Sparkles } from "lucide-rea
 import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
-import {
-  isOpenClawOnboardingModelReady,
-  isOpenClawOnboardingSystemReady
-} from "@/lib/openclaw/readiness";
+import { isOpenClawOnboardingSystemReady } from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
   AddModelsProviderId,
@@ -94,9 +91,9 @@ export function OpenClawOnboarding({
   onSelectStage: (stage: WizardStage) => void;
   onDismiss: () => void;
   canDismiss: boolean;
-}) {
+  }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
-  const modelReady = isOpenClawOnboardingModelReady(snapshot);
+  const modelReady = modelSwitchFeedback.phase === "success" || showReadyState;
   const showLaunchpad = modelReady && showReadyState;
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;

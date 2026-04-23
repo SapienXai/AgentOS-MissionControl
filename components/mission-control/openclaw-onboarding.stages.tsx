@@ -71,51 +71,116 @@ export function SystemStage({
       </div>
 
       <div className="mt-2.5 space-y-1.5">
-        {steps.map((step, index) => (
-          <div
-            key={step.id}
-            className={cn(
-              "flex items-center gap-1.5 rounded-[12px] border px-2 py-1.5",
-              stepContainerClassName(step.state, surfaceTheme)
-            )}
-          >
-            <span
+        {steps.map((step, index) => {
+          const isCurrentRunning = step.state === "current" && run.runState === "running";
+          const isRuntimeStep = step.id === "runtime";
+
+          return (
+            <div
+              key={step.id}
               className={cn(
-                "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[9px] font-medium",
-                stepIconClassName(step.state, surfaceTheme)
+                "relative flex items-center gap-1.5 overflow-hidden rounded-[12px] border px-2 py-1.5",
+                isCurrentRunning
+                  ? surfaceTheme === "light"
+                    ? "shadow-[inset_0_1px_0_rgba(255,255,255,0.55),0_0_0_1px_rgba(215,178,154,0.18)]"
+                    : "shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_0_0_1px_rgba(103,232,249,0.08)]"
+                  : "",
+                stepContainerClassName(step.state, surfaceTheme)
               )}
             >
-              {step.state === "complete" ? <Check className="h-2.5 w-2.5" /> : index + 1}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1.5">
-                <p className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
-                  {step.label}
-                </p>
-                <span
-                  className={cn(
-                    "rounded-full px-1.5 py-0.5 text-[6px] uppercase tracking-[0.14em]",
-                    stepBadgeClassName(step.state, surfaceTheme)
-                  )}
-                >
-                  {step.state === "complete"
-                    ? "Ready"
-                    : step.state === "current"
-                      ? "Active"
-                      : "Pending"}
-                </span>
-              </div>
-              <p
+              {isCurrentRunning ? (
+                <>
+                  <motion.div
+                    aria-hidden="true"
+                    className={cn(
+                      "pointer-events-none absolute inset-y-0 left-0 w-1/3 blur-[1px]",
+                      surfaceTheme === "light"
+                        ? "bg-gradient-to-r from-transparent via-[#d9b08d]/26 to-transparent"
+                        : "bg-gradient-to-r from-transparent via-cyan-200/12 to-transparent"
+                    )}
+                    animate={{ x: ["-30%", isRuntimeStep ? "250%" : "230%"] }}
+                    transition={{
+                      duration: isRuntimeStep ? 1.45 : 2.05,
+                      repeat: Infinity,
+                      ease: "linear"
+                    }}
+                  />
+                  <motion.div
+                    aria-hidden="true"
+                    className={cn(
+                      "pointer-events-none absolute inset-x-2 bottom-0 h-px rounded-full",
+                      surfaceTheme === "light"
+                        ? "bg-gradient-to-r from-transparent via-[#c99672] to-transparent"
+                        : "bg-gradient-to-r from-transparent via-cyan-200/70 to-transparent"
+                    )}
+                    animate={{ opacity: [0.28, 0.92, 0.28], scaleX: [0.86, 1, 0.86] }}
+                    transition={{
+                      duration: isRuntimeStep ? 1.2 : 1.65,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                  />
+                </>
+              ) : null}
+              <span
                 className={cn(
-                  "mt-0.5 text-[8px] leading-[0.82rem]",
-                  surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+                  "relative mt-0.5 inline-flex h-5 w-5 items-center justify-center overflow-hidden rounded-full border text-[9px] font-medium",
+                  stepIconClassName(step.state, surfaceTheme)
                 )}
               >
-                {step.description}
-              </p>
+                {isCurrentRunning ? (
+                  <motion.span
+                    aria-hidden="true"
+                    className={cn(
+                      "absolute inset-0 rounded-full border",
+                      surfaceTheme === "light"
+                        ? "border-[#d9b59a]/35 bg-[#f7eee7]/80"
+                        : "border-cyan-200/16 bg-cyan-300/[0.06]"
+                    )}
+                    animate={{ scale: [1, 1.16, 1], opacity: [0.45, 0.95, 0.45] }}
+                    transition={{
+                      duration: isRuntimeStep ? 1.5 : 1.9,
+                      repeat: Infinity,
+                      ease: "easeInOut"
+                    }}
+                  />
+                ) : null}
+                <span className="relative z-[1]">
+                  {step.state === "complete" ? (
+                    <Check className="h-2.5 w-2.5" />
+                  ) : isCurrentRunning ? (
+                    <LoaderCircle className="h-2.5 w-2.5 animate-spin" />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+              </span>
+              <div className="relative z-[1] min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-1.5">
+                  <p className={cn("text-[11px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
+                    {step.label}
+                  </p>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[6px] uppercase tracking-[0.14em]",
+                      stepBadgeClassName(step.state, surfaceTheme)
+                    )}
+                  >
+                    {step.state === "complete" ? "Ready" : step.state === "current" ? (isCurrentRunning ? "Working" : "Active") : "Pending"}
+                  </span>
+                </div>
+                <p
+                  className={cn(
+                    "mt-0.5 text-[8px] leading-[0.82rem]",
+                    surfaceTheme === "light" ? "text-[#8f7664]" : "text-slate-500"
+                  )}
+                >
+                  {step.description}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <StageConsole
@@ -281,7 +346,7 @@ function ModelDefaultSummary({
               surfaceTheme === "light" ? "text-[#9a7a65]" : "text-slate-500"
             )}
           >
-            Current default
+            Detected default
           </p>
           <p className={cn("mt-1 truncate text-[10px]", surfaceTheme === "light" ? "text-[#3e2f24]" : "text-white")}>
             {defaultModelLabel ?? "Not set"}

@@ -1,5 +1,3 @@
-import { access } from "node:fs/promises";
-import path from "node:path";
 import { spawn } from "node:child_process";
 
 import { NextResponse } from "next/server";
@@ -12,21 +10,14 @@ import {
 } from "@/lib/openclaw/readiness";
 import {
   ensureOpenClawRuntimeSmokeTest,
-  createWorkspaceProject,
   getMissionControlSnapshot
 } from "@/lib/agentos/control-plane";
 import type {
   DiscoveredModelCandidate,
   MissionControlSnapshot,
   OpenClawModelOnboardingPhase,
-  OpenClawModelOnboardingStreamEvent,
-  WorkspaceCreateInput
+  OpenClawModelOnboardingStreamEvent
 } from "@/lib/agentos/contracts";
-import {
-  DEFAULT_WORKSPACE_RULES,
-  buildDefaultWorkspaceAgents
-} from "@/lib/openclaw/workspace-presets";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -63,61 +54,6 @@ type CommandResult = {
   timedOut: boolean;
   errorMessage?: string;
 };
-
-async function pathExists(targetPath: string) {
-  try {
-    await access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function resolveDemoWorkspaceIdentity(snapshot: MissionControlSnapshot) {
-  const baseName = "Demo Workspace";
-  const workspaceRoot =
-    snapshot.diagnostics.configuredWorkspaceRoot ??
-    snapshot.diagnostics.workspaceRoot;
-  const usedNames = new Set(snapshot.workspaces.map((workspace) => workspace.name.trim().toLowerCase()));
-
-  let suffix = 1;
-
-  while (true) {
-    const name = suffix === 1 ? baseName : `${baseName} ${suffix}`;
-    const directory = suffix === 1 ? "demo-workspace" : `demo-workspace-${suffix}`;
-    const targetPath = path.join(workspaceRoot, directory);
-
-    if (!usedNames.has(name.toLowerCase()) && !(await pathExists(targetPath))) {
-      return { name, directory };
-    }
-
-    suffix += 1;
-  }
-}
-
-async function buildDemoWorkspaceInput(
-  snapshot: MissionControlSnapshot,
-  modelId: string
-): Promise<WorkspaceCreateInput> {
-  const { name, directory } = await resolveDemoWorkspaceIdentity(snapshot);
-
-  return {
-    name,
-    directory,
-    brief: "A starter demo workspace created automatically after onboarding.",
-    modelId,
-    sourceMode: "empty",
-    template: "software",
-    teamPreset: "solo",
-    modelProfile: "balanced",
-    rules: {
-      ...DEFAULT_WORKSPACE_RULES,
-      kickoffMission: false
-    },
-    agents: buildDefaultWorkspaceAgents("software", "solo", name),
-    contextSources: []
-  };
-}
 
 export async function POST(request: Request) {
   let input: ModelOnboardingInput;
@@ -449,88 +385,18 @@ export async function POST(request: Request) {
         }
 
         snapshot = await getMissionControlSnapshot({ force: true });
-        let createdWorkspaceId: string | null = null;
-
-        if (snapshot.workspaces.length === 0) {
-          await send({
-            type: "status",
-            phase: "verifying",
-            message: "Creating a demo workspace and starter agent..."
-          });
-
-          const demoWorkspaceInput = await buildDemoWorkspaceInput(snapshot, input.modelId);
-          let lastProgressMessage = "";
-
-          try {
-            const createdWorkspace = await createWorkspaceProject(demoWorkspaceInput, {
-              onProgress: async (progress) => {
-                const activeStep =
-                  progress.steps.find((step) => step.status === "active") ??
-                  progress.steps.find((step) => step.status === "done");
-                const nextProgressMessage =
-                  activeStep?.detail?.trim() || activeStep?.label?.trim() || progress.description.trim();
-
-                if (!nextProgressMessage || nextProgressMessage === lastProgressMessage) {
-                  return;
-                }
-
-                lastProgressMessage = nextProgressMessage;
-
-                await send({
-                  type: "status",
-                  phase: "verifying",
-                  message: nextProgressMessage
-                });
-              }
-            });
-
-            createdWorkspaceId = createdWorkspace.workspaceId;
-            snapshot = await getMissionControlSnapshot({ force: true });
-          } catch (error) {
-            const recoveredSnapshot = await getMissionControlSnapshot({ force: true });
-
-            if (recoveredSnapshot.workspaces.length > 0) {
-              await send({
-                type: "done",
-                ok: true,
-                phase: "ready",
-                message: "Default model saved. Existing workspace is ready.",
-                exitCode: 0,
-                stdout: aggregatedStdout,
-                stderr: aggregatedStderr,
-                snapshot: recoveredSnapshot,
-                workspaceId: recoveredSnapshot.workspaces[0]?.id
-              });
-              await closeWriter();
-              return;
-            }
-
-            aggregatedStderr = aggregatedStderr
-              ? `${aggregatedStderr}\n${error instanceof Error ? error.message : "Demo workspace creation failed."}`
-              : error instanceof Error
-                ? error.message
-                : "Demo workspace creation failed.";
-
-            await fail("verifying", "Default model was saved, but the demo workspace could not be created.", {
-              snapshot,
-              docsUrl
-            });
-            return;
-          }
-        }
-
         await send({
           type: "done",
           ok: true,
           phase: "ready",
-          message: createdWorkspaceId
-            ? "Default model saved. Demo workspace is ready."
-            : "Default model saved. Onboarding is complete.",
+          message:
+            snapshot.workspaces.length === 0
+              ? "Default model saved. Launchpad is ready."
+              : "Default model saved. Onboarding is complete.",
           exitCode: 0,
           stdout: aggregatedStdout,
           stderr: aggregatedStderr,
-          snapshot,
-          workspaceId: createdWorkspaceId ?? undefined
+          snapshot
         });
         await closeWriter();
         return;

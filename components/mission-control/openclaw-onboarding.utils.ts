@@ -15,6 +15,7 @@ export type SurfaceTheme = "dark" | "light";
 export type RunState = "idle" | "running" | "success" | "error";
 export type WizardStage = "system" | "models";
 export type StepState = "complete" | "current" | "pending";
+type SystemStepId = "cli" | "gateway" | "runtime";
 
 export type StageRunDetails = {
   runState: RunState;
@@ -68,19 +69,21 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
     {
       id: "cli",
       label: "OpenClaw CLI",
-      description: snapshot.diagnostics.installed
-        ? `Installed${snapshot.diagnostics.version ? ` · v${snapshot.diagnostics.version}` : ""}`
-        : "Install the OpenClaw CLI.",
+      description: resolveSystemStepDescription("cli", snapshot, phase, cliComplete, gatewayComplete, liveComplete, runtimeReady),
       state: resolveStepState(cliComplete, !cliComplete && (phase === "detecting" || phase === "installing-cli"))
     },
     {
       id: "gateway",
       label: "Gateway service",
-      description: snapshot.diagnostics.loaded
-        ? "Gateway is already registered."
-        : directGatewayRun
-          ? "Gateway is running directly."
-          : "Register the gateway service once.",
+      description: resolveSystemStepDescription(
+        "gateway",
+        snapshot,
+        phase,
+        cliComplete,
+        gatewayComplete,
+        liveComplete,
+        runtimeReady
+      ),
       state: resolveStepState(
         gatewayComplete,
         !gatewayComplete && (phase === "installing-gateway" || (cliComplete && phase === "detecting"))
@@ -89,13 +92,15 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
     {
       id: "runtime",
       label: "Runtime ready",
-      description: runtimeReady
-        ? "RPC and state are ready."
-        : liveComplete
-          ? "RPC is online; state checks continue in the background."
-          : gatewayComplete
-            ? "Gateway is up; verify RPC."
-            : "Start the gateway and verify RPC.",
+      description: resolveSystemStepDescription(
+        "runtime",
+        snapshot,
+        phase,
+        cliComplete,
+        gatewayComplete,
+        liveComplete,
+        runtimeReady
+      ),
       state: resolveStepState(
         runtimeReady,
         !runtimeReady &&
@@ -105,6 +110,86 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
       )
     }
   ] as Array<{ id: string; label: string; description: string; state: StepState }>;
+}
+
+function resolveSystemStepDescription(
+  stepId: SystemStepId,
+  snapshot: MissionControlSnapshot,
+  phase: OpenClawOnboardingPhase | null,
+  cliComplete: boolean,
+  gatewayComplete: boolean,
+  liveComplete: boolean,
+  runtimeReady: boolean
+) {
+  if (stepId === "cli") {
+    if (snapshot.diagnostics.installed) {
+      return `Installed${snapshot.diagnostics.version ? ` · v${snapshot.diagnostics.version}` : ""}`;
+    }
+
+    if (phase === "installing-cli") {
+      return "Installing the CLI and local wrapper.";
+    }
+
+    if (phase === "detecting" || !snapshot.diagnostics.installed) {
+      return "Checking whether the CLI is already installed.";
+    }
+
+    return "Install the OpenClaw CLI.";
+  }
+
+  if (stepId === "gateway") {
+    if (snapshot.diagnostics.loaded) {
+      return "Gateway is already registered.";
+    }
+
+    if (phase === "installing-gateway") {
+      return "Registering the gateway service.";
+    }
+
+    if (phase === "starting-gateway") {
+      return "Starting the gateway service.";
+    }
+
+    if (phase === "detecting" && cliComplete) {
+      return "Checking gateway registration.";
+    }
+
+    if (liveComplete) {
+      return "Gateway is up and waiting on RPC.";
+    }
+
+    if (phase === "verifying") {
+      return "Gateway is up and waiting on RPC.";
+    }
+
+    if (snapshot.diagnostics.rpcOk) {
+      return "Gateway is running directly.";
+    }
+
+    return "Register the gateway service once.";
+  }
+
+  if (runtimeReady) {
+    return "RPC, state, and session store are ready.";
+  }
+
+  if (phase === "verifying") {
+    return "Verifying RPC, state writes, and session store access.";
+  }
+
+  if (phase === "starting-gateway") {
+    return "Starting the gateway and waiting for RPC.";
+  }
+
+  if (gatewayComplete) {
+    return "Gateway is up; verify RPC and runtime state.";
+  }
+
+  if (liveComplete) {
+    return "RPC is online; final runtime checks continue.";
+  }
+
+  return "Start the gateway and verify RPC.";
 }
 
 export function resolvePrimaryAction(params: {
@@ -130,7 +215,11 @@ export function resolvePrimaryAction(params: {
   const selectedModelId = params.selectedModelId.trim();
   const defaultModelId = params.defaultModelId?.trim() ?? "";
 
-  if (selectedModelId && selectedModelId !== defaultModelId) {
+  if (selectedModelId) {
+    if (params.modelReady && selectedModelId === defaultModelId) {
+      return { kind: "dismiss" as const, label: "Enter AgentOS" };
+    }
+
     return { kind: "set-default" as const, label: "Set as default" };
   }
 
@@ -337,18 +426,6 @@ export function resolveInitialOnboardingProviderId(
     return selectedProvider;
   }
 
-  const recommendedProvider = resolveModelProvider(snapshot.diagnostics.modelReadiness.recommendedModelId);
-
-  if (isAddModelsProviderId(recommendedProvider)) {
-    return recommendedProvider;
-  }
-
-  const preferredLoginProvider = snapshot.diagnostics.modelReadiness.preferredLoginProvider;
-
-  if (isAddModelsProviderId(preferredLoginProvider)) {
-    return preferredLoginProvider;
-  }
-
   const connectedProvider = snapshot.diagnostics.modelReadiness.authProviders.find(
     (provider): provider is (typeof snapshot.diagnostics.modelReadiness.authProviders)[number] & {
       provider: AddModelsProviderId;
@@ -359,7 +436,46 @@ export function resolveInitialOnboardingProviderId(
     return connectedProvider;
   }
 
+  const preferredLoginProvider = snapshot.diagnostics.modelReadiness.preferredLoginProvider;
+
+  if (isAddModelsProviderId(preferredLoginProvider)) {
+    return preferredLoginProvider;
+  }
+
+  const recommendedProvider = resolveModelProvider(snapshot.diagnostics.modelReadiness.recommendedModelId);
+
+  if (isAddModelsProviderId(recommendedProvider)) {
+    return recommendedProvider;
+  }
+
   return "openrouter";
+}
+
+export function resolveInitialOnboardingModelId(snapshot: MissionControlSnapshot) {
+  const resolvedDefaultModel =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    null;
+
+  if (
+    snapshot.workspaces.length > 0 &&
+    resolvedDefaultModel &&
+    snapshot.diagnostics.modelReadiness.defaultModelReady
+  ) {
+    return resolvedDefaultModel;
+  }
+
+  const recommendedModelId = snapshot.diagnostics.modelReadiness.recommendedModelId || null;
+
+  if (!recommendedModelId) {
+    return null;
+  }
+
+  if (snapshot.workspaces.length > 0) {
+    return recommendedModelId;
+  }
+
+  return null;
 }
 
 export function stepContainerClassName(state: StepState, surfaceTheme: SurfaceTheme) {

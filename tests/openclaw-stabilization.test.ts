@@ -284,7 +284,7 @@ test("mission control snapshots prefer live data over fallback snapshots", () =>
   assert.equal(isNewerSnapshot(refreshed, current), true);
 });
 
-test("onboarding starts on the selected or recommended provider", () => {
+test("onboarding starts on the selected, connected, or preferred provider", () => {
   const snapshot = {
     diagnostics: {
       modelReadiness: {
@@ -312,7 +312,32 @@ test("onboarding starts on the selected or recommended provider", () => {
     resolveInitialOnboardingProviderId(snapshot, "openrouter/google/gemma-4-31b-it:free"),
     "openrouter"
   );
-  assert.equal(resolveInitialOnboardingProviderId(snapshot, undefined), "anthropic");
+  assert.equal(resolveInitialOnboardingProviderId(snapshot, undefined), "openrouter");
+
+  const connectedSnapshot = {
+    diagnostics: {
+      modelReadiness: {
+        recommendedModelId: "anthropic/claude-3-7-sonnet",
+        preferredLoginProvider: "openrouter",
+        authProviders: [
+          {
+            provider: "ollama",
+            connected: true,
+            canLogin: false,
+            detail: null
+          },
+          {
+            provider: "openrouter",
+            connected: false,
+            canLogin: true,
+            detail: null
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveInitialOnboardingProviderId(connectedSnapshot, undefined), "ollama");
 });
 
 test("model onboarding requires an explicit selection before verification", () => {
@@ -337,6 +362,21 @@ test("model onboarding requires an explicit selection before verification", () =
       modelReady: false,
       systemActionLabel: "Continue",
       selectedModelId: "openrouter/google/gemma-4-31b-it:free",
+      defaultModelId: "openai/gpt-5.4"
+    }),
+    {
+      kind: "set-default",
+      label: "Set as default"
+    }
+  );
+
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: false,
+      systemActionLabel: "Continue",
+      selectedModelId: "openai/gpt-5.4",
       defaultModelId: "openai/gpt-5.4"
     }),
     {

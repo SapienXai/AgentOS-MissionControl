@@ -47,9 +47,9 @@ import {
   shouldDeferWorkspaceSelectionHydration,
   updateOptimisticMissionTask
 } from "@/components/mission-control/mission-control-shell.utils";
+import { resolveInitialOnboardingModelId } from "@/components/mission-control/openclaw-onboarding.utils";
 import { compactPath } from "@/lib/openclaw/presenters";
 import {
-  isOpenClawOnboardingModelReady as resolveOpenClawSetupReady,
   isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
@@ -201,9 +201,7 @@ export function MissionControlShell({
   const [isOnboardingDismissed, setIsOnboardingDismissed] = useState(false);
   const [isOnboardingForcedOpen, setIsOnboardingForcedOpen] = useState(false);
   const [showOnboardingReadyState, setShowOnboardingReadyState] = useState(false);
-  const [hasSeenMissionReady, setHasSeenMissionReady] = useState(() =>
-    resolveOpenClawSetupReady(initialSnapshot)
-  );
+  const [hasSeenMissionReady, setHasSeenMissionReady] = useState(false);
   const [gatewayControlAction, setGatewayControlAction] = useState<GatewayControlAction | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [surfaceTheme, setSurfaceTheme] = useState<SurfaceTheme>("dark");
@@ -255,13 +253,11 @@ export function MissionControlShell({
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
   const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
-  const isOpenClawReady = resolveOpenClawSetupReady(snapshot);
   const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
   const shouldAutoShowOnboarding =
     !isOnboardingDismissed &&
-    !isOpenClawReady &&
     !hasActiveMissionWork &&
     !hasSeenMissionReady;
   const shouldShowOnboarding =
@@ -813,17 +809,7 @@ export function MissionControlShell({
   }, [snapshot, isSettingsOpen, isSavingGateway, isSavingWorkspaceRoot]);
 
   useEffect(() => {
-    if (isOpenClawReady) {
-      setHasSeenMissionReady(true);
-    }
-  }, [isOpenClawReady]);
-
-  useEffect(() => {
-    const preferredModelId =
-      snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
-      snapshot.diagnostics.modelReadiness.defaultModel ||
-      snapshot.diagnostics.modelReadiness.recommendedModelId ||
-      "";
+    const preferredModelId = resolveInitialOnboardingModelId(snapshot) || "";
 
     if (!preferredModelId) {
       return;
@@ -837,10 +823,8 @@ export function MissionControlShell({
       setSelectedOnboardingModelId(preferredModelId);
     }
   }, [
-    selectedOnboardingModelId,
-    snapshot.diagnostics.modelReadiness.defaultModel,
-    snapshot.diagnostics.modelReadiness.recommendedModelId,
-    snapshot.diagnostics.modelReadiness.resolvedDefaultModel
+    snapshot,
+    selectedOnboardingModelId
   ]);
 
   useEffect(() => {
@@ -875,45 +859,20 @@ export function MissionControlShell({
   }, [isOpenClawOnboardingSystemReady, modelOnboardingRunState, onboardingRunState]);
 
   useEffect(() => {
-    if (isOpenClawReady) {
-      if (isOnboardingDismissed) {
-        setShowOnboardingReadyState(false);
-        return;
-      }
+    if (isOnboardingDismissed) {
+      setShowOnboardingReadyState(false);
+      return;
+    }
 
-      if (
-        isOnboardingForcedOpen &&
-        onboardingRunState === "idle" &&
-        modelOnboardingRunState === "idle"
-      ) {
-        return;
-      }
-
-      if (onboardingRunState !== "idle" || modelOnboardingRunState !== "idle") {
-        setOnboardingRunState("success");
-        setOnboardingPhase("ready");
-        setOnboardingStatusMessage(null);
-        setOnboardingResultMessage("OpenClaw and a usable default model are ready. Choose your next step.");
-        setModelOnboardingRunState("success");
-        setModelOnboardingPhase("ready");
-        setModelOnboardingStatusMessage(null);
-        setModelOnboardingResultMessage("A usable default model is ready. Choose your next step.");
-        setOnboardingStage("models");
-        setShowOnboardingReadyState(true);
-      } else {
-        setShowOnboardingReadyState(false);
-      }
+    if (modelSwitchFeedback.phase === "success") {
+      setHasSeenMissionReady(true);
+      setOnboardingStage("models");
+      setShowOnboardingReadyState(true);
       return;
     }
 
     setShowOnboardingReadyState(false);
-  }, [
-    isOnboardingForcedOpen,
-    isOpenClawReady,
-    isOnboardingDismissed,
-    onboardingRunState,
-    modelOnboardingRunState
-  ]);
+  }, [isOnboardingDismissed, modelSwitchFeedback.phase]);
 
   const resetUpdateDialogState = () => {
     if (updateRunState === "running") {
@@ -925,6 +884,29 @@ export function MissionControlShell({
     setUpdateResultMessage(null);
     setUpdateLog("");
     setUpdateManualCommand(null);
+  };
+
+  const resetFreshInstallOnboardingState = () => {
+    setOnboardingRunState("idle");
+    setOnboardingPhase(null);
+    setOnboardingStatusMessage(null);
+    setOnboardingResultMessage(null);
+    setOnboardingLog("");
+    setOnboardingManualCommand(null);
+    setOnboardingDocsUrl(null);
+    setModelOnboardingRunState("idle");
+    setModelOnboardingPhase(null);
+    setModelOnboardingStatusMessage(null);
+    setModelOnboardingResultMessage(null);
+    setModelOnboardingManualCommand(null);
+    setModelOnboardingDocsUrl(null);
+    setModelOnboardingLog("");
+    setDiscoveredModels([]);
+    setSelectedOnboardingModelId("");
+    setModelSwitchFeedback(initialModelSwitchFeedback);
+    setShowOnboardingReadyState(false);
+    setHasSeenMissionReady(false);
+    hydratedOnboardingModelIdRef.current = null;
   };
 
   const appendUpdateLog = (text: string) => {
@@ -1260,6 +1242,7 @@ export function MissionControlShell({
 
   const runOpenClawOnboarding = async () => {
     setIsOnboardingDismissed(false);
+    resetFreshInstallOnboardingState();
     setOnboardingStage("system");
     setOnboardingRunState("running");
     setOnboardingPhase("detecting");
@@ -1395,8 +1378,6 @@ export function MissionControlShell({
       snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
       snapshot.diagnostics.modelReadiness.defaultModel ||
       null;
-    const shouldAutoEnterAfterSetDefault =
-      payload.intent === "set-default" && snapshot.workspaces.length === 0;
     const updateSetDefaultToast = (description: string) => {
       if (payload.intent !== "set-default") {
         return;
@@ -1541,18 +1522,8 @@ export function MissionControlShell({
                   });
                 }
 
-                if (payload.intent === "set-default" && shouldAutoEnterAfterSetDefault) {
-                  dismissOnboarding();
-                  const createdWorkspaceId =
-                    event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
-
-                  if (createdWorkspaceId) {
-                    setPendingWorkspaceOpenId(createdWorkspaceId);
-                    setActiveWorkspaceId(createdWorkspaceId);
-                    selectNode(createdWorkspaceId);
-                  } else if ((event.snapshot?.workspaces.length ?? 0) === 0) {
-                    openWorkspaceWizard("basic");
-                  }
+                if (payload.intent === "set-default") {
+                  setShowOnboardingReadyState(true);
                 }
               } else if (event.phase === "authenticating" && event.manualCommand) {
                 if (!completeSetDefaultToast("message", "Continue in terminal.", event.message)) {
@@ -1609,17 +1580,8 @@ export function MissionControlShell({
             completeSetDefaultToast("error", actionCopy.errorTitle, event.message);
           }
 
-          if (event.ok && payload.intent === "set-default" && shouldAutoEnterAfterSetDefault) {
-            dismissOnboarding();
-            const createdWorkspaceId = event.workspaceId ?? event.snapshot?.workspaces[0]?.id ?? null;
-
-            if (createdWorkspaceId) {
-              setPendingWorkspaceOpenId(createdWorkspaceId);
-              setActiveWorkspaceId(createdWorkspaceId);
-              selectNode(createdWorkspaceId);
-            } else if ((event.snapshot?.workspaces.length ?? 0) === 0) {
-              openWorkspaceWizard("basic");
-            }
+          if (event.ok && payload.intent === "set-default") {
+            setShowOnboardingReadyState(true);
           }
         }
       }
@@ -1697,7 +1659,7 @@ export function MissionControlShell({
     setIsSettingsOpen(false);
     setOnboardingStage(resolvedStage);
     setIsOnboardingDismissed(false);
-    setShowOnboardingReadyState(stage === undefined && isOpenClawReady);
+    setShowOnboardingReadyState(stage === undefined && modelSwitchFeedback.phase === "success");
     setIsOnboardingForcedOpen(true);
   };
 
@@ -2056,6 +2018,10 @@ export function MissionControlShell({
               }
 
               if (event.ok) {
+                if (resetDialogTarget === "full-uninstall") {
+                  resetFreshInstallOnboardingState();
+                }
+
                 clearMissionControlBrowserState();
                 toast.success(
                   resetDialogTarget === "full-uninstall"
@@ -2099,6 +2065,10 @@ export function MissionControlShell({
           }
 
           if (event.ok) {
+            if (resetDialogTarget === "full-uninstall") {
+              resetFreshInstallOnboardingState();
+            }
+
             clearMissionControlBrowserState();
           }
         }

@@ -18,6 +18,7 @@ import {
   resolveWorkspaceSelection,
   shouldDeferWorkspaceSelectionHydration
 } from "@/components/mission-control/mission-control-shell.utils";
+import { resolveInitialOnboardingModelId } from "@/components/mission-control/openclaw-onboarding.utils";
 import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 
 test("agent draft helpers keep create flows stable", () => {
@@ -97,6 +98,88 @@ test("install summary reflects the active install family and root", () => {
     resolveOpenClawInstallSummary(gitSnapshot).detail,
     "Install root: ~/openclaw · Updater: pnpm"
   );
+});
+
+test("initial onboarding model stays blank until a connected provider can justify a recommendation", () => {
+  const blankSnapshot = {
+    workspaces: [],
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: null,
+        defaultModel: null,
+        recommendedModelId: "openai-codex/gpt-5.4",
+        authProviders: [
+          {
+            provider: "openai-codex",
+            connected: false,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+  const staleDefaultSnapshot = {
+    workspaces: [],
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: "openai-codex/gpt-5.4",
+        defaultModel: "openai-codex/gpt-5.4",
+        defaultModelReady: false,
+        recommendedModelId: "openai-codex/gpt-5.4",
+        authProviders: [
+          {
+            provider: "openai-codex",
+            connected: false,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+  const connectedSnapshot = {
+    workspaces: [],
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: null,
+        defaultModel: null,
+        recommendedModelId: "openai-codex/gpt-5.4",
+        authProviders: [
+          {
+            provider: "openai-codex",
+            connected: true,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+  const workspaceSnapshot = {
+    workspaces: [
+      {
+        id: "workspace-1"
+      }
+    ],
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: "openai-codex/gpt-5.4",
+        defaultModel: "openai-codex/gpt-5.4",
+        defaultModelReady: true,
+        recommendedModelId: "openai-codex/gpt-5.4",
+        authProviders: [
+          {
+            provider: "openai-codex",
+            connected: true,
+            canLogin: true
+          }
+        ]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveInitialOnboardingModelId(blankSnapshot), null);
+  assert.equal(resolveInitialOnboardingModelId(staleDefaultSnapshot), null);
+  assert.equal(resolveInitialOnboardingModelId(connectedSnapshot), null);
+  assert.equal(resolveInitialOnboardingModelId(workspaceSnapshot), "openai-codex/gpt-5.4");
 });
 
 test("workspace selection helpers keep the last valid workspace", () => {

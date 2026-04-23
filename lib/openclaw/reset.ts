@@ -128,8 +128,7 @@ export async function executeReset(
 
     const openClawResult = await runOpenClaw([
       "uninstall",
-      "--service",
-      "--state",
+      "--all",
       "--yes",
       "--non-interactive"
     ]);
