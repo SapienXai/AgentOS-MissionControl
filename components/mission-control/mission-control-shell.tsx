@@ -2238,6 +2238,12 @@ export function MissionControlShell({
     resetResetDialogState();
   };
 
+  const handleResetBackToSetup = () => {
+    setResetDialogTarget(null);
+    resetResetDialogState();
+    openSetupWizard("system");
+  };
+
   return (
     <div
       className={cn(
@@ -2785,6 +2791,7 @@ export function MissionControlShell({
           onExecute={() => {
             void runReset();
           }}
+          onBackToSetup={handleResetBackToSetup}
           onOpenChange={handleResetDialogOpenChange}
         />
 

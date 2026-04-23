@@ -183,7 +183,7 @@ test("initial onboarding model stays blank until a connected provider can justif
   assert.equal(resolveInitialOnboardingModelId(workspaceSnapshot), "openai-codex/gpt-5.4");
 });
 
-test("onboarding launchpad requires real readiness or a workspace-backed default", () => {
+test("onboarding launchpad requires confirmed setup or a workspace-backed default", () => {
   const detectedDefaultOnly = {
     workspaces: [],
     diagnostics: {
@@ -217,7 +217,13 @@ test("onboarding launchpad requires real readiness or a workspace-backed default
 
   assert.equal(shouldShowOnboardingLaunchpad(detectedDefaultOnly), false);
   assert.equal(shouldShowOnboardingLaunchpad(workspaceBackedDefault), true);
-  assert.equal(shouldShowOnboardingLaunchpad(readyModel), true);
+  assert.equal(shouldShowOnboardingLaunchpad(readyModel), false);
+  assert.equal(
+    shouldShowOnboardingLaunchpad(readyModel, {
+      hasSeenMissionReady: true
+    }),
+    true
+  );
   assert.equal(
     shouldShowOnboardingLaunchpad(detectedDefaultOnly, {
       modelSwitchSucceeded: true

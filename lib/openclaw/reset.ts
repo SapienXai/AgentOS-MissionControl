@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { runOpenClaw } from "@/lib/openclaw/cli";
+import { resetOpenClawBinCache, runOpenClaw } from "@/lib/openclaw/cli";
 import {
   clearMissionControlCaches,
   deleteAgent,
@@ -176,6 +176,10 @@ export async function executeReset(
     phase: "refreshing",
     message: "Refreshing the AgentOS snapshot..."
   });
+
+  if (target === "full-uninstall") {
+    resetOpenClawBinCache();
+  }
 
   clearMissionControlCaches();
 

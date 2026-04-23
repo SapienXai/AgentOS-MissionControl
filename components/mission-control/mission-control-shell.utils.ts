@@ -565,7 +565,6 @@ export function shouldShowOnboardingLaunchpad(
   }
 
   return (
-    snapshot.diagnostics.modelReadiness.ready ||
     Boolean(options.hasSeenMissionReady) ||
     Boolean(options.modelSwitchSucceeded) ||
     hasWorkspaceBackedModelSetup(snapshot)

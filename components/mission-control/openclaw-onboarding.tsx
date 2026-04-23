@@ -350,7 +350,7 @@ export function OpenClawOnboarding({
               </Button>
             ) : null}
 
-            {canDismiss && !showLaunchpad ? (
+            {canDismiss && !showLaunchpad && stage === "models" ? (
               <button
                 type="button"
                 onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}

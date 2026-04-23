@@ -36,6 +36,7 @@ export function ResetDialog({
   onConfirmTextChange,
   onRefreshPreview,
   onExecute,
+  onBackToSetup,
   onOpenChange
 }: {
   open: boolean;
@@ -53,6 +54,7 @@ export function ResetDialog({
   onConfirmTextChange: (value: string) => void;
   onRefreshPreview: () => void;
   onExecute: () => void;
+  onBackToSetup: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const expectedConfirmation =
@@ -399,7 +401,14 @@ export function ResetDialog({
           <Button
             type="button"
             variant={hasFinished ? "default" : "secondary"}
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              if (target === "full-uninstall" && runState === "success") {
+                onBackToSetup();
+                return;
+              }
+
+              onOpenChange(false);
+            }}
             disabled={isExecuting}
             className={
               hasFinished && surfaceTheme === "light"
@@ -409,7 +418,11 @@ export function ResetDialog({
                   : undefined
             }
           >
-            {hasFinished ? "Done" : "Close"}
+            {target === "full-uninstall" && runState === "success"
+              ? "Back to setup"
+              : hasFinished
+                ? "Done"
+                : "Close"}
           </Button>
           {!hasFinished ? (
             <Button
