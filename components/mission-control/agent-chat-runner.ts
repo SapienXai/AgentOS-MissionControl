@@ -123,6 +123,12 @@ export function sendAgentChatMessage({
       role: entry.role,
       text: entry.text
     }));
+  const previousAssistantTexts = new Set(
+    promptHistory
+      .filter((entry) => entry.role === "assistant")
+      .map((entry) => normalizeAgentChatText(entry.text))
+      .filter(Boolean)
+  );
 
   const payload = {
     message: trimmedText,
@@ -136,6 +142,7 @@ export function sendAgentChatMessage({
     payload,
     userMessageId,
     assistantMessageId,
+    previousAssistantTexts,
     run,
     onRefresh,
     onSnapshotChange,
@@ -150,6 +157,7 @@ async function runAgentChatTurn({
   payload,
   userMessageId,
   assistantMessageId,
+  previousAssistantTexts,
   run,
   onRefresh,
   onSnapshotChange,
@@ -164,6 +172,7 @@ async function runAgentChatTurn({
   };
   userMessageId: string;
   assistantMessageId: string;
+  previousAssistantTexts: Set<string>;
   run: ActiveAgentChatRun;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
@@ -199,6 +208,13 @@ async function runAgentChatTurn({
       }
 
       if (event.type === "assistant") {
+        const normalizedEventText = normalizeAgentChatText(event.text);
+        if (!assistantTextReceived && normalizedEventText && previousAssistantTexts.has(normalizedEventText)) {
+          run.statusMessage = "Agent is drafting a reply...";
+          dispatchAgentChatStateChange(agentId);
+          return;
+        }
+
         assistantTextReceived = true;
         latestAssistantText = event.text;
         run.statusMessage = "Agent is drafting a reply...";
@@ -305,6 +321,10 @@ function renderAgentReplyText(result: MissionResponse) {
     .filter(Boolean)
     .join("\n\n");
   return payloadText || result.summary || "No response text was returned.";
+}
+
+function normalizeAgentChatText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function readRenamedAgent(meta: MissionResponse["meta"]) {

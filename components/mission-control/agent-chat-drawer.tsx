@@ -42,6 +42,33 @@ function TypingDots({ surfaceTheme }: { surfaceTheme: "dark" | "light" }) {
   );
 }
 
+function AssistantBubbleHeader({
+  agentLabel,
+  statusLabel,
+  surfaceTheme
+}: {
+  agentLabel: string;
+  statusLabel: string | null;
+  surfaceTheme: "dark" | "light";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-center justify-between gap-3 text-[9px] uppercase tracking-[0.24em]",
+        surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
+      )}
+    >
+      <span className="min-w-0 truncate">{agentLabel}</span>
+      {statusLabel ? (
+        <span className="inline-flex shrink-0 items-center gap-1.5">
+          <span>{statusLabel}</span>
+          <TypingDots surfaceTheme={surfaceTheme} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentChatDrawer({
   agent,
   surfaceTheme,
@@ -247,6 +274,8 @@ export function AgentChatDrawer({
             const visibleAssistantText = revealedAssistantText ?? entry.text;
             const isRevealingAssistant =
               isAssistant && Boolean(revealedAssistantText) && visibleAssistantText !== entry.text;
+            const showAssistantActivity = isActiveAssistant || isRevealingAssistant;
+            const assistantActivityLabel = isPendingAssistant ? "Thinking" : showAssistantActivity ? "Replying" : null;
             const isPendingUser = entry.role === "user" && entry.id === runSnapshot.userMessageId && runSnapshot.isRunning;
             const showInlineStatus = entry.status === "sending" && isPendingUser;
 
@@ -271,37 +300,33 @@ export function AgentChatDrawer({
                 >
                   {isPendingAssistant ? (
                     <>
-                      <div
+                      <AssistantBubbleHeader
+                        agentLabel={agentLabel}
+                        statusLabel={assistantActivityLabel}
+                        surfaceTheme={surfaceTheme}
+                      />
+                      <p
                         className={cn(
-                          "text-[9px] uppercase tracking-[0.24em]",
-                          surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
+                          "mt-1.5 text-[12px] leading-5",
+                          surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500"
                         )}
                       >
-                        {agentLabel}
-                      </div>
-                      <div className="mt-1 flex items-center justify-between gap-3">
-                        <span className="min-w-0 flex-1 text-[12px] leading-5 text-inherit">
-                          {runSnapshot.statusMessage || "Typing..."}
-                        </span>
-                        <TypingDots surfaceTheme={surfaceTheme} />
-                      </div>
+                        {resolveAssistantThinkingHint(runSnapshot.statusMessage)}
+                      </p>
                     </>
                   ) : (
                     <>
                       {isAssistant ? (
-                        <div
-                          className={cn(
-                            "text-[9px] uppercase tracking-[0.24em]",
-                            surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400"
-                          )}
-                        >
-                          {agentLabel}
-                        </div>
+                        <AssistantBubbleHeader
+                          agentLabel={agentLabel}
+                          statusLabel={assistantActivityLabel}
+                          surfaceTheme={surfaceTheme}
+                        />
                       ) : null}
-                      <p className={cn("whitespace-pre-wrap break-words [overflow-wrap:anywhere]", isAssistant && "mt-1")}>
+                      <p className={cn("whitespace-pre-wrap break-words [overflow-wrap:anywhere]", isAssistant && "mt-1.5")}>
                         {isAssistant ? visibleAssistantText : entry.text}
                       </p>
-                      {isActiveAssistant || isRevealingAssistant ? (
+                      {showAssistantActivity ? (
                         <motion.span
                           aria-hidden="true"
                           animate={{ opacity: [0.2, 1, 0.2] }}
@@ -390,6 +415,20 @@ export function AgentChatDrawer({
 
 function readVisibleAgentChatMessages(agentId: string, runSnapshot: AgentChatRunSnapshot): ChatMessage[] {
   return normalizeAgentChatMessagesForDisplay(readAgentChatMessages(agentId), runSnapshot);
+}
+
+function resolveAssistantThinkingHint(statusMessage: string | null) {
+  const normalizedStatus = statusMessage?.toLowerCase() ?? "";
+
+  if (normalizedStatus.includes("finalizing") || normalizedStatus.includes("drafting")) {
+    return "Shaping the reply before it appears here.";
+  }
+
+  if (normalizedStatus.includes("thinking")) {
+    return "Checking recent context before answering.";
+  }
+
+  return "Reading your message and preparing a reply.";
 }
 
 function revealNextAssistantText(targetText: string, currentText: string) {
