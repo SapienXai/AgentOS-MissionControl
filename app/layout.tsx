@@ -6,7 +6,7 @@ import "@/app/globals.css";
 
 const siteTitle = "AgentOS | Control Plane";
 const siteDescription = "Human Control Layer for AI Agents and Companies | Built on OpenClaw.";
-const socialImagePath = "/readme/agentos1.webp";
+const socialImagePath = "/readme/readme.jpeg";
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.VERCEL_URL;
 const metadataBase = new URL(siteUrl ? (siteUrl.startsWith("http") ? siteUrl : `https://${siteUrl}`) : "http://localhost:3000");
 

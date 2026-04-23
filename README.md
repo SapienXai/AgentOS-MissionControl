@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/readme/banner.jpeg" alt="AgentOS control-plane interface" width="100%" />
+  <img src="public/readme/readme.jpeg" alt="AgentOS control-plane interface" width="100%" />
 
 # AgentOS | Control Plane
 
