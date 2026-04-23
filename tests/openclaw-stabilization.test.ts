@@ -15,6 +15,7 @@ import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/dom
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import {
+  extractKickoffProgressMessages,
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
@@ -668,6 +669,15 @@ test("mission dispatch runtime output merges into a mission payload", () => {
       ]
     }
   });
+});
+
+test("kickoff progress parser hides terminal control and auth-profile noise", () => {
+  assert.deepEqual(
+    extractKickoffProgressMessages(
+      "\u001b[33magents/auth-profiles\u001b[39m \u001b[36minherited auth-profiles from main agent\u001b[39m\n> Preparing kickoff output"
+    ),
+    ["Preparing kickoff output"]
+  );
 });
 
 test("workspace bootstrap input keeps the path contract stable", () => {

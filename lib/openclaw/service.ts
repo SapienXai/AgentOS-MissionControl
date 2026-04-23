@@ -3693,7 +3693,8 @@ async function runWorkspaceKickoffMission(
       ? "low"
       : params.modelProfile === "quality"
         ? "high"
-        : "medium";
+      : "medium";
+  const emittedRuntimeMessages = new Set<string>();
 
   await options.onProgress?.({
     message: "Submitting the kickoff brief to the primary agent.",
@@ -3740,8 +3741,15 @@ async function runWorkspaceKickoffMission(
           return;
         }
 
+        const message = resolveKickoffRuntimeProgressMessage(stderr);
+
+        if (!message || emittedRuntimeMessages.has(message)) {
+          return;
+        }
+
+        emittedRuntimeMessages.add(message);
         await options.onProgress?.({
-          message: `Kickoff runtime: ${stderr.split(/\r?\n/)[0]}`,
+          message,
           percent: 64
         });
       }
@@ -3754,6 +3762,52 @@ async function runWorkspaceKickoffMission(
   });
 
   return result;
+}
+
+function resolveKickoffRuntimeProgressMessage(output: string) {
+  const cleaned = stripAnsiSequences(output)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  if (!cleaned) {
+    return null;
+  }
+
+  const normalized = cleaned.toLowerCase();
+
+  if (
+    normalized.includes("scope upgrade pending approval") ||
+    normalized.includes("pairing required") ||
+    normalized.includes("more scopes than currently approved")
+  ) {
+    return "Gateway permissions need approval; continuing with the embedded runtime.";
+  }
+
+  if (normalized.includes("falling back to embedded")) {
+    return "Gateway agent is unavailable; continuing with the embedded runtime.";
+  }
+
+  if (normalized.includes("gateway connect failed")) {
+    return "Gateway connection is not ready; continuing with the embedded runtime.";
+  }
+
+  return `Runtime notice: ${summarizeKickoffRuntimeOutput(cleaned)}`;
+}
+
+function summarizeKickoffRuntimeOutput(value: string) {
+  const redacted = value
+    .replace(/\(requestId:\s*[^)]+\)/gi, "")
+    .replace(/\brequestId:\s*\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return redacted.length > 160 ? `${redacted.slice(0, 157).trim()}...` : redacted;
+}
+
+function stripAnsiSequences(value: string) {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 function createWorkspaceAgentId(workspaceSlug: string, agentKey: string) {

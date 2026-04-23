@@ -799,7 +799,7 @@ export function describeWorkspaceSourceCompletion(sourceMode: WorkspaceSourceMod
 }
 
 export function extractKickoffProgressMessages(text: string) {
-  const trimmed = text.trim();
+  const trimmed = stripAnsiSequences(text).trim();
 
   if (!trimmed) {
     return [];
@@ -810,9 +810,14 @@ export function extractKickoffProgressMessages(text: string) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.replace(/^[>•*-]\s*/, ""))
-    .filter((line) => !line.startsWith("{") && !line.startsWith("["));
+    .filter((line) => !line.startsWith("{") && !line.startsWith("["))
+    .filter((line) => !/auth-profiles/i.test(line));
 
   return Array.from(new Set(normalized)).slice(0, 3);
+}
+
+function stripAnsiSequences(value: string) {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 export function buildWorkspaceKickoffPrompt(

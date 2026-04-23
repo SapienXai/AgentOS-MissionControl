@@ -2728,13 +2728,6 @@ export function MissionControlShell({
               dismissOnboarding();
               openWorkspaceWizard("basic");
             }}
-            onDismiss={dismissOnboarding}
-            canDismiss={
-              !showOnboardingReadyState &&
-              onboardingRunState !== "running" &&
-              modelOnboardingRunState !== "running" &&
-              launchpadWorkspaceCreateRunState !== "running"
-            }
           />
         ) : null}
 

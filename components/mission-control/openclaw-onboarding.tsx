@@ -65,10 +65,8 @@ export function OpenClawOnboarding({
   onContinueToModels,
   onBackToSystem,
   onSelectStage,
-  onDismiss,
   launchpadCreateProgress,
-  launchpadCreateRunState,
-  canDismiss
+  launchpadCreateRunState
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: SurfaceTheme;
@@ -94,10 +92,8 @@ export function OpenClawOnboarding({
   onContinueToModels: () => void;
   onBackToSystem: () => void;
   onSelectStage: (stage: WizardStage) => void;
-  onDismiss: () => void;
   launchpadCreateProgress: OperationProgressSnapshot | null;
   launchpadCreateRunState: "idle" | "running" | "success" | "error";
-  canDismiss: boolean;
   }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
   const modelReady = modelSwitchFeedback.phase === "success" || showReadyState;
@@ -128,7 +124,6 @@ export function OpenClawOnboarding({
           ? "AGENTOS : Workspace creation needs attention."
           : "AGENTOS : OpenClaw is ready. Create the first workspace below."
     : "AGENTOS : Bring your local OpenClaw online.";
-  const openSurfaceLabel = hasWorkspaces ? "Open demo surface" : "Create workspace";
   const topBadgeLabel = showLaunchpad
     ? hasWorkspaces
       ? "Launchpad"
@@ -350,18 +345,6 @@ export function OpenClawOnboarding({
               </Button>
             ) : null}
 
-            {canDismiss && !showLaunchpad && stage === "models" ? (
-              <button
-                type="button"
-                onClick={hasWorkspaces ? onDismiss : onOpenWorkspaceCreate}
-                className={cn(
-                  "text-[9px] uppercase tracking-[0.16em] transition-colors",
-                  surfaceTheme === "light" ? "text-[#8f7664] hover:text-[#6f5949]" : "text-slate-500 hover:text-slate-300"
-                )}
-              >
-                {openSurfaceLabel}
-              </button>
-            ) : null}
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
