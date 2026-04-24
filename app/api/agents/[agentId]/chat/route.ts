@@ -327,13 +327,33 @@ function resolveChatStatusMessage(turn: TranscriptTurn) {
 }
 
 function sanitizePolledAssistantText(value: string) {
-  const trimmed = value.trim();
+  return sanitizeAgentChatReplyText(value);
+}
 
-  if (!trimmed || /^\[thinking\]\b/i.test(trimmed)) {
+function sanitizeAgentChatReplyText(value: unknown) {
+  if (typeof value !== "string") {
     return "";
   }
 
-  return trimmed;
+  const trimmed = value.trim();
+  return stripLeadingThinkingBlock(trimmed);
+}
+
+function stripLeadingThinkingBlock(value: string) {
+  if (!value || !/^\[thinking\]\b/i.test(value)) {
+    return value;
+  }
+
+  const paragraphs = value
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length <= 2) {
+    return "";
+  }
+
+  return paragraphs.slice(2).join("\n\n").trim();
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {
@@ -342,7 +362,7 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
   const payloads = Array.isArray(resultPayload.payloads)
     ? resultPayload.payloads
         .map((entry) => {
-          const extracted = extractMissionControlAction(resolveAgentChatEntryText(entry));
+          const extracted = extractMissionControlAction(sanitizeAgentChatReplyText(resolveAgentChatEntryText(entry)));
 
           if (!action && extracted.action) {
             action = extracted.action;
@@ -356,7 +376,7 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
         .filter((entry) => entry.text.length > 0)
     : [];
   const extractedSummary = extractMissionControlAction(
-    typeof payload.summary === "string" ? payload.summary : resultPayload.summary
+    sanitizeAgentChatReplyText(typeof payload.summary === "string" ? payload.summary : resultPayload.summary)
   );
 
   if (!action && extractedSummary.action) {

@@ -208,7 +208,14 @@ async function runAgentChatTurn({
       }
 
       if (event.type === "assistant") {
-        const normalizedEventText = normalizeAgentChatText(event.text);
+        const eventText = sanitizeAgentChatReplyText(event.text);
+        const normalizedEventText = normalizeAgentChatText(eventText);
+        if (!eventText) {
+          run.statusMessage = "Agent is thinking...";
+          dispatchAgentChatStateChange(agentId);
+          return;
+        }
+
         if (!assistantTextReceived && normalizedEventText && previousAssistantTexts.has(normalizedEventText)) {
           run.statusMessage = "Agent is drafting a reply...";
           dispatchAgentChatStateChange(agentId);
@@ -216,7 +223,7 @@ async function runAgentChatTurn({
         }
 
         assistantTextReceived = true;
-        latestAssistantText = event.text;
+        latestAssistantText = eventText;
         run.statusMessage = "Agent is drafting a reply...";
 
         updateAgentChatMessages(agentId, (current) =>
@@ -226,7 +233,7 @@ async function runAgentChatTurn({
             }
 
             if (entry.id === assistantMessageId) {
-              return { ...entry, text: event.text, status: "sending" as const };
+              return { ...entry, text: eventText, status: "sending" as const };
             }
 
             return entry;
@@ -317,14 +324,40 @@ function updateAgentChatMessages(
 
 function renderAgentReplyText(result: MissionResponse) {
   const payloadText = result.payloads
-    .map((entry) => entry.text?.trim())
+    .map((entry) => sanitizeAgentChatReplyText(entry.text))
     .filter(Boolean)
     .join("\n\n");
-  return payloadText || result.summary || "No response text was returned.";
+  return payloadText || sanitizeAgentChatReplyText(result.summary) || "No response text was returned.";
 }
 
 function normalizeAgentChatText(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function sanitizeAgentChatReplyText(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  return stripLeadingThinkingBlock(trimmed);
+}
+
+function stripLeadingThinkingBlock(value: string) {
+  if (!value || !/^\[thinking\]\b/i.test(value)) {
+    return value;
+  }
+
+  const paragraphs = value
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length <= 2) {
+    return "";
+  }
+
+  return paragraphs.slice(2).join("\n\n").trim();
 }
 
 function readRenamedAgent(meta: MissionResponse["meta"]) {

@@ -784,10 +784,6 @@ function extractTranscriptText(
         return [item.text];
       }
 
-      if (item.type === "thinking" && item.thinking) {
-        return [`[thinking] ${item.thinking}`];
-      }
-
       return [];
     })
     .join("\n\n")
