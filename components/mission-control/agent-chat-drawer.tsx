@@ -69,6 +69,92 @@ function AssistantBubbleHeader({
   );
 }
 
+function AssistantThinkingActivity({
+  statusMessage,
+  expanded,
+  onToggle,
+  surfaceTheme
+}: {
+  statusMessage: string | null;
+  expanded: boolean;
+  onToggle: () => void;
+  surfaceTheme: "dark" | "light";
+}) {
+  const previewLines = resolveAssistantThinkingPreview(statusMessage);
+  const detailLines = resolveAssistantThinkingDetails(statusMessage);
+
+  return (
+    <div
+      className={cn(
+        "mt-2 overflow-hidden rounded-[14px] border px-3 py-2",
+        surfaceTheme === "light"
+          ? "border-[#e7d8cc] bg-[#fff7f1]/70"
+          : "border-cyan-300/10 bg-slate-950/24"
+      )}
+    >
+      <div className="space-y-1.5">
+        {previewLines.map((line, index) => (
+          <motion.div
+            key={line}
+            animate={{ opacity: [0.48, 0.92, 0.48] }}
+            transition={{ duration: 1.8, repeat: Infinity, delay: index * 0.18, ease: "easeInOut" }}
+            className={cn(
+              "h-3.5 rounded-full",
+              surfaceTheme === "light"
+                ? "bg-[linear-gradient(90deg,rgba(139,114,98,0.16),rgba(139,114,98,0.34),rgba(139,114,98,0.14))]"
+                : "bg-[linear-gradient(90deg,rgba(125,211,252,0.10),rgba(125,211,252,0.27),rgba(125,211,252,0.08))]",
+              index === 0 ? "w-[72%]" : "w-[54%]"
+            )}
+          >
+            <span
+              className={cn(
+                "block truncate px-2 text-[10px] leading-3.5",
+                surfaceTheme === "light" ? "text-[#7d6556]/78" : "text-slate-300/72"
+              )}
+            >
+              {line}
+            </span>
+          </motion.div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "mt-2 text-[10px] uppercase tracking-[0.2em] transition hover:opacity-80",
+          surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/70"
+        )}
+      >
+        {expanded ? "Hide details" : "Show details"}
+      </button>
+
+      {expanded ? (
+        <motion.ul
+          initial={{ opacity: 0, y: -3 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={cn(
+            "mt-2 space-y-1 border-t pt-2 text-[11px] leading-4",
+            surfaceTheme === "light" ? "border-[#e7d8cc] text-[#7d6556]" : "border-white/[0.07] text-slate-400"
+          )}
+        >
+          {detailLines.map((line) => (
+            <li key={line} className="flex gap-2">
+              <span
+                className={cn(
+                  "mt-[7px] h-1 w-1 shrink-0 rounded-full",
+                  surfaceTheme === "light" ? "bg-[#b28f78]" : "bg-cyan-300/70"
+                )}
+              />
+              <span>{line}</span>
+            </li>
+          ))}
+        </motion.ul>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentChatDrawer({
   agent,
   surfaceTheme,
@@ -88,6 +174,7 @@ export function AgentChatDrawer({
   const [runSnapshot, setRunSnapshot] = useState<AgentChatRunSnapshot>(() => getAgentChatRunSnapshot(agent.id));
   const [revealingAssistantId, setRevealingAssistantId] = useState<string | null>(null);
   const [revealedAssistantTextById, setRevealedAssistantTextById] = useState<Record<string, string>>({});
+  const [expandedThinkingById, setExpandedThinkingById] = useState<Record<string, boolean>>({});
   const listRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isVisibleRef = useRef(isVisible);
@@ -109,6 +196,7 @@ export function AgentChatDrawer({
     setDraft("");
     setRevealingAssistantId(null);
     setRevealedAssistantTextById({});
+    setExpandedThinkingById({});
 
     const handleChatStateChange = (event: Event) => {
       const detail = (event as CustomEvent<{ agentId?: string }>).detail;
@@ -305,14 +393,17 @@ export function AgentChatDrawer({
                         statusLabel={assistantActivityLabel}
                         surfaceTheme={surfaceTheme}
                       />
-                      <p
-                        className={cn(
-                          "mt-1.5 text-[12px] leading-5",
-                          surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-500"
-                        )}
-                      >
-                        {resolveAssistantThinkingHint(runSnapshot.statusMessage)}
-                      </p>
+                      <AssistantThinkingActivity
+                        statusMessage={runSnapshot.statusMessage}
+                        expanded={Boolean(expandedThinkingById[entry.id])}
+                        onToggle={() =>
+                          setExpandedThinkingById((current) => ({
+                            ...current,
+                            [entry.id]: !current[entry.id]
+                          }))
+                        }
+                        surfaceTheme={surfaceTheme}
+                      />
                     </>
                   ) : (
                     <>
@@ -429,6 +520,46 @@ function resolveAssistantThinkingHint(statusMessage: string | null) {
   }
 
   return "Reading your message and preparing a reply.";
+}
+
+function resolveAssistantThinkingPreview(statusMessage: string | null) {
+  const hint = resolveAssistantThinkingHint(statusMessage);
+
+  if (hint.includes("Shaping")) {
+    return ["Shaping the reply", "Preparing the final wording"];
+  }
+
+  if (hint.includes("Checking")) {
+    return ["Reading your message", "Checking recent context"];
+  }
+
+  return ["Reading your message", "Preparing a reply"];
+}
+
+function resolveAssistantThinkingDetails(statusMessage: string | null) {
+  const normalizedStatus = statusMessage?.toLowerCase() ?? "";
+
+  if (normalizedStatus.includes("finalizing") || normalizedStatus.includes("drafting")) {
+    return [
+      "The agent has enough context to answer.",
+      "It is tightening the response before showing it here.",
+      "Raw reasoning stays hidden; only the final reply is saved."
+    ];
+  }
+
+  if (normalizedStatus.includes("thinking")) {
+    return [
+      "The agent is reading the direct message.",
+      "It is checking recent chat and workspace context.",
+      "It will replace this activity card with the final reply."
+    ];
+  }
+
+  return [
+    "The message was sent to the selected agent.",
+    "AgentOS is waiting for the first response signal.",
+    "This activity is temporary and is not saved to chat history."
+  ];
 }
 
 function revealNextAssistantText(targetText: string, currentText: string) {

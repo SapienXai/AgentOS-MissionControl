@@ -145,7 +145,7 @@ export async function POST(
           });
         }
 
-        const currentText = typeof turn.finalText === "string" ? turn.finalText.trim() : "";
+        const currentText = typeof turn.finalText === "string" ? sanitizePolledAssistantText(turn.finalText) : "";
         if (currentText && currentText !== latestAssistantText) {
           latestAssistantText = currentText;
           await send({
@@ -324,6 +324,16 @@ function resolveChatStatusMessage(turn: TranscriptTurn) {
   }
 
   return "Agent is thinking...";
+}
+
+function sanitizePolledAssistantText(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed || /^\[thinking\]\b/i.test(trimmed)) {
+    return "";
+  }
+
+  return trimmed;
 }
 
 function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload): MissionResponse {
