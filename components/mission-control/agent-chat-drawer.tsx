@@ -118,16 +118,18 @@ function AssistantThinkingActivity({
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          "mt-2 text-[10px] uppercase tracking-[0.2em] transition hover:opacity-80",
-          surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/70"
-        )}
-      >
-        {expanded ? "Hide details" : "Show details"}
-      </button>
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={onToggle}
+          className={cn(
+            "text-[8px] uppercase tracking-[0.18em] transition hover:opacity-80",
+            surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/70"
+          )}
+        >
+          {expanded ? "Hide details" : "Show details"}
+        </button>
+      </div>
 
       {expanded ? (
         <motion.ul
