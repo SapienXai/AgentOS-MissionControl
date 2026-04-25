@@ -16,11 +16,7 @@ Built on top of OpenClaw, the agent orchestration kernel.
   ·
   <a href="#why-agentos"><strong>Why AgentOS</strong></a>
   ·
-  <a href="#quick-start"><strong>Quick Start</strong></a>
-  ·
   <a href="#architecture"><strong>Architecture</strong></a>
-  ·
-  <a href="#key-features"><strong>Features</strong></a>
   ·
   <a href="#product-highlights"><strong>Highlights</strong></a>
   ·
@@ -29,32 +25,24 @@ Built on top of OpenClaw, the agent orchestration kernel.
   <a href="#roadmap"><strong>Roadmap</strong></a>
 </p>
 
-<p>
-  <img src="https://img.shields.io/badge/Next.js-16-0b1220?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js 16" />
-  <img src="https://img.shields.io/badge/React-19-07111d?style=for-the-badge&logo=react&logoColor=61dafb" alt="React 19" />
-  <img src="https://img.shields.io/badge/TypeScript-Strict-0f172a?style=for-the-badge&logo=typescript&logoColor=3178c6" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/OpenClaw-Kernel-111827?style=for-the-badge" alt="OpenClaw kernel" />
-  <img src="https://img.shields.io/badge/Local--First-Control_Plane-101828?style=for-the-badge" alt="Local-first control plane" />
-</p>
-
 <p align="center">
-  <a href="https://nextjs.org" target="_blank" rel="noreferrer" title="Next.js" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
-    <img src="https://cdn.simpleicons.org/nextdotjs/000000" alt="Next.js" height="24" />
+  <a href="https://nextjs.org" target="_blank" rel="noreferrer" title="Next.js" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; margin:0 8px 5px 0; font-size:0.86rem; line-height:1;">
+    <img src="https://cdn.simpleicons.org/nextdotjs/000000" alt="Next.js" height="18" />
     <strong>Next.js</strong>
   </a>
-  <a href="https://react.dev" target="_blank" rel="noreferrer" title="React" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
-    <img src="https://cdn.simpleicons.org/react/61DAFB" alt="React" height="24" />
+  <a href="https://react.dev" target="_blank" rel="noreferrer" title="React" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; margin:0 8px 5px 0; font-size:0.86rem; line-height:1;">
+    <img src="https://cdn.simpleicons.org/react/61DAFB" alt="React" height="18" />
     <strong>React</strong>
   </a>
-  <a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" title="TypeScript" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
-    <img src="https://cdn.simpleicons.org/typescript/3178C6" alt="TypeScript" height="24" />
+  <a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" title="TypeScript" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; margin:0 8px 5px 0; font-size:0.86rem; line-height:1;">
+    <img src="https://cdn.simpleicons.org/typescript/3178C6" alt="TypeScript" height="18" />
     <strong>TypeScript</strong>
   </a>
-  <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noreferrer" title="OpenClaw" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
-    <img src="public/assets/openclaw.png" alt="OpenClaw" height="24" />
+  <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noreferrer" title="OpenClaw" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; margin:0 8px 5px 0; font-size:0.86rem; line-height:1;">
+    <img src="public/assets/openclaw.png" alt="OpenClaw" height="18" />
   </a>
-  <a href="https://pnpm.io" target="_blank" rel="noreferrer" title="pnpm" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
-    <img src="https://cdn.simpleicons.org/pnpm/F69220" alt="pnpm" height="24" />
+  <a href="https://pnpm.io" target="_blank" rel="noreferrer" title="pnpm" style="text-decoration:none; display:inline-flex; align-items:center; gap:4px; margin:0 8px 5px 0; font-size:0.86rem; line-height:1;">
+    <img src="https://cdn.simpleicons.org/pnpm/F69220" alt="pnpm" height="18" />
     <strong>pnpm</strong>
   </a>
 </p>
