@@ -1,5 +1,7 @@
 # @sapienx/agentos
 
+License: MIT
+
 Install:
 
 ```bash

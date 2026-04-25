@@ -37,6 +37,10 @@ Built on top of OpenClaw, the agent orchestration kernel.
 
 </div>
 
+## License
+
+MIT
+
 ## Why AgentOS
 
 As AI agents become cheaper to run, the bottleneck shifts from raw orchestration to human control.

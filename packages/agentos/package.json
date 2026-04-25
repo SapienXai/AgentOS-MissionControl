@@ -3,6 +3,7 @@
   "version": "0.4.1",
   "description": "AgentOS control plane launcher",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "agentos": "bin/agentos.js"
   },
