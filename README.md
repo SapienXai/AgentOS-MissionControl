@@ -38,20 +38,24 @@ Built on top of OpenClaw, the agent orchestration kernel.
 </p>
 
 <p align="center">
-  <a href="https://nextjs.org" target="_blank" rel="noreferrer" title="Next.js">
+  <a href="https://nextjs.org" target="_blank" rel="noreferrer" title="Next.js" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
     <img src="https://cdn.simpleicons.org/nextdotjs/000000" alt="Next.js" height="24" />
+    <strong>Next.js</strong>
   </a>
-  <a href="https://react.dev" target="_blank" rel="noreferrer" title="React">
+  <a href="https://react.dev" target="_blank" rel="noreferrer" title="React" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
     <img src="https://cdn.simpleicons.org/react/61DAFB" alt="React" height="24" />
+    <strong>React</strong>
   </a>
-  <a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" title="TypeScript">
+  <a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" title="TypeScript" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
     <img src="https://cdn.simpleicons.org/typescript/3178C6" alt="TypeScript" height="24" />
+    <strong>TypeScript</strong>
   </a>
-  <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noreferrer" title="OpenClaw">
-    <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg" alt="OpenClaw" height="24" />
+  <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noreferrer" title="OpenClaw" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
+    <img src="public/assets/openclaw.png" alt="OpenClaw" height="24" />
   </a>
-  <a href="https://pnpm.io" target="_blank" rel="noreferrer" title="pnpm">
+  <a href="https://pnpm.io" target="_blank" rel="noreferrer" title="pnpm" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; margin:0 12px 8px 0;">
     <img src="https://cdn.simpleicons.org/pnpm/F69220" alt="pnpm" height="24" />
+    <strong>pnpm</strong>
   </a>
 </p>
 
