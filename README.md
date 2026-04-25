@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/readme/readme.jpeg" alt="AgentOS control-plane interface" width="100%" />
+  <img src="public/assets/screenshots/0.jpeg" alt="AgentOS control-plane interface" width="100%" />
 
 # AgentOS | Control Plane
 
@@ -11,6 +11,8 @@ Built on top of OpenClaw, the agent orchestration kernel.
   <a href="https://sapienx.app/agentos"><strong>Website</strong></a>
   ·
   <a href="https://www.youtube.com/watch?v=ujz-4bYDjdY"><strong>Watch Demo</strong></a>
+  ·
+  <a href="#try-agentos-in-5-minutes"><strong>Try in 5 minutes</strong></a>
   ·
   <a href="#why-agentos"><strong>Why AgentOS</strong></a>
   ·
@@ -36,6 +38,44 @@ Built on top of OpenClaw, the agent orchestration kernel.
 </p>
 
 </div>
+
+## Try AgentOS in 5 minutes
+
+1. Install AgentOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash
+```
+
+Or install it with your package manager:
+
+```bash
+pnpm add -g @sapienx/agentos
+```
+
+2. Open the UI:
+
+```bash
+agentos start --open
+```
+
+3. Verify the runtime:
+
+```bash
+agentos doctor
+```
+
+First thing to try:
+
+- Open the AgentOS UI.
+- Check the OpenClaw onboarding state.
+- Create or inspect a workspace.
+- Create an agent or use the guided workspace flow.
+- Dispatch a mission.
+- Inspect the runtime output or transcript.
+
+If OpenClaw is already installed, AgentOS connects to the live control plane and shows the current gateway, models, agents, and runtimes.
+If OpenClaw is missing or not ready yet, AgentOS opens in an explicit fallback or onboarding flow instead of showing a fake live state.
 
 ## License
 
@@ -154,27 +194,80 @@ In practice, that means:
 - Configurable gateway endpoint and default workspace root from settings.
 - Explicit fallback mode when OpenClaw is unavailable, rather than pretending live control exists.
 
+## What works today / What is coming next
+
+### What works today
+
+- Local AgentOS control plane built with Next.js.
+- OpenClaw-aware onboarding and fallback state.
+- Workspace overview and live control-plane snapshot.
+- Agent creation and editing with presets and policies.
+- Workspace creation and guided workspace wizard.
+- Mission dispatch to OpenClaw-backed agents.
+- Runtime and transcript inspection.
+- Gateway diagnostics and control actions.
+- Local-first settings for gateway endpoint and workspace root.
+- Install paths through the release installer and package manager.
+
+### What is coming next
+
+- Deeper Telegram and Discord operation jobs.
+- More complete approval history and audit trails.
+- Stronger recurring workflow and job management.
+- Richer model and provider setup guidance.
+- More workspace and agent preset examples.
+- Better remote or multi-host OpenClaw management.
+- More durable analytics and historical runtime views.
+
 ## Product Highlights
 
-Three flows define the current AgentOS experience:
+The screenshots below show the current product flow in the order a new visitor is most likely to explore it.
 
-### One-Click OpenClaw Setup
-
-<img src="public/readme/setup.webp" alt="Guided OpenClaw setup and onboarding flow" width="100%" />
-
-Go from zero to a live control plane in minutes. AgentOS detects what is missing, installs OpenClaw, and guides operators through system and model onboarding without the usual setup friction.
-
-### AI Workspace Architect
-
-<img src="public/readme/create.webp" alt="AI architect flow for creating workspaces, tasks, and agents" width="100%" />
-
-Turn a rough idea into an operational blueprint. The architect flow uses OpenClaw-backed planning to shape workspaces, tasks, and specialized agent roles before execution even begins.
-
-### Guided Workspace Wizards
-
-<img src="public/readme/wizzard.webp" alt="Workspace wizard for project context and agent setup" width="100%" />
-
-Launch new projects with confidence. Structured wizards capture context, scaffold the right workspace shape, and assemble the agent team your project needs without manual busywork.
+<table>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/1.jpeg" alt="AgentOS launchpad onboarding flow" width="100%" />
+      <strong>Launchpad</strong><br />
+      Guided onboarding for OpenClaw, models, and the first workspace.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/2.jpeg" alt="AgentOS control plane overview" width="100%" />
+      <strong>Control Plane</strong><br />
+      Live graph, task flow, and inspector visibility in one place.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/3.jpeg" alt="AgentOS agent builder flow" width="100%" />
+      <strong>Agent Builder</strong><br />
+      Create agents from scratch, presets, or imports.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/4_1.jpeg" alt="AgentOS agent chat flow" width="100%" />
+      <strong>Agent Chat</strong><br />
+      Talk to agents directly and turn intent into action.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/5.jpeg" alt="AgentOS model setup flow" width="100%" />
+      <strong>Add Models</strong><br />
+      Connect providers and discover models without leaving AgentOS.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/6.jpeg" alt="AgentOS workspace wizard flow" width="100%" />
+      <strong>Workspace Wizard</strong><br />
+      Shape a workspace from one prompt and a guided flow.
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="public/assets/screenshots/7.jpeg" alt="AgentOS workspace surfaces flow" width="100%" />
+      <strong>Workspace Surfaces</strong><br />
+      Connect Telegram, Discord, Slack, and more to every workspace.
+    </td>
+  </tr>
+</table>
 
 ## UI Surfaces
 
@@ -474,8 +567,3 @@ Please keep contributions aligned with the current design principles:
 - Keep user-facing copy and documentation in English.
 - Run `pnpm lint`, `pnpm typecheck`, and `pnpm build` before opening a PR.
 - Prefer concise English commit messages; Conventional Commits are a good fit here.
-
-## License
-
-This repository does not currently include a license file.
-Until one is added, assume standard copyright restrictions apply.
