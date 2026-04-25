@@ -37,6 +37,24 @@ Built on top of OpenClaw, the agent orchestration kernel.
   <img src="https://img.shields.io/badge/Local--First-Control_Plane-101828?style=for-the-badge" alt="Local-first control plane" />
 </p>
 
+<p align="center">
+  <a href="https://nextjs.org" target="_blank" rel="noreferrer" title="Next.js">
+    <img src="https://cdn.simpleicons.org/nextdotjs/000000" alt="Next.js" height="24" />
+  </a>
+  <a href="https://react.dev" target="_blank" rel="noreferrer" title="React">
+    <img src="https://cdn.simpleicons.org/react/61DAFB" alt="React" height="24" />
+  </a>
+  <a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" title="TypeScript">
+    <img src="https://cdn.simpleicons.org/typescript/3178C6" alt="TypeScript" height="24" />
+  </a>
+  <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noreferrer" title="OpenClaw">
+    <img src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text-dark.svg" alt="OpenClaw" height="24" />
+  </a>
+  <a href="https://pnpm.io" target="_blank" rel="noreferrer" title="pnpm">
+    <img src="https://cdn.simpleicons.org/pnpm/F69220" alt="pnpm" height="24" />
+  </a>
+</p>
+
 </div>
 
 ## Try AgentOS in 5 minutes
@@ -77,9 +95,55 @@ First thing to try:
 If OpenClaw is already installed, AgentOS connects to the live control plane and shows the current gateway, models, agents, and runtimes.
 If OpenClaw is missing or not ready yet, AgentOS opens in an explicit fallback or onboarding flow instead of showing a fake live state.
 
-## License
+## Product Highlights
 
-MIT
+The screenshots below show the current product flow in the order a new visitor is most likely to explore it.
+
+<table>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/1.jpeg" alt="AgentOS launchpad onboarding flow" width="100%" />
+      <strong>Launchpad</strong><br />
+      Guided onboarding for OpenClaw, models, and the first workspace.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/2.jpeg" alt="AgentOS control plane overview" width="100%" />
+      <strong>Control Plane</strong><br />
+      Live graph, task flow, and inspector visibility in one place.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/3.jpeg" alt="AgentOS agent builder flow" width="100%" />
+      <strong>Agent Builder</strong><br />
+      Create agents from scratch, presets, or imports.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/4_1.jpeg" alt="AgentOS agent chat flow" width="100%" />
+      <strong>Agent Chat</strong><br />
+      Talk to agents directly and turn intent into action.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/5.jpeg" alt="AgentOS model setup flow" width="100%" />
+      <strong>Add Models</strong><br />
+      Connect providers and discover models without leaving AgentOS.
+    </td>
+    <td valign="top" width="50%">
+      <img src="public/assets/screenshots/6.jpeg" alt="AgentOS workspace wizard flow" width="100%" />
+      <strong>Workspace Wizard</strong><br />
+      Shape a workspace from one prompt and a guided flow.
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
+      <img src="public/assets/screenshots/7.jpeg" alt="AgentOS workspace surfaces flow" width="100%" />
+      <strong>Workspace Surfaces</strong><br />
+      Connect Telegram, Discord, Slack, and more to every workspace.
+    </td>
+  </tr>
+</table>
 
 ## Why AgentOS
 
@@ -218,56 +282,6 @@ In practice, that means:
 - More workspace and agent preset examples.
 - Better remote or multi-host OpenClaw management.
 - More durable analytics and historical runtime views.
-
-## Product Highlights
-
-The screenshots below show the current product flow in the order a new visitor is most likely to explore it.
-
-<table>
-  <tr>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/1.jpeg" alt="AgentOS launchpad onboarding flow" width="100%" />
-      <strong>Launchpad</strong><br />
-      Guided onboarding for OpenClaw, models, and the first workspace.
-    </td>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/2.jpeg" alt="AgentOS control plane overview" width="100%" />
-      <strong>Control Plane</strong><br />
-      Live graph, task flow, and inspector visibility in one place.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/3.jpeg" alt="AgentOS agent builder flow" width="100%" />
-      <strong>Agent Builder</strong><br />
-      Create agents from scratch, presets, or imports.
-    </td>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/4_1.jpeg" alt="AgentOS agent chat flow" width="100%" />
-      <strong>Agent Chat</strong><br />
-      Talk to agents directly and turn intent into action.
-    </td>
-  </tr>
-  <tr>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/5.jpeg" alt="AgentOS model setup flow" width="100%" />
-      <strong>Add Models</strong><br />
-      Connect providers and discover models without leaving AgentOS.
-    </td>
-    <td valign="top" width="50%">
-      <img src="public/assets/screenshots/6.jpeg" alt="AgentOS workspace wizard flow" width="100%" />
-      <strong>Workspace Wizard</strong><br />
-      Shape a workspace from one prompt and a guided flow.
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" valign="top">
-      <img src="public/assets/screenshots/7.jpeg" alt="AgentOS workspace surfaces flow" width="100%" />
-      <strong>Workspace Surfaces</strong><br />
-      Connect Telegram, Discord, Slack, and more to every workspace.
-    </td>
-  </tr>
-</table>
 
 ## UI Surfaces
 
@@ -567,3 +581,7 @@ Please keep contributions aligned with the current design principles:
 - Keep user-facing copy and documentation in English.
 - Run `pnpm lint`, `pnpm typecheck`, and `pnpm build` before opening a PR.
 - Prefer concise English commit messages; Conventional Commits are a good fit here.
+
+## License
+
+MIT
