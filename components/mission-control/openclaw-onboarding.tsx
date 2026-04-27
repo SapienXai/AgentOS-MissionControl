@@ -4,7 +4,10 @@ import { ArrowLeft, ArrowRight, Check, LoaderCircle, Sparkles } from "lucide-rea
 import { motion } from "motion/react";
 
 import { Button } from "@/components/ui/button";
-import { isOpenClawOnboardingSystemReady } from "@/lib/openclaw/readiness";
+import {
+  isOpenClawOnboardingModelReady,
+  isOpenClawOnboardingSystemReady
+} from "@/lib/openclaw/readiness";
 import type {
   DiscoveredModelCandidate,
   AddModelsProviderId,
@@ -59,7 +62,6 @@ export function OpenClawOnboarding({
   onRunSystemSetup,
   onRunModelSetDefault,
   onOpenAddModels,
-  onOpenWorkspaceCreate,
   onCreateWorkspace,
   onEnterAgentOS,
   onContinueToModels,
@@ -86,7 +88,6 @@ export function OpenClawOnboarding({
   onRunSystemSetup: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
-  onOpenWorkspaceCreate: () => void;
   onCreateWorkspace: () => void;
   onEnterAgentOS: () => void;
   onContinueToModels: () => void;
@@ -96,7 +97,10 @@ export function OpenClawOnboarding({
   launchpadCreateRunState: "idle" | "running" | "success" | "error";
   }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
-  const modelReady = modelSwitchFeedback.phase === "success" || showReadyState;
+  const modelReady =
+    modelSwitchFeedback.phase === "success" ||
+    showReadyState ||
+    isOpenClawOnboardingModelReady(snapshot);
   const showLaunchpad = modelReady && showReadyState;
   const isLaunchpadBuilding = launchpadCreateRunState === "running";
   const workspaceCount = snapshot.workspaces.length;
@@ -351,30 +355,19 @@ export function OpenClawOnboarding({
             {showLaunchpad ? (
               <>
                 {hasWorkspaces ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={onOpenWorkspaceCreate}
-                      className={secondaryActionClassName(surfaceTheme)}
-                    >
-                      Create workspace
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={onEnterAgentOS}
-                      className={cn(
-                        "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
-                        surfaceTheme === "light"
-                          ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
-                          : "bg-white text-slate-950 hover:bg-white/92"
-                      )}
-                    >
-                      Enter AgentOS
-                      <ArrowRight className="ml-1.5 h-3 w-3" />
-                    </Button>
-                  </>
+                  <Button
+                    type="button"
+                    onClick={onEnterAgentOS}
+                    className={cn(
+                      "h-8 min-w-[156px] rounded-full px-3 text-[11px]",
+                      surfaceTheme === "light"
+                        ? "bg-[#c8946f] text-white shadow-[0_14px_34px_rgba(200,148,111,0.24)] hover:bg-[#b88461]"
+                        : "bg-white text-slate-950 hover:bg-white/92"
+                    )}
+                  >
+                    Enter AgentOS
+                    <ArrowRight className="ml-1.5 h-3 w-3" />
+                  </Button>
                 ) : isLaunchpadBuilding ? (
                   <span
                     className={cn(

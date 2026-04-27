@@ -62,12 +62,14 @@ export function OpenClawOnboardingProviderFlow({
   snapshot,
   selectedModelId,
   onSelectedModelIdChange,
-  onOpenAddModels
+  onOpenAddModels,
+  autoDiscover = true
 }: {
   snapshot: MissionControlSnapshot;
   selectedModelId: string;
   onSelectedModelIdChange: (value: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
+  autoDiscover?: boolean;
 }) {
   const [activeProviderId, setActiveProviderId] = useState<AddModelsProviderId>(() =>
     resolveInitialOnboardingProviderId(snapshot, selectedModelId)
@@ -98,10 +100,46 @@ export function OpenClawOnboardingProviderFlow({
   const activeDescriptor = getModelProviderDescriptor(activeProviderId);
   const activeDraft = resolveDraft(providerDrafts[activeProviderId]);
   const activeConnection = activeDraft.connection ?? resolveConnectionDetail(snapshot, activeProviderId);
+  const snapshotProviderModels = useMemo(
+    () =>
+      snapshot.models
+        .filter(
+          (model) =>
+            model.provider === activeProviderId &&
+            model.available !== false &&
+            !model.missing
+        )
+        .map((model) => ({
+          id: model.id,
+          name: model.name,
+          provider: model.provider,
+          input: model.input,
+          contextWindow: model.contextWindow,
+          local: Boolean(model.local),
+          available: model.available !== false,
+          missing: model.missing,
+          alreadyAdded: true,
+          recommended:
+            model.id === snapshot.diagnostics.modelReadiness.recommendedModelId ||
+            model.id === snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+            model.id === snapshot.diagnostics.modelReadiness.defaultModel,
+          supportsTools: model.tags.includes("tools"),
+          isFree: model.tags.includes("free"),
+          tags: model.tags
+        })),
+    [
+      activeProviderId,
+      snapshot.diagnostics.modelReadiness.defaultModel,
+      snapshot.diagnostics.modelReadiness.recommendedModelId,
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel,
+      snapshot.models
+    ]
+  );
+  const activeCatalogModels = activeDraft.models.length > 0 ? activeDraft.models : snapshotProviderModels;
   const activeModels = useMemo(() => {
     const query = activeDraft.search.trim().toLowerCase();
 
-    return activeDraft.models
+    return activeCatalogModels
       .slice()
       .sort((left, right) => {
         const rightScore = Number(right.recommended) + Number(right.isFree) + Number(right.supportsTools);
@@ -121,7 +159,7 @@ export function OpenClawOnboardingProviderFlow({
         const haystack = `${model.name} ${model.id} ${model.tags.join(" ")}`.toLowerCase();
         return haystack.includes(query);
       });
-  }, [activeDraft.models, activeDraft.search]);
+  }, [activeCatalogModels, activeDraft.search]);
 
   const selectedModelLabel =
     snapshot.models.find((model) => model.id === selectedModelId)?.name ||
@@ -191,11 +229,11 @@ export function OpenClawOnboardingProviderFlow({
 
     try {
       const result = await adapter.getConnectionStatus();
-      const nextState = result.connection.connected ? "discovering" : "idle";
+      const nextState = result.connection.connected && autoDiscover ? "discovering" : "idle";
 
       applyActionResult(providerId, result, nextState);
 
-      if (result.connection.connected) {
+      if (result.connection.connected && autoDiscover) {
         await discoverProvider(providerId, true);
       }
     } catch (error) {

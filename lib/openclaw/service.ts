@@ -29,8 +29,13 @@ import {
   runOpenClaw,
   runOpenClawJson,
   runOpenClawJsonStream,
+  getResolvedOpenClawBin,
   resolveOpenClawVersion
 } from "@/lib/openclaw/cli";
+import {
+  buildOpenClawBinarySelectionSnapshot,
+  readOpenClawBinarySelection
+} from "@/lib/openclaw/binary-selection";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import {
   buildWorkspaceCreateProgressTemplate,
@@ -1556,6 +1561,10 @@ async function loadMissionControlSnapshots({
       updateError,
       legacyInfo: status?.overview?.update
     });
+    const openClawBinarySelection = buildOpenClawBinarySelectionSnapshot(
+      await readOpenClawBinarySelection(),
+      getResolvedOpenClawBin()
+    );
     const runtimeDiagnostics = await runtimeDiagnosticsPromise;
 
     const snapshotIssueResults = {
@@ -1595,6 +1604,7 @@ async function loadMissionControlSnapshots({
       updateChannel: status?.updateChannel || "stable",
       updateInfo,
       serviceLabel: gatewayStatus?.service?.label,
+      openClawBinarySelection,
       modelReadiness,
       runtime: runtimeDiagnostics,
       commandHistory: getRecentOpenClawCommandDiagnostics(),
@@ -2682,6 +2692,40 @@ export async function createWorkspaceProject(
     `Workspace input and ${enabledAgents.length} agent configuration${enabledAgents.length === 1 ? "" : "s"} are ready.`
   );
 
+  const existingWorkspaceResult = await resolveExistingWorkspaceCreateResult(targetDir, snapshot, normalized.slug);
+
+  if (existingWorkspaceResult) {
+    await progress.startStep("source", describeWorkspaceSourceStart(normalized.sourceMode, targetDir));
+    await progress.addActivity("source", "Workspace already exists. Reusing the existing folder.", "done");
+    await progress.completeStep("source", "Existing workspace folder reused.");
+    await progress.startStep("scaffold", "Writing the initial workspace scaffold and local metadata.");
+    await progress.addActivity("scaffold", "Workspace scaffold already exists. Reusing existing files.", "done");
+    await progress.completeStep("scaffold", "Workspace files and starter docs are already in place.");
+    await progress.startStep(
+      "agents",
+      existingWorkspaceResult.agentIds.length === 1
+        ? "Reusing the existing workspace agent."
+        : `Reusing ${existingWorkspaceResult.agentIds.length} workspace agents.`
+    );
+    await progress.addActivity(
+      "agents",
+      `${existingWorkspaceResult.agentIds.length} agent${existingWorkspaceResult.agentIds.length === 1 ? "" : "s"} already linked to the workspace.`,
+      "done"
+    );
+    await progress.completeStep(
+      "agents",
+      `${existingWorkspaceResult.agentIds.length} agent${existingWorkspaceResult.agentIds.length === 1 ? "" : "s"} already linked to the workspace.`
+    );
+    await progress.startStep("kickoff", "Finalizing workspace bootstrap.");
+    await progress.addActivity("kickoff", "Kickoff was already handled by the existing workspace.", "done");
+    await progress.completeStep("kickoff", "Workspace bootstrap is already complete.");
+
+    snapshotCache = null;
+    clearRuntimeHistoryCache();
+
+    return existingWorkspaceResult;
+  }
+
   await progress.startStep("source", describeWorkspaceSourceStart(normalized.sourceMode, targetDir));
   await progress.addActivity("source", describeWorkspaceSourceActivity(normalized.sourceMode, normalized), "active");
   await materializeWorkspaceSource({
@@ -2808,6 +2852,114 @@ export async function createWorkspaceProject(
     kickoffRunId,
     kickoffStatus,
     kickoffError
+  };
+}
+
+async function resolveExistingWorkspaceCreateResult(
+  targetDir: string,
+  snapshot: MissionControlSnapshot,
+  workspaceSlug: string
+): Promise<WorkspaceCreateResult | null> {
+  const manifest = await readWorkspaceProjectManifest(targetDir);
+  const enabledManifestAgents = manifest.agents.filter((agent) => agent.enabled);
+  const hasExistingWorkspaceContent =
+    Boolean(manifest.name || manifest.template || manifest.sourceMode || manifest.agentTemplate) ||
+    enabledManifestAgents.length > 0 ||
+    manifest.channels.length > 0 ||
+    manifest.contextSources.length > 0;
+
+  if (!hasExistingWorkspaceContent) {
+    return null;
+  }
+
+  const workspaceId = workspaceIdFromPath(targetDir);
+  const workspace =
+    snapshot.workspaces.find((entry) => entry.id === workspaceId) ??
+    snapshot.workspaces.find((entry) => path.resolve(entry.path) === path.resolve(targetDir)) ??
+    null;
+
+  const workspaceAgents = snapshot.agents.filter(
+    (agent) => agent.workspaceId === workspaceId || path.resolve(agent.workspacePath) === path.resolve(targetDir)
+  );
+  const existingAgentIds = new Set(workspaceAgents.map((agent) => agent.id));
+  const manifestAgentRefs = enabledManifestAgents.map((agent) =>
+    resolveManifestWorkspaceAgentProvisioningRef(workspaceSlug, agent)
+  );
+
+  const repairedAgentIds: string[] = [];
+  for (const entry of manifestAgentRefs) {
+    if (existingAgentIds.has(entry.agentId)) {
+      continue;
+    }
+
+    const createdAgentId = await createBootstrappedWorkspaceAgentFromProvisioning({
+      workspacePath: targetDir,
+      workspaceSlug,
+      workspaceModelId: entry.agent.modelId,
+      agent: entry.agent
+    });
+    repairedAgentIds.push(createdAgentId);
+    existingAgentIds.add(createdAgentId);
+  }
+
+  const manifestAgentIds = uniqueStrings(manifestAgentRefs.map((entry) => entry.agentId));
+  const resolvedAgentIds = uniqueStrings([
+    ...workspaceAgents.map((agent) => agent.id),
+    ...repairedAgentIds,
+    ...manifestAgentIds
+  ]);
+
+  if (resolvedAgentIds.length === 0) {
+    return null;
+  }
+
+  const manifestPrimaryAgent = manifest.agents.find((agent) => agent.enabled && agent.isPrimary) ?? null;
+  const manifestPrimaryAgentRef = manifestPrimaryAgent
+    ? resolveManifestWorkspaceAgentProvisioningRef(workspaceSlug, manifestPrimaryAgent)
+    : null;
+  const primaryAgentId =
+    workspaceAgents[0]?.id ??
+    manifestPrimaryAgentRef?.agentId ??
+    resolvedAgentIds[0];
+
+  return {
+    workspaceId: workspace?.id ?? workspaceId,
+    workspacePath: workspace?.path ?? targetDir,
+    agentIds: resolvedAgentIds,
+    primaryAgentId,
+    kickoffRunId: undefined,
+    kickoffStatus: undefined,
+    kickoffError: undefined
+  };
+}
+
+function resolveManifestWorkspaceAgentProvisioningRef(
+  workspaceSlug: string,
+  manifestAgent: WorkspaceProjectManifestAgent
+) {
+  const slugPrefix = `${workspaceSlug}-`;
+  const agentKey = manifestAgent.id.startsWith(slugPrefix)
+    ? manifestAgent.id.slice(slugPrefix.length)
+    : manifestAgent.id;
+  const normalizedAgentKey = agentKey || manifestAgent.id;
+
+  return {
+    agentId: manifestAgent.id.startsWith(slugPrefix)
+      ? manifestAgent.id
+      : createWorkspaceAgentId(workspaceSlug, manifestAgent.id),
+    agent: {
+      id: normalizedAgentKey,
+      name: manifestAgent.name ?? normalizedAgentKey,
+      role: manifestAgent.role ?? "Agent",
+      enabled: manifestAgent.enabled,
+      emoji: manifestAgent.emoji ?? undefined,
+      theme: manifestAgent.theme ?? undefined,
+      skillId: manifestAgent.skillId ?? undefined,
+      modelId: manifestAgent.modelId ?? undefined,
+      isPrimary: manifestAgent.isPrimary,
+      policy: manifestAgent.policy ?? undefined,
+      channelIds: manifestAgent.channelIds
+    } satisfies WorkspaceAgentBlueprintInput
   };
 }
 

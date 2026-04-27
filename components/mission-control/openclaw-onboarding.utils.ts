@@ -216,7 +216,7 @@ export function resolvePrimaryAction(params: {
   const defaultModelId = params.defaultModelId?.trim() ?? "";
 
   if (selectedModelId) {
-    if (params.modelReady && selectedModelId === defaultModelId) {
+    if (selectedModelId === defaultModelId) {
       return { kind: "dismiss" as const, label: "Enter AgentOS" };
     }
 

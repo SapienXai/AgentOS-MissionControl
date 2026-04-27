@@ -7,6 +7,11 @@ import {
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
 } from "@/lib/openclaw/install";
+import {
+  createDefaultOpenClawBinarySelection,
+  readOpenClawBinarySelection,
+  resolveOpenClawBinarySelectionPath
+} from "@/lib/openclaw/binary-selection";
 import type { OpenClawCommandDiagnostic } from "@/lib/openclaw/types";
 
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
@@ -342,8 +347,6 @@ export function formatOpenClawCommand(command: string, args: string[]) {
 }
 
 export async function resolveOpenClawBin(): Promise<string> {
-  const candidates = getOpenClawBinCandidates();
-
   if (resolveOpenClawBinPromise) {
     return resolveOpenClawBinPromise;
   }
@@ -351,6 +354,17 @@ export async function resolveOpenClawBin(): Promise<string> {
   resolveOpenClawBinPromise = (async () => {
     if (resolvedOpenClawBin) {
       return resolvedOpenClawBin;
+    }
+
+    const selection = await readOpenClawBinarySelection().catch(() => createDefaultOpenClawBinarySelection());
+    const selectionPath = resolveOpenClawBinarySelectionPath(selection);
+    const explicitEnvBin = initialOpenClawBinEnv || "";
+    const candidates = selection.mode === "auto"
+      ? getOpenClawBinCandidates()
+      : [selectionPath || ""];
+
+    if (selection.mode === "auto" && explicitEnvBin) {
+      candidates.unshift(explicitEnvBin);
     }
 
     for (const candidate of candidates) {
@@ -381,7 +395,7 @@ export function resetOpenClawBinCache() {
 }
 
 export function getOpenClawBinCandidates() {
-  const envBin = process.env.OPENCLAW_BIN?.trim() || "";
+  const envBin = initialOpenClawBinEnv;
   const bundledNodeBin = getOpenClawBundledNodeBinPath();
   const localPrefixBin = getOpenClawLocalPrefixBinPath();
   const candidates = [
@@ -393,6 +407,10 @@ export function getOpenClawBinCandidates() {
   ];
 
   return Array.from(new Set(candidates.filter((candidate) => Boolean(candidate))));
+}
+
+export function getResolvedOpenClawBin() {
+  return resolvedOpenClawBin || null;
 }
 
 function parseJsonOutput<T>(text: string): T {

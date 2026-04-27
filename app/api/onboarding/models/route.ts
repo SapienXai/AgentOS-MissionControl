@@ -326,6 +326,20 @@ export async function POST(request: Request) {
       }
 
       const runSetDefault = async (modelId: string) => {
+        const currentDefaultModelId =
+          snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+          snapshot.diagnostics.modelReadiness.defaultModel ||
+          null;
+
+        if (currentDefaultModelId && modelId.trim() === currentDefaultModelId.trim()) {
+          await send({
+            type: "status",
+            phase: "ready",
+            message: "The selected default model is already active."
+          });
+          return true;
+        }
+
         await send({
           type: "status",
           phase: "configuring-default",
@@ -381,6 +395,26 @@ export async function POST(request: Request) {
       };
 
       if (input.intent === "set-default") {
+        const currentDefaultModelId =
+          snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+          snapshot.diagnostics.modelReadiness.defaultModel ||
+          null;
+
+        if (currentDefaultModelId && input.modelId.trim() === currentDefaultModelId.trim()) {
+          await send({
+            type: "done",
+            ok: true,
+            phase: "ready",
+            message: "The selected default model is already active.",
+            exitCode: 0,
+            stdout: aggregatedStdout,
+            stderr: aggregatedStderr,
+            snapshot
+          });
+          await closeWriter();
+          return;
+        }
+
         if (!(await runSetDefault(input.modelId))) {
           return;
         }

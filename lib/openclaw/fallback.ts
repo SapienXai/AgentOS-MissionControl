@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
+import { createDefaultOpenClawBinarySelection } from "@/lib/openclaw/binary-selection";
 import {
   buildWorkspaceContextManifest,
   WORKSPACE_CONTEXT_CORE_PATHS,
@@ -36,6 +37,7 @@ function createTransientSnapshot(
       dashboardUrl: "http://127.0.0.1:18789/",
       gatewayUrl: "ws://127.0.0.1:18789",
       configuredGatewayUrl: null,
+      openClawBinarySelection: createDefaultOpenClawBinarySelection(),
       modelReadiness: {
         ready: false,
         defaultModel: null,
@@ -132,6 +134,7 @@ export function createFallbackSnapshot(reason: string): MissionControlSnapshot {
       dashboardUrl: "http://127.0.0.1:18789/",
       gatewayUrl: "ws://127.0.0.1:18789",
       configuredGatewayUrl: null,
+      openClawBinarySelection: createDefaultOpenClawBinarySelection(),
       modelReadiness: {
         ready: true,
         defaultModel: "openai-codex/gpt-5.1-codex-mini",

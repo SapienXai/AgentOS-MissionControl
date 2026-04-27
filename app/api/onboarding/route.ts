@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { formatOpenClawCommand, resetOpenClawBinCache, resolveOpenClawBin } from "@/lib/openclaw/cli";
+import { createDefaultOpenClawBinarySelection, writeOpenClawBinarySelection } from "@/lib/openclaw/binary-selection";
 import { isOpenClawSystemReady } from "@/lib/openclaw/readiness";
 import {
   OPENCLAW_INSTALL_DOCS_URL,
@@ -527,7 +528,14 @@ async function installOpenClawCli(
     return null;
   }
 
-  process.env.OPENCLAW_BIN = getOpenClawLocalPrefixBinPath();
+  await writeOpenClawBinarySelection({
+    ...createDefaultOpenClawBinarySelection(),
+    mode: "local-prefix",
+    path: getOpenClawLocalPrefixBinPath(),
+    resolvedPath: getOpenClawLocalPrefixBinPath(),
+    label: "Local prefix",
+    detail: getOpenClawLocalPrefixBinPath()
+  });
   resetOpenClawBinCache();
 
   try {

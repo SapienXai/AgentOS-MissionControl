@@ -20,6 +20,7 @@ import {
 } from "@/components/mission-control/openclaw-onboarding.utils";
 import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/openclaw-onboarding-provider-flow";
 import { formatModelLabel } from "@/lib/openclaw/presenters";
+import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
 import { cn } from "@/lib/utils";
 
@@ -237,6 +238,7 @@ export function ModelStage({
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
     null;
+  const modelReady = isOpenClawOnboardingModelReady(snapshot);
   const defaultModelLabel = resolveModelDisplayLabel(defaultModelId, availableModels);
   const switchTargetLabel = resolveModelDisplayLabel(selectedModelId, availableModels);
   const hasPendingModelSwitch = Boolean(
@@ -302,6 +304,7 @@ export function ModelStage({
             selectedModelId={selectedModelId}
             onSelectedModelIdChange={onSelectedModelIdChange}
             onOpenAddModels={onOpenAddModels}
+            autoDiscover={!modelReady}
           />
 
           <StageConsole

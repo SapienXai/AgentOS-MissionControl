@@ -56,14 +56,16 @@ import {
   createPendingOperationProgressSnapshot
 } from "@/lib/openclaw/operation-progress";
 import {
+  isOpenClawOnboardingModelReady as resolveOpenClawModelReady,
   isOpenClawOnboardingSystemReady as resolveOpenClawSystemReady
 } from "@/lib/openclaw/readiness";
 import type {
   AddModelsProviderId,
   DiscoveredModelCandidate,
   MissionResponse,
-  MissionControlSnapshot,
-  OpenClawModelOnboardingPhase,
+    MissionControlSnapshot,
+    OpenClawBinarySelection,
+    OpenClawModelOnboardingPhase,
   OpenClawModelOnboardingStreamEvent,
   OpenClawOnboardingPhase,
   OpenClawOnboardingStreamEvent,
@@ -131,6 +133,19 @@ const initialModelSwitchFeedback: ModelSwitchFeedback = {
   message: null
 };
 
+function areOpenClawBinarySelectionsEqual(
+  left: OpenClawBinarySelection,
+  right: OpenClawBinarySelection
+) {
+  return (
+    left.mode === right.mode &&
+    left.path === right.path &&
+    left.resolvedPath === right.resolvedPath &&
+    left.label === right.label &&
+    left.detail === right.detail
+  );
+}
+
 export function MissionControlShell({
   initialSnapshot
 }: {
@@ -183,8 +198,12 @@ export function MissionControlShell({
   const recentCreatedAgentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gatewayDraft, setGatewayDraft] = useState(() => resolveGatewayDraft(initialSnapshot));
   const [workspaceRootDraft, setWorkspaceRootDraft] = useState(() => resolveWorkspaceRootDraft(initialSnapshot));
+  const [openClawBinarySelectionDraft, setOpenClawBinarySelectionDraft] = useState<OpenClawBinarySelection>(
+    () => initialSnapshot.diagnostics.openClawBinarySelection
+  );
   const [isSavingGateway, setIsSavingGateway] = useState(false);
   const [isSavingWorkspaceRoot, setIsSavingWorkspaceRoot] = useState(false);
+  const [isSavingOpenClawBinary, setIsSavingOpenClawBinary] = useState(false);
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false);
   const [updateRunState, setUpdateRunState] = useState<UpdateRunState>("idle");
   const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
@@ -265,6 +284,7 @@ export function MissionControlShell({
       (runtime.status === "running" || runtime.status === "queued") && !isDirectChatRuntime(runtime)
   ).length;
   const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
+  const isOpenClawOnboardingModelReady = resolveOpenClawModelReady(snapshot);
   const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
@@ -275,6 +295,7 @@ export function MissionControlShell({
   const shouldAutoShowOnboarding =
     !isOnboardingDismissed &&
     !hasActiveMissionWork &&
+    !isOpenClawOnboardingModelReady &&
     !shouldShowLaunchpadReadyState;
   const shouldShowOnboarding =
     shouldAutoShowOnboarding || showOnboardingReadyState || isOnboardingForcedOpen;
@@ -823,6 +844,18 @@ export function MissionControlShell({
     setGatewayDraft(resolveGatewayDraft(snapshot));
     setWorkspaceRootDraft(resolveWorkspaceRootDraft(snapshot));
   }, [snapshot, isSettingsOpen, isSavingGateway, isSavingWorkspaceRoot]);
+
+  useEffect(() => {
+    if (isSettingsOpen || isSavingOpenClawBinary) {
+      return;
+    }
+
+    setOpenClawBinarySelectionDraft((current) =>
+      areOpenClawBinarySelectionsEqual(current, snapshot.diagnostics.openClawBinarySelection)
+        ? current
+        : snapshot.diagnostics.openClawBinarySelection
+    );
+  }, [isSettingsOpen, isSavingOpenClawBinary, snapshot.diagnostics.openClawBinarySelection]);
 
   useEffect(() => {
     const preferredModelId = resolveInitialOnboardingModelId(snapshot) || "";
@@ -1651,8 +1684,16 @@ export function MissionControlShell({
 
   const runModelSetDefault = async (modelId?: string) => {
     const targetModelId = modelId || selectedOnboardingModelId;
+    const currentDefaultModelId =
+      snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+      snapshot.diagnostics.modelReadiness.defaultModel ||
+      null;
 
     if (!targetModelId) {
+      return;
+    }
+
+    if (currentDefaultModelId && targetModelId.trim() === currentDefaultModelId.trim()) {
       return;
     }
 
@@ -1754,11 +1795,22 @@ export function MissionControlShell({
 
       const result = createdResult as WorkspaceCreateResult;
       setLaunchpadWorkspaceCreateRunState("success");
-      setPendingWorkspaceOpenId(result.workspaceId);
-      setActiveWorkspaceId(result.workspaceId);
-      selectNode(result.workspaceId);
 
-      await refresh().catch(() => {});
+      const refreshedSnapshot = await refreshSnapshot({ force: true }).catch(() => null);
+      const nextWorkspaceId =
+        refreshedSnapshot?.workspaces.some((workspace) => workspace.id === result.workspaceId)
+          ? result.workspaceId
+          : refreshedSnapshot?.workspaces[0]?.id ?? result.workspaceId;
+
+      setPendingWorkspaceOpenId(nextWorkspaceId);
+      setActiveWorkspaceId(nextWorkspaceId);
+      selectNode(nextWorkspaceId);
+
+      if (refreshedSnapshot) {
+        setSnapshot(refreshedSnapshot);
+      } else {
+        await refresh().catch(() => {});
+      }
 
       dismissOnboarding();
 
@@ -1785,10 +1837,12 @@ export function MissionControlShell({
     dismissOnboarding,
     launchpadWorkspaceCreateRunState,
     refresh,
+    refreshSnapshot,
     selectedOnboardingModelId,
     selectNode,
     snapshot.diagnostics.modelReadiness.defaultModel,
-    snapshot.diagnostics.modelReadiness.resolvedDefaultModel
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel,
+    setSnapshot
   ]);
 
   const openSetupWizard = (stage?: OnboardingWizardStage) => {
@@ -1803,6 +1857,11 @@ export function MissionControlShell({
   };
 
   const enterAgentOS = useCallback(() => {
+    if (snapshot.workspaces.length === 0) {
+      void runLaunchpadWorkspaceCreate();
+      return;
+    }
+
     const targetWorkspaceId =
       (activeWorkspaceId && snapshot.workspaces.some((workspace) => workspace.id === activeWorkspaceId)
         ? activeWorkspaceId
@@ -1815,7 +1874,7 @@ export function MissionControlShell({
     }
 
     dismissOnboarding();
-  }, [activeWorkspaceId, dismissOnboarding, selectNode, snapshot.workspaces]);
+  }, [activeWorkspaceId, dismissOnboarding, runLaunchpadWorkspaceCreate, selectNode, snapshot.workspaces]);
 
   const controlGateway = async (action: GatewayControlAction) => {
     setGatewayControlAction(action);
@@ -1990,6 +2049,116 @@ export function MissionControlShell({
       });
     } finally {
       setIsSavingWorkspaceRoot(false);
+    }
+  };
+
+  const buildOpenClawBinarySelectionDraft = useCallback(
+    (mode: OpenClawBinarySelection["mode"], pathValue?: string | null): OpenClawBinarySelection => {
+      switch (mode) {
+        case "auto":
+          return {
+            mode: "auto",
+            path: null,
+            resolvedPath: null,
+            label: "Auto",
+            detail: "Use the managed resolution order."
+          };
+        case "local-prefix": {
+          return {
+            mode: "local-prefix",
+            path: null,
+            resolvedPath: null,
+            label: "Local prefix",
+            detail: "Use the managed local prefix install."
+          };
+        }
+        case "global-path":
+          return {
+            mode: "global-path",
+            path: null,
+            resolvedPath: null,
+            label: "Global PATH",
+            detail: "Resolve the first executable named openclaw on PATH when saved."
+          };
+        default: {
+          const normalizedPath = typeof pathValue === "string" ? pathValue.trim() : "";
+          return {
+            mode: "custom",
+            path: normalizedPath || null,
+            resolvedPath: normalizedPath || null,
+            label: "Custom path",
+            detail: normalizedPath || "Enter an absolute path to an executable OpenClaw binary."
+          };
+        }
+      }
+    },
+    []
+  );
+
+  const handleOpenClawBinarySelectionModeChange = useCallback(
+    (mode: OpenClawBinarySelection["mode"]) => {
+      setOpenClawBinarySelectionDraft((current) => {
+        if (mode === current.mode) {
+          if (mode === "custom") {
+            return buildOpenClawBinarySelectionDraft(mode, current.path);
+          }
+
+          return current;
+        }
+
+        if (mode === "custom") {
+          return buildOpenClawBinarySelectionDraft(mode, current.path);
+        }
+
+        return buildOpenClawBinarySelectionDraft(mode);
+      });
+    },
+    [buildOpenClawBinarySelectionDraft]
+  );
+
+  const handleOpenClawBinarySelectionPathChange = useCallback((value: string) => {
+    setOpenClawBinarySelectionDraft(buildOpenClawBinarySelectionDraft("custom", value));
+  }, [buildOpenClawBinarySelectionDraft]);
+
+  const saveOpenClawBinarySettings = async (nextSelection: OpenClawBinarySelection) => {
+    setIsSavingOpenClawBinary(true);
+
+    try {
+      const response = await fetch("/api/settings/openclaw-binary", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(nextSelection)
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "OpenClaw binary selection could not be updated.");
+      }
+
+      const result = (await response.json()) as {
+        snapshot: MissionControlSnapshot;
+        selection: OpenClawBinarySelection;
+      };
+
+      setSnapshot(result.snapshot);
+      setOpenClawBinarySelectionDraft(result.selection);
+
+      const selectionLabel = result.selection.label || "OpenClaw binary";
+
+      toast.success("OpenClaw binary updated.", {
+        description:
+          result.selection.mode === "auto"
+            ? "AgentOS will use the managed resolution order."
+            : `${selectionLabel} is now the active choice.`
+      });
+    } catch (error) {
+      toast.error("OpenClaw binary update failed.", {
+        description: error instanceof Error ? error.message : "Unable to update the OpenClaw binary."
+      });
+    } finally {
+      setIsSavingOpenClawBinary(false);
     }
   };
 
@@ -2412,8 +2581,10 @@ export function MissionControlShell({
           isSettingsOpen={isSettingsOpen}
           gatewayDraft={gatewayDraft}
           workspaceRootDraft={workspaceRootDraft}
+          openClawBinarySelection={openClawBinarySelectionDraft}
           isSavingGateway={isSavingGateway}
           isSavingWorkspaceRoot={isSavingWorkspaceRoot}
+          isSavingOpenClawBinary={isSavingOpenClawBinary}
           isCheckingForUpdates={isCheckingForUpdates}
           updateRunState={updateRunState}
           selectedModelId={selectedOnboardingModelId}
@@ -2426,9 +2597,12 @@ export function MissionControlShell({
           onToggleSettings={() => setIsSettingsOpen((current) => !current)}
           onGatewayDraftChange={setGatewayDraft}
           onWorkspaceRootDraftChange={setWorkspaceRootDraft}
+          onOpenClawBinarySelectionModeChange={handleOpenClawBinarySelectionModeChange}
+          onOpenClawBinarySelectionPathChange={handleOpenClawBinarySelectionPathChange}
           onSelectedModelIdChange={setSelectedOnboardingModelId}
           onSaveGatewaySettings={saveGatewaySettings}
           onSaveWorkspaceRootSettings={saveWorkspaceRootSettings}
+          onSaveOpenClawBinarySettings={saveOpenClawBinarySettings}
           onCheckForUpdates={checkForUpdates}
           onControlGateway={controlGateway}
           onOpenSetupWizard={openSetupWizard}
@@ -2738,10 +2912,6 @@ export function MissionControlShell({
             }}
             launchpadCreateProgress={launchpadWorkspaceCreateProgress}
             launchpadCreateRunState={launchpadWorkspaceCreateRunState}
-            onOpenWorkspaceCreate={() => {
-              dismissOnboarding();
-              openWorkspaceWizard("basic");
-            }}
           />
         ) : null}
 

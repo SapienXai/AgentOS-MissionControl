@@ -19,6 +19,7 @@ import type { OpenClawInstallSummary } from "@/components/mission-control/missio
 import type {
   AddModelsProviderId,
   MissionControlSnapshot,
+  OpenClawBinarySelection,
   ResetTarget
 } from "@/lib/agentos/contracts";
 import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
@@ -55,6 +56,11 @@ export type MissionControlShellSettingsPanelProps = {
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onOpenUpdateDialog: () => void;
   onOpenResetDialog: (target: ResetTarget) => void;
+  openClawBinarySelection: OpenClawBinarySelection;
+  isSavingOpenClawBinary: boolean;
+  onOpenClawBinarySelectionModeChange: (value: OpenClawBinarySelection["mode"]) => void;
+  onOpenClawBinarySelectionPathChange: (value: string) => void;
+  onSaveOpenClawBinarySettings: (value: OpenClawBinarySelection) => Promise<void>;
   installSummary: OpenClawInstallSummary;
 };
 
@@ -84,6 +90,11 @@ export function MissionControlShellSettingsPanel({
   onOpenAddModels,
   onOpenUpdateDialog,
   onOpenResetDialog,
+  openClawBinarySelection,
+  isSavingOpenClawBinary,
+  onOpenClawBinarySelectionModeChange,
+  onOpenClawBinarySelectionPathChange,
+  onSaveOpenClawBinarySettings,
   installSummary
 }: MissionControlShellSettingsPanelProps) {
   const isOpenClawReady = isOpenClawOnboardingModelReady(snapshot);
@@ -121,6 +132,15 @@ export function MissionControlShellSettingsPanel({
       ? "Service only"
       : "Offline";
   const commandHistory = snapshot.diagnostics.commandHistory ?? [];
+  const hasCustomBinaryPath =
+    openClawBinarySelection.mode !== "custom" || Boolean(openClawBinarySelection.path?.trim());
+  const resolvedBinaryPreview =
+    openClawBinarySelection.resolvedPath ||
+    (openClawBinarySelection.mode === "global-path"
+      ? "openclaw (PATH)"
+      : openClawBinarySelection.mode === "local-prefix"
+        ? "Local prefix"
+        : "Auto");
 
   return (
     <div
@@ -557,6 +577,173 @@ export function MissionControlShellSettingsPanel({
               className={settingsSecondaryButtonStyles}
             >
               Add models
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "mt-2 rounded-[16px] border px-2.5 py-2.5",
+          surfaceTheme === "light"
+            ? "border-[#e6d7cb] bg-[#fffaf6]"
+            : "border-white/8 bg-white/[0.03]"
+        )}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p
+              className={cn(
+                "text-[8px] uppercase tracking-[0.18em]",
+                surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+              )}
+            >
+              Binary selector
+            </p>
+            <p
+              className={cn(
+                "mt-1 text-[10px] leading-[1.05rem]",
+                surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+              )}
+            >
+              Choose which OpenClaw install AgentOS should resolve.
+            </p>
+          </div>
+          <TerminalSquare
+            className={cn("mt-0.5 h-4 w-4", surfaceTheme === "light" ? "text-[#8b7262]" : "text-slate-400")}
+          />
+        </div>
+
+        <div className="mt-2 grid gap-2">
+          <div className="min-w-0">
+            <Label htmlFor="openclaw-binary-mode" className="sr-only">
+              OpenClaw binary mode
+            </Label>
+            <select
+              id="openclaw-binary-mode"
+              value={openClawBinarySelection.mode}
+              onChange={(event) =>
+                onOpenClawBinarySelectionModeChange(event.target.value as OpenClawBinarySelection["mode"])
+              }
+              disabled={isSavingOpenClawBinary}
+              className={cn(
+                "h-8 w-full rounded-[12px] border px-2.5 font-mono text-[11px]",
+                surfaceTheme === "light"
+                  ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] shadow-[inset_0_0_0_1000px_#fffdfb]"
+                  : "border-white/10 bg-white/[0.04] text-slate-100"
+              )}
+            >
+              <option value="auto">Auto</option>
+              <option value="local-prefix">Local prefix</option>
+              <option value="global-path">Global PATH</option>
+              <option value="custom">Custom path</option>
+            </select>
+          </div>
+
+          {openClawBinarySelection.mode === "custom" ? (
+            <div className="min-w-0">
+              <Label htmlFor="openclaw-binary-path" className="sr-only">
+                Custom OpenClaw binary path
+              </Label>
+              <Input
+                id="openclaw-binary-path"
+                value={openClawBinarySelection.path || ""}
+                onChange={(event) => onOpenClawBinarySelectionPathChange(event.target.value)}
+                placeholder="/opt/homebrew/bin/openclaw"
+                disabled={isSavingOpenClawBinary}
+                className={cn(
+                  "h-8 min-w-0 rounded-[12px] px-2.5 font-mono text-[12px]",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
+                    : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
+                )}
+              />
+            </div>
+          ) : null}
+
+          <div
+            className={cn(
+              "rounded-[14px] border px-2.5 py-2",
+              surfaceTheme === "light"
+                ? "border-[#ead8c8] bg-white"
+                : "border-white/8 bg-white/[0.03]"
+            )}
+          >
+            <p
+              className={cn(
+                "text-[8px] uppercase tracking-[0.18em]",
+                surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+              )}
+            >
+              Resolved path
+            </p>
+            <p
+              className={cn(
+                "mt-1 truncate font-display text-[0.86rem]",
+                surfaceTheme === "light" ? "text-[#3f2f24]" : "text-white"
+              )}
+              title={resolvedBinaryPreview}
+            >
+              {resolvedBinaryPreview}
+            </p>
+            <p
+              className={cn(
+                "mt-1 text-[10px] leading-[1.05rem]",
+                surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+              )}
+            >
+              {openClawBinarySelection.detail}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={isSavingOpenClawBinary}
+              onClick={() => onOpenClawBinarySelectionModeChange("auto")}
+              className={settingsSecondaryButtonStyles}
+            >
+              Auto
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={isSavingOpenClawBinary}
+              onClick={() => onOpenClawBinarySelectionModeChange("local-prefix")}
+              className={settingsSecondaryButtonStyles}
+            >
+              Local prefix
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              disabled={isSavingOpenClawBinary}
+              onClick={() => onOpenClawBinarySelectionModeChange("global-path")}
+              className={settingsSecondaryButtonStyles}
+            >
+              Global PATH
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isSavingOpenClawBinary || !hasCustomBinaryPath}
+              onClick={() => {
+                void onSaveOpenClawBinarySettings(openClawBinarySelection);
+              }}
+              className={settingsPrimaryButtonStyles}
+            >
+              {isSavingOpenClawBinary ? (
+                <>
+                  <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save selection"
+              )}
             </Button>
           </div>
         </div>

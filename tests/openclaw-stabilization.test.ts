@@ -9,6 +9,12 @@ import {
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
 } from "@/lib/openclaw/install";
+import {
+  buildOpenClawBinarySelectionSnapshot,
+  createDefaultOpenClawBinarySelection,
+  normalizeOpenClawBinarySelection,
+  resolveOpenClawBinarySelectionPath
+} from "@/lib/openclaw/binary-selection";
 import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
 import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
@@ -208,6 +214,29 @@ test("openclaw resolver does not let the managed wrapper shadow the bundled node
   }
 });
 
+test("openclaw binary selection helpers preserve explicit choices", () => {
+  const autoSelection = normalizeOpenClawBinarySelection(null);
+  assert.deepEqual(autoSelection, createDefaultOpenClawBinarySelection());
+  assert.equal(resolveOpenClawBinarySelectionPath(autoSelection), null);
+
+  const customSelection = normalizeOpenClawBinarySelection({
+    mode: "custom",
+    path: "/opt/homebrew/bin/openclaw"
+  });
+
+  assert.equal(customSelection.mode, "custom");
+  assert.equal(customSelection.path, "/opt/homebrew/bin/openclaw");
+  assert.equal(resolveOpenClawBinarySelectionPath(customSelection), "/opt/homebrew/bin/openclaw");
+
+  const snapshotSelection = buildOpenClawBinarySelectionSnapshot(
+    customSelection,
+    "/opt/homebrew/bin/openclaw"
+  );
+
+  assert.equal(snapshotSelection.resolvedPath, "/opt/homebrew/bin/openclaw");
+  assert.equal(snapshotSelection.label, "Custom path");
+});
+
 test("openclaw onboarding uses the official installer command", () => {
   const command = getOpenClawInstallCommand();
 
@@ -374,6 +403,21 @@ test("model onboarding requires an explicit selection before verification", () =
     {
       kind: "select-model",
       label: "Select a model"
+    }
+  );
+
+  assert.deepEqual(
+    resolvePrimaryAction({
+      stage: "models",
+      systemReady: true,
+      modelReady: false,
+      systemActionLabel: "Continue",
+      selectedModelId: "openai/gpt-5.4",
+      defaultModelId: "openai/gpt-5.4"
+    }),
+    {
+      kind: "dismiss",
+      label: "Enter AgentOS"
     }
   );
 

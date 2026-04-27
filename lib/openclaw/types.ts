@@ -1,4 +1,5 @@
 export type DiagnosticHealth = "healthy" | "degraded" | "offline";
+export type OpenClawBinarySelectionMode = "auto" | "local-prefix" | "global-path" | "custom";
 
 export type AgentStatus = "engaged" | "monitoring" | "ready" | "standby" | "offline";
 
@@ -70,6 +71,14 @@ export interface OpenClawRuntimeDiagnostics {
   issues: string[];
 }
 
+export interface OpenClawBinarySelection {
+  mode: OpenClawBinarySelectionMode;
+  path: string | null;
+  resolvedPath: string | null;
+  label: string;
+  detail: string;
+}
+
 export interface ModelReadiness {
   ready: boolean;
   defaultModel: string | null;
@@ -119,6 +128,7 @@ export interface GatewayDiagnostics {
   updateChannel?: string;
   updateInfo?: string;
   serviceLabel?: string;
+  openClawBinarySelection: OpenClawBinarySelection;
   modelReadiness: ModelReadiness;
   runtime: OpenClawRuntimeDiagnostics;
   commandHistory?: OpenClawCommandDiagnostic[];
