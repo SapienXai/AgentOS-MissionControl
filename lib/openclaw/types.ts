@@ -121,8 +121,22 @@ export interface GatewayDiagnostics {
   serviceLabel?: string;
   modelReadiness: ModelReadiness;
   runtime: OpenClawRuntimeDiagnostics;
+  commandHistory?: OpenClawCommandDiagnostic[];
   securityWarnings: string[];
   issues: string[];
+}
+
+export interface OpenClawCommandDiagnostic {
+  id: string;
+  command: string;
+  args: string[];
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "ok" | "failed" | "timeout" | "aborted" | "start-error";
+  exitCode: number | null;
+  stdoutPreview: string | null;
+  stderrPreview: string | null;
 }
 
 export interface PresenceRecord {

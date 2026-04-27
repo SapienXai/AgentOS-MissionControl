@@ -7,12 +7,16 @@ import {
   getOpenClawLocalPrefixBinPath,
   getOpenClawUserLocalBinPath
 } from "@/lib/openclaw/install";
+import type { OpenClawCommandDiagnostic } from "@/lib/openclaw/types";
 
 export const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "openclaw";
 const initialOpenClawBinEnv = process.env.OPENCLAW_BIN?.trim() || "";
 let resolvedOpenClawBin = "";
 let resolveOpenClawBinPromise: Promise<string> | null = null;
 const shellSafeSegmentPattern = /^[A-Za-z0-9_./:@=+%-]+$/;
+const commandDiagnosticsLimit = 25;
+let commandDiagnosticSequence = 0;
+const commandDiagnostics: OpenClawCommandDiagnostic[] = [];
 
 interface CommandOptions {
   timeoutMs?: number;
@@ -63,6 +67,9 @@ export async function runOpenClawStream(
   const openClawBin = await resolveOpenClawBin();
 
   return new Promise<CommandResult>((resolve, reject) => {
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    const commandDiagnosticId = `openclaw:${startedAtMs}:${commandDiagnosticSequence++}`;
     const child = spawn(/*turbopackIgnore: true*/ openClawBin, args, {
       detached: true,
       env: buildOpenClawEnv()
@@ -170,6 +177,17 @@ export async function runOpenClawStream(
     child.on("error", (error) => {
       cleanup();
       settle(() => {
+        recordOpenClawCommandDiagnostic({
+          id: commandDiagnosticId,
+          command: openClawBin,
+          args,
+          startedAt,
+          startedAtMs,
+          status: "start-error",
+          exitCode: null,
+          stdout,
+          stderr: stderr ? `${stderr}\n${error.message}` : error.message
+        });
         reject(
           createCommandError(
             `OpenClaw command failed to start: ${error.message}`,
@@ -185,6 +203,17 @@ export async function runOpenClawStream(
       cleanup();
       settle(() => {
         if (aborted) {
+          recordOpenClawCommandDiagnostic({
+            id: commandDiagnosticId,
+            command: openClawBin,
+            args,
+            startedAt,
+            startedAtMs,
+            status: "aborted",
+            exitCode: code,
+            stdout,
+            stderr: stderr || "The command was aborted."
+          });
           reject(
             createCommandError(
               "OpenClaw command was aborted.",
@@ -197,6 +226,17 @@ export async function runOpenClawStream(
         }
 
         if (timedOut) {
+          recordOpenClawCommandDiagnostic({
+            id: commandDiagnosticId,
+            command: openClawBin,
+            args,
+            startedAt,
+            startedAtMs,
+            status: "timeout",
+            exitCode: code,
+            stdout,
+            stderr: stderr || "The command exceeded its timeout window."
+          });
           reject(
             createCommandError(
               `OpenClaw command timed out after ${Math.round((options.timeoutMs ?? 45000) / 1000)} seconds.`,
@@ -209,6 +249,17 @@ export async function runOpenClawStream(
         }
 
         if (code !== 0) {
+          recordOpenClawCommandDiagnostic({
+            id: commandDiagnosticId,
+            command: openClawBin,
+            args,
+            startedAt,
+            startedAtMs,
+            status: "failed",
+            exitCode: code,
+            stdout,
+            stderr
+          });
           reject(
             createCommandError(
               `OpenClaw command failed with exit code ${code}.`,
@@ -220,6 +271,17 @@ export async function runOpenClawStream(
           return;
         }
 
+        recordOpenClawCommandDiagnostic({
+          id: commandDiagnosticId,
+          command: openClawBin,
+          args,
+          startedAt,
+          startedAtMs,
+          status: "ok",
+          exitCode: code,
+          stdout,
+          stderr
+        });
         resolve({
           stdout,
           stderr
@@ -227,6 +289,14 @@ export async function runOpenClawStream(
       });
     });
   });
+}
+
+export function getRecentOpenClawCommandDiagnostics() {
+  return [...commandDiagnostics].reverse();
+}
+
+export function clearOpenClawCommandDiagnostics() {
+  commandDiagnostics.length = 0;
 }
 
 export async function runOpenClawJsonStream<T>(
@@ -446,6 +516,84 @@ function stringifyStream(value: unknown) {
   }
 
   return "";
+}
+
+function recordOpenClawCommandDiagnostic(input: {
+  id: string;
+  command: string;
+  args: string[];
+  startedAt: string;
+  startedAtMs: number;
+  status: OpenClawCommandDiagnostic["status"];
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}) {
+  const finishedAtMs = Date.now();
+  commandDiagnostics.push({
+    id: input.id,
+    command: input.command,
+    args: sanitizeCommandArgs(input.args),
+    startedAt: input.startedAt,
+    finishedAt: new Date(finishedAtMs).toISOString(),
+    durationMs: Math.max(finishedAtMs - input.startedAtMs, 0),
+    status: input.status,
+    exitCode: input.exitCode,
+    stdoutPreview: previewCommandOutput(input.stdout),
+    stderrPreview: previewCommandOutput(input.stderr)
+  });
+
+  if (commandDiagnostics.length > commandDiagnosticsLimit) {
+    commandDiagnostics.splice(0, commandDiagnostics.length - commandDiagnosticsLimit);
+  }
+}
+
+function sanitizeCommandArgs(args: string[]) {
+  const redactedValueFlags = new Set([
+    "--message",
+    "--api-key",
+    "--token",
+    "--password",
+    "--secret",
+    "--key"
+  ]);
+  const sanitized: string[] = [];
+  let redactNext = false;
+
+  for (const arg of args) {
+    if (redactNext) {
+      sanitized.push("[redacted]");
+      redactNext = false;
+      continue;
+    }
+
+    const [flagName] = arg.split("=", 1);
+
+    if (redactedValueFlags.has(flagName)) {
+      sanitized.push(arg.includes("=") ? `${flagName}=[redacted]` : arg);
+      redactNext = !arg.includes("=");
+      continue;
+    }
+
+    sanitized.push(arg.length > 160 ? `${arg.slice(0, 157)}...` : arg);
+  }
+
+  return sanitized;
+}
+
+function previewCommandOutput(output: string) {
+  const normalized = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.length > 800 ? `${normalized.slice(0, 797)}...` : normalized;
 }
 
 function quoteShellSegment(value: string) {

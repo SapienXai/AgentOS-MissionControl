@@ -368,6 +368,7 @@ export function AgentChatDrawer({
             const assistantActivityLabel = isPendingAssistant ? "Thinking" : showAssistantActivity ? "Replying" : null;
             const isPendingUser = entry.role === "user" && entry.id === runSnapshot.userMessageId && runSnapshot.isRunning;
             const showInlineStatus = entry.status === "sending" && isPendingUser;
+            const errorMessage = entry.errorMessage?.trim();
 
             return (
               <div key={entry.id} className={cn("flex", isUser ? "justify-end" : "justify-start")}>
@@ -439,9 +440,21 @@ export function AgentChatDrawer({
                       {isUser ? "Sending…" : "Drafting…"}
                     </p>
                   ) : !isPendingAssistant && entry.status === "error" ? (
-                    <p className="mt-1.5 text-[10px] uppercase tracking-[0.18em] text-rose-300">
-                      Failed to send
-                    </p>
+                    <div className="mt-1.5 space-y-1">
+                      <p className="text-[10px] uppercase tracking-[0.18em] text-rose-300">
+                        Failed to send
+                      </p>
+                      {errorMessage ? (
+                        <p
+                          className={cn(
+                            "text-[11px] leading-4 [overflow-wrap:anywhere]",
+                            surfaceTheme === "light" ? "text-rose-700" : "text-rose-200"
+                          )}
+                        >
+                          {errorMessage}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               </div>

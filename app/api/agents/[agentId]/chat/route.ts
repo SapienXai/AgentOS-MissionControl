@@ -10,6 +10,7 @@ import {
 import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
+import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import type { MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
@@ -199,6 +200,11 @@ export async function POST(
         }
 
         const sessionId = globalThis.crypto.randomUUID();
+        await recordAgentChatSession({
+          agentId,
+          sessionId,
+          workspacePath: agent.workspacePath
+        });
         const commandPromise = runOpenClawJsonStream<AgentChatCommandPayload>(
           [
             "agent",

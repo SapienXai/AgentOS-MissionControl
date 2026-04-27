@@ -12,6 +12,7 @@ import {
   resolveMissionDispatchRuntimeStatus,
   resolveMissionDispatchSubtitle
 } from "@/lib/openclaw/domains/mission-dispatch-model";
+import type { SessionsPayload } from "@/lib/openclaw/domains/session-catalog";
 import type { MissionDispatchRecordLike } from "@/lib/openclaw/domains/mission-dispatch-model";
 import type { RuntimeRecord } from "@/lib/openclaw/types";
 
@@ -20,6 +21,52 @@ export type MissionDispatchRuntimeLifecycleHelpers = {
   persistObservation: (record: MissionDispatchRecordLike, runtime: RuntimeRecord) => Promise<void>;
   reconcileRuntimeState: (record: MissionDispatchRecordLike, runtime: RuntimeRecord) => Promise<void>;
 };
+
+export function annotateMissionDispatchSessions(
+  sessions: SessionsPayload["sessions"],
+  records: MissionDispatchRecordLike[]
+): SessionsPayload["sessions"] {
+  if (sessions.length === 0 || records.length === 0) {
+    return sessions;
+  }
+
+  const recordByAgentSession = new Map<string, MissionDispatchRecordLike>();
+
+  for (const record of records) {
+    const sessionId = extractMissionDispatchSessionId(record);
+
+    if (!record.agentId || !sessionId) {
+      continue;
+    }
+
+    recordByAgentSession.set(createAgentSessionKey(record.agentId, sessionId), record);
+  }
+
+  if (recordByAgentSession.size === 0) {
+    return sessions;
+  }
+
+  return sessions.map((session) => {
+    const record =
+      session.agentId && session.sessionId
+        ? recordByAgentSession.get(createAgentSessionKey(session.agentId, session.sessionId))
+        : null;
+
+    if (!record) {
+      return session;
+    }
+
+    return {
+      ...session,
+      kind: "task",
+      origin: "mission-dispatch",
+      dispatchId: record.id,
+      mission: record.mission,
+      routedMission: record.routedMission,
+      dispatchSubmittedAt: record.submittedAt
+    };
+  });
+}
 
 export function annotateMissionDispatchMetadata(
   runtimes: RuntimeRecord[],
@@ -207,6 +254,10 @@ export function scoreMissionDispatchRuntimeMatch(
 
 export function isSyntheticDispatchRuntime(runtime: RuntimeRecord) {
   return runtime.id.startsWith("runtime:dispatch:");
+}
+
+function createAgentSessionKey(agentId: string, sessionId: string) {
+  return `${agentId}:${sessionId}`;
 }
 
 export function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, record: MissionDispatchRecordLike): RuntimeRecord {

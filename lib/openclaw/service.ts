@@ -25,6 +25,7 @@ import {
 import { parseAgentIdentityMarkdown } from "@/lib/openclaw/agent-bootstrap-files";
 import {
   detectOpenClaw,
+  getRecentOpenClawCommandDiagnostics,
   runOpenClaw,
   runOpenClawJson,
   runOpenClawJsonStream,
@@ -73,6 +74,7 @@ import {
 import { extractMissionCommandPayloads } from "@/lib/openclaw/domains/mission-dispatch-model";
 import {
   annotateMissionDispatchMetadata as annotateMissionDispatchMetadataFromRuntime,
+  annotateMissionDispatchSessions,
   buildMissionDispatchRuntimes as buildMissionDispatchRuntimesFromRuntime,
   isSyntheticDispatchRuntime
 } from "@/lib/openclaw/domains/mission-dispatch-runtime";
@@ -91,6 +93,19 @@ import {
   getRuntimeOutputForResolvedRuntime as getRuntimeOutputForResolvedRuntimeFromTranscript,
   mapSessionToRuntimes as mapSessionToRuntimesFromTranscript
 } from "@/lib/openclaw/domains/runtime-transcript";
+import {
+  annotateAgentChatSessions,
+  readAgentChatSessionIndex
+} from "@/lib/openclaw/domains/agent-chat-sessions";
+import {
+  settleSessionsPayloadFromSessionCatalogs,
+  type SessionsPayload
+} from "@/lib/openclaw/domains/session-catalog";
+import { mapSessionCatalogEntryToRuntime } from "@/lib/openclaw/domains/runtime-normalizer";
+import {
+  mergeRuntimeHistory as mergeRuntimeHistoryRecords,
+  sortRuntimesByUpdatedAtDesc
+} from "@/lib/openclaw/domains/runtime-history";
 import {
   assertWorkspaceBootstrapAgentIdsAvailable as assertWorkspaceBootstrapAgentIdsAvailableFromProvisioning,
   createBootstrappedWorkspaceAgent as createBootstrappedWorkspaceAgentFromProvisioning,
@@ -154,7 +169,6 @@ import {
   resolveAgentStatus,
   resolveDiagnosticHealth,
   resolveModelReadiness,
-  resolveRuntimeStatus,
   resolveUpdateInfo,
   resolveWorkspaceHealth,
   unique
@@ -214,6 +228,8 @@ import type {
   WorkspaceChannelGroupAssignment,
   WorkspaceChannelWorkspaceBinding
 } from "@/lib/openclaw/types";
+
+export { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/domains/session-catalog";
 
 export { discoverDiscordRoutes, discoverSurfaceRoutes, discoverTelegramGroups, getChannelRegistry };
 
@@ -369,29 +385,6 @@ type ModelsStatusPayload = {
   };
 };
 
-type SessionsPayload = {
-  sessions: Array<{
-    agentId?: string;
-    key?: string;
-    sessionId?: string;
-    updatedAt?: number;
-    ageMs?: number;
-    inputTokens?: number;
-    outputTokens?: number;
-    totalTokens?: number;
-    model?: string;
-    modelProvider?: string;
-    cacheRead?: number;
-    kind?: string;
-  }>;
-};
-
-type SessionCatalogEntry = Record<string, unknown>;
-
-type NormalizedSessionCatalogEntry = SessionsPayload["sessions"][number] & {
-  key: string;
-};
-
 type PresencePayload = Array<{
   host: string;
   ip: string;
@@ -486,6 +479,10 @@ let statusRefreshPromise: Promise<void> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 let snapshotGeneration = 0;
 
+function clearRuntimeHistoryCache() {
+  runtimeHistoryCache = new Map();
+}
+
 export function clearMissionControlCaches() {
   snapshotGeneration += 1;
   snapshotCache = null;
@@ -499,7 +496,7 @@ export function clearMissionControlCaches() {
   modelsStatusPayloadCache = null;
   sessionsPayloadCache = null;
   presencePayloadCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 }
 
 function loadSnapshotPairForCurrentGeneration(profile: SnapshotLoadProfile = "interactive") {
@@ -669,27 +666,6 @@ async function settleAgentConfigFromStateFile(): Promise<PromiseSettledResult<Ag
     return {
       status: "fulfilled",
       value: Array.isArray(list) ? (list as AgentConfigPayload) : []
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-async function settleSessionsPayloadFromSessionCatalogs(
-  agentConfig: AgentConfigPayload
-): Promise<PromiseSettledResult<SessionsPayload>> {
-  try {
-    const roots = collectSessionCatalogRoots(agentConfig);
-    const sessions = await readSessionsFromCatalogRoots(roots);
-
-    return {
-      status: "fulfilled",
-      value: {
-        sessions
-      }
     };
   } catch (error) {
     return {
@@ -870,175 +846,6 @@ function buildModelStatusFromAgentConfig(agentConfig: AgentConfigPayload): Model
     defaultModel,
     resolvedDefault: defaultModel
   };
-}
-
-function collectSessionCatalogRoots(agentConfig: AgentConfigPayload) {
-  return uniqueStrings([
-    ...agentConfig.flatMap((entry) => {
-      const roots: string[] = [];
-      const workspace = normalizeOptionalValue(entry.workspace);
-
-      if (workspace) {
-        roots.push(path.join(workspace, ".openclaw", "agents"));
-      }
-
-      return roots;
-    }),
-    path.join(openClawStateRootPath, "agents")
-  ]);
-}
-
-async function readSessionsFromCatalogRoots(roots: string[]) {
-  const sessionsByKey = new Map<string, NormalizedSessionCatalogEntry>();
-
-  for (const root of roots) {
-    let entries;
-
-    try {
-      entries = await readdir(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      const sessionsPath = path.join(root, entry.name, "sessions", "sessions.json");
-      let raw: string;
-
-      try {
-        raw = await readFile(sessionsPath, "utf8");
-      } catch {
-        continue;
-      }
-
-      let parsed: unknown;
-
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        continue;
-      }
-
-      if (Array.isArray(parsed)) {
-        for (const candidate of parsed) {
-          if (!isObjectRecord(candidate)) {
-            continue;
-          }
-
-          const normalized = normalizeSessionCatalogEntry(candidate, entry.name);
-
-          if (!sessionsByKey.has(normalized.key)) {
-            sessionsByKey.set(normalized.key, normalized);
-          }
-        }
-
-        continue;
-      }
-
-      if (!isObjectRecord(parsed)) {
-        continue;
-      }
-
-      for (const [sessionKey, candidate] of Object.entries(parsed)) {
-        if (!isObjectRecord(candidate)) {
-          continue;
-        }
-
-        const normalized = normalizeSessionCatalogEntry(candidate, entry.name, sessionKey);
-
-        if (!sessionsByKey.has(normalized.key)) {
-          sessionsByKey.set(normalized.key, normalized);
-        }
-      }
-    }
-  }
-
-  return Array.from(sessionsByKey.values()).sort(
-    (left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)
-  );
-}
-
-function normalizeSessionCatalogEntry(
-  entry: SessionCatalogEntry,
-  agentId: string,
-  fallbackKey?: string
-): NormalizedSessionCatalogEntry {
-  const sessionId = normalizeOptionalValue(typeof entry.sessionId === "string" ? entry.sessionId : undefined);
-  const updatedAt = readSessionCatalogNumber(entry, "updatedAt");
-  const inputTokens = readSessionCatalogNumber(entry, "inputTokens");
-  const outputTokens = readSessionCatalogNumber(entry, "outputTokens");
-  const totalTokens = readSessionCatalogNumber(entry, "totalTokens");
-  const cacheRead = readSessionCatalogNumber(entry, "cacheRead");
-  const ageMs = readSessionCatalogNumber(entry, "ageMs") ?? inferSessionAgeMs(updatedAt);
-  const model = normalizeOptionalValue(typeof entry.model === "string" ? entry.model : undefined);
-  const modelProvider = normalizeOptionalValue(typeof entry.modelProvider === "string" ? entry.modelProvider : undefined);
-  const key =
-    normalizeOptionalValue(typeof entry.key === "string" ? entry.key : fallbackKey) ??
-    sessionId ??
-    `${agentId}:${updatedAt ?? "session"}`;
-
-  return {
-    agentId,
-    key,
-    sessionId: sessionId || undefined,
-    updatedAt,
-    ageMs,
-    inputTokens,
-    outputTokens,
-    totalTokens:
-      totalTokens ?? (typeof inputTokens === "number" || typeof outputTokens === "number"
-        ? (inputTokens ?? 0) + (outputTokens ?? 0)
-        : undefined),
-    model,
-    modelProvider,
-    cacheRead,
-    kind: inferSessionKindFromCatalogEntry(entry, key)
-  };
-}
-
-function readSessionCatalogNumber(entry: SessionCatalogEntry, key: string) {
-  const value = entry[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function inferSessionAgeMs(updatedAt?: number) {
-  return typeof updatedAt === "number" ? Math.max(Date.now() - updatedAt, 0) : undefined;
-}
-
-export function inferSessionKindFromCatalogEntry(entry: SessionCatalogEntry, sessionKey?: string) {
-  const declaredKind = normalizeOptionalValue(
-    typeof entry.kind === "string" ? entry.kind : typeof entry.chatType === "string" ? entry.chatType : undefined
-  );
-
-  if (declaredKind) {
-    return declaredKind;
-  }
-
-  const deliveryContext = isObjectRecord(entry.deliveryContext) ? entry.deliveryContext : null;
-  const origin = isObjectRecord(entry.origin) ? entry.origin : null;
-
-  if (normalizeOptionalValue(typeof deliveryContext?.to === "string" ? deliveryContext.to : undefined) === "heartbeat") {
-    return "direct";
-  }
-
-  if (normalizeOptionalValue(typeof origin?.provider === "string" ? origin.provider : undefined) === "heartbeat") {
-    return "direct";
-  }
-
-  const normalizedKey = normalizeOptionalValue(sessionKey);
-
-  if (normalizedKey && /:(direct|dm|private):/i.test(normalizedKey)) {
-    return "direct";
-  }
-
-  if (normalizedKey && /:(group|channel|thread):/i.test(normalizedKey)) {
-    return "group";
-  }
-
-  return "task";
 }
 
 function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
@@ -1352,7 +1159,10 @@ async function loadMissionControlSnapshots({
     const resolvedAgentConfig = resolveCachedPayload(agentConfigResult, agentConfigPayloadCache, (entry) => {
       agentConfigPayloadCache = entry;
     });
-    const sessionsResult = await settleSessionsPayloadFromSessionCatalogs(resolvedAgentConfig.value ?? []);
+    const sessionsResult = await settleSessionsPayloadFromSessionCatalogs(
+      resolvedAgentConfig.value ?? [],
+      openClawStateRootPath
+    );
     const resolvedAgents = resolveCachedPayload(agentsResult, agentPayloadCache, (entry) => {
       agentPayloadCache = entry;
     });
@@ -1374,7 +1184,6 @@ async function loadMissionControlSnapshots({
     const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
     const localModels = buildModelsPayloadFromFallbackSources(agentConfig, modelStatus);
     const models = resolvedModels.value?.models ?? localModels.models;
-    const sessions = resolvedSessions.value?.sessions ?? [];
     const presence = resolvedPresence.value ?? [];
     const hasOpenClawSignal =
       statusResult.status === "fulfilled" ||
@@ -1388,6 +1197,12 @@ async function loadMissionControlSnapshots({
     const runtimeDiagnosticsPromise = buildRuntimeDiagnostics(agentIds, settings);
     void runtimeDiagnosticsPromise.catch(() => {});
     const dispatchRecordsPromise = readMissionDispatchRecords();
+    const dispatchRecords = await dispatchRecordsPromise;
+    const agentChatSessionIndex = await readAgentChatSessionIndex();
+    const sessions = annotateMissionDispatchSessions(
+      annotateAgentChatSessions(resolvedSessions.value?.sessions ?? [], agentChatSessionIndex),
+      dispatchRecords
+    );
     const channelRegistryResult = await settleChannelRegistryFromLocalFile();
     const channelRegistry =
       channelRegistryResult.status === "fulfilled"
@@ -1430,10 +1245,11 @@ async function loadMissionControlSnapshots({
       recentSessionsByAgent.set(session.agentId, list);
     }
 
-    const dispatchRecords = await dispatchRecordsPromise;
     const liveSessionRuntimes = (
       await Promise.all(
-        sessions.map((session) => mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, mapRuntime))
+        sessions.map((session) =>
+          mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, mapSessionCatalogEntryToRuntime)
+        )
       )
     ).flat();
     const annotatedLiveSessionRuntimes = annotateMissionDispatchMetadataFromRuntime(
@@ -1781,6 +1597,7 @@ async function loadMissionControlSnapshots({
       serviceLabel: gatewayStatus?.service?.label,
       modelReadiness,
       runtime: runtimeDiagnostics,
+      commandHistory: getRecentOpenClawCommandDiagnostics(),
       securityWarnings,
       issues: [
         ...collectIssues(
@@ -2439,7 +2256,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
     await syncWorkspaceAgentPolicySkills(workspace.path);
   }
 
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return {
     agentId: agent.id,
@@ -2981,7 +2798,7 @@ export async function createWorkspaceProject(
   }
 
   snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return {
     workspaceId: workspaceIdFromPath(targetDir),
@@ -3049,7 +2866,7 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
   }
 
   snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return {
     workspaceId: workspaceIdFromPath(targetPath),
@@ -3280,7 +3097,7 @@ async function applyWorkspacePlanEdits(
   await writeTextFileEnsured(projectManifestPath, `${JSON.stringify(projectManifest, null, 2)}\n`);
 
   snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return {
     workspaceId: workspaceIdFromPath(currentWorkspacePath),
@@ -3424,7 +3241,7 @@ export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null
   }
 
   snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return getMissionControlSnapshot({ force: true });
 }
@@ -3439,7 +3256,7 @@ export async function updateWorkspaceRoot(input: { workspaceRoot?: string | null
   });
 
   snapshotCache = null;
-  runtimeHistoryCache = new Map();
+  clearRuntimeHistoryCache();
 
   return getMissionControlSnapshot({ force: true });
 }
@@ -6897,125 +6714,12 @@ function ensureWorkspace(store: Map<string, WorkspaceProject>, workspacePath: st
   return workspace;
 }
 
-function mapRuntime(
-  session: SessionsPayload["sessions"][number],
-  agentConfig: AgentConfigPayload,
-  agentsList: AgentPayload
-): RuntimeRecord {
-  const agent = agentsList.find((entry) => entry.id === session.agentId);
-  const config = agentConfig.find((entry) => entry.id === session.agentId);
-  const workspacePath = agent?.workspace || config?.workspace;
-  const workspaceId = workspacePath ? workspaceIdFromPath(workspacePath) : undefined;
-  const taskId = extractToken(session.key, "task");
-  const stage = extractToken(session.key, "stage");
-  const modelId =
-    session.model && session.model.includes("/")
-      ? session.model
-      : config?.model || agent?.model || "unassigned";
-  const status = resolveRuntimeStatus(stage, session.key, session.ageMs);
-  const runtimeId = createRuntimeId(session);
-  const taskLabel = taskId ? taskId.slice(0, 8) : null;
-
-  return {
-    id: runtimeId,
-    source: "session",
-    key: session.key || "unknown-session",
-    title: taskLabel
-      ? `${prettifyAgentName(session.agentId)} · ${taskLabel}`
-      : `${prettifyAgentName(session.agentId)} session`,
-    subtitle: taskLabel ? `task ${taskLabel} · ${stage || "running"}` : "main session",
-    status,
-    updatedAt: session.updatedAt ?? null,
-    ageMs: session.ageMs ?? null,
-    agentId: session.agentId,
-    workspaceId,
-    modelId,
-    sessionId: session.sessionId,
-    taskId,
-    tokenUsage:
-      typeof session.totalTokens === "number" || typeof session.inputTokens === "number"
-        ? {
-            input: session.inputTokens ?? 0,
-            output: session.outputTokens ?? 0,
-            total: session.totalTokens ?? (session.inputTokens ?? 0) + (session.outputTokens ?? 0),
-            cacheRead: session.cacheRead ?? 0
-          }
-        : undefined,
-    metadata: {
-      kind: session.kind ?? "direct",
-      chatType: session.kind ?? "direct",
-      stage: stage ?? null,
-      historical: false
-    }
-  };
-}
-
 function mergeRuntimeHistory(currentRuntimes: RuntimeRecord[]) {
-  const nextHistory = new Map<string, RuntimeRecord>();
-  const currentIds = new Set(currentRuntimes.map((runtime) => runtime.id));
-
-  for (const runtime of currentRuntimes) {
-    nextHistory.set(runtime.id, runtime);
-  }
-
-  for (const [runtimeId, runtime] of runtimeHistoryCache.entries()) {
-    if (currentIds.has(runtimeId)) {
-      continue;
-    }
-
-    const historicalRuntime = {
-      ...runtime,
-      status:
-        runtime.status === "stalled"
-          ? "stalled"
-          : runtime.status === "cancelled"
-            ? "cancelled"
-            : "completed",
-      metadata: {
-        ...runtime.metadata,
-        historical: true
-      }
-    } satisfies RuntimeRecord;
-
-    nextHistory.set(runtimeId, historicalRuntime);
-  }
-
-  const prunedHistory = pruneRuntimeHistory(Array.from(nextHistory.values()));
-  runtimeHistoryCache = new Map(
-    prunedHistory
-      .filter((runtime) => !isSyntheticDispatchRuntime(runtime))
-      .map((runtime) => [runtime.id, runtime])
-  );
-
-  return prunedHistory.sort(sortRuntimesByUpdatedAtDesc);
-}
-
-function pruneRuntimeHistory(runtimes: RuntimeRecord[]) {
-  const grouped = new Map<string, RuntimeRecord[]>();
-
-  for (const runtime of runtimes) {
-    const groupKey = runtime.agentId || runtime.workspaceId || "global";
-    const list = grouped.get(groupKey) ?? [];
-    list.push(runtime);
-    grouped.set(groupKey, list);
-  }
-
-  return Array.from(grouped.values()).flatMap((entries) =>
-    entries
-      .sort(sortRuntimesByUpdatedAtDesc)
-      .slice(0, 8)
-  );
-}
-
-function sortRuntimesByUpdatedAtDesc(left: RuntimeRecord, right: RuntimeRecord) {
-  return (right.updatedAt ?? 0) - (left.updatedAt ?? 0);
-}
-
-function createRuntimeId(session: SessionsPayload["sessions"][number]) {
-  const taskId = extractToken(session.key, "task");
-  const runtimeKey = taskId || session.key || session.sessionId || String(Math.random());
-  const sessionToken = session.sessionId || hashValue(session.agentId || "sessionless");
-  return `runtime:${sessionToken}:${hashValue(runtimeKey)}`;
+  const result = mergeRuntimeHistoryRecords(currentRuntimes, runtimeHistoryCache, {
+    excludeFromCache: isSyntheticDispatchRuntime
+  });
+  runtimeHistoryCache = result.cache;
+  return result.runtimes;
 }
 
 function resolveAgentForMission(snapshot: MissionControlSnapshot, workspaceId?: string) {
@@ -7086,37 +6790,9 @@ function resolveWorkspaceTargetPath(currentPath: string, name?: string, director
   return path.join(path.dirname(currentPath), nextSlug);
 }
 
-function extractToken(key: string | undefined, prefix: string) {
-  if (!key) {
-    return undefined;
-  }
-
-  const marker = `:${prefix}:`;
-  const index = key.indexOf(marker);
-
-  if (index === -1) {
-    return undefined;
-  }
-
-  const tail = key.slice(index + marker.length);
-  return tail.split(":")[0];
-}
-
 function prettifyWorkspaceName(workspacePath: string) {
   const base = path.basename(workspacePath) || workspacePath;
   return base
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function prettifyAgentName(agentId: string | undefined) {
-  if (!agentId) {
-    return "OpenClaw";
-  }
-
-  return agentId
     .split(/[-_]/g)
     .filter(Boolean)
     .map((part) => part[0].toUpperCase() + part.slice(1))
@@ -7133,8 +6809,4 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-function hashValue(value: string) {
-  return createHash("sha1").update(value).digest("hex").slice(0, 10);
 }

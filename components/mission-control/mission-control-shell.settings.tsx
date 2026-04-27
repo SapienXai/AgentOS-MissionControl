@@ -7,7 +7,8 @@ import {
   ChevronDown,
   LoaderCircle,
   RefreshCw,
-  Square
+  Square,
+  TerminalSquare
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -119,6 +120,7 @@ export function MissionControlShellSettingsPanel({
     : snapshot.diagnostics.loaded
       ? "Service only"
       : "Offline";
+  const commandHistory = snapshot.diagnostics.commandHistory ?? [];
 
   return (
     <div
@@ -569,6 +571,113 @@ export function MissionControlShellSettingsPanel({
         )}
       >
         <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "text-[11px] uppercase tracking-[0.18em]",
+                surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-400"
+              )}
+            >
+              OpenClaw commands
+            </p>
+            <p
+              className={cn(
+                "mt-1 text-[10px] leading-4",
+                surfaceTheme === "light" ? "text-[#7a6252]" : "text-slate-500"
+              )}
+            >
+              Recent CLI calls used by AgentOS.
+            </p>
+          </div>
+          <TerminalSquare className={cn("h-4 w-4", surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500")} />
+        </div>
+
+        <div className="mt-2 grid gap-1.5">
+          {commandHistory.length > 0 ? (
+            commandHistory.slice(0, 5).map((entry) => {
+              const preview = entry.stderrPreview || entry.stdoutPreview;
+
+              return (
+                <div
+                  key={entry.id}
+                  className={cn(
+                    "min-w-0 rounded-[12px] border px-2 py-1.5",
+                    surfaceTheme === "light"
+                      ? "border-[#e0d0c3] bg-[#fffdfb]"
+                      : "border-white/[0.08] bg-black/10"
+                  )}
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <p
+                      className={cn(
+                        "min-w-0 truncate font-mono text-[10px]",
+                        surfaceTheme === "light" ? "text-[#4f3d31]" : "text-slate-200"
+                      )}
+                    >
+                      openclaw {entry.args.join(" ")}
+                    </p>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.16em]",
+                        commandStatusClassName(entry.status, surfaceTheme)
+                      )}
+                    >
+                      {entry.status}
+                    </span>
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px]",
+                      surfaceTheme === "light" ? "text-[#846d5c]" : "text-slate-500"
+                    )}
+                  >
+                    <span>{formatCommandDuration(entry.durationMs)}</span>
+                    <span>{formatCommandTimestamp(entry.finishedAt)}</span>
+                    {typeof entry.exitCode === "number" ? <span>exit {entry.exitCode}</span> : null}
+                  </div>
+                  {preview ? (
+                    <p
+                      className={cn(
+                        "mt-1 line-clamp-2 whitespace-pre-wrap break-words font-mono text-[10px] leading-4",
+                        entry.status === "ok"
+                          ? surfaceTheme === "light"
+                            ? "text-[#846d5c]"
+                            : "text-slate-500"
+                          : surfaceTheme === "light"
+                            ? "text-rose-700"
+                            : "text-rose-200"
+                      )}
+                    >
+                      {preview}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <p
+              className={cn(
+                "rounded-[12px] border px-2 py-2 text-[11px]",
+                surfaceTheme === "light"
+                  ? "border-[#e0d0c3] bg-[#fffdfb] text-[#846d5c]"
+                  : "border-white/[0.08] bg-black/10 text-slate-500"
+              )}
+            >
+              No OpenClaw commands have been captured in this server session yet.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "mt-2 rounded-[16px] border px-2.5 py-2.5",
+          surfaceTheme === "light"
+            ? "border-[#e6d7cb] bg-[#fffaf6]"
+            : "border-white/8 bg-white/[0.03]"
+        )}
+      >
+        <div className="flex items-center justify-between gap-3">
           <div>
             <Label
               htmlFor="workspace-root"
@@ -895,6 +1004,53 @@ function GatewayServiceMenuButton({
       <span>{label}</span>
     </button>
   );
+}
+
+function commandStatusClassName(
+  status: NonNullable<MissionControlSnapshot["diagnostics"]["commandHistory"]>[number]["status"],
+  surfaceTheme: SurfaceTheme
+) {
+  if (status === "ok") {
+    return surfaceTheme === "light"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200";
+  }
+
+  if (status === "timeout" || status === "aborted") {
+    return surfaceTheme === "light"
+      ? "border-amber-300 bg-amber-50 text-amber-800"
+      : "border-amber-300/25 bg-amber-300/10 text-amber-200";
+  }
+
+  return surfaceTheme === "light"
+    ? "border-rose-300 bg-rose-50 text-rose-700"
+    : "border-rose-300/25 bg-rose-300/10 text-rose-200";
+}
+
+function formatCommandDuration(durationMs: number) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return "unknown";
+  }
+
+  if (durationMs < 1000) {
+    return `${durationMs}ms`;
+  }
+
+  return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
+}
+
+function formatCommandTimestamp(value: string) {
+  const timestamp = Date.parse(value);
+
+  if (Number.isNaN(timestamp)) {
+    return "unknown time";
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(timestamp);
 }
 
 function settingsButtonClassName(surfaceTheme: SurfaceTheme, tone: "secondary" | "primary" | "warning" | "warningSolid") {

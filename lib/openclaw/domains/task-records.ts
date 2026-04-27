@@ -154,7 +154,29 @@ function selectTaskSignalRuntimes(runtimes: RuntimeRecord[]) {
 }
 
 function isDirectChatRuntime(runtime: RuntimeRecord) {
+  const origin = typeof runtime.metadata.origin === "string" ? runtime.metadata.origin : null;
+
+  if (origin === "mission-dispatch") {
+    return false;
+  }
+
+  if (origin === "agent-chat") {
+    return true;
+  }
+
   if (typeof runtime.metadata.dispatchId === "string" && runtime.metadata.dispatchId.trim()) {
+    return false;
+  }
+
+  const prompt =
+    resolveRuntimeMissionText(runtime) ||
+    (typeof runtime.metadata.turnPrompt === "string" ? runtime.metadata.turnPrompt : null);
+
+  if (typeof prompt === "string" && isDirectChatPrompt(prompt)) {
+    return true;
+  }
+
+  if (hasTaskIdentity(runtime)) {
     return false;
   }
 
@@ -166,15 +188,50 @@ function isDirectChatRuntime(runtime: RuntimeRecord) {
     return true;
   }
 
-  const prompt =
-    resolveRuntimeMissionText(runtime) ||
-    (typeof runtime.metadata.turnPrompt === "string" ? runtime.metadata.turnPrompt : null);
-
-  if (typeof prompt === "string" && isDirectChatPrompt(prompt)) {
+  if (isUnscopedSessionRuntime(runtime)) {
     return true;
   }
 
   return false;
+}
+
+function hasTaskIdentity(runtime: RuntimeRecord) {
+  return Boolean(
+    runtime.taskId?.trim() ||
+      runtime.runId?.trim() ||
+      resolveRuntimeMetadataMissionText(runtime) ||
+      (typeof runtime.metadata.taskId === "string" && runtime.metadata.taskId.trim()) ||
+      (typeof runtime.metadata.runId === "string" && runtime.metadata.runId.trim()) ||
+      (typeof runtime.metadata.bootstrapStage === "string" && runtime.metadata.bootstrapStage.trim()) ||
+      (typeof runtime.metadata.dispatchStatus === "string" && runtime.metadata.dispatchStatus.trim())
+  );
+}
+
+function resolveRuntimeMetadataMissionText(runtime: RuntimeRecord) {
+  if (typeof runtime.metadata.mission !== "string") {
+    return null;
+  }
+
+  const normalized = stripMissionRouting(runtime.metadata.mission);
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isUnscopedSessionRuntime(runtime: RuntimeRecord) {
+  if (runtime.source !== "session") {
+    return false;
+  }
+
+  const key = runtime.key.trim();
+  const title = runtime.title.trim().toLowerCase();
+  const subtitle = runtime.subtitle.trim().toLowerCase();
+
+  return (
+    /:main$/.test(key) ||
+    /:explicit:[^:]+$/.test(key) ||
+    title === "agent session" ||
+    subtitle === "main session" ||
+    subtitle === "direct session"
+  );
 }
 
 function isDirectChatPrompt(text: string) {

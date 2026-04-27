@@ -7,6 +7,7 @@ export type AgentChatMessage = {
   text: string;
   createdAt: number;
   status?: AgentChatStatus;
+  errorMessage?: string | null;
   runId?: string | null;
 };
 
@@ -41,6 +42,9 @@ function isAgentChatMessage(candidate: unknown): candidate is AgentChatMessage {
     typeof entry.id === "string" &&
     typeof entry.text === "string" &&
     typeof entry.createdAt === "number" &&
+    (entry.errorMessage === undefined ||
+      entry.errorMessage === null ||
+      typeof entry.errorMessage === "string") &&
     (entry.status === undefined ||
       entry.status === "sending" ||
       entry.status === "sent" ||

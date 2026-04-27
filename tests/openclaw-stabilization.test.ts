@@ -12,7 +12,11 @@ import {
 import { resolveRequiredLoginProvider } from "@/lib/openclaw/model-onboarding";
 import { resolveUpdateInfo } from "@/lib/openclaw/domains/control-plane-normalization";
 import { createMissionDispatchResultFromRuntimeOutput } from "@/lib/openclaw/domains/mission-dispatch-model";
-import { annotateMissionDispatchMetadata } from "@/lib/openclaw/domains/mission-dispatch-runtime";
+import {
+  annotateMissionDispatchMetadata,
+  annotateMissionDispatchSessions
+} from "@/lib/openclaw/domains/mission-dispatch-runtime";
+import { mapSessionCatalogEntryToRuntime } from "@/lib/openclaw/domains/runtime-normalizer";
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import { normalizeChannelRegistry } from "@/lib/openclaw/domains/workspace-manifest";
 import { buildTaskRecords } from "@/lib/openclaw/domains/task-records";
@@ -22,7 +26,8 @@ import {
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
-import { inferFallbackModelMetadata, inferSessionKindFromCatalogEntry } from "@/lib/openclaw/service";
+import { inferFallbackModelMetadata } from "@/lib/openclaw/service";
+import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/domains/session-catalog";
 import {
   resolveInitialOnboardingProviderId
 } from "@/components/mission-control/openclaw-onboarding.utils";
@@ -781,6 +786,197 @@ test("mission dispatch groups direct session turns into one task card", () => {
   assert.equal(tasks[0].runtimeCount, 2);
   assert.deepEqual(tasks[0].runtimeIds.sort(), ["runtime:session-1:turn-1", "runtime:session-1:turn-2"]);
   assert.equal(tasks[0].artifactCount, 1);
+});
+
+test("mission dispatch sessions carry explicit task origin before runtime matching", () => {
+  const dispatchRecord = {
+    id: "dispatch-1",
+    status: "running",
+    agentId: "agent-1",
+    sessionId: "session-1",
+    mission: "Create the Faros document",
+    routedMission: "Create the Faros document\n\nTask output routing:\n- Put outputs under deliverables/run/",
+    thinking: "medium",
+    workspaceId: "workspace-1",
+    workspacePath: "/tmp/workspace-1",
+    submittedAt: "2026-04-13T00:00:00.000Z",
+    updatedAt: "2026-04-13T00:00:30.000Z",
+    outputDir: "/tmp/workspace-1/deliverables/run",
+    outputDirRelative: "deliverables/run",
+    notesDirRelative: "memory",
+    runner: {
+      pid: null,
+      childPid: null,
+      startedAt: "2026-04-13T00:00:00.000Z",
+      finishedAt: null,
+      lastHeartbeatAt: "2026-04-13T00:00:30.000Z",
+      logPath: null
+    },
+    observation: {
+      runtimeId: null,
+      observedAt: null
+    },
+    result: null,
+    error: null
+  } as const;
+  const sessions = annotateMissionDispatchSessions(
+    [
+      {
+        agentId: "agent-1",
+        key: "agent:agent-1:explicit:session-1",
+        sessionId: "session-1",
+        updatedAt: Date.parse("2026-04-13T00:00:20.000Z"),
+        ageMs: 0,
+        model: "openai/gpt-5.4-mini"
+      }
+    ],
+    [dispatchRecord]
+  );
+  const runtime = mapSessionCatalogEntryToRuntime(
+    sessions[0],
+    [
+      {
+        id: "agent-1",
+        workspace: "/tmp/workspace-1",
+        model: "openai/gpt-5.4-mini"
+      }
+    ],
+    [
+      {
+        id: "agent-1",
+        workspace: "/tmp/workspace-1",
+        model: "openai/gpt-5.4-mini"
+      }
+    ]
+  );
+  const tasks = buildTaskRecords([runtime], [
+    {
+      id: "agent-1",
+      name: "Research Lead"
+    }
+  ] as Parameters<typeof buildTaskRecords>[1]);
+
+  assert.equal(runtime.metadata.origin, "mission-dispatch");
+  assert.equal(runtime.metadata.dispatchId, "dispatch-1");
+  assert.equal(runtime.metadata.mission, "Create the Faros document");
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].key, "dispatch:dispatch-1");
+  assert.equal(tasks[0].dispatchId, "dispatch-1");
+});
+
+test("task cards use explicit runtime origin before direct-chat heuristics", () => {
+  const runtimes = [
+    {
+      id: "runtime:agent-chat",
+      source: "session",
+      key: "agent:agent-1:explicit:agent-chat",
+      title: "Agent chat session",
+      subtitle: "direct chat",
+      status: "completed",
+      updatedAt: Date.parse("2026-04-13T00:00:00.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "agent-chat-session",
+      metadata: {
+        origin: "agent-chat",
+        dispatchId: "should-not-win",
+        mission: "This should stay out of task cards"
+      }
+    },
+    {
+      id: "runtime:mission-dispatch",
+      source: "session",
+      key: "agent:agent-1:explicit:mission-dispatch",
+      title: "Agent session",
+      subtitle: "direct session",
+      status: "running",
+      updatedAt: Date.parse("2026-04-13T00:00:30.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "mission-session",
+      metadata: {
+        origin: "mission-dispatch",
+        dispatchId: "dispatch-1",
+        kind: "direct",
+        chatType: "direct",
+        mission: "Create the Faros document"
+      }
+    }
+  ] as unknown as RuntimeRecord[];
+
+  const tasks = buildTaskRecords(runtimes, [
+    {
+      id: "agent-1",
+      name: "Research Lead"
+    }
+  ] as Parameters<typeof buildTaskRecords>[1]);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].key, "dispatch:dispatch-1");
+  assert.deepEqual(tasks[0].runtimeIds, ["runtime:mission-dispatch"]);
+});
+
+test("task cards ignore unscoped direct session records", () => {
+  const runtimes = [
+    {
+      id: "runtime:main-session",
+      source: "session",
+      key: "agent:agent-1:main",
+      title: "Agent session",
+      subtitle: "main session",
+      status: "idle",
+      updatedAt: Date.parse("2026-04-13T00:00:00.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-main",
+      metadata: {}
+    },
+    {
+      id: "runtime:explicit-session",
+      source: "session",
+      key: "agent:agent-1:explicit:session-explicit",
+      title: "Agent session",
+      subtitle: "direct session",
+      status: "completed",
+      updatedAt: Date.parse("2026-04-13T00:00:10.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-explicit",
+      metadata: {}
+    },
+    {
+      id: "runtime:dispatch-1",
+      source: "session",
+      key: "agent:agent-1:explicit:dispatch-session",
+      title: "Create the Faros document",
+      subtitle: "Wrote the deliverable",
+      status: "completed",
+      updatedAt: Date.parse("2026-04-13T00:01:00.000Z"),
+      ageMs: 0,
+      agentId: "agent-1",
+      workspaceId: "workspace-1",
+      sessionId: "dispatch-session",
+      metadata: {
+        dispatchId: "dispatch-1",
+        mission: "Create the Faros document"
+      }
+    }
+  ] as unknown as RuntimeRecord[];
+
+  const tasks = buildTaskRecords(runtimes, [
+    {
+      id: "agent-1",
+      name: "Research Lead"
+    }
+  ] as Parameters<typeof buildTaskRecords>[1]);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].key, "dispatch:dispatch-1");
+  assert.deepEqual(tasks[0].runtimeIds, ["runtime:dispatch-1"]);
 });
 
 test("kickoff progress parser hides terminal control and auth-profile noise", () => {

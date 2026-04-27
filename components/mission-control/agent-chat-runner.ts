@@ -292,12 +292,12 @@ async function runAgentChatTurn({
       current
         .map((entry) => {
           if (entry.id === userMessageId) {
-            return { ...entry, status: "error" as const };
+            return { ...entry, status: "error" as const, errorMessage: message };
           }
 
           if (entry.id === assistantMessageId) {
             if (partialText.length > 0) {
-              return { ...entry, text: partialText, status: "error" as const };
+              return { ...entry, text: partialText, status: "error" as const, errorMessage: message };
             }
 
             return entry;
