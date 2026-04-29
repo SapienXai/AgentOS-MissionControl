@@ -19,6 +19,7 @@ import {
   toPersistedTaskPositionKey
 } from "@/components/mission-control/canvas.persistence";
 import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
+import { resolveAgentModelLabel } from "@/lib/openclaw/presenters";
 import type {
   MissionControlSnapshot,
   MissionControlSurfaceProvider,
@@ -127,6 +128,7 @@ export function buildCanvasGraph(
       const activeTaskCount = agentTasks.filter((task) => isLiveTask(task)).length;
       const isAgentChatOpen = activeChatAgentId === agent.id;
       const surfaceBadges = buildAgentSurfaceBadges(snapshot, workspace, agent);
+      const modelLabel = resolveAgentModelLabel(agent.modelId, snapshot.models);
       const agentPosition = resolvePersistedPosition(
         toPersistedAgentPositionKey(agent),
         { x: agentX, y: agentY },
@@ -160,6 +162,7 @@ export function buildCanvasGraph(
           activeTaskCount,
           chatOpen: isAgentChatOpen,
           relativeTimeReferenceMs,
+          modelLabel,
           surfaceBadges,
           onMessage: onMessageAgent,
           onEdit: onEditAgent,

@@ -853,6 +853,18 @@ function buildModelStatusFromAgentConfig(agentConfig: AgentConfigPayload): Model
   };
 }
 
+function resolveSnapshotDefaultAgentModelId(snapshot: MissionControlSnapshot) {
+  if (!snapshot.diagnostics.modelReadiness.defaultModelReady) {
+    return undefined;
+  }
+
+  return (
+    normalizeOptionalValue(snapshot.diagnostics.modelReadiness.resolvedDefaultModel) ??
+    normalizeOptionalValue(snapshot.diagnostics.modelReadiness.defaultModel) ??
+    undefined
+  );
+}
+
 function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
   return [...new Set(agentIds.filter(Boolean))].sort().join("\u0000");
 }
@@ -1954,6 +1966,8 @@ export async function createAgent(input: AgentCreateInput) {
   const setupAgentId =
     snapshot.agents.find((entry) => entry.workspaceId === resolvedWorkspaceId && entry.policy.preset === "setup")?.id ?? null;
   const agentDir = buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId);
+  const requestedModelId = normalizeOptionalValue(input.modelId);
+  const agentModelId = requestedModelId ?? resolveSnapshotDefaultAgentModelId(snapshot);
 
   const args = [
     "agents",
@@ -1967,8 +1981,8 @@ export async function createAgent(input: AgentCreateInput) {
     "--json"
   ];
 
-  if (input.modelId?.trim()) {
-    args.push("--model", input.modelId.trim());
+  if (agentModelId) {
+    args.push("--model", agentModelId);
   }
 
   await runOpenClaw(args);
@@ -1990,7 +2004,7 @@ export async function createAgent(input: AgentCreateInput) {
     resolvedWorkspacePath,
     {
       name: displayName,
-      model: normalizeOptionalValue(input.modelId),
+      model: agentModelId,
       heartbeat,
       skills: uniqueStrings([...presetSkillIds, policySkillId]),
       tools:
@@ -2028,7 +2042,7 @@ export async function createAgent(input: AgentCreateInput) {
     enabled: true,
     skillId: presetSkillIds[0] ?? policySkillId,
     toolIds: presetToolIds,
-    modelId: normalizeOptionalValue(input.modelId),
+    modelId: agentModelId,
     isPrimary: false,
     policy,
     channelIds: input.channelIds ?? []
@@ -2093,7 +2107,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     input.modelId !== undefined
       ? normalizeOptionalValue(input.modelId)
       : agent.modelId === "unassigned"
-        ? undefined
+        ? resolveSnapshotDefaultAgentModelId(snapshot)
         : agent.modelId;
   const onlyModelChanged =
     input.modelId !== undefined &&
@@ -2752,6 +2766,9 @@ export async function createWorkspaceProject(
   await progress.completeStep("scaffold", "Workspace files and starter docs are in place.");
 
   const createdAgentIds: string[] = [];
+  const workspaceModelId =
+    normalized.modelId ??
+    resolveSnapshotDefaultAgentModelId(await getMissionControlSnapshot({ includeHidden: true }));
 
   await progress.startStep(
     "agents",
@@ -2772,7 +2789,7 @@ export async function createWorkspaceProject(
     const createdAgentId = await createBootstrappedWorkspaceAgentFromProvisioning({
       workspacePath: targetDir,
       workspaceSlug: normalized.slug,
-      workspaceModelId: normalized.modelId,
+      workspaceModelId,
       agent
     });
     createdAgentIds.push(createdAgentId);

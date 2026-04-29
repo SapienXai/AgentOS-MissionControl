@@ -31,6 +31,7 @@ export type AgentSurfaceBadge = {
 
 export type AgentNodeData = Record<string, unknown> & {
   agent: OpenClawAgent;
+  modelLabel: string;
   emphasis: boolean;
   focused?: boolean;
   composerFocused?: boolean;

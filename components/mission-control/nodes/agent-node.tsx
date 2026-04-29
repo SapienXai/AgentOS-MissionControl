@@ -27,7 +27,11 @@ import {
   formatCapabilityLabel,
   getAgentPresetMeta
 } from "@/lib/openclaw/agent-presets";
-import { formatAgentDisplayName, formatModelLabel, formatRelativeTime } from "@/lib/openclaw/presenters";
+import {
+  formatAgentDisplayName,
+  formatModelLabel,
+  formatRelativeTime
+} from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
 
 type AgentFlowNode = FlowNode<AgentNodeData, "agent">;
@@ -197,7 +201,7 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
         : data.agent.status === "offline"
           ? "danger"
       : "muted";
-  const modelBadgeLabel = data.agent.modelId === "unassigned" ? "default model" : formatModelLabel(data.agent.modelId);
+  const modelBadgeLabel = data.modelLabel || formatModelLabel(data.agent.modelId);
   const themeLabel = data.agent.identity.theme ?? formatAgentPresetLabel(data.agent.policy.preset);
   const skillCount = effectiveSkills.length;
   const heartbeatLabel = data.agent.heartbeat.enabled

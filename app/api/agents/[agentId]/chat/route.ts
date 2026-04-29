@@ -7,13 +7,18 @@ import {
   buildWorkspaceTeamPrompt,
   normalizeAgentChatHistory
 } from "@/lib/openclaw/agent-chat-prompt";
+import {
+  buildDirectAgentIdentityReply,
+  isDirectAgentIdentityQuestion,
+  isStaleAgentChatContextRecoveryText
+} from "@/lib/openclaw/agent-chat-guards";
 import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
 import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
-import type { MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
+import type { ControlPlaneSnapshot, MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
 import type { TranscriptTurn } from "@/lib/openclaw/domains/runtime-transcript";
 
 export const runtime = "nodejs";
@@ -180,6 +185,15 @@ export async function POST(
           return;
         }
 
+        const resolvedDefaultModelId = resolveReadyDefaultAgentModelId(snapshot);
+        if (agent.modelId === "unassigned" && resolvedDefaultModelId) {
+          await updateAgent({
+            id: agentId,
+            modelId: resolvedDefaultModelId
+          });
+          agent.modelId = resolvedDefaultModelId;
+        }
+
         const submittedMessage = input.message.trim();
         const rawMessage = input.rawMessage?.trim();
         const operatorMessage = rawMessage || submittedMessage;
@@ -244,7 +258,8 @@ export async function POST(
           // Ignore a last transient read failure.
         }
 
-        const response = toAgentChatResponse(agentId, result);
+        let response = toAgentChatResponse(agentId, result);
+        response = recoverDirectIdentityResponse(response, formatAgentDisplayName(agent), operatorMessage);
         const action = readMissionControlAction(response.meta);
 
         if (action?.type === "rename_agent") {
@@ -309,6 +324,18 @@ function isComposedAgentChatPrompt(value: string) {
     value.includes("## Telegram coordination") ||
     value.includes("## Discord coordination") ||
     value.includes("You are chatting directly with the operator inside AgentOS.")
+  );
+}
+
+function resolveReadyDefaultAgentModelId(snapshot: ControlPlaneSnapshot) {
+  if (!snapshot.diagnostics.modelReadiness.defaultModelReady) {
+    return null;
+  }
+
+  return (
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel?.trim() ||
+    snapshot.diagnostics.modelReadiness.defaultModel?.trim() ||
+    null
   );
 }
 
@@ -407,6 +434,30 @@ function toAgentChatResponse(agentId: string, payload: AgentChatCommandPayload):
           missionControlAction: action
         }
       : resultPayload.meta
+  };
+}
+
+function recoverDirectIdentityResponse(response: MissionResponse, agentName: string, operatorMessage: string): MissionResponse {
+  if (!isDirectAgentIdentityQuestion(operatorMessage)) {
+    return response;
+  }
+
+  const responseText = [response.summary, ...response.payloads.map((entry) => entry.text)].join("\n\n");
+  if (!isStaleAgentChatContextRecoveryText(responseText)) {
+    return response;
+  }
+
+  const text = buildDirectAgentIdentityReply(agentName);
+
+  return {
+    ...response,
+    summary: text,
+    payloads: [
+      {
+        text,
+        mediaUrl: null
+      }
+    ]
   };
 }
 

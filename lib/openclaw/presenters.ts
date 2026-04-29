@@ -1,6 +1,12 @@
 import { formatDistanceStrict } from "date-fns";
 
-import type { AgentStatus, DiagnosticHealth, RuntimeStatus, OpenClawAgent } from "@/lib/openclaw/types";
+import type {
+  AgentStatus,
+  DiagnosticHealth,
+  ModelRecord,
+  RuntimeStatus,
+  OpenClawAgent
+} from "@/lib/openclaw/types";
 
 export function formatRelativeTime(timestamp: number | null | undefined, referenceTimeMs: number = Date.now()) {
   if (timestamp == null || Number.isNaN(timestamp)) {
@@ -53,6 +59,19 @@ export function formatTokens(value: number | null | undefined) {
 
 export function formatModelLabel(modelId: string) {
   return modelId.split("/").at(1) || modelId;
+}
+
+export function resolveAgentModelLabel(
+  modelId: string | null | undefined,
+  models: readonly Pick<ModelRecord, "id" | "name">[]
+) {
+  const normalizedModelId = typeof modelId === "string" ? modelId.trim() : "";
+
+  if (!normalizedModelId || normalizedModelId === "unassigned") {
+    return "Unassigned";
+  }
+
+  return models.find((model) => model.id === normalizedModelId)?.name?.trim() || formatModelLabel(normalizedModelId);
 }
 
 export function formatAgentDisplayName(agent: Pick<OpenClawAgent, "name" | "identityName">) {

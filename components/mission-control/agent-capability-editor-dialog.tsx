@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle
@@ -330,6 +331,9 @@ export function AgentCapabilityEditorDialog({
         <div className="flex max-h-[calc(100dvh-1.5rem)] min-h-0 flex-col">
           <DialogHeader className="border-b border-white/[0.08] px-4 py-2.5">
             <DialogTitle className="text-[0.95rem]">{`Edit ${isSkillsEditor ? "skills" : "tools"} · ${formatAgentDisplayName(agent)}`}</DialogTitle>
+            <DialogDescription className="sr-only">
+              Edit the selected agent&apos;s skills or tools and save the updated capability set.
+            </DialogDescription>
             <div className="flex flex-wrap gap-1 pt-0.5">
               <Badge variant="muted" className={headerBadgeClassName}>
                 {formatAgentPresetLabel(agent.policy.preset)}

@@ -8,6 +8,11 @@ import {
   writeAgentChatMessages
 } from "@/components/mission-control/agent-chat-storage";
 import { consumeNdjsonStream } from "@/lib/ndjson";
+import {
+  buildDirectAgentIdentityReply,
+  isDirectAgentIdentityQuestion,
+  isStaleAgentChatContextRecoveryText
+} from "@/lib/openclaw/agent-chat-guards";
 import type { MissionControlSnapshot, MissionResponse } from "@/lib/agentos/contracts";
 
 type AgentChatStreamEvent =
@@ -42,6 +47,7 @@ export type AgentChatRunSnapshot = {
 
 export type SendAgentChatMessageOptions = {
   agentId: string;
+  agentName: string;
   text: string;
   onRefresh?: () => Promise<void>;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
@@ -63,6 +69,7 @@ export function getAgentChatRunSnapshot(agentId: string): AgentChatRunSnapshot {
 
 export function sendAgentChatMessage({
   agentId,
+  agentName,
   text,
   onRefresh,
   onSnapshotChange,
@@ -140,6 +147,7 @@ export function sendAgentChatMessage({
   run.promise = runAgentChatTurn({
     agentId,
     payload,
+    agentName,
     userMessageId,
     assistantMessageId,
     previousAssistantTexts,
@@ -155,6 +163,7 @@ export function sendAgentChatMessage({
 async function runAgentChatTurn({
   agentId,
   payload,
+  agentName,
   userMessageId,
   assistantMessageId,
   previousAssistantTexts,
@@ -170,6 +179,7 @@ async function runAgentChatTurn({
     history: Array<{ role: "user" | "assistant"; text: string }>;
     thinking: "low";
   };
+  agentName: string;
   userMessageId: string;
   assistantMessageId: string;
   previousAssistantTexts: Set<string>;
@@ -210,8 +220,16 @@ async function runAgentChatTurn({
       if (event.type === "assistant") {
         const eventText = sanitizeAgentChatReplyText(event.text);
         const normalizedEventText = normalizeAgentChatText(eventText);
+        const isStaleIdentityRecovery =
+          isDirectAgentIdentityQuestion(payload.rawMessage) && isStaleAgentChatContextRecoveryText(eventText);
         if (!eventText) {
           run.statusMessage = "Agent is thinking...";
+          dispatchAgentChatStateChange(agentId);
+          return;
+        }
+
+        if (isStaleIdentityRecovery) {
+          run.statusMessage = "Agent is drafting a reply...";
           dispatchAgentChatStateChange(agentId);
           return;
         }
@@ -248,7 +266,11 @@ async function runAgentChatTurn({
       }
 
       finalResponse = event.response ?? null;
-      const finalText = finalResponse ? renderAgentReplyText(finalResponse) : latestAssistantText;
+      const finalText = recoverDirectIdentityText(
+        finalResponse ? renderAgentReplyText(finalResponse) : latestAssistantText,
+        agentName,
+        payload.rawMessage
+      );
 
       if (finalResponse) {
         latestAssistantText = finalText;
@@ -328,6 +350,14 @@ function renderAgentReplyText(result: MissionResponse) {
     .filter(Boolean)
     .join("\n\n");
   return payloadText || sanitizeAgentChatReplyText(result.summary) || "No response text was returned.";
+}
+
+function recoverDirectIdentityText(text: string, agentName: string, operatorMessage: string) {
+  if (!isDirectAgentIdentityQuestion(operatorMessage) || !isStaleAgentChatContextRecoveryText(text)) {
+    return text;
+  }
+
+  return buildDirectAgentIdentityReply(agentName);
 }
 
 function normalizeAgentChatText(value: string) {

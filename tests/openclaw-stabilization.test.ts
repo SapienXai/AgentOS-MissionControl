@@ -45,6 +45,13 @@ import {
   resolveModelOnboardingActionCopy,
   resolveModelOnboardingStartPhase
 } from "@/components/mission-control/mission-control-shell.utils";
+import { buildAgentChatPrompt } from "@/lib/openclaw/agent-chat-prompt";
+import {
+  buildDirectAgentIdentityReply,
+  isDirectAgentIdentityQuestion,
+  isStaleAgentChatContextRecoveryText
+} from "@/lib/openclaw/agent-chat-guards";
+import { resolveAgentModelLabel } from "@/lib/openclaw/presenters";
 import type { ControlPlaneSnapshot, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import type {
   ChannelRegistry,
@@ -235,6 +242,69 @@ test("openclaw binary selection helpers preserve explicit choices", () => {
 
   assert.equal(snapshotSelection.resolvedPath, "/opt/homebrew/bin/openclaw");
   assert.equal(snapshotSelection.label, "Custom path");
+});
+
+test("agent chat prompt keeps direct identity chat out of task recovery", () => {
+  const prompt = buildAgentChatPrompt(
+    [
+      {
+        role: "user",
+        text: "hello boy"
+      },
+      {
+        role: "assistant",
+        text: "I couldn't recover any prior task context from memory or the workspace. Send me the last goal or file."
+      }
+    ],
+    "so what is your name and how old are you",
+    {
+      agentName: "Little Boy",
+      agentDir: "/tmp/agent",
+      workspacePath: "/tmp/workspace"
+    }
+  );
+
+  assert.match(prompt, /Answer the operator's latest message directly/);
+  assert.match(prompt, /Your current display name in AgentOS is Little Boy/);
+  assert.match(prompt, /Operator: so what is your name and how old are you/);
+  assert.doesNotMatch(prompt, /couldn't recover any prior task context/i);
+  assert.doesNotMatch(prompt, /Send me the last goal or file/i);
+  assert.equal(isDirectAgentIdentityQuestion("so what is your name and how old are you"), true);
+  assert.equal(
+    isStaleAgentChatContextRecoveryText(
+      "I can’t continue because there’s still no recoverable task context. I checked workspace files, memory, and recent session metadata."
+    ),
+    true
+  );
+  assert.equal(
+    isStaleAgentChatContextRecoveryText(
+      "I still don’t have any task state to resume from. I’ve already checked the workspace, memory, and session metadata. Send me the last task, file, or error."
+    ),
+    true
+  );
+  assert.equal(
+    buildDirectAgentIdentityReply("Little Boy"),
+    "My name is Little Boy. I do not have a real age; I am an AI agent running inside AgentOS."
+  );
+});
+
+test("agent model labels show missing assignments explicitly", () => {
+  assert.equal(
+    resolveAgentModelLabel(
+      "unassigned",
+      [
+        {
+          id: "openai-codex/gpt-5.4-mini",
+          name: "GPT-5.4 Mini"
+        }
+      ]
+    ),
+    "Unassigned"
+  );
+  assert.equal(
+    resolveAgentModelLabel("openai-codex/gpt-5.5", []),
+    "gpt-5.5"
+  );
 });
 
 test("openclaw onboarding uses the official installer command", () => {

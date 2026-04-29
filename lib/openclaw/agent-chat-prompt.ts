@@ -1,4 +1,9 @@
 import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
+import {
+  buildDirectAgentIdentityReply,
+  isDirectAgentIdentityQuestion,
+  isStaleAgentChatContextRecoveryText
+} from "@/lib/openclaw/agent-chat-guards";
 import { MISSION_CONTROL_ACTION_TAG } from "@/lib/openclaw/chat-actions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type { MissionControlSnapshot, OpenClawAgent } from "@/lib/openclaw/types";
@@ -39,6 +44,10 @@ function isStaleTelegramCredentialFailure(entry: AgentChatHistoryEntry, telegram
           lowerText.includes("eksik") ||
           lowerText.includes("gerek"))))
   );
+}
+
+function isStaleDirectChatContextRecovery(entry: AgentChatHistoryEntry) {
+  return entry.role === "assistant" && isStaleAgentChatContextRecoveryText(entry.text);
 }
 
 export function buildWorkspaceTeamPrompt(snapshot: MissionControlSnapshot, agent: OpenClawAgent) {
@@ -92,13 +101,17 @@ export function buildAgentChatPrompt(
   const turns = history
     .filter((entry) => entry.role === "user" || entry.role === "assistant")
     .filter((entry) => !isStaleTelegramCredentialFailure(entry, telegramCoordinationEnabled))
+    .filter((entry) => !isStaleDirectChatContextRecovery(entry))
     .slice(-8)
     .map((entry) => `${entry.role === "user" ? "Operator" : "Agent"}: ${entry.text.trim()}`)
     .join("\n");
 
   const trimmed = message.trim();
+  const isIdentityQuestion = isDirectAgentIdentityQuestion(trimmed);
   const instructions = [
-    "You are chatting directly with the operator inside AgentOS. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards."
+    "You are chatting directly with the operator inside AgentOS. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards.",
+    "Answer the operator's latest message directly. Do not turn ordinary chat, greetings, or identity questions into a request to recover task context.",
+    "For simple identity questions, answer from the current display name. You do not have a real age; if asked, say that briefly instead of searching memory or the workspace."
   ];
 
   if (options.agentDir) {
@@ -144,6 +157,14 @@ export function buildAgentChatPrompt(
   }
 
   instructions.push(`Your current display name in AgentOS is ${options.agentName}.`);
+  if (isIdentityQuestion) {
+    instructions.push(
+      `The operator is asking a direct identity question. Answer with this substance: "${buildDirectAgentIdentityReply(options.agentName)}" Do not inspect files, memory, session metadata, or prior task context for this question.`
+    );
+  }
+  instructions.push(
+    "Direct chat mode takes priority over workspace operating docs for this turn: respond to the latest operator message as a chat message unless the operator explicitly asks you to inspect files, continue a task, or modify the workspace."
+  );
   const prefix = `${instructions.join("\n")}\n`;
 
   return turns

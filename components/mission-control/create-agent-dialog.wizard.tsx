@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogTitle,
   DialogTrigger
@@ -758,6 +759,9 @@ export function CreateAgentDialog({
                 : "border-white/10 bg-[linear-gradient(180deg,rgba(14,20,34,0.98),rgba(9,13,24,0.99))]"
             )}
           >
+            <DialogDescription className="sr-only">
+              Create a new OpenClaw agent by choosing a starter mode, editing identity and policy, and saving the workspace agent.
+            </DialogDescription>
             {stage === "start" ? (
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">

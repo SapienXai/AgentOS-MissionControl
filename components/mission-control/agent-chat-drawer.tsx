@@ -324,6 +324,7 @@ export function AgentChatDrawer({
     try {
       await sendAgentChatMessage({
         agentId: agent.id,
+        agentName: agentLabel,
         text,
         onRefresh,
         onSnapshotChange,

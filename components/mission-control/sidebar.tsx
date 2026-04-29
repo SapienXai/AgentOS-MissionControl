@@ -67,6 +67,7 @@ import {
   formatAgentDisplayName,
   formatContextWindow,
   formatModelLabel,
+  resolveAgentModelLabel,
   toneForHealth
 } from "@/lib/openclaw/presenters";
 import type { AgentPolicy, AgentPreset, DiscoveredModelCandidate, MissionControlSnapshot } from "@/lib/agentos/contracts";
@@ -929,7 +930,7 @@ export function MissionSidebar({
                             <div className="mt-3 flex items-center gap-2">
                               <div className="min-w-0 flex-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-slate-400">
                                 <span className="truncate">
-                                  {agent.modelId === "unassigned" ? "default model" : formatModelLabel(agent.modelId)}
+                                  {resolveAgentModelLabel(agent.modelId, snapshot.models)}
                                 </span>
                               </div>
                             </div>
