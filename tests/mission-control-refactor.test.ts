@@ -52,6 +52,14 @@ test("control plane helpers normalize snapshot and onboarding fallback", () => {
   assert.equal(resolveGatewayDraft(gatewaySnapshot), "ws://127.0.0.1:18789");
   assert.equal(resolveOnboardingAction(onboardingSnapshot).label, "Install OpenClaw");
 
+  const onlineWithoutWorkspace = {
+    workspaces: [],
+    agents: [],
+    diagnostics: { installed: true, rpcOk: true }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveOnboardingAction(onlineWithoutWorkspace).label, "Continue setup");
+
   const optimisticTask = createOptimisticMissionTaskRecord(
     {
       requestId: "req-1",
@@ -202,7 +210,21 @@ test("onboarding launchpad requires confirmed setup or a workspace-backed defaul
       {
         id: "workspace-1"
       }
+    ],
+    agents: [
+      {
+        id: "agent-1"
+      }
     ]
+  } as unknown as MissionControlSnapshot;
+  const workspaceWithoutAgent = {
+    ...detectedDefaultOnly,
+    workspaces: [
+      {
+        id: "workspace-1"
+      }
+    ],
+    agents: []
   } as unknown as MissionControlSnapshot;
   const readyModel = {
     ...detectedDefaultOnly,
@@ -216,6 +238,7 @@ test("onboarding launchpad requires confirmed setup or a workspace-backed defaul
   } as unknown as MissionControlSnapshot;
 
   assert.equal(shouldShowOnboardingLaunchpad(detectedDefaultOnly), false);
+  assert.equal(shouldShowOnboardingLaunchpad(workspaceWithoutAgent), false);
   assert.equal(shouldShowOnboardingLaunchpad(workspaceBackedDefault), true);
   assert.equal(shouldShowOnboardingLaunchpad(readyModel), false);
   assert.equal(

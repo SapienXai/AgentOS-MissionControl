@@ -47,6 +47,17 @@ import {
 } from "@/components/mission-control/mission-control-shell.utils";
 import { buildAgentChatPrompt } from "@/lib/openclaw/agent-chat-prompt";
 import {
+  buildOpenClawUpdateRecoveryManualCommand,
+  isOpenClawGatewayReadyOutput,
+  shouldAttemptOpenClawUpdateRecovery
+} from "@/lib/openclaw/update-recovery";
+import {
+  resolveOpenClawRuntimeFailureMessage,
+  resolveOpenClawRuntimePreflightError,
+  buildOpenClawRuntimeSmokeTestRecoveryCommand,
+  classifyOpenClawRuntimeSmokeTestFailure
+} from "@/lib/openclaw/runtime-compatibility";
+import {
   buildDirectAgentIdentityReply,
   isDirectAgentIdentityQuestion,
   isStaleAgentChatContextRecoveryText
@@ -290,6 +301,87 @@ test("openclaw binary selection helpers preserve explicit choices", () => {
 
   assert.equal(snapshotSelection.resolvedPath, "/opt/homebrew/bin/openclaw");
   assert.equal(snapshotSelection.label, "Custom path");
+});
+
+test("openclaw update recovery detects post-update setup failures", () => {
+  const output = `Update Result: OK
+  Root: /Users/example/.openclaw/tools/node-v22.22.0/lib/node_modules/openclaw
+  Before: 2026.4.25
+  After: 2026.4.27
+
+Completion cache update failed: Error: spawnSync node ETIMEDOUT
+Gateway did not become healthy after restart.`;
+
+  assert.equal(shouldAttemptOpenClawUpdateRecovery(output), true);
+  assert.equal(shouldAttemptOpenClawUpdateRecovery("npm failed before installing anything"), false);
+  assert.equal(
+    buildOpenClawUpdateRecoveryManualCommand("/Users/example/.openclaw/bin/openclaw"),
+    "/Users/example/.openclaw/bin/openclaw doctor --fix && /Users/example/.openclaw/bin/openclaw gateway restart && /Users/example/.openclaw/bin/openclaw gateway status --deep"
+  );
+});
+
+test("openclaw update recovery accepts deep gateway readiness output", () => {
+  const deepStatusOutput = `OpenClaw gateway status
+LaunchAgent: loaded
+Service runtime: status=running, state=active, pid=48670
+Gateway port 18789 status: listening
+Connectivity probe: ok
+Capability: admin-capable`;
+
+  assert.equal(isOpenClawGatewayReadyOutput(deepStatusOutput), true);
+  assert.equal(isOpenClawGatewayReadyOutput("Gateway Health\nOK"), true);
+  assert.equal(isOpenClawGatewayReadyOutput("Connectivity probe: failed"), false);
+  assert.equal(
+    buildOpenClawRuntimeSmokeTestRecoveryCommand("/Users/example/.openclaw/bin/openclaw", "Unknown model: openai-codex/gpt-5.4-mini"),
+    "/Users/example/.openclaw/bin/openclaw models set openai-codex/gpt-5.5"
+  );
+  assert.deepEqual(
+    classifyOpenClawRuntimeSmokeTestFailure(
+      "[channels] failed to load bundled channel telegram: ENOENT: no such file or directory"
+    ),
+    {
+      kind: "plugin-runtime",
+      detail: "bundled channel loading failed after the update. Run `openclaw doctor --fix` and restart the gateway."
+    }
+  );
+  assert.deepEqual(
+    classifyOpenClawRuntimeSmokeTestFailure(
+      "GatewayClientRequestError: FailoverError: Unknown model: openai-codex/gpt-5.4-mini."
+    ),
+    {
+      kind: "model-route",
+      detail:
+        "OpenClaw rejected the active Codex model route. The model can exist in Codex, but this OpenClaw provider path could not run it. Try `openai-codex/gpt-5.5`, or use `openai/gpt-5.4-mini` with an OpenAI API key."
+    }
+  );
+});
+
+test("openclaw runtime failure message explains codex route rejection", () => {
+  assert.equal(
+    resolveOpenClawRuntimeFailureMessage(
+      "GatewayClientRequestError: FailoverError: Unknown model: openai-codex/gpt-5.4-mini."
+    ),
+    "OpenClaw rejected the active Codex model route. The model can exist in Codex, but this OpenClaw provider path could not run it. Try `openai-codex/gpt-5.5`, or use `openai/gpt-5.4-mini` with an OpenAI API key."
+  );
+  assert.equal(resolveOpenClawRuntimeFailureMessage("unrelated failure"), null);
+});
+
+test("openclaw runtime preflight rejects bundled channel load failures", () => {
+  const snapshot = {
+    diagnostics: {
+      issues: [
+        "[channels] failed to load bundled channel telegram: ENOENT: no such file or directory"
+      ],
+      runtime: {
+        issues: []
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(
+    resolveOpenClawRuntimePreflightError(snapshot),
+    "OpenClaw runtime is missing bundled channel files after the update. Run `openclaw doctor --fix` and restart the gateway."
+  );
 });
 
 test("agent chat prompt keeps direct identity chat out of task recovery", () => {

@@ -518,6 +518,13 @@ export function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
   }
 
   if (isOpenClawOnboardingSystemReady(snapshot)) {
+    if (!hasAgentOSWorkspaceSetup(snapshot)) {
+      return {
+        label: "Continue setup",
+        description: "Create the first AgentOS workspace and agent before entering the canvas."
+      };
+    }
+
     return {
       label: "Enter AgentOS",
       description: "OpenClaw is online. Runtime checks continue in the background."
@@ -544,13 +551,17 @@ export function resolveOnboardingAction(snapshot: MissionControlSnapshot) {
   };
 }
 
+export function hasAgentOSWorkspaceSetup(snapshot: Pick<MissionControlSnapshot, "workspaces" | "agents">) {
+  return (snapshot.workspaces?.length ?? 0) > 0 && (snapshot.agents?.length ?? 0) > 0;
+}
+
 export function hasWorkspaceBackedModelSetup(snapshot: MissionControlSnapshot) {
   const defaultModel =
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
     null;
 
-  return snapshot.workspaces.length > 0 && Boolean(defaultModel);
+  return hasAgentOSWorkspaceSetup(snapshot) && Boolean(defaultModel);
 }
 
 export function shouldShowOnboardingLaunchpad(

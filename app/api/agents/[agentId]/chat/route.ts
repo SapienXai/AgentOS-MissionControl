@@ -17,6 +17,10 @@ import { extractMissionControlAction, type MissionControlAction } from "@/lib/op
 import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
 import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
+import {
+  resolveOpenClawRuntimeFailureMessage,
+  resolveOpenClawRuntimePreflightError
+} from "@/lib/openclaw/runtime-compatibility";
 import { renderWorkspaceSurfaceCoordinationMarkdownForAgent } from "@/lib/openclaw/surface-coordination";
 import type { ControlPlaneSnapshot, MissionDispatchStatus, MissionResponse } from "@/lib/agentos/contracts";
 import type { TranscriptTurn } from "@/lib/openclaw/domains/runtime-transcript";
@@ -194,6 +198,16 @@ export async function POST(
           agent.modelId = resolvedDefaultModelId;
         }
 
+        const runtimePreflightError = resolveOpenClawRuntimePreflightError(snapshot);
+        if (runtimePreflightError) {
+          await send({
+            type: "done",
+            ok: false,
+            message: runtimePreflightError
+          });
+          return;
+        }
+
         const submittedMessage = input.message.trim();
         const rawMessage = input.rawMessage?.trim();
         const operatorMessage = rawMessage || submittedMessage;
@@ -288,9 +302,10 @@ export async function POST(
           type: "done",
           ok: false,
           message:
-            error instanceof Error
+            resolveOpenClawRuntimeFailureMessage(error instanceof Error ? error.message : "") ||
+            (error instanceof Error
               ? error.message
-              : "OpenClaw could not send the message right now. Please try again."
+              : "OpenClaw could not send the message right now. Please try again.")
         });
       } finally {
         stopPolling();

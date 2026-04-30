@@ -36,6 +36,7 @@ import {
   type SurfaceTheme,
   type WizardStage
 } from "@/components/mission-control/openclaw-onboarding.utils";
+import { hasAgentOSWorkspaceSetup } from "@/components/mission-control/mission-control-shell.utils";
 import {
   LaunchpadStage,
   ModelStage,
@@ -97,11 +98,12 @@ export function OpenClawOnboarding({
   launchpadCreateRunState: "idle" | "running" | "success" | "error";
   }) {
   const onboardingSystemReady = systemRun.runState === "success" || isOpenClawOnboardingSystemReady(snapshot);
+  const hasWorkspaceSetup = hasAgentOSWorkspaceSetup(snapshot);
   const modelReady =
     modelSwitchFeedback.phase === "success" ||
     showReadyState ||
-    isOpenClawOnboardingModelReady(snapshot);
-  const showLaunchpad = modelReady && showReadyState;
+    (isOpenClawOnboardingModelReady(snapshot) && hasWorkspaceSetup);
+  const showLaunchpad = modelReady && (showReadyState || !hasWorkspaceSetup);
   const isLaunchpadBuilding = launchpadCreateRunState === "running";
   const workspaceCount = snapshot.workspaces.length;
   const hasWorkspaces = workspaceCount > 0;
@@ -354,7 +356,7 @@ export function OpenClawOnboarding({
           <div className="flex flex-wrap items-center gap-2">
             {showLaunchpad ? (
               <>
-                {hasWorkspaces ? (
+                {hasWorkspaceSetup ? (
                   <Button
                     type="button"
                     onClick={onEnterAgentOS}

@@ -18,6 +18,7 @@ import {
   type SurfaceTheme,
   type StepState
 } from "@/components/mission-control/openclaw-onboarding.utils";
+import { hasAgentOSWorkspaceSetup } from "@/components/mission-control/mission-control-shell.utils";
 import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/openclaw-onboarding-provider-flow";
 import { formatModelLabel } from "@/lib/openclaw/presenters";
 import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
@@ -238,8 +239,9 @@ export function ModelStage({
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
     null;
-  const modelReady = isOpenClawOnboardingModelReady(snapshot);
-  const defaultModelLabel = resolveModelDisplayLabel(defaultModelId, availableModels);
+  const hasWorkspaceSetup = hasAgentOSWorkspaceSetup(snapshot);
+  const modelReady = isOpenClawOnboardingModelReady(snapshot) && hasWorkspaceSetup;
+  const defaultModelLabel = hasWorkspaceSetup ? resolveModelDisplayLabel(defaultModelId, availableModels) : null;
   const switchTargetLabel = resolveModelDisplayLabel(selectedModelId, availableModels);
   const hasPendingModelSwitch = Boolean(
     selectedModelId.trim() && selectedModelId.trim() !== (defaultModelId?.trim() ?? "")

@@ -30,6 +30,7 @@ import {
 import {
   createOptimisticMissionTaskRecord,
   findReplacementTaskForOptimisticTask,
+  hasAgentOSWorkspaceSetup,
   isDirectChatRuntime,
   isTaskAbortable,
   isTaskHiddenByPreferences,
@@ -285,6 +286,7 @@ export function MissionControlShell({
   ).length;
   const isOpenClawOnboardingSystemReady = resolveOpenClawSystemReady(snapshot);
   const isOpenClawOnboardingModelReady = resolveOpenClawModelReady(snapshot);
+  const hasWorkspaceSetup = hasAgentOSWorkspaceSetup(snapshot);
   const openClawInstallSummary = resolveOpenClawInstallSummary(snapshot);
   const onboardingAction = resolveOnboardingAction(snapshot);
   const hasActiveMissionWork = activeRuntimeCount > 0 || optimisticMissionTasks.length > 0;
@@ -292,10 +294,14 @@ export function MissionControlShell({
     hasSeenMissionReady,
     modelSwitchSucceeded: modelSwitchFeedback.phase === "success"
   });
+  const needsWorkspaceSetup =
+    isOpenClawOnboardingSystemReady &&
+    isOpenClawOnboardingModelReady &&
+    !hasWorkspaceSetup;
   const shouldAutoShowOnboarding =
-    !isOnboardingDismissed &&
     !hasActiveMissionWork &&
-    !isOpenClawOnboardingModelReady &&
+    (!isOnboardingDismissed || needsWorkspaceSetup) &&
+    (!isOpenClawOnboardingModelReady || needsWorkspaceSetup) &&
     !shouldShowLaunchpadReadyState;
   const shouldShowOnboarding =
     shouldAutoShowOnboarding || showOnboardingReadyState || isOnboardingForcedOpen;
@@ -1857,7 +1863,7 @@ export function MissionControlShell({
   };
 
   const enterAgentOS = useCallback(() => {
-    if (snapshot.workspaces.length === 0) {
+    if (!hasAgentOSWorkspaceSetup(snapshot)) {
       void runLaunchpadWorkspaceCreate();
       return;
     }
@@ -1874,7 +1880,7 @@ export function MissionControlShell({
     }
 
     dismissOnboarding();
-  }, [activeWorkspaceId, dismissOnboarding, runLaunchpadWorkspaceCreate, selectNode, snapshot.workspaces]);
+  }, [activeWorkspaceId, dismissOnboarding, runLaunchpadWorkspaceCreate, selectNode, snapshot]);
 
   const controlGateway = async (action: GatewayControlAction) => {
     setGatewayControlAction(action);
