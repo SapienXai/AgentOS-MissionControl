@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Link2, Loader2, Plus, RefreshCw, Trash2, UserRound } from "lucide-react";
 
 import { SurfaceIcon } from "@/components/mission-control/surface-icon";
 import { Badge } from "@/components/ui/badge";
@@ -30,9 +30,15 @@ import {
   getSurfaceCatalogEntry,
   OPENCLAW_SURFACE_CATALOG,
   sortSurfaceAccounts,
-  type SurfaceCatalogEntry,
   type SurfaceProvisionField
 } from "@/lib/openclaw/surface-catalog";
+import {
+  buildEmptyProvisionDraft,
+  buildProvisionConfig,
+  getProvisionConfigPath,
+  getProvisionDraftText,
+  isProvisionFieldSatisfied
+} from "@/lib/openclaw/surface-provision";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import type {
   ChannelAccountRecord,
@@ -49,11 +55,6 @@ type ChannelMutationResult = {
   registry?: MissionControlSnapshot["channelRegistry"];
   account?: MissionControlSnapshot["channelAccounts"][number];
 };
-
-function getProvisionDraftText(draft: Record<string, string | boolean>, key: string) {
-  const value = draft[key];
-  return typeof value === "string" ? value : "";
-}
 
 const SURFACE_KIND_ORDER: MissionControlSurfaceKind[] = ["chat", "inbox", "trigger"];
 
@@ -178,6 +179,63 @@ export function WorkspaceChannelsDialog({
           ...current,
           [surfaceId]: result.supported === false || !Array.isArray(result.routes) ? [] : result.routes
         }));
+        if (provider === "telegram" && Array.isArray(result.routes) && result.routes.length > 0) {
+          const surface = workspaceSurfaces.find((entry) => entry.id === surfaceId) ?? null;
+          const workspaceBinding = surface?.workspaces.find((entry) => entry.workspaceId === workspace.id) ?? null;
+
+          if (surface && workspaceBinding) {
+            const currentAssignments = (workspaceBinding.groupAssignments ?? []).filter(
+              (assignment) => assignment.enabled !== false
+            );
+            const currentRouteIds = new Set(currentAssignments.map((assignment) => assignment.chatId));
+            const missingRoutes = result.routes.filter((route) => route.routeId && !currentRouteIds.has(route.routeId));
+
+            if (missingRoutes.length > 0) {
+              try {
+                const syncResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/channels`, {
+                  method: "PATCH",
+                  headers: {
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    action: "groups",
+                    channelId: surfaceId,
+                    groupAssignments: [
+                      ...currentAssignments,
+                      ...missingRoutes.map((route) => ({
+                        chatId: route.routeId,
+                        title: route.title ?? null,
+                        agentId: null,
+                        enabled: true
+                      }))
+                    ]
+                  })
+                });
+                const syncResult = (await syncResponse.json()) as ChannelMutationResult;
+
+                if (!syncResponse.ok || syncResult.error) {
+                  throw new Error(syncResult.error || "Discovered groups could not be enabled.");
+                }
+
+                if (syncResult.registry && onSnapshotChange) {
+                  onSnapshotChange((current) => replaceSnapshotChannelRegistry(current, syncResult.registry!));
+                }
+
+                toast.success("Telegram routes enabled.", {
+                  description:
+                    missingRoutes.length === 1
+                      ? `${missingRoutes[0].title ?? missingRoutes[0].routeId} now falls back to the primary agent.`
+                      : `${missingRoutes.length} discovered groups now fall back to the primary agent.`
+                });
+                void onRefresh().catch(() => {});
+              } catch (error) {
+                toast.error("Telegram route sync failed.", {
+                  description: error instanceof Error ? error.message : "Discovered groups could not be enabled."
+                });
+              }
+            }
+          }
+        }
       } catch (error) {
         setRouteErrorsBySurfaceId((current) => ({
           ...current,
@@ -188,7 +246,7 @@ export function WorkspaceChannelsDialog({
         setLoadingRoutesBySurfaceId((current) => ({ ...current, [surfaceId]: false }));
       }
     },
-    [workspace?.id]
+    [onRefresh, onSnapshotChange, workspace, workspaceSurfaces]
   );
 
   useEffect(() => {
@@ -593,7 +651,7 @@ export function WorkspaceChannelsDialog({
         <label
           key={field.key}
           htmlFor={fieldId}
-          className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+          className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2.5 transition-colors hover:bg-white/[0.04]"
         >
           <input
             id={fieldId}
@@ -610,7 +668,7 @@ export function WorkspaceChannelsDialog({
           />
           <div className="min-w-0">
             <p className="text-sm font-medium text-white">{field.label}</p>
-            {field.helpText ? <p className="mt-1 text-[11px] leading-5 text-slate-500">{field.helpText}</p> : null}
+            {field.helpText ? <p className="mt-1 text-[11px] leading-4 text-slate-500">{field.helpText}</p> : null}
           </div>
         </label>
       );
@@ -628,7 +686,7 @@ export function WorkspaceChannelsDialog({
                 [field.key]: event.target.value
               }))
             }
-            className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+            className="flex h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
             disabled={isSaving}
           >
             <option value="">Select one</option>
@@ -650,6 +708,7 @@ export function WorkspaceChannelsDialog({
             }
             placeholder={field.placeholder}
             disabled={isSaving}
+            className="min-h-20 rounded-xl px-3 py-2"
           />
         ) : (
           <Input
@@ -664,23 +723,38 @@ export function WorkspaceChannelsDialog({
             }
             placeholder={field.placeholder}
             disabled={isSaving}
+            className="h-10 rounded-xl px-3"
           />
         )}
-        {field.helpText ? <p className="text-[11px] leading-5 text-slate-500">{field.helpText}</p> : null}
+        {field.helpText ? <p className="text-[11px] leading-4 text-slate-500">{field.helpText}</p> : null}
       </FormField>
     );
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden p-0">
+      <DialogContent
+        className="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-1rem)] max-w-5xl flex-col overflow-hidden rounded-[22px] p-0"
+        closeClassName="right-3 top-3"
+      >
         <div className="flex min-h-0 flex-1 flex-col">
-        <DialogHeader className="px-4 pb-0 pt-4 sm:px-6 sm:pt-6">
-          <DialogTitle>Workspace surfaces</DialogTitle>
-          <DialogDescription>
-            OpenClaw-first integration management for chat, inbox, and trigger surfaces. AgentOS presets can sit on top
-            of these bindings without hiding the raw provider shape.
-          </DialogDescription>
+        <DialogHeader className="border-b border-white/10 px-4 py-3 pr-12 sm:px-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle className="text-lg">Workspace surfaces</DialogTitle>
+              <DialogDescription className="mt-1 text-xs">
+                Manage accounts, owners, and routes for this workspace.
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-slate-400">
+              <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
+                {workspaceSurfaces.length} linked
+              </Badge>
+              <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
+                {allAccounts.length} accounts
+              </Badge>
+            </div>
+          </div>
         </DialogHeader>
 
         {isSaving && savingMessage ? (
@@ -692,20 +766,20 @@ export function WorkspaceChannelsDialog({
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4 sm:px-6 sm:pb-6">
-        <div className="grid min-h-0 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <aside className="h-fit rounded-[22px] border border-white/10 bg-white/[0.03] p-3 lg:sticky lg:top-0">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="grid min-h-0 gap-4 sm:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="h-fit rounded-2xl border border-white/10 bg-white/[0.025] p-2.5 sm:sticky sm:top-0">
             <Tabs value={activeKind} onValueChange={(value) => setActiveKind(value as MissionControlSurfaceKind)}>
-              <TabsList className="grid h-10 w-full grid-cols-3">
+              <TabsList className="grid h-9 w-full grid-cols-3 rounded-xl">
                 {availableKinds.map((kind) => (
-                  <TabsTrigger key={kind} className="h-8 rounded-xl px-3 text-[12px]" value={kind}>
-                    {kind}
+                  <TabsTrigger key={kind} className="h-7 rounded-lg px-2 text-[11px]" value={kind}>
+                    {formatSurfaceKindLabel(kind)}
                   </TabsTrigger>
                 ))}
               </TabsList>
             </Tabs>
 
-            <div className="mt-3 space-y-2">
+            <div className="mt-2.5 space-y-1.5">
               {providerOptions.map((provider) => {
                 const entry = getSurfaceCatalogEntry(provider);
                 const providerSurfaceCount = workspaceSurfaces.filter((surface) => surface.type === provider).length;
@@ -717,29 +791,24 @@ export function WorkspaceChannelsDialog({
                     type="button"
                     onClick={() => setActiveProvider(provider)}
                     className={cn(
-                      "flex w-full items-start justify-between gap-3 rounded-2xl border px-3 py-2.5 text-left transition-colors",
+                      "flex w-full items-center justify-between gap-3 rounded-xl border px-2.5 py-2 text-left transition-colors",
                       activeProvider === provider
                         ? "border-cyan-300/35 bg-cyan-400/[0.08]"
                         : "border-white/8 bg-white/[0.02] hover:bg-white/[0.04]"
                     )}
                   >
-                    <div className="flex min-w-0 items-start gap-3">
-                      <SurfaceIcon provider={provider} className="mt-0.5 h-9 w-9 shrink-0" />
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <SurfaceIcon provider={provider} className="h-8 w-8 shrink-0" />
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-white">{entry.label}</p>
-                        <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-400">
-                          {entry.description}
+                        <p className="mt-0.5 truncate text-[10px] text-slate-500">
+                          {providerAccountCount} account{providerAccountCount === 1 ? "" : "s"}
                         </p>
                       </div>
                     </div>
-                    <div className="shrink-0 space-y-1 text-right">
-                      <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                        {providerSurfaceCount} linked
-                      </Badge>
-                      <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">
-                        {providerAccountCount} account{providerAccountCount === 1 ? "" : "s"}
-                      </p>
-                    </div>
+                    <Badge variant="muted" className="h-5 shrink-0 rounded-full px-2 text-[10px]">
+                      {providerSurfaceCount}
+                    </Badge>
                   </button>
                 );
               })}
@@ -747,19 +816,16 @@ export function WorkspaceChannelsDialog({
           </aside>
 
           <div className="min-w-0 space-y-4">
-            <section className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">{currentCatalogEntry.label} bindings</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">{currentCatalogEntry.description}</p>
-                </div>
+            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="min-w-0 truncate text-sm font-medium text-white">{currentCatalogEntry.label} surfaces</p>
                 <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
                   {providerWorkspaceSurfaces.length} linked
                 </Badge>
               </div>
 
               {providerWorkspaceSurfaces.length > 0 ? (
-                <div className="mt-4 space-y-3">
+                <div className="mt-3 space-y-2.5">
                   {providerWorkspaceSurfaces.map((surface) => {
                     const workspaceBinding =
                       surface.workspaces.find((binding) => binding.workspaceId === workspace?.id) ?? null;
@@ -786,26 +852,19 @@ export function WorkspaceChannelsDialog({
                     return (
                       <div
                         key={surface.id}
-                        className="rounded-[22px] border border-white/8 bg-white/[0.02] p-4"
+                        className="rounded-2xl border border-white/8 bg-white/[0.02] p-3"
                       >
                         <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="flex min-w-0 items-start gap-3">
-                            <SurfaceIcon provider={surface.type} className="mt-0.5 h-10 w-10 shrink-0" />
+                          <div className="flex min-w-0 items-center gap-3">
+                            <SurfaceIcon provider={surface.type} className="h-9 w-9 shrink-0" />
                             <div className="min-w-0">
                               <div className="flex flex-wrap items-center gap-2">
                                 <p className="truncate text-sm font-medium text-white">{surface.name}</p>
                                 <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
-                                  {currentCatalogEntry.label}
+                                  {formatSurfaceKindLabel(currentCatalogEntry.kind)}
                                 </Badge>
                               </div>
-                              <p className="mt-1 truncate text-[11px] text-slate-400">{surface.id}</p>
-                              <p className="mt-1 text-[11px] text-slate-500">
-                                {currentCatalogEntry.kind === "chat"
-                                  ? "Chat surface"
-                                  : currentCatalogEntry.kind === "inbox"
-                                    ? "Inbox surface"
-                                    : "Trigger surface"}
-                              </p>
+                              <p className="mt-1 truncate text-[11px] text-slate-500">{surface.id}</p>
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
@@ -817,14 +876,17 @@ export function WorkspaceChannelsDialog({
                               disabled={isSaving}
                               onClick={() => void handleDisconnectSurface(surface.id)}
                             >
+                              <Link2 className="mr-1.5 h-3.5 w-3.5" />
                               Disconnect
                             </Button>
                             <Button
                               type="button"
                               variant="destructive"
                               size="sm"
-                              className="h-8 rounded-full px-3 text-[11px]"
+                              className="h-8 w-8 rounded-full p-0"
                               disabled={isSaving}
+                              aria-label={`Delete ${surface.name}`}
+                              title="Delete everywhere"
                               onClick={() => {
                                 const exactAccount = providerAccounts.find((entry) => entry.id === surface.id) ?? null;
                                 const legacyAccount =
@@ -840,13 +902,12 @@ export function WorkspaceChannelsDialog({
                                 }
                               }}
                             >
-                              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                              Delete
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </div>
 
-                        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                           <div className="space-y-2">
                             <FormField label={currentCatalogEntry.kind === "chat" ? "Primary agent" : "Owner agent"} htmlFor={`primary-${surface.id}`}>
                               <select
@@ -854,7 +915,7 @@ export function WorkspaceChannelsDialog({
                                 value={surface.primaryAgentId ?? ""}
                                 disabled={isSaving}
                                 onChange={(event) => void handlePrimaryChange(surface.id, event.target.value)}
-                                className="flex h-10 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none"
+                                className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none"
                               >
                                 <option value="">Select agent</option>
                                 {workspaceAgents.map((agent) => (
@@ -864,8 +925,9 @@ export function WorkspaceChannelsDialog({
                                 ))}
                               </select>
                             </FormField>
-                            <p className="text-[11px] text-slate-400">
-                              Current owner: {resolveAgentDisplayName(surface.primaryAgentId)}
+                            <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                              <UserRound className="h-3 w-3" />
+                              {resolveAgentDisplayName(surface.primaryAgentId)}
                             </p>
                           </div>
 
@@ -879,7 +941,7 @@ export function WorkspaceChannelsDialog({
                                     type="button"
                                     disabled={isSaving}
                                     onClick={() => void handleRemoveAssistant(surface.id, agentId)}
-                                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] text-slate-200 transition-colors hover:bg-white/[0.08]"
+                                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-slate-200 transition-colors hover:bg-white/[0.08]"
                                   >
                                     <span>{resolveAgentDisplayName(agentId, agentId)}</span>
                                     <span className="text-slate-500">remove</span>
@@ -901,7 +963,7 @@ export function WorkspaceChannelsDialog({
                                       [surface.id]: event.target.value
                                     }))
                                   }
-                                  className="flex h-10 w-full rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none sm:min-w-[180px]"
+                                  className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none sm:min-w-[180px]"
                                 >
                                   <option value="">Select assistant</option>
                                   {availableAssistantAgents.map((agent) => (
@@ -913,11 +975,12 @@ export function WorkspaceChannelsDialog({
                                 <Button
                                   type="button"
                                   size="sm"
-                                  className="h-10 rounded-full px-4 text-[11px]"
+                                  className="h-9 rounded-full px-3 text-[11px]"
                                   disabled={isSaving || !(delegateDraftBySurfaceId[surface.id] ?? "").trim()}
                                   onClick={() => void handleAddAssistant(surface.id)}
                                 >
-                                  Add assistant
+                                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                                  Add
                                 </Button>
                               </div>
                             ) : null}
@@ -925,15 +988,13 @@ export function WorkspaceChannelsDialog({
                         </div>
 
                         {currentCatalogEntry.supportsRouteDiscovery ? (
-                          <div className="mt-4 rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
+                          <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.025] p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="min-w-0">
                                 <p className="text-sm font-medium text-white">
                                   {getSurfaceCatalogEntry(surface.type).label} routes
                                 </p>
-                                <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                                  {describeSurfaceRouting(surface.type)}
-                                </p>
+                                <p className="mt-0.5 text-[11px] text-slate-500">Unassigned routes use the primary agent.</p>
                               </div>
                               <Button
                                 type="button"
@@ -948,7 +1009,7 @@ export function WorkspaceChannelsDialog({
                                 ) : (
                                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                                 )}
-                                Refresh
+                                Routes
                               </Button>
                             </div>
 
@@ -977,7 +1038,7 @@ export function WorkspaceChannelsDialog({
                                   return (
                                     <div
                                       key={`${surface.id}:${route.routeId}`}
-                                      className="rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
+                                      className="rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2.5"
                                     >
                                       <div className="flex items-start gap-3">
                                         <input
@@ -998,7 +1059,7 @@ export function WorkspaceChannelsDialog({
                                                   {route.kind}
                                                 </Badge>
                                               </div>
-                                              <p className="mt-1 truncate text-[11px] text-slate-400">
+                                              <p className="mt-1 truncate text-[11px] text-slate-500">
                                                 {route.subtitle ?? route.routeId}
                                                 {route.lastSeen ? ` · seen ${formatSurfaceTimestamp(route.lastSeen)}` : ""}
                                               </p>
@@ -1037,7 +1098,7 @@ export function WorkspaceChannelsDialog({
                                 })}
                               </div>
                             ) : (
-                              <div className="mt-3 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] text-slate-400">
+                              <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-[11px] text-slate-500">
                                 {getEmptyRouteDiscoveryCopy(surface.type)}
                               </div>
                             )}
@@ -1048,42 +1109,36 @@ export function WorkspaceChannelsDialog({
                   })}
                 </div>
               ) : (
-                <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-4 text-sm text-slate-400">
+                <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-sm text-slate-500">
                   No {currentCatalogEntry.label} surfaces are linked to this workspace yet.
                 </div>
               )}
             </section>
 
-            <section className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">Connect {currentCatalogEntry.label}</p>
-                  <p className="mt-1 text-xs leading-5 text-slate-400">
-                    Reuse an OpenClaw account when it already exists. Provision here only for providers that AgentOS can
-                    safely set up on top of OpenClaw today.
-                  </p>
-                </div>
+            <section className="rounded-2xl border border-white/10 bg-white/[0.025] p-3.5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="min-w-0 truncate text-sm font-medium text-white">Connect {currentCatalogEntry.label}</p>
                 <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
                   {providerAccounts.length} available
                 </Badge>
               </div>
 
-              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+              <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Existing OpenClaw accounts</p>
+                  <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">Existing accounts</p>
                   {providerAccounts.length > 0 ? (
                     providerAccounts.map((account) => {
                       const linked = isLinkedAccountId(account.id);
                       return (
                         <div
                           key={account.id}
-                          className="flex flex-col gap-3 rounded-2xl border border-white/8 bg-white/[0.02] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                          className="flex flex-col gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            <SurfaceIcon provider={account.type} className="h-9 w-9 shrink-0" />
+                            <SurfaceIcon provider={account.type} className="h-8 w-8 shrink-0" />
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium text-white">{account.name}</p>
-                              <p className="mt-1 truncate text-[11px] text-slate-400">{account.id}</p>
+                              <p className="mt-1 truncate text-[11px] text-slate-500">{account.id}</p>
                             </div>
                           </div>
                           <Button
@@ -1094,26 +1149,29 @@ export function WorkspaceChannelsDialog({
                             disabled={isSaving || linked}
                             onClick={() => void handleAttachExisting(account)}
                           >
-                            {linked ? "Linked" : "Connect"}
+                            {linked ? "Linked" : (
+                              <>
+                                <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                                Connect
+                              </>
+                            )}
                           </Button>
                         </div>
                       );
                     })
                   ) : (
-                    <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-4 text-sm text-slate-400">
-                      No {currentCatalogEntry.label} accounts were discovered from OpenClaw yet.
+                    <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-3 py-3 text-sm text-slate-500">
+                      No {currentCatalogEntry.label} accounts found.
                     </div>
                   )}
                 </div>
 
-                <div className="space-y-3 rounded-[20px] border border-white/8 bg-white/[0.02] p-4">
-                  <div>
-                    <p className="text-sm font-medium text-white">Provision from AgentOS</p>
-                    <p className="mt-1 text-[11px] leading-5 text-slate-400">
-                      {currentCatalogEntry.supportsProvisioning
-                        ? `AgentOS will provision ${currentCatalogEntry.label} using the provider-native OpenClaw binding fields, then attach it to this workspace.`
-                        : "This provider should be configured directly in OpenClaw first. AgentOS will attach and manage it once the account exists."}
-                    </p>
+                <div className="space-y-3 rounded-xl border border-white/8 bg-white/[0.02] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-white">Provision</p>
+                    <Badge variant="muted" className="h-5 rounded-full px-2 text-[10px]">
+                      {currentCatalogEntry.supportsProvisioning ? "AgentOS" : "OpenClaw"}
+                    </Badge>
                   </div>
 
                   <FormField label="Surface name" htmlFor="surface-name">
@@ -1124,6 +1182,7 @@ export function WorkspaceChannelsDialog({
                         setProvisionDraft((current) => ({ ...current, name: event.target.value }))
                       }
                       placeholder={`${currentCatalogEntry.label} workspace surface`}
+                      className="h-10 rounded-xl px-3"
                     />
                   </FormField>
 
@@ -1132,36 +1191,30 @@ export function WorkspaceChannelsDialog({
                   ) : null}
 
                   {advancedProvisionFields.length > 0 ? (
-                    <details className="rounded-[20px] border border-white/8 bg-white/[0.015] p-4">
-                      <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                    <details className="rounded-xl border border-white/8 bg-white/[0.015] p-3">
+                      <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
                         Advanced settings
                       </summary>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {advancedProvisionFields.map(renderProvisionField)}
                       </div>
                     </details>
                   ) : null}
 
                   {provisionPreviewConfig && provisionPreviewPath ? (
-                    <details className="rounded-[20px] border border-cyan-300/15 bg-cyan-400/[0.04] p-4" open>
+                    <details className="rounded-xl border border-cyan-300/15 bg-cyan-400/[0.04] p-3">
                       <summary className="cursor-pointer list-none text-xs font-medium uppercase tracking-[0.16em] text-cyan-100">
-                        OpenClaw config preview
+                        Config preview
                       </summary>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <Badge variant="muted" className="h-6 rounded-full px-2 text-[10px]">
                           {provisionPreviewPath}
                         </Badge>
-                        <p className="text-[11px] leading-5 text-cyan-100/70">
-                          This is the JSON AgentOS sends to OpenClaw for this surface.
-                        </p>
                       </div>
                       {currentCatalogEntry.provider === "gmail" ? (
-                        <p className="mt-2 text-[11px] leading-5 text-cyan-100/70">
-                          AgentOS also enables <code>hooks.enabled=true</code> so the Gmail watcher can start on the
-                          OpenClaw side.
-                        </p>
+                        <p className="mt-2 text-[11px] leading-5 text-cyan-100/70">Includes Gmail hook enablement.</p>
                       ) : null}
-                      <pre className="mt-3 max-h-64 overflow-auto rounded-[18px] border border-white/10 bg-slate-950/80 p-3 text-[11px] leading-5 text-slate-100">
+                      <pre className="mt-3 max-h-52 overflow-auto rounded-xl border border-white/10 bg-slate-950/80 p-3 text-[11px] leading-5 text-slate-100">
                         {JSON.stringify(provisionPreviewConfig, null, 2)}
                       </pre>
                     </details>
@@ -1172,7 +1225,7 @@ export function WorkspaceChannelsDialog({
                       id="surface-primary-agent"
                       value={newPrimaryAgentId}
                       onChange={(event) => setNewPrimaryAgentId(event.target.value)}
-                      className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white outline-none"
+                      className="flex h-10 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                     >
                       <option value="">Select agent</option>
                       {workspaceAgents.map((agent) => (
@@ -1185,11 +1238,18 @@ export function WorkspaceChannelsDialog({
 
                   <Button
                     type="button"
-                    className="h-11 rounded-full px-4"
+                    className="h-10 rounded-full px-4 text-sm"
                     disabled={!canProvisionSurface}
                     onClick={() => void handleProvisionSurface()}
                   >
-                    {isSaving ? "Provisioning..." : `Provision ${currentCatalogEntry.label}`}
+                    {isSaving ? (
+                      "Provisioning..."
+                    ) : (
+                      <>
+                        <Plus className="mr-1.5 h-4 w-4" />
+                        Provision
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
@@ -1199,7 +1259,7 @@ export function WorkspaceChannelsDialog({
 
         </div>
 
-        <DialogFooter className="border-t border-white/10 px-4 py-4 sm:px-6">
+        <DialogFooter className="border-t border-white/10 px-4 py-3 sm:px-5">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             Close
           </Button>
@@ -1313,18 +1373,6 @@ function buildSurfaceRouteOptions(
   });
 }
 
-function describeSurfaceRouting(provider: MissionControlSurfaceProvider) {
-  if (provider === "telegram") {
-    return "OpenClaw surface discovery maps Telegram groups to owning agents. Unassigned groups fall back to the primary agent.";
-  }
-
-  if (provider === "discord") {
-    return "OpenClaw surface discovery maps Discord surfaces to owning agents. Unassigned surfaces fall back to the primary agent.";
-  }
-
-  return "OpenClaw surface discovery maps provider surfaces to owning agents. Unassigned surfaces fall back to the primary agent.";
-}
-
 function getEmptyRouteDiscoveryCopy(provider: MissionControlSurfaceProvider) {
   if (provider === "telegram") {
     return "No Telegram groups found yet. Send one message in the target group, then refresh surface discovery.";
@@ -1337,108 +1385,8 @@ function getEmptyRouteDiscoveryCopy(provider: MissionControlSurfaceProvider) {
   return "No surfaces were discovered yet for this provider.";
 }
 
-function buildEmptyProvisionDraft(entry: SurfaceCatalogEntry) {
-  const draft: Record<string, string | boolean> = {
-    name: ""
-  };
-
-  for (const field of entry.provisionFields) {
-    if (typeof field.defaultValue === "boolean") {
-      draft[field.key] = field.defaultValue;
-      continue;
-    }
-
-    if (typeof field.defaultValue === "string") {
-      draft[field.key] = field.defaultValue;
-      continue;
-    }
-
-    draft[field.key] = field.inputType === "checkbox" ? false : "";
-  }
-
-  return draft;
-}
-
-function isProvisionFieldSatisfied(field: SurfaceProvisionField, draft: Record<string, string | boolean>) {
-  if (!field.required) {
-    return true;
-  }
-
-  const value = draft[field.key];
-
-  if (field.inputType === "checkbox") {
-    return value === true;
-  }
-
-  if (field.inputType === "number") {
-    const parsed = typeof value === "number" ? value : Number(typeof value === "string" ? value.trim() : "");
-    return Number.isFinite(parsed);
-  }
-
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function buildProvisionConfig(
-  fields: SurfaceProvisionField[],
-  draft: Record<string, string | boolean>
-) {
-  const config: Record<string, unknown> = {};
-
-  for (const field of fields) {
-    const value = draft[field.key];
-
-    if (field.inputType === "checkbox") {
-      config[field.key] = Boolean(value);
-      continue;
-    }
-
-    if (field.inputType === "number") {
-      const parsed = typeof value === "string" ? Number(value.trim()) : Number(value);
-      if (Number.isFinite(parsed)) {
-        config[field.key] = parsed;
-      }
-      continue;
-    }
-
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) {
-        config[field.key] = parseProvisionTextValue(trimmed);
-      }
-    }
-  }
-
-  return config;
-}
-
-function parseProvisionTextValue(value: string) {
-  if (
-    (value.startsWith("{") && value.endsWith("}")) ||
-    (value.startsWith("[") && value.endsWith("]"))
-  ) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      return value;
-    }
-  }
-
-  return value;
-}
-
-function getProvisionConfigPath(provider: MissionControlSurfaceProvider) {
-  switch (provider) {
-    case "gmail":
-      return "hooks.gmail";
-    case "email":
-      return "email";
-    case "webhook":
-      return "hooks";
-    case "cron":
-      return "cron";
-    default:
-      return provider;
-  }
+function formatSurfaceKindLabel(kind: MissionControlSurfaceKind) {
+  return kind.slice(0, 1).toUpperCase() + kind.slice(1);
 }
 
 function inferRouteKind(provider: MissionControlSurfaceProvider, routeId: string): DiscoveredSurfaceRoute["kind"] {

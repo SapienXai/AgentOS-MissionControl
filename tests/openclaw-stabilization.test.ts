@@ -52,6 +52,8 @@ import {
   isStaleAgentChatContextRecoveryText
 } from "@/lib/openclaw/agent-chat-guards";
 import { resolveAgentModelLabel } from "@/lib/openclaw/presenters";
+import { buildProvisionConfig, isProvisionFieldSatisfied } from "@/lib/openclaw/surface-provision";
+import type { SurfaceProvisionField } from "@/lib/openclaw/surface-catalog";
 import type { ControlPlaneSnapshot, MissionControlSnapshot } from "@/lib/agentos/contracts";
 import type {
   ChannelRegistry,
@@ -190,6 +192,52 @@ test("control plane snapshots normalize duplicates and nested registries", () =>
 test("openclaw version parsing extracts the release tag", () => {
   assert.equal(parseOpenClawVersion("OpenClaw 2026.4.15 (041266a)"), "2026.4.15");
   assert.equal(parseOpenClawVersion("OpenClaw version unknown"), null);
+});
+
+test("surface provisioning config nests dotted OpenClaw fields", () => {
+  const fields: SurfaceProvisionField[] = [
+    { key: "account", label: "Account" },
+    { key: "serve.port", label: "Serve port", inputType: "number" },
+    { key: "serve.bind", label: "Serve bind" },
+    { key: "tailscale.mode", label: "Tailscale mode" },
+    { key: "includeBody", label: "Include body", inputType: "checkbox" }
+  ];
+
+  assert.deepEqual(
+    buildProvisionConfig(fields, {
+      account: "agent@example.com",
+      "serve.port": "8788",
+      "serve.bind": "127.0.0.1",
+      "tailscale.mode": "funnel",
+      includeBody: true
+    }),
+    {
+      account: "agent@example.com",
+      serve: {
+        port: 8788,
+        bind: "127.0.0.1"
+      },
+      tailscale: {
+        mode: "funnel"
+      },
+      includeBody: true
+    }
+  );
+});
+
+test("required numeric surface fields reject empty drafts", () => {
+  assert.equal(
+    isProvisionFieldSatisfied(
+      {
+        key: "maxConcurrentRuns",
+        label: "Max concurrent runs",
+        inputType: "number",
+        required: true
+      },
+      { maxConcurrentRuns: "" }
+    ),
+    false
+  );
 });
 
 test("openclaw resolver considers local prefix fallbacks", () => {
