@@ -97,6 +97,7 @@ export function WorkspaceChannelsDialog({
   const [savingMessage, setSavingMessage] = useState<string | null>(null);
   const [newPrimaryAgentId, setNewPrimaryAgentId] = useState("");
   const [delegateDraftBySurfaceId, setDelegateDraftBySurfaceId] = useState<Record<string, string>>({});
+  const [delegateRouteDraftBySurfaceId, setDelegateRouteDraftBySurfaceId] = useState<Record<string, string>>({});
   const [discoveredRoutesBySurfaceId, setDiscoveredRoutesBySurfaceId] = useState<
     Record<string, DiscoveredSurfaceRoute[]>
   >({});
@@ -135,6 +136,11 @@ export function WorkspaceChannelsDialog({
       return formatAgentDisplayName(snapshot.agents.find((agent) => agent.id === agentId) ?? { name: agentId });
     },
     [snapshot.agents]
+  );
+  const resolveWorkspaceDisplayName = useCallback(
+    (candidateWorkspaceId: string) =>
+      snapshot.workspaces.find((entry) => entry.id === candidateWorkspaceId)?.name ?? candidateWorkspaceId,
+    [snapshot.workspaces]
   );
 
   const providerOptions = useMemo(() => {
@@ -189,8 +195,28 @@ export function WorkspaceChannelsDialog({
             );
             const currentRouteIds = new Set(currentAssignments.map((assignment) => assignment.chatId));
             const missingRoutes = result.routes.filter((route) => route.routeId && !currentRouteIds.has(route.routeId));
+            const routeTitlesById = new Map(
+              result.routes
+                .filter((route) => route.routeId && route.title?.trim())
+                .map((route) => [route.routeId, route.title?.trim() ?? null] as const)
+            );
+            const titledAssignments = currentAssignments.map((assignment) => {
+              const discoveredTitle = routeTitlesById.get(assignment.chatId);
 
-            if (missingRoutes.length > 0) {
+              if (!discoveredTitle || assignment.title === discoveredTitle) {
+                return assignment;
+              }
+
+              return {
+                ...assignment,
+                title: discoveredTitle
+              };
+            });
+            const titleChanged = titledAssignments.some(
+              (assignment, index) => assignment.title !== currentAssignments[index]?.title
+            );
+
+            if (missingRoutes.length > 0 || titleChanged) {
               try {
                 const syncResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspace.id)}/channels`, {
                   method: "PATCH",
@@ -201,7 +227,7 @@ export function WorkspaceChannelsDialog({
                     action: "groups",
                     channelId: surfaceId,
                     groupAssignments: [
-                      ...currentAssignments,
+                      ...titledAssignments,
                       ...missingRoutes.map((route) => ({
                         chatId: route.routeId,
                         title: route.title ?? null,
@@ -225,7 +251,9 @@ export function WorkspaceChannelsDialog({
                   description:
                     missingRoutes.length === 1
                       ? `${missingRoutes[0].title ?? missingRoutes[0].routeId} now falls back to the primary agent.`
-                      : `${missingRoutes.length} discovered groups now fall back to the primary agent.`
+                      : missingRoutes.length > 1
+                        ? `${missingRoutes.length} discovered groups now fall back to the primary agent.`
+                        : "Discovered group names were synced."
                 });
                 void onRefresh().catch(() => {});
               } catch (error) {
@@ -257,6 +285,7 @@ export function WorkspaceChannelsDialog({
       setDeleteConfirmText("");
       setProvisionDraft(buildEmptyProvisionDraft(getSurfaceCatalogEntry(activeProvider)));
       setDelegateDraftBySurfaceId({});
+      setDelegateRouteDraftBySurfaceId({});
       setDiscoveredRoutesBySurfaceId({});
       setRouteErrorsBySurfaceId({});
       setLoadingRoutesBySurfaceId({});
@@ -523,11 +552,12 @@ export function WorkspaceChannelsDialog({
 
   const handleAddAssistant = async (surfaceId: string) => {
     const agentId = delegateDraftBySurfaceId[surfaceId]?.trim();
+    const routeId = delegateRouteDraftBySurfaceId[surfaceId]?.trim();
     if (!workspace || !agentId) {
       return;
     }
 
-    beginSaving("Adding assistant agent...");
+    beginSaving(routeId ? "Adding assistant and assigning route..." : "Adding assistant agent...");
 
     try {
       const result = await patchWorkspaceSurface({
@@ -537,8 +567,56 @@ export function WorkspaceChannelsDialog({
         workspacePath: workspace.path
       });
       applyRegistryUpdate(result);
+
+      let assignedRouteTitle: string | null = null;
+      if (routeId) {
+        const surface = workspaceSurfaces.find((entry) => entry.id === surfaceId) ?? null;
+        const workspaceBinding = surface?.workspaces.find((entry) => entry.workspaceId === workspace.id) ?? null;
+
+        if (!surface || !workspaceBinding) {
+          throw new Error("Surface route binding was not found.");
+        }
+
+        const currentAssignments = (workspaceBinding.groupAssignments ?? []).filter(
+          (assignment) => assignment.enabled !== false
+        );
+        const visibleAssignments = surface.workspaces.flatMap((binding) =>
+          (binding.groupAssignments ?? []).filter((assignment) => assignment.enabled !== false)
+        );
+        const route =
+          buildSurfaceRouteOptions(discoveredRoutesBySurfaceId[surfaceId] ?? [], visibleAssignments, surface.type).find(
+            (entry) => entry.routeId === routeId
+          ) ?? null;
+        assignedRouteTitle = route?.title ?? routeId;
+
+        const nextAssignment: WorkspaceChannelGroupAssignment = {
+          chatId: routeId,
+          title: route?.title ?? currentAssignments.find((assignment) => assignment.chatId === routeId)?.title ?? null,
+          agentId,
+          enabled: true
+        };
+        const nextAssignments = currentAssignments.some((assignment) => assignment.chatId === routeId)
+          ? currentAssignments.map((assignment) =>
+              assignment.chatId === routeId ? { ...assignment, ...nextAssignment } : assignment
+            )
+          : [...currentAssignments, nextAssignment];
+
+        const routeResult = await patchWorkspaceSurface({
+          action: "groups",
+          channelId: surfaceId,
+          groupAssignments: nextAssignments
+        });
+        applyRegistryUpdate(routeResult);
+      }
+
       setDelegateDraftBySurfaceId((current) => ({ ...current, [surfaceId]: "" }));
-      toast.success("Assistant agent added.");
+      setDelegateRouteDraftBySurfaceId((current) => ({ ...current, [surfaceId]: "" }));
+      toast.success(routeId ? "Assistant added and assigned." : "Assistant agent added.", {
+        description:
+          routeId && assignedRouteTitle
+            ? `${resolveAgentDisplayName(agentId, agentId)} now owns ${assignedRouteTitle}.`
+            : undefined
+      });
       void onRefresh().catch(() => {});
     } catch (error) {
       toast.error("Assistant update failed.", {
@@ -840,13 +918,42 @@ export function WorkspaceChannelsDialog({
                     const currentAssignments = (workspaceBinding?.groupAssignments ?? []).filter(
                       (assignment) => assignment.enabled !== false
                     );
+                    const visibleRouteAssignments = surface.workspaces.flatMap((binding) =>
+                      (binding.groupAssignments ?? []).filter((assignment) => assignment.enabled !== false)
+                    );
+                    const externalRouteOwnersByRouteId = surface.workspaces
+                      .filter((binding) => binding.workspaceId !== workspace?.id)
+                      .flatMap((binding) =>
+                        (binding.groupAssignments ?? [])
+                          .filter((assignment) => assignment.enabled !== false && assignment.chatId)
+                          .map((assignment) => ({
+                            routeId: assignment.chatId,
+                            workspaceName: resolveWorkspaceDisplayName(binding.workspaceId),
+                            ownerName: assignment.agentId
+                              ? resolveAgentDisplayName(assignment.agentId, assignment.agentId)
+                              : `${resolveAgentDisplayName(surface.primaryAgentId, "Primary agent")} fallback`
+                          }))
+                      )
+                      .reduce<Record<string, Array<{ workspaceName: string; ownerName: string }>>>(
+                        (groups, owner) => ({
+                          ...groups,
+                          [owner.routeId]: [
+                            ...(groups[owner.routeId] ?? []),
+                            { workspaceName: owner.workspaceName, ownerName: owner.ownerName }
+                          ]
+                        }),
+                        {}
+                      );
                     const discoveredRoutes = discoveredRoutesBySurfaceId[surface.id] ?? [];
                     const isLoadingRoutes = Boolean(loadingRoutesBySurfaceId[surface.id]);
                     const routeError = routeErrorsBySurfaceId[surface.id] ?? null;
                     const routeOptions = buildSurfaceRouteOptions(
                       discoveredRoutes,
-                      currentAssignments,
+                      visibleRouteAssignments.length > 0 ? visibleRouteAssignments : currentAssignments,
                       surface.type
+                    );
+                    const primaryAgentIsInWorkspace = workspaceAgents.some(
+                      (agent) => agent.id === surface.primaryAgentId
                     );
 
                     return (
@@ -918,6 +1025,11 @@ export function WorkspaceChannelsDialog({
                                 className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none"
                               >
                                 <option value="">Select agent</option>
+                                {surface.primaryAgentId && !primaryAgentIsInWorkspace ? (
+                                  <option value={surface.primaryAgentId}>
+                                    {resolveAgentDisplayName(surface.primaryAgentId, surface.primaryAgentId)} · outside this workspace
+                                  </option>
+                                ) : null}
                                 {workspaceAgents.map((agent) => (
                                   <option key={agent.id} value={agent.id}>
                                     {formatAgentDisplayName(agent)}
@@ -932,7 +1044,14 @@ export function WorkspaceChannelsDialog({
                           </div>
 
                           <div className="space-y-2">
-                            <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">Assistants</p>
+                            <div className="space-y-1">
+                              <p className="text-[10px] uppercase tracking-[0.16em] text-slate-400">
+                                Assistants available for routes
+                              </p>
+                              <p className="text-[11px] leading-4 text-slate-500">
+                                Add an agent to the surface, then optionally assign it to a route.
+                              </p>
+                            </div>
                             {assistantIds.length > 0 ? (
                               <div className="flex flex-wrap gap-2">
                                 {assistantIds.map((agentId) => (
@@ -953,29 +1072,53 @@ export function WorkspaceChannelsDialog({
                             )}
 
                             {availableAssistantAgents.length > 0 ? (
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                                <select
-                                  value={delegateDraftBySurfaceId[surface.id] ?? ""}
-                                  disabled={isSaving}
-                                  onChange={(event) =>
-                                    setDelegateDraftBySurfaceId((current) => ({
-                                      ...current,
-                                      [surface.id]: event.target.value
-                                    }))
-                                  }
-                                  className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none sm:min-w-[180px]"
-                                >
-                                  <option value="">Select assistant</option>
-                                  {availableAssistantAgents.map((agent) => (
-                                    <option key={agent.id} value={agent.id}>
-                                      {formatAgentDisplayName(agent)}
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                                <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                                  <select
+                                    value={delegateDraftBySurfaceId[surface.id] ?? ""}
+                                    disabled={isSaving}
+                                    aria-label="Assistant agent"
+                                    onChange={(event) =>
+                                      setDelegateDraftBySurfaceId((current) => ({
+                                        ...current,
+                                        [surface.id]: event.target.value
+                                      }))
+                                    }
+                                    className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none"
+                                  >
+                                    <option value="">Select assistant</option>
+                                    {availableAssistantAgents.map((agent) => (
+                                      <option key={agent.id} value={agent.id}>
+                                        {formatAgentDisplayName(agent)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <select
+                                    value={delegateRouteDraftBySurfaceId[surface.id] ?? ""}
+                                    disabled={isSaving || routeOptions.length === 0}
+                                    aria-label="Initial route assignment"
+                                    onChange={(event) =>
+                                      setDelegateRouteDraftBySurfaceId((current) => ({
+                                        ...current,
+                                        [surface.id]: event.target.value
+                                      }))
+                                    }
+                                    className="flex h-9 w-full rounded-xl border border-white/10 bg-white/5 px-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <option value="">
+                                      {routeOptions.length > 0 ? "No route yet" : "No discovered routes"}
                                     </option>
-                                  ))}
-                                </select>
+                                    {routeOptions.map((route) => (
+                                      <option key={`${surface.id}-target-${route.routeId}`} value={route.routeId}>
+                                        Assign to {route.title ?? route.routeId}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
                                 <Button
                                   type="button"
                                   size="sm"
-                                  className="h-9 rounded-full px-3 text-[11px]"
+                                  className="h-9 rounded-full px-3 text-[11px] sm:shrink-0"
                                   disabled={isSaving || !(delegateDraftBySurfaceId[surface.id] ?? "").trim()}
                                   onClick={() => void handleAddAssistant(surface.id)}
                                 >
@@ -1022,6 +1165,7 @@ export function WorkspaceChannelsDialog({
                                 {routeOptions.map((route) => {
                                   const currentAssignment =
                                     currentAssignments.find((assignment) => assignment.chatId === route.routeId) ?? null;
+                                  const externalOwners = externalRouteOwnersByRouteId[route.routeId] ?? [];
                                   const enabled = Boolean(currentAssignment);
                                   const nextAssignments = enabled
                                     ? currentAssignments.filter((assignment) => assignment.chatId !== route.routeId)
@@ -1063,33 +1207,46 @@ export function WorkspaceChannelsDialog({
                                                 {route.subtitle ?? route.routeId}
                                                 {route.lastSeen ? ` · seen ${formatSurfaceTimestamp(route.lastSeen)}` : ""}
                                               </p>
+                                              {externalOwners.length > 0 ? (
+                                                <p className="mt-1 text-[11px] leading-4 text-amber-100/75">
+                                                  Also routed in{" "}
+                                                  {externalOwners
+                                                    .map((owner) => `${owner.workspaceName} by ${owner.ownerName}`)
+                                                    .join(", ")}
+                                                </p>
+                                              ) : null}
                                             </div>
-                                            <select
-                                              value={currentAssignment?.agentId ?? ""}
-                                              disabled={isSaving || !enabled}
-                                              onChange={(event) =>
-                                                void updateSurfaceAssignments(
-                                                  surface.id,
-                                                  currentAssignments.map((assignment) =>
-                                                    assignment.chatId === route.routeId
-                                                      ? {
-                                                          ...assignment,
-                                                          title: route.title ?? assignment.title ?? null,
-                                                          agentId: event.target.value || null
-                                                        }
-                                                      : assignment
+                                            <div className="min-w-[190px] space-y-1">
+                                              <p className="px-1 text-[9px] uppercase tracking-[0.14em] text-slate-500">
+                                                Route owner
+                                              </p>
+                                              <select
+                                                value={currentAssignment?.agentId ?? ""}
+                                                disabled={isSaving || !enabled}
+                                                onChange={(event) =>
+                                                  void updateSurfaceAssignments(
+                                                    surface.id,
+                                                    currentAssignments.map((assignment) =>
+                                                      assignment.chatId === route.routeId
+                                                        ? {
+                                                            ...assignment,
+                                                            title: route.title ?? assignment.title ?? null,
+                                                            agentId: event.target.value || null
+                                                          }
+                                                        : assignment
+                                                    )
                                                   )
-                                                )
-                                              }
-                                              className="flex h-8 min-w-[170px] rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                              <option value="">Use primary agent</option>
-                                              {workspaceAgents.map((agent) => (
-                                                <option key={agent.id} value={agent.id}>
-                                                  {formatAgentDisplayName(agent)}
-                                                </option>
-                                              ))}
-                                            </select>
+                                                }
+                                                className="flex h-8 w-full rounded-full border border-white/10 bg-white/5 px-3 text-[11px] text-white outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                              >
+                                                <option value="">Primary fallback</option>
+                                                {workspaceAgents.map((agent) => (
+                                                  <option key={agent.id} value={agent.id}>
+                                                    {formatAgentDisplayName(agent)}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </div>
                                           </div>
                                         </div>
                                       </div>

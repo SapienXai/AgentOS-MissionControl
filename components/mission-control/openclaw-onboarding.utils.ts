@@ -106,7 +106,9 @@ export function buildSystemSteps(snapshot: MissionControlSnapshot, phase: OpenCl
         !runtimeReady &&
           (phase === "starting-gateway" ||
             phase === "verifying" ||
-            (gatewayComplete && phase === "detecting"))
+            (gatewayComplete && phase === "detecting") ||
+            gatewayComplete ||
+            liveComplete)
       )
     }
   ] as Array<{ id: string; label: string; description: string; state: StepState }>;

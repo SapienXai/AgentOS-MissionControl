@@ -74,15 +74,15 @@ export function SystemStage({
 
       <div className="mt-2.5 space-y-1.5">
         {steps.map((step, index) => {
-          const isCurrentRunning = step.state === "current" && run.runState === "running";
           const isRuntimeStep = step.id === "runtime";
+          const isChecking = step.state === "current" && (run.runState === "running" || isRuntimeStep);
 
           return (
             <div
               key={step.id}
               className={cn(
                 "relative flex items-center gap-1.5 overflow-hidden rounded-[12px] border px-2 py-1.5",
-                isCurrentRunning
+                isChecking
                   ? surfaceTheme === "light"
                     ? "shadow-[inset_0_1px_0_rgba(255,255,255,0.55),0_0_0_1px_rgba(215,178,154,0.18)]"
                     : "shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_0_0_1px_rgba(103,232,249,0.08)]"
@@ -90,7 +90,7 @@ export function SystemStage({
                 stepContainerClassName(step.state, surfaceTheme)
               )}
             >
-              {isCurrentRunning ? (
+              {isChecking ? (
                 <>
                   <motion.div
                     aria-hidden="true"
@@ -130,7 +130,7 @@ export function SystemStage({
                   stepIconClassName(step.state, surfaceTheme)
                 )}
               >
-                {isCurrentRunning ? (
+                {isChecking ? (
                   <motion.span
                     aria-hidden="true"
                     className={cn(
@@ -150,7 +150,7 @@ export function SystemStage({
                 <span className="relative z-[1]">
                   {step.state === "complete" ? (
                     <Check className="h-2.5 w-2.5" />
-                  ) : isCurrentRunning ? (
+                  ) : isChecking ? (
                     <LoaderCircle className="h-2.5 w-2.5 animate-spin" />
                   ) : (
                     index + 1
@@ -168,7 +168,7 @@ export function SystemStage({
                       stepBadgeClassName(step.state, surfaceTheme)
                     )}
                   >
-                    {step.state === "complete" ? "Ready" : step.state === "current" ? (isCurrentRunning ? "Working" : "Active") : "Pending"}
+                    {step.state === "complete" ? "Ready" : step.state === "current" ? (isChecking ? "Checking" : "Active") : "Pending"}
                   </span>
                 </div>
                 <p
