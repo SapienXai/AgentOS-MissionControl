@@ -1,9 +1,7 @@
 import "server-only";
 
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import net from "node:net";
+import { access, readFile, readdir, rename, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -11,11 +9,9 @@ import { createErrorSnapshot } from "@/lib/openclaw/fallback";
 import {
   DEFAULT_AGENT_PRESET,
   formatAgentPresetLabel,
-  formatCapabilityLabel,
   filterKnownOpenClawSkillIds,
   filterKnownOpenClawToolIds,
   getAgentPresetMeta,
-  inferAgentPresetFromContext,
   resolveAgentPolicy
 } from "@/lib/openclaw/agent-presets";
 import {
@@ -27,11 +23,65 @@ import {
   detectOpenClaw,
   getRecentOpenClawCommandDiagnostics,
   runOpenClaw,
-  runOpenClawJson,
-  runOpenClawJsonStream,
   getResolvedOpenClawBin,
   resolveOpenClawVersion
 } from "@/lib/openclaw/cli";
+import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { probeLocalGatewayStatus } from "@/lib/openclaw/client/local-gateway-probe";
+import {
+  settleGatewayStatusPayloadFromOpenClaw,
+  settleModelStatusPayloadFromOpenClaw,
+  settleStatusPayloadFromOpenClaw
+} from "@/lib/openclaw/client/gateway-payloads";
+import { GatewayStatusCache } from "@/lib/openclaw/client/gateway-status-cache";
+import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
+import { settleChannelRegistryFromLocalFile } from "@/lib/openclaw/state/channel-registry-payload";
+import {
+  channelRegistryPath,
+  openClawStateRootPath
+} from "@/lib/openclaw/state/paths";
+import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
+import { RuntimeDiagnosticsStateCache } from "@/lib/openclaw/state/runtime-diagnostics-cache";
+import type {
+  SnapshotLoadProfile,
+  SnapshotPair
+} from "@/lib/openclaw/state/snapshot-cache";
+import { MissionControlCacheService } from "@/lib/openclaw/application/mission-control-cache-service";
+import { buildRuntimeDiagnosticsFromState } from "@/lib/openclaw/adapter/runtime-diagnostics-adapter";
+import {
+  buildModelRecords,
+  buildModelsPayloadFromFallbackSources,
+  buildModelStatusFromAgentConfig
+} from "@/lib/openclaw/adapter/model-adapter";
+import { buildAgentPayloadsFromConfig } from "@/lib/openclaw/adapter/agent-adapter";
+import { buildSnapshotAgentEntry } from "@/lib/openclaw/adapter/agent-snapshot-adapter";
+import { readAgentBootstrapProfile } from "@/lib/openclaw/adapter/agent-profile-adapter";
+import { buildPresenceRecords } from "@/lib/openclaw/adapter/presence-adapter";
+import {
+  buildDiagnosticIssues,
+  buildGatewayDiagnostics,
+  buildSecurityWarnings,
+  buildVersionDiagnostics
+} from "@/lib/openclaw/adapter/diagnostics-adapter";
+import { buildVisibleSnapshotCollections } from "@/lib/openclaw/adapter/visibility-adapter";
+import { buildWorkspaceProjectEntry } from "@/lib/openclaw/adapter/workspace-snapshot-adapter";
+import {
+  CachedPayloadController,
+  createDeferredPayloadResult,
+  isDeferredPayloadResult,
+  resolveCachedPayload,
+  SLOW_PAYLOAD_CACHE_TTL_MS,
+  type CachedPayload
+} from "@/lib/openclaw/client/payload-cache";
+import type {
+  AgentConfigPayload,
+  AgentPayload,
+  GatewayStatusPayload,
+  ModelsPayload,
+  ModelsStatusPayload,
+  PresencePayload,
+  StatusPayload
+} from "@/lib/openclaw/client/gateway-client";
 import {
   buildOpenClawBinarySelectionSnapshot,
   readOpenClawBinarySelection
@@ -41,22 +91,14 @@ import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
 } from "@/lib/openclaw/operation-progress";
-import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { getSurfaceKind } from "@/lib/openclaw/surface-catalog";
 import {
   DEFAULT_WORKSPACE_RULES,
   buildDefaultWorkspaceAgents,
   getWorkspaceTemplateMeta
 } from "@/lib/openclaw/workspace-presets";
+import { buildWorkspaceScaffoldDocuments, normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import {
-  buildWorkspaceContextManifest,
-  buildWorkspaceScaffoldDocuments,
-  WORKSPACE_CONTEXT_CORE_PATHS,
-  WORKSPACE_CONTEXT_OPTIONAL_PATHS,
-  normalizeWorkspaceDocOverrides
-} from "@/lib/openclaw/workspace-docs";
-import {
-  buildAgentPolicyPromptLines,
   buildWorkspaceKickoffPrompt,
   describeWorkspaceSourceActivity,
   describeWorkspaceSourceCompletion,
@@ -64,11 +106,9 @@ import {
   detectWorkspaceToolExamples,
   extractKickoffProgressMessages,
   materializeWorkspaceSource,
-  renderSkillMarkdown,
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir,
   writeTextFileEnsured,
-  writeTextFileIfMissing,
   scaffoldWorkspaceContents
 } from "@/lib/openclaw/domains/workspace-bootstrap";
 import { buildTaskRecords } from "@/lib/openclaw/domains/task-records";
@@ -135,15 +175,12 @@ import {
   areWorkspaceAgentsEqual,
   areWorkspaceCreateRulesEqual,
   collectWorkspaceEditableDocPaths,
-  collectWorkspaceResourceState,
-  createWorkspaceProjectFromEditSeed,
-  listLocalWorkspaceSkills
+  createWorkspaceProjectFromEditSeed
 } from "@/lib/openclaw/domains/workspace-edit";
 import {
   parseWorkspaceProjectManifestAgent,
   readWorkspaceProjectManifest,
   normalizeChannelRegistry,
-  parseWorkspaceChannelSummary,
   uniqueByChatId
 } from "@/lib/openclaw/domains/workspace-manifest";
 import type {
@@ -165,19 +202,12 @@ import {
 } from "@/lib/openclaw/domains/channels";
 import type { ManagedDiscordBinding } from "@/lib/openclaw/domains/channels";
 import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
+import { normalizeOptionalValue, resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
 import {
-  collectIssues,
-  compareVersionStrings,
-  normalizeOptionalValue,
-  normalizeUpdateError,
-  resolveAgentAction,
-  resolveAgentStatus,
-  resolveDiagnosticHealth,
-  resolveModelReadiness,
-  resolveUpdateInfo,
-  resolveWorkspaceHealth,
-  unique
-} from "@/lib/openclaw/domains/control-plane-normalization";
+  buildWorkspaceBootstrapProfileCache,
+  readWorkspaceInspectorMetadata,
+  type WorkspaceBootstrapProfileCache
+} from "@/lib/openclaw/adapter/workspace-inspector-adapter";
 import {
   getConfiguredWorkspaceRoot,
   getLatestRuntimeSmokeTest,
@@ -203,10 +233,8 @@ import type {
   MissionAbortResponse,
   MissionResponse,
   MissionSubmission,
-  ModelRecord,
   OpenClawRuntimeSmokeTest,
   OpenClawAgent,
-  PresenceRecord,
   RelationshipRecord,
   TaskDetailRecord,
   RuntimeRecord,
@@ -236,110 +264,10 @@ import type {
 
 export { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/domains/session-catalog";
 
+export { inferFallbackModelMetadata } from "@/lib/openclaw/adapter/model-adapter";
+
 export { discoverDiscordRoutes, discoverSurfaceRoutes, discoverTelegramGroups, getChannelRegistry };
 
-type GatewayStatusPayload = {
-  service?: {
-    label?: string;
-    loaded?: boolean;
-  };
-  gateway?: {
-    bindMode?: string;
-    port?: number;
-    probeUrl?: string;
-  };
-  rpc?: {
-    ok?: boolean;
-  };
-};
-
-type StatusPayload = {
-  runtimeVersion?: string;
-  version?: string;
-  updateChannel?: string;
-  overview?: {
-    version?: string;
-    update?: string;
-  };
-  update?: {
-    root?: string;
-    installKind?: string;
-    packageManager?: string;
-    registry?: {
-      latestVersion?: string | null;
-      error?: string | null;
-    };
-  };
-  securityAudit?: {
-    findings?: Array<{ severity?: string; title?: string; detail?: string }>;
-  };
-  sessions?: {
-    recent?: Array<{
-      agentId?: string;
-      key?: string;
-      sessionId?: string;
-      updatedAt?: number;
-      age?: number;
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheRead?: number;
-      totalTokens?: number;
-      model?: string;
-    }>;
-  };
-  agents?: {
-    defaultId?: string;
-  };
-  heartbeat?: {
-    agents?: Array<{
-      agentId: string;
-      enabled?: boolean;
-      every?: string | null;
-      everyMs?: number | null;
-    }>;
-  };
-};
-
-type AgentPayload = Array<{
-  id: string;
-  name?: string;
-  identityName?: string;
-  identityEmoji?: string;
-  identitySource?: string;
-  workspace: string;
-  agentDir: string;
-  model?: string;
-  bindings?: number;
-  isDefault?: boolean;
-}>;
-
-type AgentConfigPayload = Array<{
-  id: string;
-  name?: string;
-  workspace: string;
-  agentDir?: string;
-  model?: string;
-  heartbeat?: {
-    every?: string;
-  };
-  skills?: string[];
-  tools?: {
-    fs?: {
-      workspaceOnly?: boolean;
-    };
-  };
-  identity?: {
-    name?: string;
-    emoji?: string;
-    theme?: string;
-    avatar?: string;
-  };
-  default?: boolean;
-}>;
-
-const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
-const channelRegistryPath = path.join(missionControlRootPath, "channel-registry.json");
-const openClawStateRootPath = path.join(os.homedir(), ".openclaw");
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
 const runtimeSmokeTestMessage = "AgentOS runtime smoke test. Reply with a brief READY status.";
 type WorkspaceCreateOptions = {
@@ -351,150 +279,38 @@ type KickoffProgressHandler = (update: {
   percent: number;
 }) => Promise<void> | void;
 
-type ModelsPayload = {
-  models: Array<{
-    key: string;
-    name: string;
-    input: string;
-    contextWindow: number | null;
-    local: boolean | null;
-    available: boolean | null;
-    tags: string[];
-    missing: boolean;
-  }>;
-};
-
-type ModelsStatusPayload = {
-  defaultModel?: string | null;
-  resolvedDefault?: string | null;
-  allowed?: string[];
-  auth?: {
-    providers?: Array<{
-      provider?: string;
-      effective?: {
-        kind?: string;
-        detail?: string;
-      };
-      profiles?: {
-        count?: number;
-      };
-    }>;
-    missingProvidersInUse?: string[];
-    unusableProfiles?: unknown[];
-    oauth?: {
-      providers?: Array<{
-        provider?: string;
-        status?: string;
-      }>;
-    };
-  };
-};
-
-type PresencePayload = Array<{
-  host: string;
-  ip: string;
-  version: string;
-  platform: string;
-  deviceFamily?: string;
-  mode: string;
-  reason: string;
-  text: string;
-  ts: number;
-}>;
-
-type MissionCommandPayload = {
-  runId?: string;
-  status?: string;
-  summary?: string;
-  payloads?: Array<{
-    text: string;
-    mediaUrl: string | null;
-  }>;
-  meta?: Record<string, unknown>;
-  result?: {
-    payloads?: Array<{
-      text: string;
-      mediaUrl: string | null;
-    }>;
-    meta?: Record<string, unknown>;
-  };
-};
-
-type AgentBootstrapProfile = OpenClawAgent["profile"];
-type OpenClawRuntimeState = Omit<MissionControlSnapshot["diagnostics"]["runtime"], "smokeTest">;
-type SnapshotLoadProfile = "interactive" | "refresh";
-
-type CachedPayload<T> = {
-  value: T;
-  capturedAt: number;
-};
-
-type BootstrapProfileReadResult = {
-  fileName: string;
-  lines: string[];
-  source: string;
-};
-
-type WorkspaceBootstrapProfileCache = {
-  profileFiles: readonly string[];
-  contextManifest: ReturnType<typeof buildWorkspaceContextManifest>;
-  workspaceSections: Map<string, string[]>;
-  workspaceSources: string[];
-};
-
 const SNAPSHOT_CACHE_TTL_MS = 30_000;
 const RUNTIME_DIAGNOSTICS_CACHE_TTL_MS = 5 * 60_000;
 const GATEWAY_STATUS_STALE_GRACE_MS = 60_000;
-const SLOW_PAYLOAD_CACHE_TTL_MS = 5 * 60_000;
-const DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE = "Deferred to background refresh.";
 
-type SnapshotPair = {
-  visible: MissionControlSnapshot;
-  full: MissionControlSnapshot;
-};
-
-type SnapshotCacheEntry = SnapshotPair & {
-  expiresAt: number;
-};
-
-type RuntimeDiagnosticsCacheEntry = {
-  agentIdsKey: string;
-  value: OpenClawRuntimeState;
-  expiresAt: number;
-};
-
-type GatewayStatusCacheEntry = {
-  value: GatewayStatusPayload;
-  capturedAt: number;
-};
-
-let snapshotCache: SnapshotCacheEntry | null = null;
-let snapshotPromise: Promise<SnapshotPair> | null = null;
-let runtimeDiagnosticsCache: RuntimeDiagnosticsCacheEntry | null = null;
-let runtimeDiagnosticsPromise: Promise<OpenClawRuntimeState> | null = null;
-let gatewayStatusCache: GatewayStatusCacheEntry | null = null;
-let statusPayloadCache: CachedPayload<StatusPayload> | null = null;
 let agentPayloadCache: CachedPayload<AgentPayload> | null = null;
 let agentConfigPayloadCache: CachedPayload<AgentConfigPayload> | null = null;
 let modelsPayloadCache: CachedPayload<ModelsPayload> | null = null;
 let modelsStatusPayloadCache: CachedPayload<ModelsStatusPayload> | null = null;
 let sessionsPayloadCache: CachedPayload<SessionsPayload> | null = null;
 let presencePayloadCache: CachedPayload<PresencePayload> | null = null;
-let statusRefreshPromise: Promise<void> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
-let snapshotGeneration = 0;
+const statusPayloadCache = new CachedPayloadController<StatusPayload>();
+const gatewayStatusCache = new GatewayStatusCache(GATEWAY_STATUS_STALE_GRACE_MS);
+const missionControlCacheService = new MissionControlCacheService<MissionControlSnapshot>({
+  ttlMs: SNAPSHOT_CACHE_TTL_MS,
+  load: (profile, generation) => loadMissionControlSnapshots({ profile, generation })
+});
+const runtimeDiagnosticsStateCache = new RuntimeDiagnosticsStateCache({
+  ttlMs: RUNTIME_DIAGNOSTICS_CACHE_TTL_MS,
+  getGeneration: () => missionControlCacheService.getGeneration(),
+  loadState: (agentIds) => inspectOpenClawRuntimeState(openClawStateRootPath, agentIds)
+});
 
 function clearRuntimeHistoryCache() {
   runtimeHistoryCache = new Map();
 }
 
 export function clearMissionControlCaches() {
-  snapshotGeneration += 1;
-  snapshotCache = null;
-  runtimeDiagnosticsCache = null;
-  runtimeDiagnosticsPromise = null;
-  gatewayStatusCache = null;
-  statusPayloadCache = null;
+  missionControlCacheService.clear({ incrementGeneration: true });
+  runtimeDiagnosticsStateCache.clear();
+  gatewayStatusCache.clear();
+  statusPayloadCache.clear();
   agentPayloadCache = null;
   agentConfigPayloadCache = null;
   modelsPayloadCache = null;
@@ -504,353 +320,8 @@ export function clearMissionControlCaches() {
   clearRuntimeHistoryCache();
 }
 
-function loadSnapshotPairForCurrentGeneration(profile: SnapshotLoadProfile = "interactive") {
-  const generation = snapshotGeneration;
-
-  return loadMissionControlSnapshots({ profile, generation }).then((nextSnapshot) => {
-    if (generation === snapshotGeneration) {
-      snapshotCache = {
-        ...nextSnapshot,
-        expiresAt: Date.now() + SNAPSHOT_CACHE_TTL_MS
-      };
-    }
-
-    return nextSnapshot;
-  });
-}
-
-function shouldRefreshStatusPayloadCache() {
-  return !statusPayloadCache || Date.now() - statusPayloadCache.capturedAt > SLOW_PAYLOAD_CACHE_TTL_MS;
-}
-
-function scheduleStatusPayloadRefresh() {
-  if (statusRefreshPromise || !shouldRefreshStatusPayloadCache()) {
-    return;
-  }
-
-  statusRefreshPromise = (async () => {
-    try {
-      const value = await settleStatusPayloadFromOpenClaw(15_000);
-
-      if (value.status === "fulfilled") {
-        statusPayloadCache = {
-          value: value.value,
-          capturedAt: Date.now()
-        };
-      }
-    } catch {
-      // Background refresh is best-effort.
-    } finally {
-      statusRefreshPromise = null;
-    }
-  })();
-
-  void statusRefreshPromise.catch(() => {});
-}
-
-async function settleStatusPayloadFromOpenClaw(
-  timeoutMs = 20_000
-): Promise<PromiseSettledResult<StatusPayload>> {
-  try {
-    const value = await runOpenClawJson<StatusPayload>(["status", "--json"], {
-      timeoutMs
-    });
-
-    return {
-      status: "fulfilled",
-      value
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-async function settleGatewayStatusPayloadFromOpenClaw(
-  timeoutMs = 20_000
-): Promise<PromiseSettledResult<GatewayStatusPayload>> {
-  try {
-    const value = await runOpenClawJson<GatewayStatusPayload>(["gateway", "status", "--json"], {
-      timeoutMs
-    });
-
-    return {
-      status: "fulfilled",
-      value
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-async function settleModelStatusPayloadFromOpenClaw(
-  timeoutMs = 20_000
-): Promise<PromiseSettledResult<ModelsStatusPayload>> {
-  try {
-    const value = await runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"], {
-      timeoutMs
-    });
-
-    return {
-      status: "fulfilled",
-      value
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-function resolveCachedPayload<T>(
-  result: PromiseSettledResult<T>,
-  cached: CachedPayload<T> | null,
-  writeCache: (entry: CachedPayload<T>) => void
-) {
-  if (result.status === "fulfilled") {
-    const entry = {
-      value: result.value,
-      capturedAt: Date.now()
-    };
-
-    writeCache(entry);
-
-    return {
-      value: result.value,
-      reusedCachedValue: false,
-      failed: false
-    };
-  }
-
-  if (cached && Date.now() - cached.capturedAt <= SLOW_PAYLOAD_CACHE_TTL_MS) {
-    return {
-      value: cached.value,
-      reusedCachedValue: true,
-      failed: true
-    };
-  }
-
-  return {
-    value: undefined,
-    reusedCachedValue: false,
-    failed: true
-  };
-}
-
-function createDeferredPayloadResult<T>(): PromiseSettledResult<T> {
-  return {
-    status: "rejected",
-    reason: new Error(DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE)
-  };
-}
-
-function isDeferredPayloadResult(result: PromiseSettledResult<unknown>) {
-  return (
-    result.status === "rejected" &&
-    result.reason instanceof Error &&
-    result.reason.message === DEFERRED_SNAPSHOT_PAYLOAD_MESSAGE
-  );
-}
-
-async function settleAgentConfigFromStateFile(): Promise<PromiseSettledResult<AgentConfigPayload>> {
-  try {
-    const raw = await readFile(path.join(openClawStateRootPath, "openclaw.json"), "utf8");
-    const parsed = JSON.parse(raw) as {
-      agents?: {
-        list?: unknown;
-      };
-    };
-    const list = parsed.agents?.list;
-
-    return {
-      status: "fulfilled",
-      value: Array.isArray(list) ? (list as AgentConfigPayload) : []
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-async function settleChannelRegistryFromLocalFile(): Promise<PromiseSettledResult<ChannelRegistry>> {
-  try {
-    const raw = await readFile(channelRegistryPath, "utf8");
-    const parsed = JSON.parse(raw);
-    const registryInput = isObjectRecord(parsed)
-      ? parsed
-      : { version: 1, channels: [] as unknown[] };
-    const channels = Array.isArray(registryInput.channels)
-      ? registryInput.channels
-          .map((entry) => parseWorkspaceChannelSummary(entry))
-          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
-      : [];
-
-    return {
-      status: "fulfilled",
-      value: normalizeChannelRegistry({
-        version: 1,
-        channels
-      })
-    };
-  } catch (error) {
-    return {
-      status: "rejected",
-      reason: error
-    };
-  }
-}
-
-function describeCachedPayloadReuse(label: string, reusedCachedValue: boolean) {
-  return reusedCachedValue
-    ? `${label}: Reusing the last successful payload while a slow OpenClaw command refreshes in the background.`
-    : null;
-}
-
-function buildAgentPayloadsFromConfig(agentConfig: AgentConfigPayload): AgentPayload {
-  return agentConfig.map((entry) => ({
-    id: entry.id,
-    name: entry.name || entry.identity?.name || entry.id,
-    identityName: entry.identity?.name,
-    identityEmoji: entry.identity?.emoji,
-    identitySource: entry.identity ? "config" : undefined,
-    workspace: normalizeOptionalValue(entry.workspace) ?? "",
-    agentDir: entry.agentDir || path.join(openClawStateRootPath, "agents", entry.id, "agent"),
-    model: entry.model,
-    isDefault: Boolean(entry.default)
-  }));
-}
-
-function buildModelsPayloadFromFallbackSources(
-  agentConfig: AgentConfigPayload,
-  modelStatus?: ModelsStatusPayload
-): ModelsPayload {
-  const modelIds = uniqueStrings([
-    ...agentConfig.map((entry) => entry.model ?? "").filter(Boolean),
-    ...(modelStatus?.allowed ?? []).filter(Boolean),
-    modelStatus?.resolvedDefault ?? "",
-    modelStatus?.defaultModel ?? ""
-  ]);
-
-  return {
-    models: modelIds.map((modelId) => {
-      const fallbackMetadata = inferFallbackModelMetadata(modelId);
-
-      return {
-        key: modelId,
-        name: modelId,
-        input: "text",
-        contextWindow: fallbackMetadata.contextWindow,
-        local: fallbackMetadata.local,
-        available: true,
-        tags: [],
-        missing: false
-      };
-    })
-  };
-}
-
-export function inferFallbackModelMetadata(modelId: string): {
-  contextWindow: number | null;
-  local: boolean | null;
-} {
-  const normalized = modelId.trim().toLowerCase();
-  const provider = normalized.split("/", 1)[0] || "";
-  const route = normalized.includes("/") ? normalized.slice(provider.length + 1) : normalized;
-
-  if (provider === "ollama") {
-    return {
-      contextWindow: inferOllamaContextWindow(route),
-      local: true
-    };
-  }
-
-  if (provider === "openai" || provider === "openai-codex") {
-    return {
-      contextWindow: route.startsWith("gpt-5") ? 272000 : null,
-      local: false
-    };
-  }
-
-  if (provider === "anthropic") {
-    return {
-      contextWindow: 200000,
-      local: false
-    };
-  }
-
-  if (provider === "gemini") {
-    return {
-      contextWindow: 1000000,
-      local: false
-    };
-  }
-
-  if (provider === "deepseek") {
-    return {
-      contextWindow: 64000,
-      local: false
-    };
-  }
-
-  if (provider === "mistral") {
-    return {
-      contextWindow: 128000,
-      local: false
-    };
-  }
-
-  if (provider === "openrouter" || provider === "xai") {
-    return {
-      contextWindow: null,
-      local: false
-    };
-  }
-
-  return {
-    contextWindow: null,
-    local: null
-  };
-}
-
-function inferOllamaContextWindow(route: string) {
-  if (route.includes("qwen3.5")) {
-    return 262144;
-  }
-
-  if (
-    route.includes("qwen") ||
-    route.includes("llama3.2") ||
-    route.includes("llama3.3") ||
-    route.includes("deepseek-r1")
-  ) {
-    return 131072;
-  }
-
-  return 131072;
-}
-
-function buildModelStatusFromAgentConfig(agentConfig: AgentConfigPayload): ModelsStatusPayload | undefined {
-  const defaultModel =
-    agentConfig.find((entry) => entry.default)?.model ||
-    agentConfig.find((entry) => Boolean(entry.model))?.model ||
-    null;
-
-  if (!defaultModel) {
-    return undefined;
-  }
-
-  return {
-    defaultModel,
-    resolvedDefault: defaultModel
-  };
+function invalidateSnapshotCache() {
+  missionControlCacheService.clear();
 }
 
 function resolveSnapshotDefaultAgentModelId(snapshot: MissionControlSnapshot) {
@@ -865,222 +336,17 @@ function resolveSnapshotDefaultAgentModelId(snapshot: MissionControlSnapshot) {
   );
 }
 
-function buildRuntimeDiagnosticsAgentKey(agentIds: string[]) {
-  return [...new Set(agentIds.filter(Boolean))].sort().join("\u0000");
-}
-
-function loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds: string[]) {
-  const generation = snapshotGeneration;
-  const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
-
-  return inspectOpenClawRuntimeState(agentIds).then((nextState) => {
-    if (generation === snapshotGeneration) {
-      runtimeDiagnosticsCache = {
-        agentIdsKey,
-        value: nextState,
-        expiresAt: Date.now() + RUNTIME_DIAGNOSTICS_CACHE_TTL_MS
-      };
-    }
-
-    return nextState;
-  });
-}
-
-async function readBootstrapProfileFile(
-  rootPath: string,
-  workspacePath: string,
-  fileName: string
-): Promise<BootstrapProfileReadResult | null> {
-  const filePath = path.join(rootPath, fileName);
-
-  try {
-    await access(filePath);
-    const raw = await readFile(filePath, "utf8");
-    const trimmed = raw.trim();
-
-    if (!trimmed) {
-      return null;
-    }
-
-    return {
-      fileName,
-      lines: trimmed.split(/\r?\n/),
-      source: describeBootstrapSourcePath(workspacePath, filePath)
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function buildWorkspaceBootstrapProfileCache(
-  workspacePath: string,
-  template?: WorkspaceTemplate | null,
-  rules?: WorkspaceCreateRules
-): Promise<WorkspaceBootstrapProfileCache> {
-  const contextManifest = buildWorkspaceContextManifest(template, rules ?? DEFAULT_WORKSPACE_RULES);
-  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "HEARTBEAT.md"] as const;
-  const profileFiles = [
-    ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
-  ];
-  const entries = await Promise.all(
-    profileFiles.map((fileName) => readBootstrapProfileFile(workspacePath, workspacePath, fileName))
-  );
-  const workspaceSections = new Map<string, string[]>();
-  const workspaceSources: string[] = [];
-
-  for (const entry of entries) {
-    if (!entry) {
-      continue;
-    }
-
-    workspaceSections.set(entry.fileName, entry.lines);
-    workspaceSources.push(entry.source);
-  }
-
-  return {
-    profileFiles,
-    contextManifest,
-    workspaceSections,
-    workspaceSources
-  };
-}
-
-function resolveGatewayStatus(
-  result: PromiseSettledResult<GatewayStatusPayload>
-): {
-  value: GatewayStatusPayload | undefined;
-  reusedCachedValue: boolean;
-} {
-  if (result.status === "fulfilled") {
-    gatewayStatusCache = {
-      value: result.value,
-      capturedAt: Date.now()
-    };
-
-    return {
-      value: result.value,
-      reusedCachedValue: false
-    };
-  }
-
-  if (gatewayStatusCache && Date.now() - gatewayStatusCache.capturedAt <= GATEWAY_STATUS_STALE_GRACE_MS) {
-    return {
-      value: gatewayStatusCache.value,
-      reusedCachedValue: true
-    };
-  }
-
-  return {
-    value: undefined,
-    reusedCachedValue: false
-  };
-}
-
-async function probeLocalGatewayStatus(port = 18789): Promise<GatewayStatusPayload | null> {
-  const reachable = await probeTcpPort("127.0.0.1", port, 750);
-
-  if (!reachable) {
-    return null;
-  }
-
-  return {
-    service: {
-      label: "Local port probe",
-      loaded: true
-    },
-    gateway: {
-      bindMode: "loopback",
-      port,
-      probeUrl: `ws://127.0.0.1:${port}`
-    },
-    rpc: {
-      ok: true
-    }
-  };
-}
-
-async function probeTcpPort(host: string, port: number, timeoutMs: number) {
-  return await new Promise<boolean>((resolve) => {
-    const socket = net.createConnection({ host, port });
-    let settled = false;
-
-    const finish = (ok: boolean) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      socket.removeAllListeners();
-      socket.destroy();
-      resolve(ok);
-    };
-
-    socket.setTimeout(timeoutMs);
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    socket.once("timeout", () => finish(false));
-  });
-}
-
 export async function getMissionControlSnapshot(options: { force?: boolean; includeHidden?: boolean } = {}) {
-  const cachedSnapshot = snapshotCache;
-  const cacheIsFresh = Boolean(cachedSnapshot && cachedSnapshot.expiresAt > Date.now());
-
-  if (!options.force && cacheIsFresh && cachedSnapshot) {
-    return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
-  }
-
-  if (!options.force && cachedSnapshot) {
-    if (!snapshotPromise) {
-      snapshotPromise = loadSnapshotPairForCurrentGeneration("interactive");
-      void snapshotPromise.catch(() => {});
-      void snapshotPromise.finally(() => {
-        snapshotPromise = null;
-      }).catch(() => {});
-    }
-
-    return options.includeHidden ? cachedSnapshot.full : cachedSnapshot.visible;
-  }
-
-  if (options.force) {
-    snapshotGeneration += 1;
-    snapshotCache = null;
-    snapshotPromise = loadSnapshotPairForCurrentGeneration("refresh");
-    void snapshotPromise.catch(() => {});
-
-    try {
-      const nextSnapshot = await snapshotPromise;
-
-      return options.includeHidden ? nextSnapshot.full : nextSnapshot.visible;
-    } finally {
-      snapshotPromise = null;
-    }
-  }
-
-  if (snapshotPromise) {
-    const pending = await snapshotPromise;
-    return options.includeHidden ? pending.full : pending.visible;
-  }
-
-  snapshotPromise = loadSnapshotPairForCurrentGeneration("interactive");
-  void snapshotPromise.catch(() => {});
-
-  try {
-    const nextSnapshot = await snapshotPromise;
-
-    return options.includeHidden ? nextSnapshot.full : nextSnapshot.visible;
-  } finally {
-    snapshotPromise = null;
-  }
+  return missionControlCacheService.getSnapshot(options);
 }
 
 async function loadMissionControlSnapshots({
   profile = "interactive",
-  generation = snapshotGeneration
+  generation = missionControlCacheService.getGeneration()
 }: {
   profile?: SnapshotLoadProfile;
   generation?: number;
-} = {}): Promise<SnapshotPair> {
+} = {}): Promise<SnapshotPair<MissionControlSnapshot>> {
   const localGatewayStatus = await probeLocalGatewayStatus();
   const openclawInstalled = Boolean(localGatewayStatus) || await detectOpenClaw();
 
@@ -1106,9 +372,8 @@ async function loadMissionControlSnapshots({
     let modelStatusResult: PromiseSettledResult<ModelsStatusPayload>;
     let presenceResult: PromiseSettledResult<PresencePayload>;
 
-    const statusCacheNeedsRefresh = shouldRefreshStatusPayloadCache();
-    const gatewayStatusCacheNeedsRefresh =
-      !gatewayStatusCache || Date.now() - gatewayStatusCache.capturedAt > GATEWAY_STATUS_STALE_GRACE_MS;
+    const statusCacheNeedsRefresh = statusPayloadCache.shouldRefresh();
+    const gatewayStatusCacheNeedsRefresh = gatewayStatusCache.shouldRefresh();
     const modelStatusCacheNeedsRefresh =
       !modelsStatusPayloadCache || Date.now() - modelsStatusPayloadCache.capturedAt > SLOW_PAYLOAD_CACHE_TTL_MS;
 
@@ -1124,20 +389,20 @@ async function loadMissionControlSnapshots({
         ? await settleStatusPayloadFromOpenClaw(15_000)
         : createDeferredPayloadResult();
       agentsResult = createDeferredPayloadResult();
-      agentConfigResult = await settleAgentConfigFromStateFile();
+      agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
       modelsResult = createDeferredPayloadResult();
       modelStatusResult = shouldHydrateModelStatus
         ? await settleModelStatusPayloadFromOpenClaw(15_000)
         : createDeferredPayloadResult();
       presenceResult = createDeferredPayloadResult();
       if (statusCacheNeedsRefresh && !shouldHydrateStatus) {
-        scheduleStatusPayloadRefresh();
+        statusPayloadCache.scheduleRefresh(() => settleStatusPayloadFromOpenClaw(15_000));
       }
     } else {
       statusResult = await settleStatusPayloadFromOpenClaw(45_000);
       gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw(45_000);
       agentsResult = createDeferredPayloadResult();
-      agentConfigResult = await settleAgentConfigFromStateFile();
+      agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
       modelsResult = createDeferredPayloadResult();
       modelStatusResult = await settleModelStatusPayloadFromOpenClaw(45_000);
       presenceResult = createDeferredPayloadResult();
@@ -1148,16 +413,13 @@ async function loadMissionControlSnapshots({
           value: localGatewayStatus,
           reusedCachedValue: false
         }
-      : resolveGatewayStatus(gatewayStatusResult);
+      : gatewayStatusCache.resolve(gatewayStatusResult);
 
     if (!resolvedGatewayStatus.value) {
-      const probedGatewayStatus = await probeLocalGatewayStatus(gatewayStatusCache?.value.gateway?.port ?? 18789);
+      const probedGatewayStatus = await probeLocalGatewayStatus(gatewayStatusCache.getCachedPort());
 
       if (probedGatewayStatus) {
-        gatewayStatusCache = {
-          value: probedGatewayStatus,
-          capturedAt: Date.now()
-        };
+        gatewayStatusCache.write(probedGatewayStatus);
         resolvedGatewayStatus = {
           value: probedGatewayStatus,
           reusedCachedValue: false
@@ -1170,9 +432,7 @@ async function loadMissionControlSnapshots({
       gatewayRemoteUrlResult.status === "fulfilled"
         ? normalizeOptionalValue(gatewayRemoteUrlResult.value)
         : undefined;
-    const resolvedStatus = resolveCachedPayload(statusResult, statusPayloadCache, (entry) => {
-      statusPayloadCache = entry;
-    });
+    const resolvedStatus = statusPayloadCache.resolve(statusResult);
     const resolvedAgentConfig = resolveCachedPayload(agentConfigResult, agentConfigPayloadCache, (entry) => {
       agentConfigPayloadCache = entry;
     });
@@ -1197,7 +457,7 @@ async function loadMissionControlSnapshots({
     });
     const status = resolvedStatus.value;
     const agentConfig = resolvedAgentConfig.value ?? [];
-    const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig);
+    const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, openClawStateRootPath);
     const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
     const localModels = buildModelsPayloadFromFallbackSources(agentConfig, modelStatus);
     const models = resolvedModels.value?.models ?? localModels.models;
@@ -1220,7 +480,7 @@ async function loadMissionControlSnapshots({
       annotateAgentChatSessions(resolvedSessions.value?.sessions ?? [], agentChatSessionIndex),
       dispatchRecords
     );
-    const channelRegistryResult = await settleChannelRegistryFromLocalFile();
+    const channelRegistryResult = await settleChannelRegistryFromLocalFile(channelRegistryPath);
     const channelRegistry =
       channelRegistryResult.status === "fulfilled"
         ? channelRegistryResult.value
@@ -1314,146 +574,50 @@ async function loadMissionControlSnapshots({
           manifestByWorkspace.get(rawAgent.workspace) ??
           (await readWorkspaceProjectManifest(rawAgent.workspace));
         manifestByWorkspace.set(rawAgent.workspace, manifest);
-        const workspaceBootstrapProfile =
-          workspaceBootstrapProfileByWorkspace.get(rawAgent.workspace) ??
-          (await buildWorkspaceBootstrapProfileCache(
-            rawAgent.workspace,
-            manifest.template,
-            manifest.rules ?? DEFAULT_WORKSPACE_RULES
-          ));
         const manifestAgent = manifest.agents.find((entry) => entry.id === rawAgent.id) ?? null;
-        const configuredSkills = filterAgentPolicySkills(configured?.skills ?? []);
-        const agentName =
-          normalizeOptionalValue(identityOverrides.name) ||
-          configured?.name ||
-          rawAgent.name ||
-          configured?.identity?.name ||
-          rawAgent.identityName ||
-          rawAgent.id;
-        const policy =
-          manifestAgent?.policy ??
-          resolveAgentPolicy(
-            inferAgentPresetFromContext({
-              skills: configuredSkills,
-              id: rawAgent.id,
-              name: agentName
-            }),
-            {
-              fileAccess: configured?.tools?.fs?.workspaceOnly ? "workspace-only" : "extended"
-            }
-          );
-        const configuredTools = uniqueStrings([
-          ...(manifestAgent?.toolIds ?? []),
-          ...(policy.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
-        ]);
-        const primaryModel = rawAgent.model || configured?.model || "unassigned";
         const profile = await readAgentBootstrapProfile(rawAgent.workspace, {
           agentId: rawAgent.id,
-          agentName,
+          agentName:
+            normalizeOptionalValue(identityOverrides.name) ||
+            configured?.name ||
+            rawAgent.name ||
+            configured?.identity?.name ||
+            rawAgent.identityName ||
+            rawAgent.id,
           agentDir: rawAgent.agentDir,
-          configuredSkills,
-          configuredTools,
+          configuredSkills: filterAgentPolicySkills(configured?.skills ?? []),
+          configuredTools: uniqueStrings([
+            ...(manifestAgent?.toolIds ?? []),
+            ...((configured?.tools?.fs?.workspaceOnly || manifestAgent?.policy?.fileAccess === "workspace-only")
+              ? ["fs.workspaceOnly"]
+              : [])
+          ]),
           template: manifest.template,
           rules: manifest.rules ?? DEFAULT_WORKSPACE_RULES,
-          workspaceBootstrapProfile
+          workspaceBootstrapProfile:
+            workspaceBootstrapProfileByWorkspace.get(rawAgent.workspace) ??
+            (await buildWorkspaceBootstrapProfileCache(
+              rawAgent.workspace,
+              manifest.template,
+              manifest.rules ?? DEFAULT_WORKSPACE_RULES
+            ))
         });
         const agentRuntimes = runtimes
           .filter((runtime) => runtime.agentId === rawAgent.id)
           .sort(sortRuntimesByUpdatedAtDesc);
-        const observedToolNames = uniqueStrings(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
-        const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
-        const latestRuntime = agentRuntimes[0];
-        const lastActiveAt =
-          sessionList
-            .map((entry) => entry.updatedAt ?? 0)
-            .sort((left, right) => right - left)
-            .at(0) || null;
         const heartbeat = heartbeatByAgent.get(rawAgent.id);
-        const statusValue = resolveAgentStatus({
-          rpcOk: Boolean(gatewayStatus?.rpc?.ok),
-          activeRuntime: latestRuntime,
-          heartbeatEnabled: Boolean(heartbeat?.enabled),
-          lastActiveAt
+        return buildSnapshotAgentEntry({
+          rawAgent,
+          configured,
+          identityOverrides,
+          workspaceId,
+          sessionList,
+          manifestAgent,
+          agentRuntimes,
+          gatewayRpcOk: Boolean(gatewayStatus?.rpc?.ok),
+          heartbeat,
+          profile
         });
-
-        const agent: OpenClawAgent = {
-          id: rawAgent.id,
-          name: agentName,
-          identityName:
-            normalizeOptionalValue(identityOverrides.name) ||
-            configured?.identity?.name ||
-            rawAgent.identityName ||
-            undefined,
-          workspaceId,
-          workspacePath: rawAgent.workspace,
-          agentDir: rawAgent.agentDir,
-          modelId: primaryModel,
-          isDefault: Boolean(rawAgent.isDefault || configured?.default),
-          status: statusValue,
-          sessionCount: sessionList.length,
-          lastActiveAt,
-          currentAction: resolveAgentAction({
-            runtime: latestRuntime,
-            heartbeatEvery: heartbeat?.every ?? null,
-            status: statusValue
-          }),
-          activeRuntimeIds,
-          heartbeat: {
-            enabled: Boolean(heartbeat?.enabled),
-            every: heartbeat?.every ?? null,
-            everyMs: heartbeat?.everyMs ?? null
-          },
-          identity: {
-            emoji:
-              normalizeOptionalValue(identityOverrides.emoji) ||
-              configured?.identity?.emoji ||
-              rawAgent.identityEmoji,
-            theme: normalizeOptionalValue(identityOverrides.theme) || configured?.identity?.theme,
-            avatar: normalizeOptionalValue(identityOverrides.avatar) || configured?.identity?.avatar,
-            source: rawAgent.identitySource
-          },
-          profile,
-          skills: configuredSkills,
-          tools: configuredTools,
-          observedTools: observedToolNames,
-          policy
-        };
-
-        const runtimeRelationships = activeRuntimeIds.map((runtimeId) => ({
-          id: `edge:${agent.id}:${runtimeId}:run`,
-          sourceId: agent.id,
-          targetId: runtimeId,
-          kind: "active-run" as const,
-          label: "runtime"
-        })) satisfies RelationshipRecord[];
-
-        const relationships: RelationshipRecord[] = [
-          {
-            id: `edge:${workspaceId}:${agent.id}:contains`,
-            sourceId: workspaceId,
-            targetId: agent.id,
-            kind: "contains",
-            label: "workspace member"
-          },
-          {
-            id: `edge:${agent.id}:${primaryModel}:model`,
-            sourceId: agent.id,
-            targetId: primaryModel,
-            kind: "uses-model",
-            label: "model assignment"
-          },
-          ...runtimeRelationships
-        ];
-
-        return {
-          agent,
-          workspacePath: rawAgent.workspace,
-          workspaceId,
-          primaryModel,
-          sessionCount: sessionList.length,
-          activeRuntimeIds,
-          relationships
-        };
       })
     );
 
@@ -1484,94 +648,34 @@ async function loadMissionControlSnapshots({
           manifest ?? undefined
         );
 
-        return {
-          ...workspace,
-          name: manifest?.name ?? workspace.name,
-          modelIds: unique(workspace.modelIds),
-          activeRuntimeIds: unique(workspace.activeRuntimeIds),
-          health: resolveWorkspaceHealth(workspace.agentIds, agents),
-          bootstrap: metadata.bootstrap,
-          capabilities: metadata.capabilities
-        };
+        return buildWorkspaceProjectEntry({
+          workspace,
+          manifest,
+          metadata,
+          allAgents: agents
+        });
       })
     );
 
-    const hiddenWorkspaceIds = new Set(
-      workspaces
-        .filter((workspace) => manifestByWorkspace.get(workspace.path)?.hidden)
-        .map((workspace) => workspace.id)
-    );
-    const visibleAgents = agents.filter((agent) => !hiddenWorkspaceIds.has(agent.workspaceId));
-    const hiddenAgentIds = new Set(
-      agents
-        .filter((agent) => hiddenWorkspaceIds.has(agent.workspaceId))
-        .map((agent) => agent.id)
-    );
-    const visibleRuntimes = runtimes.filter(
-      (runtime) =>
-        !(runtime.agentId && hiddenAgentIds.has(runtime.agentId)) &&
-        !(runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
-    );
-    const hiddenRuntimeIds = new Set(
-      runtimes
-        .filter(
-          (runtime) =>
-            (runtime.agentId && hiddenAgentIds.has(runtime.agentId)) ||
-            (runtime.workspaceId && hiddenWorkspaceIds.has(runtime.workspaceId))
-        )
-        .map((runtime) => runtime.id)
-    );
-    const hiddenNodeIds = new Set<string>([
-      ...hiddenWorkspaceIds,
-      ...hiddenAgentIds,
-      ...hiddenRuntimeIds
-    ]);
-    const visibleRelationships = relationships.filter(
-      (relationship) =>
-        !hiddenNodeIds.has(relationship.sourceId) &&
-        !hiddenNodeIds.has(relationship.targetId)
-    );
-    const visibleWorkspaces = workspaces.filter((workspace) => !hiddenWorkspaceIds.has(workspace.id));
-
-    const mapModels = (sourceAgents: OpenClawAgent[]) => {
-      const modelUsage = new Map<string, number>();
-      for (const agent of sourceAgents) {
-        modelUsage.set(agent.modelId, (modelUsage.get(agent.modelId) ?? 0) + 1);
-      }
-
-      return models.map((model) => ({
-        id: model.key,
-        name: model.name,
-        provider: model.key.split("/")[0] || "unknown",
-        input: model.input,
-        contextWindow: model.contextWindow,
-        local: model.local,
-        available: model.available,
-        missing: model.missing,
-        tags: model.tags,
-        usageCount: modelUsage.get(model.key) ?? 0
-      })) satisfies ModelRecord[];
-    };
+    const {
+      visibleWorkspaces,
+      visibleAgents,
+      visibleRuntimes,
+      visibleRelationships
+    } = buildVisibleSnapshotCollections({
+      workspaces,
+      agents,
+      runtimes,
+      relationships,
+      isWorkspaceHidden: (workspace) => Boolean(manifestByWorkspace.get(workspace.path)?.hidden)
+    });
 
     const modelReadiness = resolveModelReadiness(models, modelStatus);
 
-    const securityWarnings =
-      status?.securityAudit?.findings
-        ?.filter((entry) => entry.severity === "warn")
-        .map((entry) => entry.title || entry.detail || "Security warning") ?? [];
-    const resolvedStatusVersion = normalizeOptionalValue(
-      status?.runtimeVersion || status?.overview?.version || status?.version
-    );
-    const currentVersion = resolvedStatusVersion ?? (await resolveOpenClawVersion()) ?? undefined;
-    const latestVersion = normalizeOptionalValue(status?.update?.registry?.latestVersion ?? undefined);
-    const updateError = normalizeUpdateError(status?.update?.registry?.error ?? undefined);
-    const updateAvailable =
-      currentVersion && latestVersion ? compareVersionStrings(latestVersion, currentVersion) > 0 : undefined;
-    const updateInfo = resolveUpdateInfo({
-      currentVersion,
-      latestVersion,
-      updateError,
-      legacyInfo: status?.overview?.update
+    const securityWarnings = buildSecurityWarnings(status);
+    const versionDiagnostics = buildVersionDiagnostics({
+      status,
+      fallbackVersion: (await resolveOpenClawVersion()) ?? undefined
     });
     const openClawBinarySelection = buildOpenClawBinarySelectionSnapshot(
       await readOpenClawBinarySelection(),
@@ -1589,59 +693,35 @@ async function loadMissionControlSnapshots({
       sessions: sessionsResult,
       presence: presenceResult
     };
-    const diagnostics = {
-      installed: true,
-      loaded: Boolean(gatewayStatus?.service?.loaded),
-      rpcOk: Boolean(gatewayStatus?.rpc?.ok),
-      health: resolveDiagnosticHealth({
-        rpcOk: gatewayStatus?.rpc?.ok,
-        warningCount: securityWarnings.length,
-        runtimeIssueCount: runtimeDiagnostics.issues.length,
-        hasOpenClawSignal
-      }),
-      version: currentVersion,
-      latestVersion,
-      updateAvailable,
-      updateError,
-      updateRoot: normalizeOptionalValue(status?.update?.root ?? undefined),
-      updateInstallKind: normalizeOptionalValue(status?.update?.installKind ?? undefined),
-      updatePackageManager: normalizeOptionalValue(status?.update?.packageManager ?? undefined),
-      workspaceRoot: resolveWorkspaceRoot(configuredWorkspaceRoot),
+    const diagnostics = buildGatewayDiagnostics({
+      gatewayStatus,
+      status,
       configuredWorkspaceRoot: configuredWorkspaceRoot ?? null,
-      dashboardUrl: `http://127.0.0.1:${gatewayStatus?.gateway?.port ?? 18789}/`,
-      gatewayUrl: gatewayStatus?.gateway?.probeUrl || "ws://127.0.0.1:18789",
-      configuredGatewayUrl: configuredGatewayUrl ?? null,
-      bindMode: gatewayStatus?.gateway?.bindMode,
-      port: gatewayStatus?.gateway?.port,
-      updateChannel: status?.updateChannel || "stable",
-      updateInfo,
-      serviceLabel: gatewayStatus?.service?.label,
+      workspaceRoot: resolveWorkspaceRoot(configuredWorkspaceRoot),
+      configuredGatewayUrl,
+      hasOpenClawSignal,
+      securityWarnings,
+      runtimeDiagnostics,
       openClawBinarySelection,
       modelReadiness,
-      runtime: runtimeDiagnostics,
       commandHistory: getRecentOpenClawCommandDiagnostics(),
-      securityWarnings,
-      issues: [
-        ...collectIssues(
-          Object.fromEntries(
-            Object.entries(snapshotIssueResults).filter(([, result]) => !isDeferredPayloadResult(result))
-          )
-        ),
-        ...(gatewayStatusResult.status === "rejected" && resolvedGatewayStatus.reusedCachedValue
-          ? ["gatewayStatus: Reusing the last successful gateway status after a transient OpenClaw check failure."]
-          : []),
-        ...[
-          describeCachedPayloadReuse("status", resolvedStatus.reusedCachedValue),
-          describeCachedPayloadReuse("agents", resolvedAgents.reusedCachedValue),
-          describeCachedPayloadReuse("agentConfig", resolvedAgentConfig.reusedCachedValue),
-          describeCachedPayloadReuse("models", resolvedModels.reusedCachedValue),
-          describeCachedPayloadReuse("modelStatus", resolvedModelStatus.reusedCachedValue),
-          describeCachedPayloadReuse("sessions", resolvedSessions.reusedCachedValue),
-          describeCachedPayloadReuse("presence", resolvedPresence.reusedCachedValue)
-        ].filter((issue): issue is string => Boolean(issue)),
-        ...runtimeDiagnostics.issues
-      ]
-    } satisfies MissionControlSnapshot["diagnostics"];
+      versionDiagnostics,
+      issues: buildDiagnosticIssues({
+        payloadResults: snapshotIssueResults,
+        gatewayStatusRejectedWithCachedValue:
+          gatewayStatusResult.status === "rejected" && resolvedGatewayStatus.reusedCachedValue,
+        payloadReuse: {
+          status: resolvedStatus,
+          agents: resolvedAgents,
+          agentConfig: resolvedAgentConfig,
+          models: resolvedModels,
+          modelStatus: resolvedModelStatus,
+          sessions: resolvedSessions,
+          presence: resolvedPresence
+        },
+        runtimeIssues: runtimeDiagnostics.issues
+      })
+    });
 
     const tasks = buildTaskRecords(runtimes, agents);
     const visibleTasks = buildTaskRecords(visibleRuntimes, visibleAgents);
@@ -1656,17 +736,7 @@ async function loadMissionControlSnapshots({
       ...(isDeferredPayloadResult(channelRegistryResult)
         ? {}
         : {}),
-      presence: presence.map((entry) => ({
-        host: entry.host,
-        ip: entry.ip,
-        version: entry.version,
-        platform: entry.platform,
-        deviceFamily: entry.deviceFamily,
-        mode: entry.mode,
-        reason: entry.reason,
-        text: entry.text,
-        ts: entry.ts
-      })) as PresenceRecord[],
+      presence: buildPresenceRecords(presence),
       missionPresets: [
         "Audit the selected workspace and generate a concrete first task batch.",
         "Plan a multi-agent delivery mission for the current product goal.",
@@ -1679,7 +749,7 @@ async function loadMissionControlSnapshots({
         ...sharedSnapshotFields,
         workspaces,
         agents,
-        models: mapModels(agents),
+        models: buildModelRecords(models, agents),
         runtimes,
         tasks,
         relationships
@@ -1688,7 +758,7 @@ async function loadMissionControlSnapshots({
         ...sharedSnapshotFields,
         workspaces: visibleWorkspaces,
         agents: visibleAgents,
-        models: mapModels(visibleAgents),
+        models: buildModelRecords(models, visibleAgents),
         runtimes: visibleRuntimes,
         tasks: visibleTasks,
         relationships: visibleRelationships
@@ -1708,7 +778,7 @@ async function loadMissionControlSnapshots({
   }
 }
 
-function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair {
+function createSnapshotPair(snapshot: MissionControlSnapshot): SnapshotPair<MissionControlSnapshot> {
   return {
     visible: snapshot,
     full: snapshot
@@ -1727,12 +797,12 @@ function resolveRuntimeSmokeTestAgentId(
 }
 
 async function assertOpenClawRuntimeStateAccess(agentId: string | null) {
-  const runtimeState = await inspectOpenClawRuntimeState(agentId ? [agentId] : [], {
+  const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentId ? [agentId] : [], {
     touch: true
   });
 
   if (runtimeState.issues.length > 0) {
-    snapshotCache = null;
+    invalidateSnapshotCache();
     throw new Error(
       `OpenClaw runtime state is not writable. AgentOS needs write access to ${runtimeState.stateRoot} and the agent session store before missions can run.`
     );
@@ -1743,7 +813,7 @@ export async function ensureOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
 } = {}) {
   await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getMissionControlSnapshot({ force: true, includeHidden: true });
 }
 
@@ -1751,7 +821,7 @@ export async function touchOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
 } = {}) {
   await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
-  snapshotCache = null;
+  invalidateSnapshotCache();
 }
 
 export async function ensureOpenClawRuntimeSmokeTest(options: {
@@ -1782,19 +852,13 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
   await assertOpenClawRuntimeStateAccess(agentId);
 
   try {
-    const payload = await runOpenClawJson<MissionCommandPayload>(
-      [
-        "agent",
-        "--agent",
+    const payload = await getOpenClawGatewayClient().runAgentTurn(
+      {
         agentId,
-        "--message",
-        runtimeSmokeTestMessage,
-        "--thinking",
-        "off",
-        "--timeout",
-        "45",
-        "--json"
-      ],
+        message: runtimeSmokeTestMessage,
+        thinking: "off",
+        timeoutSeconds: 45
+      },
       { timeoutMs: 50000 }
     );
     const result: OpenClawRuntimeSmokeTest = {
@@ -1810,7 +874,7 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
     };
 
     await persistRuntimeSmokeTest(result);
-    snapshotCache = null;
+    invalidateSnapshotCache();
     return result;
   } catch (error) {
     const result: OpenClawRuntimeSmokeTest = {
@@ -1823,7 +887,7 @@ export async function ensureOpenClawRuntimeSmokeTest(options: {
     };
 
     await persistRuntimeSmokeTest(result);
-    snapshotCache = null;
+    invalidateSnapshotCache();
     return result;
   }
 }
@@ -1969,23 +1033,12 @@ export async function createAgent(input: AgentCreateInput) {
   const requestedModelId = normalizeOptionalValue(input.modelId);
   const agentModelId = requestedModelId ?? resolveSnapshotDefaultAgentModelId(snapshot);
 
-  const args = [
-    "agents",
-    "add",
-    agentId,
-    "--workspace",
-    resolvedWorkspacePath,
-    "--agent-dir",
+  await getOpenClawGatewayClient().addAgent({
+    id: agentId,
+    workspace: resolvedWorkspacePath,
     agentDir,
-    "--non-interactive",
-    "--json"
-  ];
-
-  if (agentModelId) {
-    args.push("--model", agentModelId);
-  }
-
-  await runOpenClaw(args);
+    model: agentModelId
+  });
 
   const policySkillId = await ensureAgentPolicySkillFromProvisioning({
     workspacePath: resolvedWorkspacePath,
@@ -2048,7 +1101,7 @@ export async function createAgent(input: AgentCreateInput) {
     channelIds: input.channelIds ?? []
   });
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
 
   return {
@@ -2143,7 +1196,7 @@ export async function updateAgent(input: AgentUpdateInput) {
       policy
     });
 
-    snapshotCache = null;
+    invalidateSnapshotCache();
 
     return {
       agentId,
@@ -2220,7 +1273,7 @@ export async function updateAgent(input: AgentUpdateInput) {
     toolIds: nextDeclaredTools
   });
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   await syncWorkspaceAgentPolicySkills(resolvedWorkspacePath);
 
   return {
@@ -2251,7 +1304,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent.workspaceId) ?? null;
   const runtimeCount = snapshot.runtimes.filter((runtime) => runtime.agentId === agent.id).length;
 
-  await runOpenClaw(["agents", "delete", agent.id, "--force", "--json"]);
+  await getOpenClawGatewayClient().deleteAgent(agent.id);
 
   try {
     const configList = await readAgentConfigList(snapshot);
@@ -2276,7 +1329,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
       // Ignore skill cleanup failures for already-pruned workspaces.
     }
 
-    snapshotCache = null;
+    invalidateSnapshotCache();
     await syncWorkspaceAgentPolicySkills(workspace.path);
   }
 
@@ -2367,7 +1420,7 @@ export async function upsertWorkspaceChannel(input: {
     }, {}, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2410,7 +1463,7 @@ export async function disconnectWorkspaceChannel(input: {
     }, {}, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2467,7 +1520,7 @@ export async function deleteWorkspaceChannelEverywhere(input: {
     )
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return measureTiming(timings, "channel.delete-read-final-registry", () => getChannelRegistry());
 }
 
@@ -2491,7 +1544,7 @@ export async function setWorkspaceChannelPrimary(input: {
     }, {}, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2554,7 +1607,7 @@ export async function setWorkspaceChannelGroups(input: {
     }, { removedGroupIds }, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2600,7 +1653,7 @@ export async function bindWorkspaceChannelAgent(input: {
     }, {}, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2656,7 +1709,7 @@ export async function unbindWorkspaceChannelAgent(input: {
     }, {}, timings)
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   return getChannelRegistry();
 }
 
@@ -2734,7 +1787,7 @@ export async function createWorkspaceProject(
     await progress.addActivity("kickoff", "Kickoff was already handled by the existing workspace.", "done");
     await progress.completeStep("kickoff", "Workspace bootstrap is already complete.");
 
-    snapshotCache = null;
+    invalidateSnapshotCache();
     clearRuntimeHistoryCache();
 
     return existingWorkspaceResult;
@@ -2805,7 +1858,7 @@ export async function createWorkspaceProject(
     `${createdAgentIds.length} agent${createdAgentIds.length === 1 ? "" : "s"} linked to the workspace.`
   );
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   await syncWorkspaceAgentPolicySkills(targetDir);
 
   const primaryAgentId =
@@ -2858,7 +1911,7 @@ export async function createWorkspaceProject(
     await progress.completeStep("kickoff", "Workspace bootstrap finished without kickoff.");
   }
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   clearRuntimeHistoryCache();
 
   return {
@@ -3034,7 +2087,7 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
     await writeAgentConfigList(updatedConfig);
   }
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   clearRuntimeHistoryCache();
 
   return {
@@ -3265,7 +2318,7 @@ async function applyWorkspacePlanEdits(
 
   await writeTextFileEnsured(projectManifestPath, `${JSON.stringify(projectManifest, null, 2)}\n`);
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   clearRuntimeHistoryCache();
 
   return {
@@ -3372,7 +2425,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
   const runtimeCount = snapshot.runtimes.filter((runtime) => runtime.workspaceId === workspace.id).length;
 
   for (const agent of workspaceAgents) {
-    await runOpenClaw(["agents", "delete", agent.id, "--force", "--json"]);
+    await getOpenClawGatewayClient().deleteAgent(agent.id);
   }
 
   try {
@@ -3404,12 +2457,12 @@ export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null
   const gatewayUrl = normalizeGatewayRemoteUrl(input.gatewayUrl);
 
   if (gatewayUrl) {
-    await runOpenClaw(["config", "set", GATEWAY_REMOTE_URL_CONFIG_KEY, gatewayUrl]);
+    await getOpenClawGatewayClient().setConfig(GATEWAY_REMOTE_URL_CONFIG_KEY, gatewayUrl);
   } else if (await hasGatewayRemoteUrlConfig()) {
-    await runOpenClaw(["config", "unset", GATEWAY_REMOTE_URL_CONFIG_KEY]);
+    await getOpenClawGatewayClient().unsetConfig(GATEWAY_REMOTE_URL_CONFIG_KEY);
   }
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   clearRuntimeHistoryCache();
 
   return getMissionControlSnapshot({ force: true });
@@ -3424,241 +2477,19 @@ export async function updateWorkspaceRoot(input: { workspaceRoot?: string | null
     ...(settings.runtimePreflight ? { runtimePreflight: settings.runtimePreflight } : {})
   });
 
-  snapshotCache = null;
+  invalidateSnapshotCache();
   clearRuntimeHistoryCache();
 
   return getMissionControlSnapshot({ force: true });
 }
 
-function buildOpenClawSessionStorePath(agentId: string) {
-  return path.join(openClawStateRootPath, "agents", agentId, "sessions");
-}
-
-function formatRuntimeWriteabilityIssue(targetPath: string, error: unknown) {
-  if (!error || typeof error !== "object") {
-    return `${targetPath}: unknown filesystem error`;
-  }
-
-  const code =
-    "code" in error && typeof error.code === "string"
-      ? error.code
-      : "unknown";
-  const message =
-    "message" in error && typeof error.message === "string"
-      ? error.message
-      : "unknown filesystem error";
-
-  return `${targetPath}: ${code} ${message}`;
-}
-
-async function probeDirectoryWriteability(
-  targetPath: string,
-  options: {
-    createIfMissing?: boolean;
-    touch?: boolean;
-  } = {}
-) {
-  try {
-    if (options.createIfMissing !== false) {
-      await mkdir(targetPath, { recursive: true });
-    }
-
-    await access(targetPath, fsConstants.R_OK | fsConstants.W_OK);
-
-    if (options.touch) {
-      const probeFilePath = path.join(
-        targetPath,
-        `.agentos-write-check-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-      );
-
-      await writeFile(probeFilePath, "", "utf8");
-      await rm(probeFilePath, { force: true });
-    }
-
-    return {
-      writable: true,
-      issue: null
-    };
-  } catch (error) {
-    return {
-      writable: false,
-      issue: formatRuntimeWriteabilityIssue(targetPath, error)
-    };
-  }
-}
-
-async function inspectOpenClawRuntimeState(
-  agentIds: string[],
-  options: {
-    touch?: boolean;
-  } = {}
-): Promise<OpenClawRuntimeState> {
-  const uniqueAgentIds = [...new Set(agentIds.filter(Boolean))];
-  const stateRootProbe = await probeDirectoryWriteability(openClawStateRootPath, {
-    createIfMissing: true,
-    touch: options.touch
-  });
-  const sessionStores = await Promise.all(
-    uniqueAgentIds.map(async (agentId) => {
-      const storePath = buildOpenClawSessionStorePath(agentId);
-      const probe = await probeDirectoryWriteability(storePath, {
-        createIfMissing: true,
-        touch: options.touch
-      });
-
-      return {
-        id: agentId,
-        path: storePath,
-        writable: probe.writable,
-        issue: probe.issue
-      };
-    })
-  );
-  const sessionStoreWritable = sessionStores.every((entry) => entry.writable);
-  const issues = [
-    stateRootProbe.writable
-      ? null
-      : `OpenClaw state root is not writable. ${stateRootProbe.issue ?? openClawStateRootPath}`,
-    ...sessionStores
-      .filter((entry) => !entry.writable)
-      .map((entry) => `OpenClaw session store for ${entry.id} is not writable. ${entry.issue ?? entry.path}`)
-  ].filter((value): value is string => Boolean(value));
-
-  return {
-    stateRoot: openClawStateRootPath,
-    stateWritable: stateRootProbe.writable,
-    sessionStoreWritable: stateRootProbe.writable && sessionStoreWritable,
-    sessionStores,
-    issues
-  };
-}
-
-async function readOpenClawRuntimeState(agentIds: string[], force = false) {
-  const agentIdsKey = buildRuntimeDiagnosticsAgentKey(agentIds);
-  const cached = runtimeDiagnosticsCache;
-  const cacheMatches = Boolean(cached && cached.agentIdsKey === agentIdsKey);
-  const cacheIsFresh = Boolean(cacheMatches && cached && cached.expiresAt > Date.now());
-
-  if (!force && cacheIsFresh && cached) {
-    return cached.value;
-  }
-
-  if (!force && cacheMatches && cached) {
-    if (!runtimeDiagnosticsPromise) {
-      runtimeDiagnosticsPromise = loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds);
-      void runtimeDiagnosticsPromise.catch(() => {});
-      void runtimeDiagnosticsPromise.finally(() => {
-        runtimeDiagnosticsPromise = null;
-      }).catch(() => {});
-    }
-
-    return cached.value;
-  }
-
-  if (!force && runtimeDiagnosticsPromise && cacheMatches && cached) {
-    return cached.value;
-  }
-
-  if (runtimeDiagnosticsPromise && !force) {
-    return runtimeDiagnosticsPromise;
-  }
-
-  if (force && runtimeDiagnosticsPromise) {
-    return runtimeDiagnosticsPromise;
-  }
-
-  runtimeDiagnosticsPromise = loadRuntimeDiagnosticsStateForCurrentGeneration(agentIds);
-  void runtimeDiagnosticsPromise.catch(() => {});
-  void runtimeDiagnosticsPromise.finally(() => {
-    runtimeDiagnosticsPromise = null;
-  }).catch(() => {});
-
-  return force ? await runtimeDiagnosticsPromise : runtimeDiagnosticsPromise;
-}
-
 async function buildRuntimeDiagnostics(agentIds: string[], settings: MissionControlSettings) {
-  const runtimeState = await readOpenClawRuntimeState(agentIds);
+  const runtimeState = await runtimeDiagnosticsStateCache.read(agentIds);
   const smokeTest = getLatestRuntimeSmokeTest(settings);
-  const issues = [
-    ...runtimeState.issues,
-    ...(smokeTest.status === "failed" && smokeTest.error
-      ? [
-          `Latest runtime smoke test failed for ${smokeTest.agentId ?? "unknown agent"}. ${smokeTest.error}`
-        ]
-      : [])
-  ];
-
-  return {
-    ...runtimeState,
-    smokeTest,
-    issues
-  } satisfies MissionControlSnapshot["diagnostics"]["runtime"];
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function _createBootstrappedWorkspaceAgent(params: {
-  workspacePath: string;
-  workspaceSlug: string;
-  workspaceModelId?: string;
-  agent: WorkspaceAgentBlueprintInput;
-}) {
-  const agentId = createWorkspaceAgentId(params.workspaceSlug, params.agent.id);
-  const modelId =
-    normalizeOptionalValue(params.agent.modelId) ?? normalizeOptionalValue(params.workspaceModelId);
-  const policy = resolveAgentPolicy(
-    params.agent.policy?.preset ?? inferAgentPresetFromContext({
-      skills: params.agent.skillId ? [params.agent.skillId] : [],
-      id: agentId,
-      name: params.agent.name
-    }),
-    params.agent.policy
-  );
-  const args = [
-    "agents",
-    "add",
-    agentId,
-    "--workspace",
-    params.workspacePath,
-    "--agent-dir",
-    buildWorkspaceAgentStatePath(params.workspacePath, agentId),
-    "--non-interactive",
-    "--json"
-  ];
-
-  if (modelId) {
-    args.push("--model", modelId);
-  }
-
-  await runOpenClaw(args);
-
-  const policySkillId = await ensureAgentPolicySkill({
-    workspacePath: params.workspacePath,
-    agentId,
-    agentName: params.agent.name,
-    policy
-  });
-
-  const configEntry = await upsertAgentConfigEntry(agentId, params.workspacePath, {
-    name: normalizeOptionalValue(params.agent.name),
-    model: modelId,
-    heartbeat: serializeHeartbeatConfig(params.agent.heartbeat),
-    skills: [normalizeOptionalValue(params.agent.skillId), policySkillId].filter((value): value is string => Boolean(value)),
-    tools: policy.fileAccess === "workspace-only"
-      ? {
-          fs: {
-            workspaceOnly: true
-          }
-        }
-      : null
-  });
-
-  await applyAgentIdentity(agentId, params.workspacePath, {
-    name: normalizeOptionalValue(params.agent.name) ?? configEntry.name,
-    emoji: normalizeOptionalValue(params.agent.emoji),
-    theme: normalizeOptionalValue(params.agent.theme)
-  }, buildWorkspaceAgentStatePath(params.workspacePath, agentId));
-
-  return agentId;
+  return buildRuntimeDiagnosticsFromState(
+    runtimeState,
+    smokeTest
+  ) satisfies MissionControlSnapshot["diagnostics"]["runtime"];
 }
 
 async function runWorkspaceKickoffMission(
@@ -3687,21 +2518,14 @@ async function runWorkspaceKickoffMission(
     percent: 18
   });
 
-  const result = await runOpenClawJsonStream<MissionCommandPayload>(
-    [
-      "agent",
-      "--agent",
-      params.agentId,
-      "--message",
-      prompt,
-      "--thinking",
-      thinking,
-      "--timeout",
-      "90",
-      "--json"
-    ],
+  const result = await getOpenClawGatewayClient().streamAgentTurn(
     {
-      timeoutMs: 120000,
+      agentId: params.agentId,
+      message: prompt,
+      thinking,
+      timeoutSeconds: 90
+    },
+    {
       onStdout: async (text: string) => {
         const messages = extractKickoffProgressMessages(text);
 
@@ -3739,7 +2563,8 @@ async function runWorkspaceKickoffMission(
           percent: 64
         });
       }
-    }
+    },
+    { timeoutMs: 120000 }
   );
 
   await options.onProgress?.({
@@ -3874,577 +2699,6 @@ function _assertWorkspaceBootstrapAgentIdsAvailable(
       `Workspace bootstrap would create agent id "${agentId}", but it already exists in workspace "${describeAgentWorkspace(snapshot, existingAgent)}". Rename the workspace or adjust the agent ids.`
     );
   }
-}
-
-type TelegramCoordinationChannelSummary = {
-  channelId: string;
-  channelName: string;
-  groups: Array<{ chatId: string; title: string | null }>;
-  peers: Array<{ agentId: string; name: string; summary: string }>;
-};
-
-type TelegramOwnedGroupSummary = {
-  channelId: string;
-  channelName: string;
-  chatId: string;
-  title: string | null;
-  primaryAgentId: string;
-  primaryAgentName: string;
-  peers: Array<{ agentId: string; name: string; summary: string }>;
-};
-
-type TelegramCoordinationContext = {
-  primaryChannels: TelegramCoordinationChannelSummary[];
-  ownedGroups: TelegramOwnedGroupSummary[];
-  delegateChannels: Array<
-    TelegramCoordinationChannelSummary & {
-      primaryAgentId: string;
-      primaryAgentName: string;
-    }
-  >;
-};
-
-type WorkspaceTeamMemberSummary = {
-  agentId: string;
-  name: string;
-  role: string;
-  isPrimary: boolean;
-  isCurrent: boolean;
-};
-
-type WorkspaceTeamContext = {
-  members: WorkspaceTeamMemberSummary[];
-};
-
-async function ensureAgentPolicySkill(params: {
-  workspacePath: string;
-  agentId: string;
-  agentName: string;
-  policy: AgentPolicy;
-  setupAgentId?: string | null;
-  snapshot?: MissionControlSnapshot;
-  channelRegistry?: ChannelRegistry;
-}) {
-  const skillId = buildAgentPolicySkillId(params.agentId);
-  await ensureTelegramDelegationHelper(params.workspacePath);
-  const team = await buildWorkspaceTeamContext(
-    params.workspacePath,
-    params.agentId,
-    params.snapshot ?? null
-  );
-  const coordination = buildTelegramCoordinationContext(
-    params.agentId,
-    params.snapshot ?? null,
-    params.channelRegistry ?? params.snapshot?.channelRegistry ?? null
-  );
-  await writeTextFileEnsured(
-    path.join(params.workspacePath, "skills", skillId, "SKILL.md"),
-    `${renderAgentPolicySkillMarkdown(params.agentName, params.policy, params.setupAgentId, team, coordination)}\n`
-  );
-  return skillId;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-async function _ensureWorkspaceSkillMarkdown(workspacePath: string, skillId: string) {
-  const [knownSkillId] = filterKnownOpenClawSkillIds([skillId]);
-
-  if (!knownSkillId) {
-    return;
-  }
-
-  const skillPath = path.join(workspacePath, "skills", skillId);
-  await mkdir(skillPath, { recursive: true });
-  await writeTextFileIfMissing(
-    path.join(skillPath, "SKILL.md"),
-    `${renderSkillMarkdown(knownSkillId, formatCapabilityLabel(knownSkillId))}\n`
-  );
-}
-
-async function ensureTelegramDelegationHelper(workspacePath: string) {
-  const helperPath = path.join(workspacePath, ".openclaw", "tools", "telegram-delegate-agent.mjs");
-  await writeTextFileEnsured(helperPath, `${renderTelegramDelegationHelperScript()}\n`);
-}
-
-function formatTelegramGroupReference(group: { chatId: string; title: string | null }) {
-  return group.title && group.title !== group.chatId ? `${group.title} (\`${group.chatId}\`)` : `\`${group.chatId}\``;
-}
-
-function describeTelegramAgentCapability(agent: OpenClawAgent | null) {
-  if (!agent) {
-    return "no capability snapshot";
-  }
-
-  const parts: string[] = [formatAgentPresetLabel(agent.policy.preset)];
-
-  const purpose = agent.profile.purpose?.trim();
-  if (purpose) {
-    parts.push(purpose);
-  }
-
-  const skills = uniqueStrings(agent.skills).slice(0, 2);
-  if (skills.length > 0) {
-    parts.push(`skills: ${skills.join(", ")}`);
-  }
-
-  const tools = uniqueStrings(agent.tools).slice(0, 2);
-  if (tools.length > 0) {
-    parts.push(`tools: ${tools.join(", ")}`);
-  }
-
-  return parts.join(" · ");
-}
-
-function buildTelegramCoordinationContext(
-  agentId: string,
-  snapshot: MissionControlSnapshot | null,
-  registry: ChannelRegistry | null
-): TelegramCoordinationContext | null {
-  if (!registry) {
-    return null;
-  }
-
-  const agentNameById = new Map(
-    snapshot?.agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]) ?? []
-  );
-  const agentById = new Map(snapshot?.agents.map((agent) => [agent.id, agent]) ?? []);
-  const currentAgent = agentById.get(agentId) ?? null;
-  const currentWorkspaceId = currentAgent?.workspaceId ?? null;
-  const primaryChannels: TelegramCoordinationChannelSummary[] = [];
-  const ownedGroups: TelegramOwnedGroupSummary[] = [];
-  const delegateChannels: Array<
-    TelegramCoordinationChannelSummary & {
-      primaryAgentId: string;
-      primaryAgentName: string;
-    }
-  > = [];
-
-  for (const channel of registry.channels.filter((entry) => entry.type === "telegram")) {
-    const workspaceBindings = channel.workspaces.filter((workspace) => workspace.workspaceId === currentWorkspaceId);
-
-    if (workspaceBindings.length === 0) {
-      continue;
-    }
-
-    const groups = uniqueByChatId(
-      workspaceBindings.flatMap((workspace) =>
-        workspace.groupAssignments.filter((assignment) => assignment.enabled !== false)
-      )
-    ).map((assignment) => ({
-      chatId: assignment.chatId,
-      title: assignment.title ?? null
-    }));
-    const ownedAssignments = uniqueByChatId(
-      workspaceBindings.flatMap((workspace) =>
-        workspace.groupAssignments.filter(
-          (assignment) => assignment.enabled !== false && assignment.agentId === agentId
-        )
-      )
-    );
-    const fallbackGroups = groups.filter(
-      (group) =>
-        !ownedAssignments.some((assignment) => assignment.chatId === group.chatId) &&
-        !workspaceBindings.some((workspace) =>
-          workspace.groupAssignments.some(
-            (assignment) => assignment.enabled !== false && assignment.chatId === group.chatId && assignment.agentId
-          )
-        )
-    );
-
-    if (channel.primaryAgentId === agentId) {
-      const peers = uniqueStrings(
-        workspaceBindings.flatMap((workspace) => workspace.agentIds.filter((candidate) => candidate !== agentId))
-      ).map((peerId) => {
-        const peer = agentById.get(peerId) ?? null;
-        return {
-          agentId: peerId,
-          name: agentNameById.get(peerId) ?? peerId,
-          summary: describeTelegramAgentCapability(peer)
-        };
-      });
-
-      primaryChannels.push({
-        channelId: channel.id,
-        channelName: channel.name,
-        groups: fallbackGroups,
-        peers
-      });
-    }
-
-    for (const assignment of ownedAssignments) {
-      const peers = uniqueStrings(
-        workspaceBindings.flatMap((workspace) =>
-          workspace.agentIds.filter((candidate) => candidate !== agentId && candidate !== channel.primaryAgentId)
-        )
-      ).map((peerId) => {
-        const peer = agentById.get(peerId) ?? null;
-        return {
-          agentId: peerId,
-          name: agentNameById.get(peerId) ?? peerId,
-          summary: describeTelegramAgentCapability(peer)
-        };
-      });
-
-      ownedGroups.push({
-        channelId: channel.id,
-        channelName: channel.name,
-        chatId: assignment.chatId,
-        title: assignment.title ?? null,
-        primaryAgentId: channel.primaryAgentId ?? "",
-        primaryAgentName: channel.primaryAgentId ? agentNameById.get(channel.primaryAgentId) ?? channel.primaryAgentId : "Unset",
-        peers
-      });
-    }
-
-    if (channel.primaryAgentId && channel.primaryAgentId !== agentId && ownedAssignments.length === 0) {
-      delegateChannels.push({
-        channelId: channel.id,
-        channelName: channel.name,
-        groups: fallbackGroups,
-        peers: uniqueStrings(
-          workspaceBindings.flatMap((workspace) =>
-            workspace.agentIds.filter((candidate) => candidate !== channel.primaryAgentId && candidate !== agentId)
-          )
-        ).map((peerId) => {
-          const peer = agentById.get(peerId) ?? null;
-          return {
-            agentId: peerId,
-            name: agentNameById.get(peerId) ?? peerId,
-            summary: describeTelegramAgentCapability(peer)
-          };
-        }),
-        primaryAgentId: channel.primaryAgentId,
-        primaryAgentName: agentNameById.get(channel.primaryAgentId) ?? channel.primaryAgentId
-      });
-    }
-  }
-
-  if (primaryChannels.length === 0 && delegateChannels.length === 0) {
-    if (ownedGroups.length === 0) {
-      return null;
-    }
-  }
-
-  return {
-    primaryChannels: primaryChannels.sort((left, right) => left.channelName.localeCompare(right.channelName)),
-    ownedGroups: ownedGroups.sort((left, right) => {
-      const leftLabel = `${left.channelName}:${left.title ?? left.chatId}`;
-      const rightLabel = `${right.channelName}:${right.title ?? right.chatId}`;
-      return leftLabel.localeCompare(rightLabel);
-    }),
-    delegateChannels: delegateChannels.sort((left, right) => left.channelName.localeCompare(right.channelName))
-  };
-}
-
-function renderTelegramCoordinationMarkdown(coordination: TelegramCoordinationContext | null | undefined) {
-  if (
-    !coordination ||
-    (coordination.primaryChannels.length === 0 &&
-      coordination.ownedGroups.length === 0 &&
-      coordination.delegateChannels.length === 0)
-  ) {
-    return null;
-  }
-
-  const lines: string[] = ["## Telegram coordination"];
-
-  lines.push(
-    "- Telegram credentials are managed by OpenClaw for the listed channels. Do not ask the operator for `TELEGRAM_BOT_TOKEN` or `channels.telegram.botToken` when sending to listed groups."
-  );
-  lines.push(
-    '- To send or post, call the `message` tool with `action: "send"`, `channel: "telegram"`, `target: "<chatId>"`, and the exact message text. Use the listed chat id as `target`.'
-  );
-  lines.push("- If sending fails, report the actual tool error instead of inventing a missing-token error.");
-
-  if (coordination.primaryChannels.length > 0) {
-    lines.push("- You are the public Telegram fallback for these channels:");
-    for (const channel of coordination.primaryChannels) {
-      const groupSummary =
-        channel.groups.length > 0
-          ? channel.groups.map(formatTelegramGroupReference).join(", ")
-          : "no allowed groups yet";
-      lines.push(`  - ${channel.channelName} (\`${channel.channelId}\`) · fallback groups: ${groupSummary}.`);
-      if (channel.peers.length > 0) {
-        lines.push("  - Internal assistants:");
-        for (const peer of channel.peers) {
-          lines.push(`    - ${peer.name} (\`${peer.agentId}\`) · ${peer.summary}.`);
-        }
-      }
-    }
-    lines.push("- Keep public Telegram replies under your own voice for unassigned groups, even when you ask another agent for help.");
-    lines.push("- For specialist help, call another agent from the workspace terminal with:");
-    lines.push("```bash");
-    lines.push('node .openclaw/tools/telegram-delegate-agent.mjs --agent <delegate-agent-id> --message "Summarize what I need from you"');
-    lines.push("```");
-    lines.push("- Use delegate turns for internal research, drafting, or analysis only. Do not ask them to answer Telegram directly.");
-    lines.push("- After a delegate responds, decide what to share publicly and send the final Telegram reply yourself.");
-  }
-
-  if (coordination.ownedGroups.length > 0) {
-    lines.push("- You are the public Telegram voice for these assigned groups:");
-    for (const group of coordination.ownedGroups) {
-      lines.push(
-        `  - ${group.channelName} (\`${group.channelId}\`) · ${group.title ?? group.chatId} (\`${group.chatId}\`) · primary ${group.primaryAgentName} (\`${group.primaryAgentId}\`).`
-      );
-      if (group.peers.length > 0) {
-        lines.push("  - Internal assistants for this group:");
-        for (const peer of group.peers) {
-          lines.push(`    - ${peer.name} (\`${peer.agentId}\`) · ${peer.summary}.`);
-        }
-      }
-    }
-    lines.push("- Reply directly to those groups as the public voice. Use other agents only for internal help.");
-  }
-
-  if (coordination.delegateChannels.length > 0) {
-    lines.push("- You can assist these Telegram admin channels when the primary agent asks:");
-    for (const channel of coordination.delegateChannels) {
-      const groupSummary =
-        channel.groups.length > 0
-          ? channel.groups.map(formatTelegramGroupReference).join(", ")
-          : "no allowed groups yet";
-      lines.push(
-        `  - ${channel.channelName} (\`${channel.channelId}\`) · primary ${channel.primaryAgentName} (\`${channel.primaryAgentId}\`) · groups: ${groupSummary}.`
-      );
-      if (channel.peers.length > 0) {
-        lines.push("    - Nearby assistants:");
-        for (const peer of channel.peers) {
-          lines.push(`      - ${peer.name} (\`${peer.agentId}\`) · ${peer.summary}.`);
-        }
-      }
-    }
-    lines.push("- When helping with Telegram work for groups not assigned to you, return concise internal findings or draft language. Do not speak as the public Telegram agent for those unassigned groups.");
-  }
-
-  return lines.join("\n");
-}
-
-function renderTelegramDelegationHelperScript() {
-  return String.raw`#!/usr/bin/env node
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
-
-function parseArgs(argv) {
-  const options = {
-    agentId: "",
-    message: "",
-    thinking: "low",
-    json: false,
-    stdin: false
-  };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--agent") {
-      options.agentId = argv[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--message") {
-      options.message = argv[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--thinking") {
-      options.thinking = argv[index + 1] ?? "low";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--json") {
-      options.json = true;
-      continue;
-    }
-
-    if (arg === "--stdin") {
-      options.stdin = true;
-      continue;
-    }
-  }
-
-  return options;
-}
-
-function usage() {
-  process.stderr.write(
-    "Usage: node .openclaw/tools/telegram-delegate-agent.mjs --agent <id> --message <text> [--thinking low|medium|high] [--json]\n"
-  );
-}
-
-function extractText(payload) {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  if (typeof payload.summary === "string" && payload.summary.trim()) {
-    return payload.summary.trim();
-  }
-
-  if (Array.isArray(payload.payloads)) {
-    for (const entry of payload.payloads) {
-      if (entry && typeof entry === "object") {
-        if (typeof entry.text === "string" && entry.text.trim()) {
-          return entry.text.trim();
-        }
-
-        if (typeof entry.content === "string" && entry.content.trim()) {
-          return entry.content.trim();
-        }
-      }
-    }
-  }
-
-  if (payload.result && typeof payload.result === "object") {
-    return extractText(payload.result);
-  }
-
-  return "";
-}
-
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-  }
-  return Buffer.concat(chunks).toString("utf8").trim();
-}
-
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.stdin) {
-    options.message = await readStdin();
-  }
-
-  if (!options.agentId || !options.message.trim()) {
-    usage();
-    process.exit(1);
-  }
-
-  const args = [
-    "agent",
-    "--agent",
-    options.agentId,
-    "--message",
-    options.message.trim(),
-    "--thinking",
-    options.thinking,
-    "--json"
-  ];
-
-  try {
-    const { stdout } = await execFileAsync("openclaw", args, {
-      cwd: process.cwd(),
-      maxBuffer: 4 * 1024 * 1024
-    });
-    const parsed = JSON.parse(stdout);
-
-    if (options.json) {
-      process.stdout.write(JSON.stringify(parsed, null, 2) + "\n");
-      return;
-    }
-
-    const text = extractText(parsed);
-    process.stdout.write((text || JSON.stringify(parsed, null, 2)) + "\n");
-  } catch (error) {
-    const message =
-      error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string"
-        ? error.stderr.trim()
-        : error instanceof Error
-          ? error.message
-          : "Telegram delegation failed.";
-    process.stderr.write(String(message) + "\n");
-    process.exit(1);
-  }
-}
-
-await main();
-`;
-}
-
-async function buildWorkspaceTeamContext(
-  workspacePath: string,
-  agentId: string,
-  snapshot: MissionControlSnapshot | null
-): Promise<WorkspaceTeamContext | null> {
-  if (!snapshot) {
-    return null;
-  }
-
-  const currentAgent = snapshot.agents.find((entry) => entry.id === agentId);
-
-  if (!currentAgent) {
-    return null;
-  }
-
-  const manifest = await readWorkspaceProjectManifest(workspacePath);
-  const manifestAgentById = new Map(manifest.agents.map((entry) => [entry.id, entry]));
-  const members = snapshot.agents
-    .filter((entry) => entry.workspaceId === currentAgent.workspaceId)
-    .sort((left, right) => {
-      if (left.id === agentId && right.id !== agentId) {
-        return -1;
-      }
-
-      if (right.id === agentId && left.id !== agentId) {
-        return 1;
-      }
-
-      const leftManifest = manifestAgentById.get(left.id);
-      const rightManifest = manifestAgentById.get(right.id);
-      const leftPrimary = leftManifest?.isPrimary ?? false;
-      const rightPrimary = rightManifest?.isPrimary ?? false;
-
-      if (leftPrimary !== rightPrimary) {
-        return leftPrimary ? -1 : 1;
-      }
-
-      return formatAgentDisplayName(left).localeCompare(formatAgentDisplayName(right));
-    })
-    .map((entry) => {
-      const manifestAgent = manifestAgentById.get(entry.id);
-
-      return {
-        agentId: entry.id,
-        name: formatAgentDisplayName(entry),
-        role: manifestAgent?.role?.trim() || formatAgentPresetLabel(entry.policy.preset),
-        isPrimary: manifestAgent?.isPrimary ?? false,
-        isCurrent: entry.id === agentId
-      } satisfies WorkspaceTeamMemberSummary;
-    });
-
-  return members.length > 0 ? { members } : null;
-}
-
-function renderWorkspaceTeamMarkdown(team: WorkspaceTeamContext | null | undefined) {
-  if (!team || team.members.length === 0) {
-    return null;
-  }
-
-  const lines = [
-    "## Workspace team",
-    "- This workspace currently includes these agents. Do not assume you are the only agent unless you verify the roster again.",
-    "- Use these exact agent ids when referring to teammates or handing work off:"
-  ];
-
-  for (const member of team.members) {
-    const labels = [
-      member.isCurrent ? "you" : null,
-      member.isPrimary ? "primary" : null,
-      member.role
-    ].filter((value): value is string => Boolean(value));
-
-    lines.push(`- ${member.name} (\`${member.agentId}\`) · ${labels.join(" · ")}.`);
-  }
-
-  lines.push(
-    "- If you are asked who is in this workspace, answer from this roster or re-check `.openclaw/project.json` before replying."
-  );
-
-  return lines.join("\n");
 }
 
 export function renderAgentsMarkdown(params: {
@@ -4681,227 +2935,9 @@ export function renderTemplateSpecificDoc(kind: "ux" | "backend" | "research" | 
 `;
 }
 
-function renderAgentPolicySkillMarkdown(
-  agentName: string,
-  policy: AgentPolicy,
-  setupAgentId?: string | null,
-  team?: WorkspaceTeamContext | null,
-  coordination?: TelegramCoordinationContext | null
-) {
-  const presetLabel = formatAgentPresetLabel(policy.preset);
-  const teamSection = renderWorkspaceTeamMarkdown(team);
-  const coordinationSection = renderTelegramCoordinationMarkdown(coordination);
-
-  return `# ${agentName} Policy
-
-Preset: ${presetLabel}
-
-## Output routing
-- Final deliverables belong in the current deliverables run folder for the task.
-- Keep temporary notes and durable workspace memory inside memory/.
-- Treat MEMORY.md, memory/*.md, docs/brief.md, docs/architecture.md, and any template-specific docs under docs/ as shared workspace context before large edits.
-- Avoid writing final artifacts to the workspace root unless the task explicitly asks for it.
-
-## Operating rules
-${buildAgentPolicyPromptLines(policy, setupAgentId)
-  .map((line) => line.replace(/^- /, "- "))
-  .join("\n")}
-${teamSection ? `\n\n${teamSection}` : ""}${coordinationSection ? `\n\n${coordinationSection}` : ""}
-`;
-}
-
 function workspaceIdFromPath(workspacePath: string) {
   const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
   return `workspace:${hash}`;
-}
-
-async function readAgentBootstrapProfile(
-  workspacePath: string,
-  options: {
-    agentId: string;
-    agentName: string;
-    agentDir?: string;
-    configuredSkills: string[];
-    configuredTools: string[];
-    template?: WorkspaceTemplate | null;
-    rules?: WorkspaceCreateRules;
-    workspaceBootstrapProfile?: WorkspaceBootstrapProfileCache;
-  }
-): Promise<AgentBootstrapProfile> {
-  const workspaceBootstrapProfile =
-    options.workspaceBootstrapProfile ??
-    (await buildWorkspaceBootstrapProfileCache(
-      workspacePath,
-      options.template,
-      options.rules
-    ));
-  const profileFiles = workspaceBootstrapProfile.profileFiles;
-  const contextManifest = workspaceBootstrapProfile.contextManifest;
-  const sections = new Map(workspaceBootstrapProfile.workspaceSections);
-  const sources = [...workspaceBootstrapProfile.workspaceSources];
-  const agentDir = normalizeOptionalValue(options.agentDir);
-
-  if (agentDir) {
-    const agentEntries = await Promise.all(
-      profileFiles.map((fileName) => readBootstrapProfileFile(agentDir, workspacePath, fileName))
-    );
-
-    for (const entry of agentEntries) {
-      if (!entry) {
-        continue;
-      }
-
-      sources.push(entry.source);
-      sections.set(entry.fileName, entry.lines);
-    }
-  }
-
-  const purpose =
-    extractPurpose(sections) ??
-    inferPurposeFromConfig({
-      agentId: options.agentId,
-      agentName: options.agentName,
-      skills: options.configuredSkills
-    });
-  const operatingInstructions = collectBulletSections(sections, [
-    { file: "AGENTS.md", heading: "Safety defaults" },
-    { file: "AGENTS.md", heading: "Daily memory" },
-    { file: "AGENTS.md", heading: "Output" },
-    { file: "SOUL.md", heading: "How I Operate" },
-    { file: "TOOLS.md", heading: "Examples" },
-    { file: "MEMORY.md", heading: "Stable facts" },
-    { file: "memory/blueprint.md", heading: "Constraints" },
-    { file: "memory/blueprint.md", heading: "Unknowns" },
-    { file: "docs/brief.md", heading: "Success signals" },
-    { file: "docs/brief.md", heading: "Open questions" },
-    { file: "docs/architecture.md", heading: "Dependencies" },
-    { file: "docs/architecture.md", heading: "Risks" },
-    { file: "deliverables/README.md", heading: "Deliverables" },
-    ...contextManifest.resources
-      .filter((spec) => spec.relativePath.startsWith("docs/") && spec.relativePath !== "docs/brief.md" && spec.relativePath !== "docs/architecture.md")
-      .flatMap((spec) => spec.headings.map((heading) => ({ file: spec.relativePath, heading })))
-  ]).slice(0, 8);
-  const responseStyle =
-    uniqueStrings([
-      ...extractInlineList(sections.get("IDENTITY.md"), "Vibe"),
-      ...extractBulletSection(sections.get("SOUL.md"), "My Quirks"),
-      ...extractBulletSection(sections.get("SOUL.md"), "How I Operate")
-    ]).slice(0, 6) || [];
-  const outputPreference =
-    extractOutputPreference(sections.get("AGENTS.md")) ??
-    extractOutputPreference(sections.get("deliverables/README.md")) ??
-    inferOutputPreference(options.configuredTools);
-
-  return {
-    purpose,
-    operatingInstructions:
-      operatingInstructions.length > 0 ? operatingInstructions : inferOperatingInstructions(options.configuredTools),
-    responseStyle,
-    outputPreference,
-    sourceFiles: sources
-  };
-}
-
-function describeBootstrapSourcePath(workspacePath: string, filePath: string) {
-  const resolvedWorkspacePath = path.resolve(workspacePath);
-  const resolvedFilePath = path.resolve(filePath);
-
-  if (
-    resolvedFilePath === resolvedWorkspacePath ||
-    resolvedFilePath.startsWith(`${resolvedWorkspacePath}${path.sep}`)
-  ) {
-    return path.relative(resolvedWorkspacePath, resolvedFilePath) || path.basename(resolvedFilePath);
-  }
-
-  return resolvedFilePath;
-}
-
-async function readWorkspaceInspectorMetadata(
-  workspacePath: string,
-  agents: OpenClawAgent[],
-  projectMeta?: WorkspaceProjectManifest
-): Promise<Pick<WorkspaceProject, "bootstrap" | "capabilities">> {
-  const resolvedProjectMeta = projectMeta ?? (await readWorkspaceProjectManifest(workspacePath));
-  const contextManifest = buildWorkspaceContextManifest(
-    resolvedProjectMeta.template ?? null,
-    resolvedProjectMeta.rules ?? DEFAULT_WORKSPACE_RULES
-  );
-  const nonContextPaths = new Set<string>([
-    ...WORKSPACE_CONTEXT_CORE_PATHS,
-    ...WORKSPACE_CONTEXT_OPTIONAL_PATHS
-  ]);
-  const [coreFiles, optionalFiles, contextFiles, folders, projectShell, localSkillIds] = await Promise.all([
-    collectWorkspaceResourceState(workspacePath, [
-      { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
-      { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
-      { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
-      { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
-      { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
-    ]),
-    collectWorkspaceResourceState(workspacePath, [
-      { id: "memory-md", label: "MEMORY.md", relativePath: "MEMORY.md", kind: "file" }
-    ]),
-    collectWorkspaceResourceState(
-      workspacePath,
-      contextManifest.resources.filter((resource) => !nonContextPaths.has(resource.relativePath))
-    ),
-    collectWorkspaceResourceState(workspacePath, [
-      { id: "docs", label: "docs/", relativePath: "docs", kind: "directory" },
-      { id: "memory", label: "memory/", relativePath: "memory", kind: "directory" },
-      { id: "deliverables", label: "deliverables/", relativePath: "deliverables", kind: "directory" },
-      { id: "skills", label: "skills/", relativePath: "skills", kind: "directory" },
-      { id: "openclaw", label: ".openclaw/", relativePath: ".openclaw", kind: "directory" }
-    ]),
-    collectWorkspaceResourceState(workspacePath, [
-      {
-        id: "project-json",
-        label: ".openclaw/project.json",
-        relativePath: ".openclaw/project.json",
-        kind: "file"
-      },
-      {
-        id: "events",
-        label: ".openclaw/project-shell/events.jsonl",
-        relativePath: ".openclaw/project-shell/events.jsonl",
-        kind: "file"
-      },
-      {
-        id: "runs",
-        label: ".openclaw/project-shell/runs",
-        relativePath: ".openclaw/project-shell/runs",
-        kind: "directory"
-      },
-      {
-        id: "tasks",
-        label: ".openclaw/project-shell/tasks",
-        relativePath: ".openclaw/project-shell/tasks",
-        kind: "directory"
-      }
-    ]),
-    listLocalWorkspaceSkills(workspacePath)
-  ]);
-  const tools = uniqueStrings(agents.flatMap((agent) => agent.tools));
-  const skills = uniqueStrings([...localSkillIds, ...agents.flatMap((agent) => agent.skills)]);
-  const workspaceOnlyAgentCount = agents.filter((agent) => agent.tools.includes("fs.workspaceOnly")).length;
-
-  return {
-    bootstrap: {
-      template: resolvedProjectMeta.template,
-      sourceMode: resolvedProjectMeta.sourceMode,
-      agentTemplate: resolvedProjectMeta.agentTemplate,
-      coreFiles,
-      optionalFiles,
-      contextFiles,
-      folders,
-      projectShell,
-      localSkillIds
-    },
-    capabilities: {
-      skills,
-      tools,
-      workspaceOnlyAgentCount
-    }
-  };
 }
 
 export async function readWorkspaceEditSeed(workspaceId: string): Promise<WorkspaceEditSeed> {
@@ -5313,10 +3349,10 @@ export async function createManagedSurfaceAccount(input: {
       );
 
       const currentConfig = await measureTiming(timings, "managed-surface.gmail.read-config", () =>
-        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
+        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const currentHooksConfig = await measureTiming(timings, "managed-surface.gmail.read-hooks", () =>
-        runOpenClawJson<Record<string, unknown>>(["config", "get", "hooks", "--json"]).catch(() => null)
+        getOpenClawGatewayClient().getConfig<Record<string, unknown>>("hooks", { timeoutMs: 60000 })
       );
       const currentPresetsValue = currentHooksConfig?.presets;
       const currentPresets = Array.isArray(currentPresetsValue)
@@ -5328,9 +3364,7 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.gmail.write-hooks", () =>
-        runOpenClaw(["config", "set", "hooks", JSON.stringify(nextHooksConfig), "--strict-json"], {
-          timeoutMs: 60000
-        })
+        getOpenClawGatewayClient().setConfig("hooks", nextHooksConfig, { strictJson: true, timeoutMs: 60000 })
       );
 
       const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
@@ -5345,15 +3379,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.gmail.write-config", () =>
-        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-          timeoutMs: 60000
-        })
+        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "webhook": {
       const currentConfig = await measureTiming(timings, "managed-surface.webhook.read-config", () =>
-        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
+        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const token = normalizeManagedSurfaceString(provisionConfig.token);
       if (!token) {
@@ -5370,15 +3402,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.webhook.write-config", () =>
-        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-          timeoutMs: 60000
-        })
+        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "cron": {
       const currentConfig = await measureTiming(timings, "managed-surface.cron.read-config", () =>
-        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
+        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const webhookToken = normalizeManagedSurfaceString(provisionConfig.webhookToken);
       if (!webhookToken) {
@@ -5395,15 +3425,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.cron.write-config", () =>
-        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-          timeoutMs: 60000
-        })
+        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "email": {
       const currentConfig = await measureTiming(timings, "managed-surface.email.read-config", () =>
-        runOpenClawJson<Record<string, unknown>>(["config", "get", configPath, "--json"]).catch(() => null)
+        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const address = normalizeManagedSurfaceString(provisionConfig.address ?? provisionConfig.email);
       if (!address) {
@@ -5421,9 +3449,7 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.email.write-config", () =>
-        runOpenClaw(["config", "set", configPath, JSON.stringify(nextConfig), "--strict-json"], {
-          timeoutMs: 60000
-        })
+        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
@@ -5974,7 +4000,7 @@ async function updateManagedSurfaceRouting(
   timings?: TimingCollector
 ) {
   const currentBindings = await measureTiming(timings, "routing.read-bindings", () =>
-    runOpenClawJson<unknown[]>(["config", "get", "bindings", "--json"]).catch(() => [])
+    getOpenClawGatewayClient().getConfig<unknown[]>("bindings").then((value) => value ?? [])
   );
 
   const managedChannels = registry.channels.filter(
@@ -6074,7 +4100,7 @@ async function updateManagedSurfaceRouting(
   ]);
 
   await measureTiming(timings, "routing.write-bindings", () =>
-    runOpenClaw(["config", "set", "bindings", JSON.stringify(nextBindings), "--strict-json"])
+    getOpenClawGatewayClient().setConfig("bindings", nextBindings, { strictJson: true })
   );
   await measureTiming(timings, "routing.sync-telegram-settings", () =>
     syncManagedTelegramSettings(managedTelegramChannels, timings)
@@ -6100,13 +4126,9 @@ function dedupeManagedBindings(bindings: unknown[]) {
 
 async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
   await measureTiming(timings, "telegram-settings.enabled", () =>
-    runOpenClaw([
-      "config",
-      "set",
-      "channels.telegram.enabled",
-      managedChannels.length > 0 ? "true" : "false",
-      "--strict-json"
-    ])
+    getOpenClawGatewayClient().setConfig("channels.telegram.enabled", managedChannels.length > 0, {
+      strictJson: true
+    })
   );
 
   const defaultAccountId = await measureTiming(timings, "telegram-settings.default-account-resolve", () =>
@@ -6115,17 +4137,13 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
 
   if (defaultAccountId) {
     await measureTiming(timings, "telegram-settings.default-account", () =>
-      runOpenClaw([
-        "config",
-        "set",
-        "channels.telegram.defaultAccount",
-        JSON.stringify(defaultAccountId),
-        "--strict-json"
-      ])
+      getOpenClawGatewayClient().setConfig("channels.telegram.defaultAccount", defaultAccountId, {
+        strictJson: true
+      })
     );
   } else {
     await measureTiming(timings, "telegram-settings.default-account-unset", () =>
-      runOpenClaw(["config", "unset", "channels.telegram.defaultAccount"]).catch(() => {})
+      getOpenClawGatewayClient().unsetConfig("channels.telegram.defaultAccount").catch(() => {})
     );
   }
 
@@ -6140,13 +4158,9 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
   );
 
   await measureTiming(timings, "telegram-settings.groups", () =>
-    runOpenClaw([
-      "config",
-      "set",
-      "channels.telegram.groups",
-      JSON.stringify(nextGroupsConfig),
-      "--strict-json"
-    ])
+    getOpenClawGatewayClient().setConfig("channels.telegram.groups", nextGroupsConfig, {
+      strictJson: true
+    })
   );
 
   if (defaultAccountId) {
@@ -6346,7 +4360,7 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
   }
 
   const currentGuilds = await measureTiming(timings, "discord-settings.read-guilds", () =>
-    runOpenClawJson<DiscordGuildConfig>(["config", "get", "channels.discord.guilds", "--json"]).catch(() => ({}))
+    getOpenClawGatewayClient().getConfig<DiscordGuildConfig>("channels.discord.guilds").then((value) => value ?? {})
   );
   const nextGuilds: Record<string, Record<string, unknown>> = {};
 
@@ -6418,13 +4432,7 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
   }
 
   await measureTiming(timings, "discord-settings.write-guilds", () =>
-    runOpenClaw([
-      "config",
-      "set",
-      "channels.discord.guilds",
-      JSON.stringify(nextGuilds),
-      "--strict-json"
-    ])
+    getOpenClawGatewayClient().setConfig("channels.discord.guilds", nextGuilds, { strictJson: true })
   );
 }
 
@@ -6635,7 +4643,7 @@ async function mutateChannelRegistry(
   await measureTiming(timings, "channel-registry.update-routing", () =>
     updateManagedSurfaceRouting(registry, cleanup, timings)
   );
-  snapshotCache = null;
+  invalidateSnapshotCache();
   await measureTiming(timings, "channel-registry.sync-telegram-coordination", () =>
     syncTelegramCoordinationSkills(previousRegistry, registry, timings)
   );
@@ -6656,186 +4664,6 @@ function findMatchingWorkspaceAgent(
     agents.find((agent) => agent.id === normalizedKey) ??
     null
   );
-}
-
-function collectBulletSections(
-  sections: Map<string, string[]>,
-  entries: Array<{ file: string; heading: string }>
-) {
-  return uniqueStrings(entries.flatMap((entry) => extractBulletSection(sections.get(entry.file), entry.heading)));
-}
-
-function extractPurpose(sections: Map<string, string[]>) {
-  const workspaceObjective =
-    extractSectionParagraph(sections.get("docs/brief.md"), "Objective") ??
-    extractSectionParagraph(sections.get("memory/blueprint.md"), "Outcome") ??
-    extractSectionParagraph(sections.get("MEMORY.md"), "Current brief") ??
-    extractSectionParagraph(sections.get("SOUL.md"), "My Purpose") ??
-    extractSectionParagraph(sections.get("IDENTITY.md"), "Role") ??
-    extractSectionParagraph(sections.get("AGENTS.md"), "Customize");
-
-  if (workspaceObjective) {
-    return workspaceObjective;
-  }
-
-  return null;
-}
-
-function extractOutputPreference(lines?: string[]) {
-  if (!lines) {
-    return null;
-  }
-
-  const match = lines.find((line) =>
-    /be concise in chat|write longer output to files|output/i.test(line)
-  );
-
-  return match ? cleanMarkdown(match) : null;
-}
-
-function inferPurposeFromConfig({
-  agentId,
-  agentName,
-  skills
-}: {
-  agentId: string;
-  agentName: string;
-  skills: string[];
-}) {
-  if (skills.length > 0) {
-    return `${agentName} specializes in ${skills.join(", ")} workflows inside the attached workspace.`;
-  }
-
-  if (/dev|build|coder|engineer/i.test(agentId)) {
-    return `${agentName} is configured as a development-focused OpenClaw operator for this workspace.`;
-  }
-
-  if (/review/i.test(agentId)) {
-    return `${agentName} is configured to review work and surface quality risks for this workspace.`;
-  }
-
-  if (/test/i.test(agentId)) {
-    return `${agentName} is configured to validate behavior, testing, and runtime quality for this workspace.`;
-  }
-
-  return `${agentName} is a general-purpose OpenClaw operator attached to this workspace.`;
-}
-
-function inferOperatingInstructions(configuredTools: string[]) {
-  if (configuredTools.includes("fs.workspaceOnly")) {
-    return ["Operate within the attached workspace and avoid spilling changes outside it."];
-  }
-
-  return ["No explicit operating instructions were found in workspace bootstrap files."];
-}
-
-function inferOutputPreference(configuredTools: string[]) {
-  if (configuredTools.includes("fs.workspaceOnly")) {
-    return "Prefer workspace-grounded output tied to real project files and artifacts.";
-  }
-
-  return null;
-}
-
-function extractSectionParagraph(lines: string[] | undefined, heading: string) {
-  if (!lines) {
-    return null;
-  }
-
-  const start = lines.findIndex((line) => normalizeHeading(line) === normalizeHeading(heading));
-  if (start === -1) {
-    return null;
-  }
-
-  const collected: string[] = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-
-    if (!line) {
-      if (collected.length > 0) {
-        break;
-      }
-      continue;
-    }
-
-    if (/^#+\s+/.test(line)) {
-      break;
-    }
-
-    if (/^[-*]\s+/.test(line)) {
-      break;
-    }
-
-    collected.push(cleanMarkdown(line));
-    if (collected.length >= 2) {
-      break;
-    }
-  }
-
-  return collected.length > 0 ? collected.join(" ") : null;
-}
-
-function extractBulletSection(lines: string[] | undefined, heading: string) {
-  if (!lines) {
-    return [];
-  }
-
-  const start = lines.findIndex((line) => normalizeHeading(line) === normalizeHeading(heading));
-  if (start === -1) {
-    return [];
-  }
-
-  const bullets: string[] = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-
-    if (!line && bullets.length > 0) {
-      break;
-    }
-
-    if (/^#+\s+/.test(line)) {
-      break;
-    }
-
-    if (/^[-*]\s+/.test(line)) {
-      bullets.push(cleanMarkdown(line.replace(/^[-*]\s+/, "")));
-      continue;
-    }
-
-    if (bullets.length > 0) {
-      break;
-    }
-  }
-
-  return bullets;
-}
-
-function extractInlineList(lines: string[] | undefined, label: string) {
-  if (!lines) {
-    return [];
-  }
-
-  const entry = lines.find((line) => line.toLowerCase().includes(`**${label.toLowerCase()}:**`));
-  if (!entry) {
-    return [];
-  }
-
-  const [, rawValue = ""] = entry.split(":");
-  return rawValue
-    .split(",")
-    .map((item) => cleanMarkdown(item))
-    .filter(Boolean);
-}
-
-function normalizeHeading(line: string) {
-  return line.replace(/^#+\s+/, "").trim().toLowerCase();
-}
-
-function cleanMarkdown(value: string) {
-  return value
-    .replace(/[`*_>#-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function uniqueStrings(values: string[]) {

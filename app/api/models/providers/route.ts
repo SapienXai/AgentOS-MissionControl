@@ -6,7 +6,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { getModelProviderDescriptor, isAddModelsProviderId } from "@/lib/openclaw/model-provider-registry";
-import { formatOpenClawCommand, resolveOpenClawBin, runOpenClawJson } from "@/lib/openclaw/cli";
+import { formatOpenClawCommand, resolveOpenClawBin } from "@/lib/openclaw/cli";
+import {
+  listOpenClawModels,
+  scanOpenClawModels
+} from "@/lib/openclaw/application/catalog-service";
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import type {
   AddModelsCatalogModel,
@@ -17,6 +21,10 @@ import type {
   AddModelsProviderId,
   MissionControlSnapshot
 } from "@/lib/agentos/contracts";
+import type {
+  ModelsPayload,
+  OpenClawModelScanPayload as OpenClawModelScanPayloadFromClient
+} from "@/lib/openclaw/client/gateway-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,29 +118,8 @@ type OpenClawAuthProfilesPayload = {
   >;
 };
 
-type OpenClawModelsListPayload = {
-  count?: number;
-  models: Array<{
-    key: string;
-    name: string;
-    input: string;
-    contextWindow: number | null;
-    local: boolean | null;
-    available: boolean | null;
-    tags: string[];
-    missing: boolean;
-  }>;
-};
-
-type OpenClawModelScanPayload = Array<{
-  id: string;
-  name: string;
-  provider: string;
-  modelRef?: string;
-  contextLength?: number | null;
-  supportsToolsMeta?: boolean;
-  isFree?: boolean;
-}>;
+type OpenClawModelsListPayload = ModelsPayload;
+type OpenClawModelScanPayload = OpenClawModelScanPayloadFromClient;
 
 type OllamaState =
   | {
@@ -312,35 +299,21 @@ async function readProviderCatalog(
   provider: AddModelsProviderId,
   configuredModelIds: Set<string>
 ): Promise<AddModelsCatalogModel[]> {
-  const providerPayload = await runOpenClawJson<OpenClawModelsListPayload>([
-    "models",
-    "list",
-    "--all",
-    "--json",
-    "--provider",
-    provider
-  ]);
+  const providerPayload = await listOpenClawModels({ all: true, provider });
   const providerModels = normalizeCatalogModels(provider, providerPayload.models, configuredModelIds);
 
   if (providerModels.length > 0) {
     return providerModels;
   }
 
-  const globalPayload = await runOpenClawJson<OpenClawModelsListPayload>(["models", "list", "--all", "--json"]);
+  const globalPayload = await listOpenClawModels({ all: true });
   const globalModels = normalizeCatalogModels(provider, globalPayload.models, configuredModelIds);
 
   if (globalModels.length > 0 || provider === "ollama") {
     return globalModels;
   }
 
-  const scanPayload = await runOpenClawJson<OpenClawModelScanPayload>([
-    "models",
-    "scan",
-    "--json",
-    "--yes",
-    "--no-input",
-    "--no-probe"
-  ]);
+  const scanPayload = await scanOpenClawModels({ yes: true, noInput: true, noProbe: true });
 
   return normalizeScanModels(provider, scanPayload, configuredModelIds);
 }

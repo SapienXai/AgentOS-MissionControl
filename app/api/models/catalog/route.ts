@@ -1,28 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { isAddModelsProviderId, modelProviderRegistry } from "@/lib/openclaw/model-provider-registry";
-import { runOpenClawJson } from "@/lib/openclaw/cli";
+import { listOpenClawModels } from "@/lib/openclaw/application/catalog-service";
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
 import type { AddModelsCatalogModel, MissionControlSnapshot } from "@/lib/agentos/contracts";
+import type { ModelsPayload } from "@/lib/openclaw/client/gateway-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type GlobalCatalogModel = Omit<AddModelsCatalogModel, "alreadyAdded">;
 const supportedProviderIds = new Set(modelProviderRegistry.map((provider) => provider.id));
-
-type OpenClawModelsListPayload = {
-  models: Array<{
-    key: string;
-    name: string;
-    input: string;
-    contextWindow: number | null;
-    local: boolean | null;
-    available: boolean | null;
-    tags: string[];
-    missing: boolean;
-  }>;
-};
 
 export async function GET() {
   try {
@@ -40,7 +28,7 @@ export async function GET() {
 
 async function readGlobalCatalog(): Promise<GlobalCatalogModel[]> {
   try {
-    const payload = await runOpenClawJson<OpenClawModelsListPayload>(["models", "list", "--all", "--json"]);
+    const payload = await listOpenClawModels({ all: true });
     return normalizeCatalogModels(payload.models);
   } catch {
     const snapshot = await getMissionControlSnapshot();
@@ -49,9 +37,9 @@ async function readGlobalCatalog(): Promise<GlobalCatalogModel[]> {
 }
 
 function normalizeCatalogModels(
-  models: OpenClawModelsListPayload["models"]
+  models: ModelsPayload["models"]
 ): GlobalCatalogModel[] {
-  const uniqueModels = new Map<string, OpenClawModelsListPayload["models"][number]>();
+  const uniqueModels = new Map<string, ModelsPayload["models"][number]>();
 
   for (const model of models || []) {
     const providerId = resolveProviderFromModelId(model.key);

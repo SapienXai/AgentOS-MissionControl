@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { runOpenClawJson } from "@/lib/openclaw/cli";
 import { getMissionControlSnapshot } from "@/lib/agentos/control-plane";
+import { controlGateway } from "@/lib/openclaw/application/gateway-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       );
     }
 
-    await runOpenClawJson<Record<string, unknown>>(["gateway", input.action, "--json"]);
+    await controlGateway(input.action);
     const snapshot = await getMissionControlSnapshot({ force: true });
 
     return NextResponse.json({

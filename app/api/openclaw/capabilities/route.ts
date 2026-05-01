@@ -1,33 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { runOpenClawJson } from "@/lib/openclaw/cli";
+import {
+  listOpenClawPlugins,
+  listOpenClawSkills
+} from "@/lib/openclaw/application/catalog-service";
 import {
   OPENCLAW_BUILTIN_TOOL_CATALOG,
   OPENCLAW_TOOL_GROUP_CATALOG,
   type OpenClawToolCatalogEntry
 } from "@/lib/openclaw/tool-catalog";
-
-type OpenClawSkillListResponse = {
-  skills: Array<{
-    name: string;
-    description?: string;
-    emoji?: string;
-    eligible?: boolean;
-    disabled?: boolean;
-    blockedByAllowlist?: boolean;
-    source?: string;
-    bundled?: boolean;
-  }>;
-};
-
-type OpenClawPluginListResponse = {
-  plugins: Array<{
-    id: string;
-    name: string;
-    status?: string;
-    toolNames?: string[];
-  }>;
-};
 
 type CapabilitySkillEntry = {
   name: string;
@@ -50,8 +31,8 @@ type CapabilityCatalogResponse = {
 
 export async function GET() {
   const [skillResult, pluginResult] = await Promise.allSettled([
-    runOpenClawJson<OpenClawSkillListResponse>(["skills", "list", "--eligible", "--json"], { timeoutMs: 15_000 }),
-    runOpenClawJson<OpenClawPluginListResponse>(["plugins", "list", "--json"], { timeoutMs: 15_000 })
+    listOpenClawSkills({ eligible: true, timeoutMs: 15_000 }),
+    listOpenClawPlugins({ timeoutMs: 15_000 })
   ]);
 
   const skills =

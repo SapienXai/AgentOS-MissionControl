@@ -14,7 +14,7 @@ import {
 } from "@/lib/openclaw/agent-chat-guards";
 import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
-import { runOpenClawJsonStream } from "@/lib/openclaw/cli";
+import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
 import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
@@ -233,23 +233,17 @@ export async function POST(
           sessionId,
           workspacePath: agent.workspacePath
         });
-        const commandPromise = runOpenClawJsonStream<AgentChatCommandPayload>(
-          [
-            "agent",
-            "--agent",
+        const commandPromise = getOpenClawGatewayClient().streamAgentTurn(
+          {
             agentId,
-            "--session-id",
             sessionId,
-            "--message",
             message,
-            "--thinking",
-            input.thinking ?? "low",
-            "--timeout",
-            "90",
-            "--json"
-          ],
+            thinking: input.thinking ?? "low",
+            timeoutSeconds: 90
+          },
+          {},
           { timeoutMs: 120000, signal: request.signal }
-        );
+        ) as Promise<AgentChatCommandPayload>;
 
         void (async () => {
           while (keepPolling && !request.signal.aborted) {

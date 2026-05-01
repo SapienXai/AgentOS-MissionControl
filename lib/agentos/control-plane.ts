@@ -1,38 +1,43 @@
 import "server-only";
 
 import {
-  abortMissionTask,
   clearMissionControlCaches,
-  createAgent,
+  getMissionControlSnapshot as getOpenClawMissionControlSnapshot
+} from "@/lib/openclaw/application/mission-control-service";
+import { createAgent, deleteAgent, updateAgent } from "@/lib/openclaw/application/agent-service";
+import {
+  createWorkspaceProject,
+  deleteWorkspaceProject,
+  readWorkspaceEditSeed,
+  updateWorkspaceProject
+} from "@/lib/openclaw/application/workspace-service";
+import { abortMissionTask, submitMission } from "@/lib/openclaw/application/mission-service";
+import {
+  ensureOpenClawRuntimeSmokeTest,
+  ensureOpenClawRuntimeStateAccess,
+  getRuntimeOutput,
+  getTaskDetail,
+  touchOpenClawRuntimeStateAccess
+} from "@/lib/openclaw/application/runtime-service";
+import {
+  updateGatewayRemoteUrl,
+  updateWorkspaceRoot
+} from "@/lib/openclaw/application/settings-service";
+import {
+  bindWorkspaceChannelAgent,
   createManagedSurfaceAccount,
   createTelegramChannelAccount,
-  createWorkspaceProject,
-  deleteAgent,
   deleteWorkspaceChannelEverywhere,
-  deleteWorkspaceProject,
   disconnectWorkspaceChannel,
   discoverDiscordRoutes,
   discoverSurfaceRoutes,
   discoverTelegramGroups,
-  ensureOpenClawRuntimeSmokeTest,
-  ensureOpenClawRuntimeStateAccess,
   getChannelRegistry,
-  getMissionControlSnapshot as getOpenClawMissionControlSnapshot,
-  getRuntimeOutput,
-  getTaskDetail,
-  readWorkspaceEditSeed,
   setWorkspaceChannelGroups,
   setWorkspaceChannelPrimary,
-  submitMission,
-  updateAgent,
-  updateGatewayRemoteUrl,
-  updateWorkspaceProject,
-  updateWorkspaceRoot,
-  touchOpenClawRuntimeStateAccess,
   unbindWorkspaceChannelAgent,
-  upsertWorkspaceChannel,
-  bindWorkspaceChannelAgent
-} from "@/lib/openclaw/service";
+  upsertWorkspaceChannel
+} from "@/lib/openclaw/application/channel-service";
 
 import { normalizeControlPlaneSnapshot } from "@/lib/agentos/acl/openclaw";
 import type { ControlPlaneSnapshot } from "@/lib/agentos/contracts";
