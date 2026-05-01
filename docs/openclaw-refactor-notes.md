@@ -76,6 +76,35 @@ Application call sites moved from direct gateway-client usage to the adapter:
 - `updateGatewayRemoteUrl`
 - `updateWorkspaceRoot`
 
+`lib/openclaw/application/workspace-service.ts` now owns the workspace mutation slice:
+
+- `createWorkspaceProject`
+- `updateWorkspaceProject`
+- `deleteWorkspaceProject`
+- Existing workspace reuse and manifest-agent repair for create.
+- Workspace source materialization and scaffold writing for create.
+- Bootstrapped workspace agent provisioning for create.
+- Workspace kickoff mission dispatch for create.
+- Create-time agent policy skill sync, snapshot invalidation, and runtime history clearing.
+- Workspace rename/relocation and agent config path rewrite.
+- Workspace plan edit application, manifest rewrite, doc override handling, and agent sync.
+- Workspace delete cleanup for OpenClaw agents, agent config entries, workspace files, and runtime counts.
+
+`lib/openclaw/service.ts` keeps the workspace compatibility exports but now delegates create/update/delete to `workspace-service`.
+
+`lib/openclaw/application/channel-service.ts` now owns the channel registry mutation slice:
+
+- `upsertWorkspaceChannel`
+- `disconnectWorkspaceChannel`
+- `deleteWorkspaceChannelEverywhere`
+- `setWorkspaceChannelPrimary`
+- `setWorkspaceChannelGroups`
+- `bindWorkspaceChannelAgent`
+- `unbindWorkspaceChannelAgent`
+- Managed routing sync for bindings, Telegram group config, Discord guild config, Telegram session store reconciliation, and Telegram coordination policy skill sync.
+
+`lib/openclaw/service.ts` keeps the channel compatibility exports but now delegates those registry mutation workflows to `channel-service`.
+
 `lib/openclaw/service.ts` delegates those moved functions to application services and remains the compatibility layer.
 
 ## Native WS Support Status
@@ -118,11 +147,8 @@ Fallback is preserved at every layer:
 
 `lib/openclaw/service.ts` is smaller but still owns workflows that are riskier to move in one pass:
 
-- Workspace create, update, delete, scaffold, reuse, repair, and delete cleanup.
-- Workspace kickoff mission orchestration.
-- Channel registry mutation and Telegram/Discord/surface provisioning.
-- Channel bind/unbind, primary/group assignment, managed account setup, and registry sync.
-- Agent/config provisioning helpers still shared by workspace/channel workflows.
+- Telegram/Discord/surface managed account provisioning and account discovery helpers.
+- Agent/config provisioning helpers still shared by remaining channel provisioning workflows.
 - OpenClaw config mutation calls used by channel provisioning, now routed through the adapter but still owned by compatibility workflow code.
 - Compatibility exports for older imports.
 
@@ -140,7 +166,7 @@ Latest verification:
 
 - `pnpm typecheck` passed.
 - `pnpm lint` passed with 0 warnings.
-- `pnpm test` passed: 63 tests.
+- `pnpm test` passed: 70 tests.
 
 Added/updated coverage:
 
@@ -151,14 +177,14 @@ Added/updated coverage:
 - Runtime-service compatibility for missing runtime and missing task shapes.
 - Mission-service compatibility for submit validation and missing-task abort shape.
 - Settings-service compatibility for gateway URL and workspace root validation shapes.
+- Workspace-service compatibility for workspace create/update/delete validation shapes.
+- Channel-service compatibility for registry mutation validation and missing-channel shapes.
 
 ## Next Safe Migrations
 
 Recommended next order:
 
-1. Expand workspace mutation characterization around scaffold contents, reuse, repair, config cleanup, runtime cleanup, and delete behavior.
-2. Move workspace create/update/delete implementations into `workspace-service`.
-3. Add channel registry mutation tests for bind/unbind, primary/group assignments, managed account creation, and registry cleanup.
-4. Move channel/provisioning implementations into `channel-service`.
-5. Continue reducing `service.ts` until only compatibility exports and shared legacy helpers remain.
-6. Add an import guard once compatibility imports are limited to known allowlisted files.
+1. Add managed account provisioning tests for Telegram, Discord, Slack, Google Chat, Gmail, webhook, cron, and email setup validation.
+2. Move remaining managed channel/surface account provisioning implementations into `channel-service`.
+3. Continue reducing `service.ts` until only compatibility exports and shared legacy helpers remain.
+4. Add an import guard once compatibility imports are limited to known allowlisted files.
