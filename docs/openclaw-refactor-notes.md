@@ -102,8 +102,10 @@ Application call sites moved from direct gateway-client usage to the adapter:
 - `bindWorkspaceChannelAgent`
 - `unbindWorkspaceChannelAgent`
 - Managed routing sync for bindings, Telegram group config, Discord guild config, Telegram session store reconciliation, and Telegram coordination policy skill sync.
+- Managed channel/surface account provisioning for Telegram, Discord, Slack, Google Chat, Gmail, webhook, cron, and email surfaces.
+- Telegram account resolution helpers, managed surface config normalization, Gmail setup argument building, and CLI fallback provisioning calls.
 
-`lib/openclaw/service.ts` keeps the channel compatibility exports but now delegates those registry mutation workflows to `channel-service`.
+`lib/openclaw/service.ts` keeps the channel compatibility exports but now delegates channel registry mutation and managed provisioning workflows to `channel-service`.
 
 `lib/openclaw/service.ts` delegates those moved functions to application services and remains the compatibility layer.
 
@@ -145,19 +147,17 @@ Fallback is preserved at every layer:
 
 ## Still In `service.ts`
 
-`lib/openclaw/service.ts` is smaller but still owns workflows that are riskier to move in one pass:
+`lib/openclaw/service.ts` is smaller and now mostly owns compatibility exports plus legacy workspace document render helpers:
 
-- Telegram/Discord/surface managed account provisioning and account discovery helpers.
-- Agent/config provisioning helpers still shared by remaining channel provisioning workflows.
-- OpenClaw config mutation calls used by channel provisioning, now routed through the adapter but still owned by compatibility workflow code.
+- Legacy workspace document render helper exports.
 - Compatibility exports for older imports.
 
-These should move only with focused characterization tests because they combine filesystem mutation, OpenClaw CLI/config mutation, cache invalidation, registry updates, and onboarding behavior.
+The remaining cleanup should focus on replacing or relocating legacy render helper exports, then adding an import guard once compatibility imports are limited to tests and known transitional modules.
 
 ## Prompt And Codebase Conflicts
 
 - The prompt asked for native WS first. The codebase and local OpenClaw artifacts confirmed only the generic request/response Gateway RPC envelope, not a complete replacement for all CLI workflows. Decision: add native WS only for confirmed generic RPC calls and keep CLI fallback for typed workflows.
-- The prompt asked to move all remaining slices if possible. Workspace mutation and channel/provisioning are still too interwoven with filesystem and registry mutation to move safely in the same pass without broader characterization coverage. Decision: move runtime, mission, settings, and adapter usage now; document workspace/channel as the next high-risk slices.
+- Workspace mutation and channel/provisioning were moved incrementally with compatibility tests and CLI fallback preserved.
 - A no-restricted-imports rule was not added yet because current compatibility tests and transitional modules still intentionally import `lib/openclaw/service.ts`. Adding it now would create noisy exceptions instead of a useful guard.
 
 ## Tests
@@ -166,7 +166,7 @@ Latest verification:
 
 - `pnpm typecheck` passed.
 - `pnpm lint` passed with 0 warnings.
-- `pnpm test` passed: 70 tests.
+- `pnpm test` passed: 78 tests.
 
 Added/updated coverage:
 
@@ -179,12 +179,12 @@ Added/updated coverage:
 - Settings-service compatibility for gateway URL and workspace root validation shapes.
 - Workspace-service compatibility for workspace create/update/delete validation shapes.
 - Channel-service compatibility for registry mutation validation and missing-channel shapes.
+- Channel-service compatibility for managed provisioning validation shapes across chat and surface providers.
 
 ## Next Safe Migrations
 
 Recommended next order:
 
-1. Add managed account provisioning tests for Telegram, Discord, Slack, Google Chat, Gmail, webhook, cron, and email setup validation.
-2. Move remaining managed channel/surface account provisioning implementations into `channel-service`.
-3. Continue reducing `service.ts` until only compatibility exports and shared legacy helpers remain.
-4. Add an import guard once compatibility imports are limited to known allowlisted files.
+1. Move or remove legacy workspace document render helper exports from `service.ts` after confirming no production callers depend on them.
+2. Continue reducing `service.ts` until it is only compatibility exports.
+3. Add an import guard once compatibility imports are limited to known allowlisted files.

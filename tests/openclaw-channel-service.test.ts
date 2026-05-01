@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   bindWorkspaceChannelAgent as bindApplicationWorkspaceChannelAgent,
+  createManagedSurfaceAccount as createApplicationManagedSurfaceAccount,
   deleteWorkspaceChannelEverywhere as deleteApplicationWorkspaceChannelEverywhere,
   disconnectWorkspaceChannel as disconnectApplicationWorkspaceChannel,
   setWorkspaceChannelGroups as setApplicationWorkspaceChannelGroups,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/openclaw/application/channel-service";
 import {
   bindWorkspaceChannelAgent as bindCompatibilityWorkspaceChannelAgent,
+  createManagedSurfaceAccount as createCompatibilityManagedSurfaceAccount,
   deleteWorkspaceChannelEverywhere as deleteCompatibilityWorkspaceChannelEverywhere,
   disconnectWorkspaceChannel as disconnectCompatibilityWorkspaceChannel,
   setWorkspaceChannelGroups as setCompatibilityWorkspaceChannelGroups,
@@ -117,5 +119,115 @@ test("channel application service preserves unbind validation shape", async () =
   assert.equal(
     await readErrorMessage(() => unbindApplicationWorkspaceChannelAgent(input)),
     await readErrorMessage(() => unbindCompatibilityWorkspaceChannelAgent(input))
+  );
+});
+
+test("channel application service preserves Telegram provisioning validation shape", async () => {
+  const input = {
+    provider: "telegram",
+    name: "Telegram",
+    token: " "
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves Discord provisioning validation shape", async () => {
+  const input = {
+    provider: "discord",
+    name: "Discord",
+    token: " "
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves Slack provisioning validation shape", async () => {
+  const input = {
+    provider: "slack",
+    name: "Slack",
+    botToken: " "
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves Google Chat provisioning validation shape", async () => {
+  const input = {
+    provider: "googlechat",
+    name: "Google Chat",
+    webhookUrl: " "
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves Gmail provisioning validation shape", async () => {
+  const input = {
+    provider: "gmail",
+    name: "Gmail",
+    config: {}
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves webhook provisioning validation shape", async () => {
+  const input = {
+    provider: "webhook",
+    name: "Webhook",
+    config: {
+      token: " "
+    }
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves cron provisioning validation shape", async () => {
+  const input = {
+    provider: "cron",
+    name: "Cron",
+    config: {
+      webhookToken: " "
+    }
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves email provisioning validation shape", async () => {
+  const input = {
+    provider: "email",
+    name: "Email",
+    config: {
+      address: " "
+    }
+  };
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
   );
 });
