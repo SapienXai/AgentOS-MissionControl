@@ -1,79 +1,164 @@
 # OpenClaw Refactor Notes
 
-AgentOS now has an explicit OpenClaw boundary for the first safe vertical slice:
+AgentOS now has a clearer OpenClaw boundary:
 
-- `OpenClawGatewayClient` remains the transport-facing interface.
-- `CliOpenClawGatewayClient` remains the default implementation and CLI fallback.
-- `OpenClawAdapter` is the AgentOS-facing interface for gateway/status behavior.
-- Application code should call the adapter layer instead of importing the gateway client directly.
+- AgentOS UI/API routes call `lib/agentos/control-plane.ts`.
+- The control plane calls `lib/openclaw/application/*` services.
+- Application services use `OpenClawAdapter` where gateway behavior is needed.
+- `OpenClawAdapter` delegates transport work to `OpenClawGatewayClient`.
+- `NativeWsOpenClawGatewayClient` can handle confirmed request/response Gateway RPC calls.
+- `CliOpenClawGatewayClient` remains the complete fallback implementation.
+- `lib/openclaw/service.ts` remains as a compatibility/delegation layer for older imports.
 
-## Migrated Slice
+Reference docs inspected during this continuation:
 
-The adapter currently owns:
+- https://docs.openclaw.ai/cli/gateway
+- https://docs.openclaw.ai/reference/rpc
 
-- OpenClaw status loading.
-- Gateway status loading.
-- Model status loading.
-- Gateway lifecycle control for `start`, `stop`, and `restart`.
+## Moved In This Continuation
 
-These calls still execute through the CLI-backed gateway client by default. No native WebSocket gateway client has been introduced.
+`lib/openclaw/client/native-ws-gateway-client.ts` was added:
 
-`lib/openclaw/application/mission-control-service.ts` now owns the read-only mission control snapshot orchestration:
+- Implements the confirmed Gateway frame shape used by the OpenClaw control UI: `type: "req"` requests and `type: "res"` responses.
+- Performs a protocol v3 `connect` handshake before method calls.
+- Correlates request ids to responses.
+- Handles native timeout, abort, close, and error cleanup.
+- Normalizes Gateway error payloads before falling back.
+- Supports native WS only for generic `call(method, params)`.
+- Delegates status, config, agent mutation, model/catalog, gateway control, and streaming methods to the CLI fallback.
 
-- Snapshot cache lifecycle and payload cache coordination.
-- OpenClaw/gateway/model status settlement through the adapter-backed payload helpers.
-- Runtime diagnostics state reads.
-- Agent, workspace, task, runtime, channel account, and diagnostics assembly for the snapshot response.
-- Visible/full snapshot selection.
+`lib/openclaw/client/gateway-client-factory.ts` now creates a native-first client wrapper unless CLI fallback is forced.
 
-`lib/openclaw/service.ts` keeps compatibility exports for `getMissionControlSnapshot` and `clearMissionControlCaches`, but delegates those calls to the application service.
+CLI fallback can be forced with either:
 
-`lib/openclaw/application/agent-service.ts` now owns the first mutation slice:
+- `AGENTOS_OPENCLAW_GATEWAY_CLIENT=cli`
+- `OPENCLAW_GATEWAY_CLIENT=cli`
+- `AGENTOS_OPENCLAW_NATIVE_WS=0|false|off`
 
-- Agent create, update, and delete workflows.
-- Agent policy skill synchronization for those workflows.
-- Agent config updates.
-- Agent identity/bootstrap file writes.
-- Workspace project agent metadata updates.
+Native WS connection settings:
 
-`lib/openclaw/service.ts` keeps compatibility exports for `createAgent`, `updateAgent`, and `deleteAgent`, but delegates those calls to the application service.
+- `AGENTOS_OPENCLAW_GATEWAY_URL` or `OPENCLAW_GATEWAY_URL`
+- `AGENTOS_OPENCLAW_GATEWAY_TOKEN`
+- `AGENTOS_OPENCLAW_GATEWAY_PASSWORD`
+- `AGENTOS_OPENCLAW_NATIVE_WS_TIMEOUT_MS`
 
-`lib/openclaw/application/workspace-service.ts` now owns the first workspace read slice:
+`lib/openclaw/adapter/openclaw-adapter.ts` was expanded into the AgentOS-facing boundary for:
 
-- Workspace edit seed assembly.
-- Workspace manifest reads for edit defaults.
-- Editable document override discovery.
-- Existing workspace agent draft reconstruction.
+- Status: `getStatus`, `getGatewayStatus`, `getModelStatus`
+- Gateway control: `controlGateway`, `probeGateway`
+- Catalog: `listModels`, `scanModels`, `listSkills`, `listPlugins`
+- Config: `getConfig`, `setConfig`, `unsetConfig`
+- Agents/runs: `addAgent`, `deleteAgent`, `runAgentTurn`, `streamAgentTurn`
+- Generic Gateway RPC: `call`
 
-`lib/openclaw/service.ts` keeps the compatibility export for `readWorkspaceEditSeed`, but delegates that call to the application service. Workspace create, update, and delete workflows are still delegated back to the compatibility service until their mutation behavior is covered with stronger characterization tests.
+Application call sites moved from direct gateway-client usage to the adapter:
 
-Workspace mutation characterization has started:
+- `lib/openclaw/application/catalog-service.ts`
+- `lib/openclaw/application/agent-service.ts`
+- `app/api/agents/[agentId]/chat/route.ts`
+- Remaining compatibility code in `lib/openclaw/service.ts` now uses the adapter for gateway-backed config, agent delete, and stream turn calls instead of importing the gateway client directly.
 
-- Workspace create validation shape.
-- Workspace update validation shape.
-- Workspace delete validation shape.
-- Missing workspace edit seed shape.
+`lib/openclaw/application/runtime-service.ts` now owns:
 
-These tests intentionally cover low-risk contracts before moving filesystem and provisioning behavior.
+- `getRuntimeOutput`
+- `getTaskDetail`
+- `ensureOpenClawRuntimeStateAccess`
+- `touchOpenClawRuntimeStateAccess`
+- `ensureOpenClawRuntimeSmokeTest`
+
+`lib/openclaw/application/mission-service.ts` now owns:
+
+- `submitMission`
+- `abortMissionTask`
+
+`lib/openclaw/application/settings-service.ts` now owns:
+
+- `updateGatewayRemoteUrl`
+- `updateWorkspaceRoot`
+
+`lib/openclaw/service.ts` delegates those moved functions to application services and remains the compatibility layer.
+
+## Native WS Support Status
+
+Native WS is intentionally narrow.
+
+Supported natively:
+
+- Handshake with the Gateway `connect` RPC.
+- Generic request/response RPC calls through `call(method, params)`.
+- Request id correlation.
+- Timeout and abort cleanup.
+- Error normalization and fallback to CLI.
+
+Still CLI-backed by design:
+
+- `status`
+- `gateway status`
+- `models status`
+- `skills/plugins/models` catalog commands
+- `config get/set/unset`
+- `agents add/delete`
+- `agent` turn execution
+- streamed agent turns
+- gateway start/stop/restart
+- gateway probe
+
+Reason: the local OpenClaw CLI and installed control UI confirmed the request/response RPC envelope, but AgentOS does not yet have a stable, tested mapping from every existing CLI command to equivalent Gateway RPC methods. Streaming was not moved because the current AgentOS stream behavior depends on CLI transcript compatibility and there is no safe tested native stream contract in this codebase.
+
+## Fallback Behavior
+
+Fallback is preserved at every layer:
+
+- The factory returns `NativeWsOpenClawGatewayClient` with `CliOpenClawGatewayClient` as fallback.
+- If native WS is disabled, unavailable, times out, fails handshake, closes, or returns an error, generic `call` falls back to CLI.
+- Unsupported typed methods on the native client delegate directly to CLI.
+- Settings/config still use the existing CLI/file-backed paths unless a safe Gateway RPC mapping is confirmed later.
 
 ## Still In `service.ts`
 
-`lib/openclaw/service.ts` still owns substantial mutation and workflow orchestration that should be moved incrementally:
+`lib/openclaw/service.ts` is smaller but still owns workflows that are riskier to move in one pass:
 
-- Workspace create, update, delete, and plan application workflows.
-- Mission submission, abort, task detail, and runtime output coordination.
-- Channel registry mutations, managed surface setup, and routing sync.
-- Filesystem writes for workspace manifests, scaffold docs, identities, skills, and channel metadata.
-- OpenClaw CLI workflow calls for channel provisioning and setup flows.
-- Compatibility delegation for snapshot reads, agent mutations, and cache invalidation used by the existing mutation workflows.
+- Workspace create, update, delete, scaffold, reuse, repair, and delete cleanup.
+- Workspace kickoff mission orchestration.
+- Channel registry mutation and Telegram/Discord/surface provisioning.
+- Channel bind/unbind, primary/group assignment, managed account setup, and registry sync.
+- Agent/config provisioning helpers still shared by workspace/channel workflows.
+- OpenClaw config mutation calls used by channel provisioning, now routed through the adapter but still owned by compatibility workflow code.
+- Compatibility exports for older imports.
 
-These are intentionally left in place because they mix filesystem mutation, OpenClaw config mutation, runtime/session state, progress streaming, and cache invalidation. They should be split only after characterization tests exist for each workflow.
+These should move only with focused characterization tests because they combine filesystem mutation, OpenClaw CLI/config mutation, cache invalidation, registry updates, and onboarding behavior.
+
+## Prompt And Codebase Conflicts
+
+- The prompt asked for native WS first. The codebase and local OpenClaw artifacts confirmed only the generic request/response Gateway RPC envelope, not a complete replacement for all CLI workflows. Decision: add native WS only for confirmed generic RPC calls and keep CLI fallback for typed workflows.
+- The prompt asked to move all remaining slices if possible. Workspace mutation and channel/provisioning are still too interwoven with filesystem and registry mutation to move safely in the same pass without broader characterization coverage. Decision: move runtime, mission, settings, and adapter usage now; document workspace/channel as the next high-risk slices.
+- A no-restricted-imports rule was not added yet because current compatibility tests and transitional modules still intentionally import `lib/openclaw/service.ts`. Adding it now would create noisy exceptions instead of a useful guard.
+
+## Tests
+
+Latest verification:
+
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with 0 warnings.
+- `pnpm test` passed: 63 tests.
+
+Added/updated coverage:
+
+- Native WS handshake success.
+- Native WS handshake failure fallback to CLI.
+- Native WS timeout fallback to CLI.
+- Expanded adapter methods through `setOpenClawGatewayClientForTesting`.
+- Runtime-service compatibility for missing runtime and missing task shapes.
+- Mission-service compatibility for submit validation and missing-task abort shape.
+- Settings-service compatibility for gateway URL and workspace root validation shapes.
 
 ## Next Safe Migrations
 
-Recommended next slices:
+Recommended next order:
 
-1. Expand workspace mutation tests for rename, repair, existing workspace reuse, and delete cleanup, then move those workflows into `workspace-service`.
-2. Move runtime/task read helpers after preserving mission dispatch and transcript output behavior.
-3. Move mission submit/abort workflows after preserving dispatch lifecycle behavior.
-4. Move channel provisioning only after preserving current CLI workflow behavior with tests.
+1. Expand workspace mutation characterization around scaffold contents, reuse, repair, config cleanup, runtime cleanup, and delete behavior.
+2. Move workspace create/update/delete implementations into `workspace-service`.
+3. Add channel registry mutation tests for bind/unbind, primary/group assignments, managed account creation, and registry cleanup.
+4. Move channel/provisioning implementations into `channel-service`.
+5. Continue reducing `service.ts` until only compatibility exports and shared legacy helpers remain.
+6. Add an import guard once compatibility imports are limited to known allowlisted files.

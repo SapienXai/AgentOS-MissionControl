@@ -14,7 +14,7 @@ import {
 } from "@/lib/openclaw/agent-chat-guards";
 import { readLatestAgentChatTurn } from "@/lib/openclaw/domains/agent-chat-transcript";
 import { extractMissionControlAction, type MissionControlAction } from "@/lib/openclaw/chat-actions";
-import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { recordAgentChatSession } from "@/lib/openclaw/domains/agent-chat-sessions";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import {
@@ -233,7 +233,7 @@ export async function POST(
           sessionId,
           workspacePath: agent.workspacePath
         });
-        const commandPromise = getOpenClawGatewayClient().streamAgentTurn(
+        const commandPromise = getOpenClawAdapter().streamAgentTurn(
           {
             agentId,
             sessionId,

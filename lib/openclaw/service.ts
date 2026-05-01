@@ -11,7 +11,7 @@ import {
 import {
   runOpenClaw
 } from "@/lib/openclaw/cli";
-import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   createAgent as createAgentFromApplication,
   deleteAgent as deleteAgentFromApplication,
@@ -21,17 +21,30 @@ import {
   readWorkspaceEditSeed as readWorkspaceEditSeedFromApplication
 } from "@/lib/openclaw/application/workspace-service";
 import {
+  abortMissionTask as abortMissionTaskFromApplication,
+  submitMission as submitMissionFromApplication
+} from "@/lib/openclaw/application/mission-service";
+import {
+  updateGatewayRemoteUrl as updateGatewayRemoteUrlFromApplication,
+  updateWorkspaceRoot as updateWorkspaceRootFromApplication
+} from "@/lib/openclaw/application/settings-service";
+import {
   clearMissionControlCaches as clearMissionControlCachesFromApplication,
-  clearMissionControlRuntimeHistoryCache,
   getMissionControlSnapshot as getMissionControlSnapshotFromApplication,
   invalidateMissionControlSnapshotCache
 } from "@/lib/openclaw/application/mission-control-service";
 import {
+  clearRuntimeHistoryCache as clearRuntimeHistoryCacheFromApplication,
+  ensureOpenClawRuntimeSmokeTest as ensureOpenClawRuntimeSmokeTestFromApplication,
+  ensureOpenClawRuntimeStateAccess as ensureOpenClawRuntimeStateAccessFromApplication,
+  getRuntimeOutput as getRuntimeOutputFromApplication,
+  getTaskDetail as getTaskDetailFromApplication,
+  touchOpenClawRuntimeStateAccess as touchOpenClawRuntimeStateAccessFromApplication
+} from "@/lib/openclaw/application/runtime-service";
+import {
   channelRegistryPath,
   openClawStateRootPath
 } from "@/lib/openclaw/state/paths";
-import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
-import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import {
   buildWorkspaceCreateProgressTemplate,
   createOperationProgressTracker
@@ -54,21 +67,6 @@ import {
   writeTextFileEnsured,
   scaffoldWorkspaceContents
 } from "@/lib/openclaw/domains/workspace-bootstrap";
-import {
-  buildTaskDetailFromDispatchRecord,
-  buildTaskDetailFromTaskRecord
-} from "@/lib/openclaw/domains/task-detail";
-import { extractMissionCommandPayloads } from "@/lib/openclaw/domains/mission-dispatch-model";
-import {
-  readMissionDispatchRecordById
-} from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
-import {
-  abortMissionDispatchTask as abortMissionDispatchTaskFromWorkflow,
-  submitMissionDispatch as submitMissionDispatchFromWorkflow
-} from "@/lib/openclaw/domains/mission-dispatch-workflow";
-import {
-  getRuntimeOutputForResolvedRuntime as getRuntimeOutputForResolvedRuntimeFromTranscript
-} from "@/lib/openclaw/domains/runtime-transcript";
 import {
   assertWorkspaceBootstrapAgentIdsAvailable as assertWorkspaceBootstrapAgentIdsAvailableFromProvisioning,
   createBootstrappedWorkspaceAgent as createBootstrappedWorkspaceAgentFromProvisioning,
@@ -106,16 +104,7 @@ import type { ManagedDiscordBinding } from "@/lib/openclaw/domains/channels";
 import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
 import {
-  getConfiguredWorkspaceRoot,
-  getRuntimeSmokeTestCacheEntry,
-  hasGatewayRemoteUrlConfig,
-  isRuntimeSmokeTestFresh,
-  mapRuntimeSmokeTestEntry,
-  normalizeGatewayRemoteUrl,
-  normalizeWorkspaceRoot,
-  persistRuntimeSmokeTest,
-  readMissionControlSettings,
-  writeMissionControlSettings
+  getConfiguredWorkspaceRoot
 } from "@/lib/openclaw/domains/control-plane-settings";
 import type {
   AgentCreateInput,
@@ -126,11 +115,8 @@ import type {
   MissionAbortResponse,
   MissionResponse,
   MissionSubmission,
-  OpenClawRuntimeSmokeTest,
   OpenClawAgent,
-  TaskDetailRecord,
   WorkspacePlan,
-  RuntimeOutputRecord,
   WorkspaceAgentBlueprintInput,
   WorkspaceCreateResult,
   WorkspaceCreateRules,
@@ -158,8 +144,8 @@ export { inferFallbackModelMetadata } from "@/lib/openclaw/adapter/model-adapter
 
 export { discoverDiscordRoutes, discoverSurfaceRoutes, discoverTelegramGroups, getChannelRegistry };
 
-const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
-const runtimeSmokeTestMessage = "AgentOS runtime smoke test. Reply with a brief READY status.";
+// Compatibility exports: new code should prefer application services, the adapter,
+// or client layer directly. Keep this module stable until legacy imports are removed.
 type WorkspaceCreateOptions = {
   onProgress?: (snapshot: OperationProgressSnapshot) => Promise<void> | void;
 };
@@ -178,7 +164,7 @@ function invalidateSnapshotCache() {
 }
 
 function clearRuntimeHistoryCache() {
-  clearMissionControlRuntimeHistoryCache();
+  clearRuntimeHistoryCacheFromApplication();
 }
 
 function resolveSnapshotDefaultAgentModelId(snapshot: MissionControlSnapshot) {
@@ -197,119 +183,27 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
   return getMissionControlSnapshotFromApplication(options);
 }
 
-function resolveRuntimeSmokeTestAgentId(
-  snapshot: MissionControlSnapshot,
-  preferredAgentId?: string | null
-) {
-  if (preferredAgentId && snapshot.agents.some((agent) => agent.id === preferredAgentId)) {
-    return preferredAgentId;
-  }
-
-  return snapshot.agents.find((agent) => agent.isDefault)?.id || snapshot.agents[0]?.id || null;
-}
-
-async function assertOpenClawRuntimeStateAccess(agentId: string | null) {
-  const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentId ? [agentId] : [], {
-    touch: true
-  });
-
-  if (runtimeState.issues.length > 0) {
-    invalidateSnapshotCache();
-    throw new Error(
-      `OpenClaw runtime state is not writable. AgentOS needs write access to ${runtimeState.stateRoot} and the agent session store before missions can run.`
-    );
-  }
-}
-
 export async function ensureOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
 } = {}) {
-  await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
-  invalidateSnapshotCache();
-  return getMissionControlSnapshot({ force: true, includeHidden: true });
+  return ensureOpenClawRuntimeStateAccessFromApplication(options);
 }
 
 export async function touchOpenClawRuntimeStateAccess(options: {
   agentId?: string | null;
 } = {}) {
-  await assertOpenClawRuntimeStateAccess(options.agentId ?? null);
-  invalidateSnapshotCache();
+  return touchOpenClawRuntimeStateAccessFromApplication(options);
 }
 
 export async function ensureOpenClawRuntimeSmokeTest(options: {
   agentId?: string | null;
   force?: boolean;
-} = {}): Promise<OpenClawRuntimeSmokeTest> {
-  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const agentId = resolveRuntimeSmokeTestAgentId(snapshot, options.agentId);
-
-  if (!agentId) {
-    return {
-      status: "not-run",
-      checkedAt: null,
-      agentId: null,
-      runId: null,
-      summary: null,
-      error: "AgentOS could not find an OpenClaw agent for the runtime smoke test."
-    };
-  }
-
-  const settings = await readMissionControlSettings();
-  const cached = getRuntimeSmokeTestCacheEntry(settings, agentId);
-
-  if (!options.force && isRuntimeSmokeTestFresh(cached)) {
-    return mapRuntimeSmokeTestEntry(agentId, cached);
-  }
-
-  await assertOpenClawRuntimeStateAccess(agentId);
-
-  try {
-    const payload = await getOpenClawGatewayClient().runAgentTurn(
-      {
-        agentId,
-        message: runtimeSmokeTestMessage,
-        thinking: "off",
-        timeoutSeconds: 45
-      },
-      { timeoutMs: 50000 }
-    );
-    const result: OpenClawRuntimeSmokeTest = {
-      status: "passed",
-      checkedAt: new Date().toISOString(),
-      agentId,
-      runId: payload.runId ?? null,
-      summary:
-        payload.summary ||
-        extractMissionCommandPayloads(payload)[0]?.text ||
-        "AgentOS verified a real OpenClaw turn.",
-      error: null
-    };
-
-    await persistRuntimeSmokeTest(result);
-    invalidateSnapshotCache();
-    return result;
-  } catch (error) {
-    const result: OpenClawRuntimeSmokeTest = {
-      status: "failed",
-      checkedAt: new Date().toISOString(),
-      agentId,
-      runId: null,
-      summary: null,
-      error: stringifyCommandFailure(error) || "OpenClaw runtime smoke test failed."
-    };
-
-    await persistRuntimeSmokeTest(result);
-    invalidateSnapshotCache();
-    return result;
-  }
+} = {}) {
+  return ensureOpenClawRuntimeSmokeTestFromApplication(options);
 }
 
 export async function submitMission(input: MissionSubmission): Promise<MissionResponse> {
-  return submitMissionDispatchFromWorkflow(input, {
-    getMissionControlSnapshot,
-    resolveAgentForMission,
-    invalidateMissionControlCaches: clearMissionControlCaches
-  });
+  return submitMissionFromApplication(input);
 }
 
 export async function abortMissionTask(
@@ -317,38 +211,11 @@ export async function abortMissionTask(
   reason?: string | null,
   dispatchId?: string | null
 ): Promise<MissionAbortResponse> {
-  return abortMissionDispatchTaskFromWorkflow(taskId, reason, dispatchId, {
-    getMissionControlSnapshot,
-    resolveAgentForMission,
-    invalidateMissionControlCaches: clearMissionControlCaches
-  });
+  return abortMissionTaskFromApplication(taskId, reason, dispatchId);
 }
 
-export async function getRuntimeOutput(runtimeId: string): Promise<RuntimeOutputRecord> {
-  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
-  let runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
-
-  if (!runtime) {
-    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-    runtime = snapshot.runtimes.find((entry) => entry.id === runtimeId);
-  }
-
-  if (!runtime) {
-    return {
-      runtimeId,
-      status: "missing",
-      finalText: null,
-      finalTimestamp: null,
-      stopReason: null,
-      errorMessage: "Runtime was not found in the current OpenClaw snapshot.",
-      items: [],
-      createdFiles: [],
-      warnings: [],
-      warningSummary: null
-    };
-  }
-
-  return getRuntimeOutputForResolvedRuntimeFromTranscript(runtime, snapshot);
+export async function getRuntimeOutput(runtimeId: string) {
+  return getRuntimeOutputFromApplication(runtimeId);
 }
 
 export async function getTaskDetail(
@@ -356,38 +223,8 @@ export async function getTaskDetail(
   options: {
     dispatchId?: string | null;
   } = {}
-): Promise<TaskDetailRecord> {
-  let snapshot = await getMissionControlSnapshot({ includeHidden: true });
-  let task = snapshot.tasks.find((entry) => entry.id === taskId);
-
-  if (!task && options.dispatchId) {
-    task = snapshot.tasks.find((entry) => entry.dispatchId === options.dispatchId);
-  }
-
-  if (!task) {
-    snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-    task = snapshot.tasks.find((entry) => entry.id === taskId);
-
-    if (!task && options.dispatchId) {
-      task = snapshot.tasks.find((entry) => entry.dispatchId === options.dispatchId);
-    }
-  }
-
-  if (!task) {
-    const dispatchId = typeof options.dispatchId === "string" ? options.dispatchId.trim() : "";
-
-    if (dispatchId) {
-      const dispatchRecord = await readMissionDispatchRecordById(dispatchId);
-
-      if (dispatchRecord) {
-        return buildTaskDetailFromDispatchRecord(dispatchRecord, snapshot);
-      }
-    }
-
-    throw new Error("Task was not found in the current OpenClaw snapshot.");
-  }
-  const dispatchRecord = task.dispatchId ? await readMissionDispatchRecordById(task.dispatchId) : null;
-  return buildTaskDetailFromTaskRecord(task, snapshot, dispatchRecord);
+) {
+  return getTaskDetailFromApplication(taskId, options);
 }
 
 export async function createAgent(input: AgentCreateInput) {
@@ -1484,7 +1321,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
   const runtimeCount = snapshot.runtimes.filter((runtime) => runtime.workspaceId === workspace.id).length;
 
   for (const agent of workspaceAgents) {
-    await getOpenClawGatewayClient().deleteAgent(agent.id);
+    await getOpenClawAdapter().deleteAgent(agent.id);
   }
 
   try {
@@ -1513,33 +1350,11 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
 }
 
 export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null }) {
-  const gatewayUrl = normalizeGatewayRemoteUrl(input.gatewayUrl);
-
-  if (gatewayUrl) {
-    await getOpenClawGatewayClient().setConfig(GATEWAY_REMOTE_URL_CONFIG_KEY, gatewayUrl);
-  } else if (await hasGatewayRemoteUrlConfig()) {
-    await getOpenClawGatewayClient().unsetConfig(GATEWAY_REMOTE_URL_CONFIG_KEY);
-  }
-
-  invalidateSnapshotCache();
-  clearRuntimeHistoryCache();
-
-  return getMissionControlSnapshot({ force: true });
+  return updateGatewayRemoteUrlFromApplication(input);
 }
 
 export async function updateWorkspaceRoot(input: { workspaceRoot?: string | null }) {
-  const workspaceRoot = normalizeWorkspaceRoot(input.workspaceRoot);
-  const settings = await readMissionControlSettings();
-
-  await writeMissionControlSettings({
-    ...(workspaceRoot ? { workspaceRoot } : {}),
-    ...(settings.runtimePreflight ? { runtimePreflight: settings.runtimePreflight } : {})
-  });
-
-  invalidateSnapshotCache();
-  clearRuntimeHistoryCache();
-
-  return getMissionControlSnapshot({ force: true });
+  return updateWorkspaceRootFromApplication(input);
 }
 
 async function runWorkspaceKickoffMission(
@@ -1568,7 +1383,7 @@ async function runWorkspaceKickoffMission(
     percent: 18
   });
 
-  const result = await getOpenClawGatewayClient().streamAgentTurn(
+  const result = await getOpenClawAdapter().streamAgentTurn(
     {
       agentId: params.agentId,
       message: prompt,
@@ -2251,10 +2066,10 @@ export async function createManagedSurfaceAccount(input: {
       );
 
       const currentConfig = await measureTiming(timings, "managed-surface.gmail.read-config", () =>
-        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
+        getOpenClawAdapter().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const currentHooksConfig = await measureTiming(timings, "managed-surface.gmail.read-hooks", () =>
-        getOpenClawGatewayClient().getConfig<Record<string, unknown>>("hooks", { timeoutMs: 60000 })
+        getOpenClawAdapter().getConfig<Record<string, unknown>>("hooks", { timeoutMs: 60000 })
       );
       const currentPresetsValue = currentHooksConfig?.presets;
       const currentPresets = Array.isArray(currentPresetsValue)
@@ -2266,7 +2081,7 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.gmail.write-hooks", () =>
-        getOpenClawGatewayClient().setConfig("hooks", nextHooksConfig, { strictJson: true, timeoutMs: 60000 })
+        getOpenClawAdapter().setConfig("hooks", nextHooksConfig, { strictJson: true, timeoutMs: 60000 })
       );
 
       const nextConfig = mergeManagedSurfaceConfig(currentConfig, {
@@ -2281,13 +2096,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.gmail.write-config", () =>
-        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
+        getOpenClawAdapter().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "webhook": {
       const currentConfig = await measureTiming(timings, "managed-surface.webhook.read-config", () =>
-        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
+        getOpenClawAdapter().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const token = normalizeManagedSurfaceString(provisionConfig.token);
       if (!token) {
@@ -2304,13 +2119,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.webhook.write-config", () =>
-        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
+        getOpenClawAdapter().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "cron": {
       const currentConfig = await measureTiming(timings, "managed-surface.cron.read-config", () =>
-        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
+        getOpenClawAdapter().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const webhookToken = normalizeManagedSurfaceString(provisionConfig.webhookToken);
       if (!webhookToken) {
@@ -2327,13 +2142,13 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.cron.write-config", () =>
-        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
+        getOpenClawAdapter().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
     case "email": {
       const currentConfig = await measureTiming(timings, "managed-surface.email.read-config", () =>
-        getOpenClawGatewayClient().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
+        getOpenClawAdapter().getConfig<Record<string, unknown>>(configPath, { timeoutMs: 60000 })
       );
       const address = normalizeManagedSurfaceString(provisionConfig.address ?? provisionConfig.email);
       if (!address) {
@@ -2351,7 +2166,7 @@ export async function createManagedSurfaceAccount(input: {
       });
 
       await measureTiming(timings, "managed-surface.email.write-config", () =>
-        getOpenClawGatewayClient().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
+        getOpenClawAdapter().setConfig(configPath, nextConfig, { strictJson: true, timeoutMs: 60000 })
       );
       break;
     }
@@ -2792,7 +2607,7 @@ async function updateManagedSurfaceRouting(
   timings?: TimingCollector
 ) {
   const currentBindings = await measureTiming(timings, "routing.read-bindings", () =>
-    getOpenClawGatewayClient().getConfig<unknown[]>("bindings").then((value) => value ?? [])
+    getOpenClawAdapter().getConfig<unknown[]>("bindings").then((value) => value ?? [])
   );
 
   const managedChannels = registry.channels.filter(
@@ -2892,7 +2707,7 @@ async function updateManagedSurfaceRouting(
   ]);
 
   await measureTiming(timings, "routing.write-bindings", () =>
-    getOpenClawGatewayClient().setConfig("bindings", nextBindings, { strictJson: true })
+    getOpenClawAdapter().setConfig("bindings", nextBindings, { strictJson: true })
   );
   await measureTiming(timings, "routing.sync-telegram-settings", () =>
     syncManagedTelegramSettings(managedTelegramChannels, timings)
@@ -2918,7 +2733,7 @@ function dedupeManagedBindings(bindings: unknown[]) {
 
 async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSummary[], timings?: TimingCollector) {
   await measureTiming(timings, "telegram-settings.enabled", () =>
-    getOpenClawGatewayClient().setConfig("channels.telegram.enabled", managedChannels.length > 0, {
+    getOpenClawAdapter().setConfig("channels.telegram.enabled", managedChannels.length > 0, {
       strictJson: true
     })
   );
@@ -2929,13 +2744,13 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
 
   if (defaultAccountId) {
     await measureTiming(timings, "telegram-settings.default-account", () =>
-      getOpenClawGatewayClient().setConfig("channels.telegram.defaultAccount", defaultAccountId, {
+      getOpenClawAdapter().setConfig("channels.telegram.defaultAccount", defaultAccountId, {
         strictJson: true
       })
     );
   } else {
     await measureTiming(timings, "telegram-settings.default-account-unset", () =>
-      getOpenClawGatewayClient().unsetConfig("channels.telegram.defaultAccount").catch(() => {})
+      getOpenClawAdapter().unsetConfig("channels.telegram.defaultAccount").catch(() => {})
     );
   }
 
@@ -2950,7 +2765,7 @@ async function syncManagedTelegramSettings(managedChannels: WorkspaceChannelSumm
   );
 
   await measureTiming(timings, "telegram-settings.groups", () =>
-    getOpenClawGatewayClient().setConfig("channels.telegram.groups", nextGroupsConfig, {
+    getOpenClawAdapter().setConfig("channels.telegram.groups", nextGroupsConfig, {
       strictJson: true
     })
   );
@@ -3152,7 +2967,7 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
   }
 
   const currentGuilds = await measureTiming(timings, "discord-settings.read-guilds", () =>
-    getOpenClawGatewayClient().getConfig<DiscordGuildConfig>("channels.discord.guilds").then((value) => value ?? {})
+    getOpenClawAdapter().getConfig<DiscordGuildConfig>("channels.discord.guilds").then((value) => value ?? {})
   );
   const nextGuilds: Record<string, Record<string, unknown>> = {};
 
@@ -3224,7 +3039,7 @@ async function syncManagedDiscordSettings(managedChannels: WorkspaceChannelSumma
   }
 
   await measureTiming(timings, "discord-settings.write-guilds", () =>
-    getOpenClawGatewayClient().setConfig("channels.discord.guilds", nextGuilds, { strictJson: true })
+    getOpenClawAdapter().setConfig("channels.discord.guilds", nextGuilds, { strictJson: true })
   );
 }
 
@@ -3460,19 +3275,6 @@ function findMatchingWorkspaceAgent(
 
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
-}
-
-function resolveAgentForMission(snapshot: MissionControlSnapshot, workspaceId?: string) {
-  if (!workspaceId) {
-    return snapshot.agents.find((agent) => agent.isDefault)?.id || snapshot.agents[0]?.id;
-  }
-
-  const workspaceAgents = snapshot.agents.filter((agent) => agent.workspaceId === workspaceId);
-  return (
-    workspaceAgents.find((agent) => agent.isDefault)?.id ||
-    workspaceAgents.find((agent) => agent.status === "engaged")?.id ||
-    workspaceAgents[0]?.id
-  );
 }
 
 function resolveDefaultWorkspaceRoot() {

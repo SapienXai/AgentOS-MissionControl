@@ -8,9 +8,7 @@ import {
   AGENT_BOOTSTRAP_FILE_OPTIONS,
   buildAgentBootstrapFileDrafts,
   rebaseAgentBootstrapFileDrafts,
-  type AgentBootstrapFileDraft,
-  type AgentBootstrapFileKind,
-  type AgentBootstrapFilePath
+  type AgentBootstrapFileDraft
 } from "@/lib/openclaw/agent-bootstrap-files";
 import { getAgentPresetMeta, resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
 import type { AgentPolicy, AgentPreset, MissionControlSnapshot } from "@/lib/agentos/contracts";

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import { controlGateway } from "@/lib/openclaw/application/gateway-service";
-import { setOpenClawAdapterForTesting } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { getOpenClawAdapter, setOpenClawAdapterForTesting } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   settleGatewayStatusPayloadFromOpenClaw,
   settleModelStatusPayloadFromOpenClaw,
@@ -39,43 +39,56 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "controlGateway", action, options });
       return { ok: true, action };
     },
-    async probeGateway() {
+    async probeGateway(options?: OpenClawCommandOptions) {
+      calls.push({ method: "probeGateway", options });
       return {};
     },
-    async call<TPayload>() {
-      return {} as TPayload;
+    async call<TPayload>(method: string, params?: Record<string, unknown>, options?: OpenClawCommandOptions) {
+      calls.push({ method: "call", action: method, options });
+      return { params } as TPayload;
     },
-    async getConfig() {
-      return null;
+    async getConfig<TPayload>(path: string, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getConfig", action: path, options });
+      return { path } as TPayload;
     },
-    async setConfig() {
+    async setConfig(path: string, _value: unknown, options?: OpenClawCommandOptions & { strictJson?: boolean }) {
+      calls.push({ method: "setConfig", action: path, options });
       return { stdout: "", stderr: "", code: 0 };
     },
-    async unsetConfig() {
+    async unsetConfig(path: string, options?: OpenClawCommandOptions) {
+      calls.push({ method: "unsetConfig", action: path, options });
       return { stdout: "", stderr: "", code: 0 };
     },
-    async addAgent() {
+    async addAgent(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "addAgent", action: input.id, options });
       return { stdout: "", stderr: "", code: 0 };
     },
-    async deleteAgent() {
+    async deleteAgent(agentId: string, options?: OpenClawCommandOptions) {
+      calls.push({ method: "deleteAgent", action: agentId, options });
       return { stdout: "", stderr: "", code: 0 };
     },
-    async runAgentTurn() {
-      return {};
+    async runAgentTurn(input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "runAgentTurn", action: input.agentId, options });
+      return { runId: "run-1" };
     },
-    async streamAgentTurn() {
-      return {};
+    async streamAgentTurn(input, _callbacks, options?: OpenClawCommandOptions) {
+      calls.push({ method: "streamAgentTurn", action: input.agentId, options });
+      return { runId: "run-2" };
     },
-    async listSkills() {
+    async listSkills(options?: OpenClawCommandOptions & { eligible?: boolean }) {
+      calls.push({ method: "listSkills", options });
       return { skills: [] };
     },
-    async listPlugins() {
+    async listPlugins(options?: OpenClawCommandOptions) {
+      calls.push({ method: "listPlugins", options });
       return { plugins: [] };
     },
-    async listModels() {
+    async listModels(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listModels", options });
       return { models: [] };
     },
-    async scanModels() {
+    async scanModels(options?: OpenClawCommandOptions & { yes?: boolean; noInput?: boolean; noProbe?: boolean }) {
+      calls.push({ method: "scanModels", options });
       return [];
     },
   };
@@ -133,5 +146,46 @@ test("gateway application service controls the gateway through the adapter", asy
   assert.deepEqual(result, { ok: true, action: "restart" });
   assert.deepEqual(calls, [
     { method: "controlGateway", action: "restart", options: {} }
+  ]);
+});
+
+test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", async () => {
+  const { client, calls } = createMockGatewayClient();
+  setOpenClawGatewayClientForTesting(client);
+
+  const adapter = getOpenClawAdapter();
+  await adapter.listSkills({ eligible: true, timeoutMs: 1 });
+  await adapter.listPlugins({ timeoutMs: 2 });
+  await adapter.listModels({ all: true }, { timeoutMs: 3 });
+  await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
+  assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
+  await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 6 });
+  await adapter.unsetConfig("gateway.remote.url", { timeoutMs: 7 });
+  await adapter.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }, { timeoutMs: 8 });
+  await adapter.deleteAgent("agent-1", { timeoutMs: 9 });
+  assert.deepEqual(await adapter.runAgentTurn({ agentId: "agent-1", message: "hello" }, { timeoutMs: 10 }), {
+    runId: "run-1"
+  });
+  assert.deepEqual(
+    await adapter.streamAgentTurn({ agentId: "agent-1", message: "hello" }, {}, { timeoutMs: 11 }),
+    { runId: "run-2" }
+  );
+  await adapter.probeGateway({ timeoutMs: 12 });
+  assert.deepEqual(await adapter.call("health", { probe: true }, { timeoutMs: 13 }), { params: { probe: true } });
+
+  assert.deepEqual(calls, [
+    { method: "listSkills", options: { eligible: true, timeoutMs: 1 } },
+    { method: "listPlugins", options: { timeoutMs: 2 } },
+    { method: "listModels", options: { timeoutMs: 3 } },
+    { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
+    { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
+    { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 6 } },
+    { method: "unsetConfig", action: "gateway.remote.url", options: { timeoutMs: 7 } },
+    { method: "addAgent", action: "agent-1", options: { timeoutMs: 8 } },
+    { method: "deleteAgent", action: "agent-1", options: { timeoutMs: 9 } },
+    { method: "runAgentTurn", action: "agent-1", options: { timeoutMs: 10 } },
+    { method: "streamAgentTurn", action: "agent-1", options: { timeoutMs: 11 } },
+    { method: "probeGateway", options: { timeoutMs: 12 } },
+    { method: "call", action: "health", options: { timeoutMs: 13 } }
   ]);
 });

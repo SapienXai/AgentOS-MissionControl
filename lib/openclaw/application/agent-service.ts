@@ -17,7 +17,7 @@ import {
   serializeHeartbeatConfig
 } from "@/lib/openclaw/agent-heartbeat";
 import { parseAgentIdentityMarkdown } from "@/lib/openclaw/agent-bootstrap-files";
-import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   clearMissionControlRuntimeHistoryCache,
   getMissionControlSnapshot,
@@ -109,7 +109,7 @@ export async function createAgent(input: AgentCreateInput) {
   const requestedModelId = normalizeOptionalValue(input.modelId);
   const agentModelId = requestedModelId ?? resolveSnapshotDefaultAgentModelId(snapshot);
 
-  await getOpenClawGatewayClient().addAgent({
+  await getOpenClawAdapter().addAgent({
     id: agentId,
     workspace: resolvedWorkspacePath,
     agentDir,
@@ -379,7 +379,7 @@ export async function deleteAgent(input: AgentDeleteInput) {
   const workspace = snapshot.workspaces.find((entry) => entry.id === agent.workspaceId) ?? null;
   const runtimeCount = snapshot.runtimes.filter((runtime) => runtime.agentId === agent.id).length;
 
-  await getOpenClawGatewayClient().deleteAgent(agent.id);
+  await getOpenClawAdapter().deleteAgent(agent.id);
 
   try {
     const configList = await readAgentConfigList(snapshot);
