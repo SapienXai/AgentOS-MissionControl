@@ -1,7 +1,7 @@
 import "server-only";
 
-import { getOpenClawGatewayClient } from "@/lib/openclaw/client/gateway-client-factory";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 
 export function controlGateway(action: "start" | "stop" | "restart") {
-  return getOpenClawGatewayClient().controlGateway(action);
+  return getOpenClawAdapter().controlGateway(action);
 }

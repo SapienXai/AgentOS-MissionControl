@@ -32,7 +32,7 @@ import {
   settleGatewayStatusPayloadFromOpenClaw,
   settleModelStatusPayloadFromOpenClaw,
   settleStatusPayloadFromOpenClaw
-} from "@/lib/openclaw/client/gateway-payloads";
+} from "@/lib/openclaw/adapter/gateway-payloads";
 import { GatewayStatusCache } from "@/lib/openclaw/client/gateway-status-cache";
 import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
 import { settleChannelRegistryFromLocalFile } from "@/lib/openclaw/state/channel-registry-payload";

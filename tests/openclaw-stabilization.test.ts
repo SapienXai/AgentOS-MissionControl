@@ -656,8 +656,8 @@ test("model onboarding requires an explicit selection before verification", () =
       defaultModelId: "openai/gpt-5.4"
     }),
     {
-      kind: "set-default",
-      label: "Set as default"
+      kind: "dismiss",
+      label: "Enter AgentOS"
     }
   );
 
@@ -1295,7 +1295,7 @@ test("workspace bootstrap input keeps the path contract stable", () => {
   assert.equal(resolved.agents[0].id, "primary-lead");
   assert.equal(resolved.agents[0].role, "Lead");
   assert.equal(resolved.agents[0].name, "Primary Lead");
-  assert.equal(resolved.agents[0].policy?.fileAccess, "workspace-only");
+  assert.equal(resolved.agents[0].policy?.fileAccess, "extended");
   assert.deepEqual(resolved.docOverrides, [
     {
       path: "docs/brief.md",

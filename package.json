@@ -12,6 +12,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "node -r ./tests/register-paths.cjs -r jiti/register.js --test",
     "publish:agentos": "cd packages/agentos && npm publish --access public"
   },
   "dependencies": {
