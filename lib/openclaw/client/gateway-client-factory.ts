@@ -8,6 +8,9 @@ import {
 import type { OpenClawGatewayClient } from "@/lib/openclaw/client/types";
 
 let defaultClient: OpenClawGatewayClient | null = null;
+let configuredProvider: OpenClawGatewayClientProvider | null = null;
+
+export type OpenClawGatewayClientProvider = () => OpenClawGatewayClient;
 
 function createDefaultOpenClawGatewayClient() {
   const cliClient = new CliOpenClawGatewayClient();
@@ -23,10 +26,15 @@ function createDefaultOpenClawGatewayClient() {
 
 export function getOpenClawGatewayClient() {
   if (!defaultClient) {
-    defaultClient = createDefaultOpenClawGatewayClient();
+    defaultClient = (configuredProvider ?? createDefaultOpenClawGatewayClient)();
   }
 
   return defaultClient;
+}
+
+export function setOpenClawGatewayClientProvider(provider: OpenClawGatewayClientProvider | null) {
+  configuredProvider = provider;
+  defaultClient = null;
 }
 
 export function setOpenClawGatewayClientForTesting(client: OpenClawGatewayClient | null) {

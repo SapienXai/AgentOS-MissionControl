@@ -20,6 +20,7 @@ Environment:
 - `pnpm test`
 - `pnpm test -- tests/openclaw-workspace-service.test.ts tests/openclaw-stabilization.test.ts`
 - `/bin/zsh -lc "node /private/tmp/agentos-deep-runtime-smoke.mjs"`
+- `node scripts/openclaw-runtime-smoke.mjs`
 - `/bin/zsh -lc "AGENTOS_OPENCLAW_GATEWAY_CLIENT=cli OPENCLAW_GATEWAY_CLIENT=cli AGENTOS_OPENCLAW_NATIVE_WS=0 node -r ./tests/register-paths.cjs -r jiti/register.js -e ..."`
 - Browser Use navigation and DOM checks against `http://localhost:3000`.
 
@@ -64,6 +65,7 @@ Passed:
 - Gateway remote URL set/clear now reflects in `snapshot.diagnostics.configuredGatewayUrl`.
 - Invalid gateway protocol `http://example.com` returns HTTP 400 with `Gateway address must start with ws:// or wss://.`
 - CLI-forced fallback snapshot loaded with `AGENTOS_OPENCLAW_GATEWAY_CLIENT=cli`, `OPENCLAW_GATEWAY_CLIENT=cli`, and `AGENTOS_OPENCLAW_NATIVE_WS=0`.
+- Added repository smoke script passed for gateway health/status, model status, agents list, sessions/recent activity, agent preflight, and forced CLI fallback snapshot.
 - Provider validation returned stable missing-field errors for Telegram, Discord, Slack, Gmail, webhook, cron, and email.
 - Google Chat provisioning returned the current stable unsupported-provider error.
 - Telegram and Discord route discovery without credentials returned empty routes without crashing.
@@ -135,7 +137,8 @@ Verification:
 
 - The smoke probe initially marked `gatewayUrl: "not-a-url"` as invalid, but the current product intentionally accepts bare host shorthand and normalizes it to `ws://...`. The true invalid-protocol case `http://example.com` correctly returns 400.
 - Gateway stop returned a stable API response and then the local gateway health recovered. This appears to be current local gateway/probe behavior rather than a crash.
-- Native WS scope remains unchanged: generic RPC only with CLI fallback for typed workflows.
+- Native WS scope is Gateway-first for supported read/probe workflows, config snapshot mutation, and generic RPC, with CLI fallback preserved for failures and unsupported agent mutation/provisioning/streaming workflows.
+- In the current local environment, OpenClaw returns `gateway.auth.token` as a redacted config value to AgentOS. Native WS no longer sends that placeholder; it records an auth diagnostic and uses CLI fallback unless a real token/password is provided through env or explicit client options.
 - CLI fallback remains required and was validated through a forced-env snapshot load.
 
 ## Final Verification
@@ -144,7 +147,9 @@ Final verification from this pass:
 
 - `pnpm typecheck`: passed.
 - `pnpm lint`: passed.
-- `pnpm test`: passed, 92 tests.
+- `pnpm test`: passed, 105 tests.
+- `pnpm build`: passed when rerun outside the sandbox after a sandbox-only Turbopack `Operation not permitted` failure.
+- `node scripts/openclaw-runtime-smoke.mjs`: passed when rerun outside the sandbox. Latest run: gateway health/status PASS with `issues=6`, model status PASS, agents list PASS, sessions/recent activity PASS, agent preflight PASS, CLI fallback snapshot PASS. The sandboxed attempt failed because Node fetch to localhost returned `EPERM`/`fetch failed`.
 
 ## Remaining Risks
 

@@ -87,6 +87,28 @@ export type AgentPayload = Array<{
   isDefault?: boolean;
 }>;
 
+export type OpenClawAgentListPayload = {
+  defaultId?: string;
+  mainKey?: string;
+  scope?: "per-sender" | "global" | string;
+  agents: Array<{
+    id: string;
+    name?: string;
+    identity?: {
+      name?: string;
+      theme?: string;
+      emoji?: string;
+      avatar?: string;
+      avatarUrl?: string;
+    };
+    workspace?: string;
+    model?: {
+      primary?: string;
+      fallbacks?: string[];
+    };
+  }>;
+};
+
 export type AgentConfigPayload = Array<{
   id: string;
   name?: string;
@@ -160,6 +182,37 @@ export interface OpenClawListModelsInput {
   all?: boolean;
   provider?: string;
 }
+
+export interface OpenClawListSessionsInput {
+  limit?: number;
+  activeMinutes?: number;
+  includeGlobal?: boolean;
+  includeUnknown?: boolean;
+  includeDerivedTitles?: boolean;
+  includeLastMessage?: boolean;
+  label?: string;
+  spawnedBy?: string;
+  agentId?: string;
+  search?: string;
+}
+
+export type OpenClawSessionsPayload = {
+  sessions: Array<Record<string, unknown> & {
+    agentId?: string;
+    key?: string;
+    sessionId?: string;
+    updatedAt?: number;
+    ageMs?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    model?: string;
+    modelProvider?: string;
+    cacheRead?: number;
+    kind?: string;
+    origin?: string;
+  }>;
+};
 
 export type ModelsStatusPayload = {
   defaultModel?: string | null;
@@ -236,6 +289,8 @@ export interface OpenClawGatewayClient {
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
+  listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
+  listSessions(input?: OpenClawListSessionsInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionsPayload>;
   listSkills(options?: OpenClawCommandOptions & { eligible?: boolean }): Promise<OpenClawSkillListPayload>;
   listPlugins(options?: OpenClawCommandOptions): Promise<OpenClawPluginListPayload>;
   listModels(input?: OpenClawListModelsInput, options?: OpenClawCommandOptions): Promise<ModelsPayload>;

@@ -8,7 +8,11 @@ import {
   settleModelStatusPayloadFromOpenClaw,
   settleStatusPayloadFromOpenClaw
 } from "@/lib/openclaw/adapter/gateway-payloads";
-import { setOpenClawGatewayClientForTesting } from "@/lib/openclaw/client/gateway-client-factory";
+import {
+  getOpenClawGatewayClient,
+  setOpenClawGatewayClientForTesting,
+  setOpenClawGatewayClientProvider
+} from "@/lib/openclaw/client/gateway-client-factory";
 import type {
   OpenClawCommandOptions,
   OpenClawGatewayClient
@@ -34,6 +38,14 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
     async getModelStatus(options?: OpenClawCommandOptions) {
       calls.push({ method: "getModelStatus", options });
       return { defaultModel: "openai/gpt-5" };
+    },
+    async listAgents(options?: OpenClawCommandOptions) {
+      calls.push({ method: "listAgents", options });
+      return { agents: [] };
+    },
+    async listSessions(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "listSessions", options });
+      return { sessions: [] };
     },
     async controlGateway(action: "start" | "stop" | "restart", options?: OpenClawCommandOptions) {
       calls.push({ method: "controlGateway", action, options });
@@ -102,6 +114,7 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
 }
 
 afterEach(() => {
+  setOpenClawGatewayClientProvider(null);
   setOpenClawGatewayClientForTesting(null);
   setOpenClawAdapterForTesting(null);
 });
@@ -153,6 +166,13 @@ test("gateway application service controls the gateway through the adapter", asy
   ]);
 });
 
+test("OpenClaw gateway client factory supports a provider extension point", () => {
+  const { client } = createMockGatewayClient();
+  setOpenClawGatewayClientProvider(() => client);
+
+  assert.equal(getOpenClawGatewayClient(), client);
+});
+
 test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", async () => {
   const { client, calls } = createMockGatewayClient();
   setOpenClawGatewayClientForTesting(client);
@@ -162,6 +182,8 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.listPlugins({ timeoutMs: 2 });
   await adapter.listModels({ all: true }, { timeoutMs: 3 });
   await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
+  await adapter.listAgents({ timeoutMs: 4 });
+  await adapter.listSessions({ limit: 1 }, { timeoutMs: 4 });
   assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
   assert.equal(await adapter.hasConfig("gateway.remote.url", { timeoutMs: 6 }), true);
   await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 7 });
@@ -183,6 +205,8 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "listPlugins", options: { timeoutMs: 2 } },
     { method: "listModels", options: { timeoutMs: 3 } },
     { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
+    { method: "listAgents", options: { timeoutMs: 4 } },
+    { method: "listSessions", options: { timeoutMs: 4 } },
     { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
     { method: "hasConfig", action: "gateway.remote.url", options: { timeoutMs: 6 } },
     { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 7 } },

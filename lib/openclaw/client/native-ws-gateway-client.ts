@@ -1,19 +1,43 @@
 import "server-only";
 
+import { z } from "zod";
+
 import { CliOpenClawGatewayClient } from "@/lib/openclaw/client/cli-gateway-client";
+import type { CommandResult } from "@/lib/openclaw/cli";
 import type {
+  GatewayProbePayload,
+  GatewayStatusPayload,
+  ModelsPayload,
+  ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
   OpenClawGatewayClient,
   OpenClawListModelsInput,
+  OpenClawListSessionsInput,
+  OpenClawModelScanPayload,
+  OpenClawPluginListPayload,
+  OpenClawSessionsPayload,
+  OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
+  StatusPayload,
 } from "@/lib/openclaw/client/types";
 
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 const DEFAULT_NATIVE_TIMEOUT_MS = 3_000;
 const CONNECT_METHOD = "connect";
 const CONTROL_PROTOCOL_VERSION = 3;
+const SERVER_OPERATOR_CLIENT_ID = "cli";
+const SERVER_OPERATOR_CLIENT_MODE = "cli";
+const DEFAULT_OPERATOR_SCOPES = [
+  "operator.admin",
+  "operator.read",
+  "operator.write",
+  "operator.approvals",
+  "operator.pairing"
+];
+const REDACTED_OPENCLAW_SECRET = "__OPENCLAW_REDACTED__";
 
 type WebSocketLike = {
   readonly readyState: number;
@@ -56,11 +80,287 @@ type GatewayResponseFrame = {
 };
 
 class NativeGatewayError extends Error {
-  constructor(message: string, options: { cause?: unknown } = {}) {
+  readonly kind: OpenClawGatewayClientErrorKind;
+
+  constructor(
+    message: string,
+    options: {
+      cause?: unknown;
+      kind?: OpenClawGatewayClientErrorKind;
+    } = {}
+  ) {
     super(message);
     this.name = "NativeGatewayError";
+    this.kind = options.kind ?? classifyGatewayError(message);
     this.cause = options.cause;
   }
+}
+
+type OpenClawGatewayClientErrorKind =
+  | "auth"
+  | "malformed-response"
+  | "scope-limited"
+  | "timeout"
+  | "unreachable"
+  | "unknown";
+
+export class OpenClawGatewayClientError extends Error {
+  constructor(
+    message: string,
+    readonly kind: OpenClawGatewayClientErrorKind,
+    options: {
+      cause?: unknown;
+    } = {}
+  ) {
+    super(message);
+    this.name = "OpenClawGatewayClientError";
+    this.cause = options.cause;
+  }
+}
+
+export type OpenClawGatewayFallbackDiagnostic = {
+  at: string;
+  operation: string;
+  issue: string;
+  kind: OpenClawGatewayClientErrorKind;
+};
+
+const recentGatewayFallbackDiagnostics: OpenClawGatewayFallbackDiagnostic[] = [];
+const maxGatewayFallbackDiagnostics = 20;
+
+export function getRecentOpenClawGatewayFallbackDiagnostics() {
+  return [...recentGatewayFallbackDiagnostics];
+}
+
+export function clearOpenClawGatewayFallbackDiagnosticsForTesting() {
+  recentGatewayFallbackDiagnostics.length = 0;
+}
+
+function recordGatewayFallbackDiagnostic(operation: string, error: unknown) {
+  const normalized = normalizeClientError(error);
+  clearGatewayFallbackDiagnostic(operation);
+  recentGatewayFallbackDiagnostics.unshift({
+    at: new Date().toISOString(),
+    operation,
+    issue: normalized.message,
+    kind: normalized.kind
+  });
+
+  recentGatewayFallbackDiagnostics.splice(maxGatewayFallbackDiagnostics);
+}
+
+function clearGatewayFallbackDiagnostic(operation: string) {
+  for (let index = recentGatewayFallbackDiagnostics.length - 1; index >= 0; index -= 1) {
+    if (recentGatewayFallbackDiagnostics[index]?.operation === operation) {
+      recentGatewayFallbackDiagnostics.splice(index, 1);
+    }
+  }
+}
+
+function normalizeClientError(error: unknown) {
+  if (error instanceof OpenClawGatewayClientError) {
+    return error;
+  }
+
+  if (error instanceof NativeGatewayError) {
+    return new OpenClawGatewayClientError(error.message, error.kind, { cause: error.cause ?? error });
+  }
+
+  const message = error instanceof Error ? error.message : String(error || "OpenClaw Gateway request failed.");
+  return new OpenClawGatewayClientError(message, classifyGatewayError(message), { cause: error });
+}
+
+function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
+  if (/auth|token|password|unauthorized|forbidden/i.test(message)) {
+    return "auth";
+  }
+
+  if (/scope|permission|not allowed/i.test(message)) {
+    return "scope-limited";
+  }
+
+  if (/invalid json|malformed|schema|payload/i.test(message)) {
+    return "malformed-response";
+  }
+
+  if (/timed out|timeout/i.test(message)) {
+    return "timeout";
+  }
+
+  if (/connect|closed|unreachable|websocket/i.test(message)) {
+    return "unreachable";
+  }
+
+  return "unknown";
+}
+
+const gatewayStatusPayloadSchema = z
+  .object({
+    service: z
+      .object({
+        label: z.string().optional(),
+        loaded: z.boolean().optional()
+      })
+      .passthrough()
+      .optional(),
+    gateway: z
+      .object({
+        bindMode: z.string().optional(),
+        port: z.number().optional(),
+        probeUrl: z.string().optional()
+      })
+      .passthrough()
+      .optional(),
+    rpc: z
+      .object({
+        ok: z.boolean().optional()
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
+
+const statusPayloadSchema = z
+  .object({
+    runtimeVersion: z.string().optional(),
+    version: z.string().optional(),
+    updateChannel: z.string().optional()
+  })
+  .passthrough();
+
+const modelStatusPayloadSchema = z
+  .object({
+    defaultModel: z.string().nullable().optional(),
+    resolvedDefault: z.string().nullable().optional(),
+    allowed: z.array(z.string()).optional()
+  })
+  .passthrough();
+
+const agentListPayloadSchema = z
+  .object({
+    defaultId: z.string().optional(),
+    mainKey: z.string().optional(),
+    scope: z.string().optional(),
+    agents: z.array(
+      z
+        .object({
+          id: z.string(),
+          name: z.string().optional(),
+          identity: z
+            .object({
+              name: z.string().optional(),
+              theme: z.string().optional(),
+              emoji: z.string().optional(),
+              avatar: z.string().optional(),
+              avatarUrl: z.string().optional()
+            })
+            .passthrough()
+            .optional(),
+          workspace: z.string().optional(),
+          model: z
+            .object({
+              primary: z.string().optional(),
+              fallbacks: z.array(z.string()).optional()
+            })
+            .passthrough()
+            .optional()
+        })
+        .passthrough()
+    )
+  })
+  .passthrough();
+
+const sessionsPayloadSchema = z
+  .object({
+    sessions: z.array(z.object({}).passthrough())
+  })
+  .passthrough();
+
+const modelsPayloadSchema = z
+  .object({
+    models: z.array(
+      z
+        .object({
+          key: z.string(),
+          name: z.string(),
+          input: z.string().default("text"),
+          contextWindow: z.number().nullable().optional().default(null),
+          local: z.boolean().nullable().optional().default(null),
+          available: z.boolean().nullable().optional().default(null),
+          tags: z.array(z.string()).optional().default([]),
+          missing: z.boolean().optional().default(false)
+        })
+        .passthrough()
+    )
+  })
+  .passthrough();
+
+const skillsPayloadSchema = z
+  .object({
+    skills: z.array(
+      z
+        .object({
+          name: z.string(),
+          description: z.string().optional(),
+          emoji: z.string().optional(),
+          eligible: z.boolean().optional(),
+          disabled: z.boolean().optional(),
+          blockedByAllowlist: z.boolean().optional(),
+          source: z.string().optional(),
+          bundled: z.boolean().optional()
+        })
+        .passthrough()
+    )
+  })
+  .passthrough();
+
+const pluginsPayloadSchema = z
+  .object({
+    plugins: z.array(
+      z
+        .object({
+          id: z.string(),
+          name: z.string(),
+          status: z.string().optional(),
+          toolNames: z.array(z.string()).optional()
+        })
+        .passthrough()
+    )
+  })
+  .passthrough();
+
+const modelScanPayloadSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      provider: z.string()
+    })
+    .passthrough()
+);
+
+const configSnapshotPayloadSchema = z
+  .object({
+    exists: z.boolean().optional(),
+    valid: z.boolean().optional(),
+    hash: z.string().optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    resolved: z.unknown().optional()
+  })
+  .passthrough();
+
+function parseGatewayPayload<TPayload>(operation: string, schema: z.ZodTypeAny, payload: unknown) {
+  const parsed = schema.safeParse(payload);
+
+  if (!parsed.success) {
+    throw new OpenClawGatewayClientError(
+      `${operation}: OpenClaw Gateway returned a malformed response.`,
+      "malformed-response",
+      { cause: parsed.error }
+    );
+  }
+
+  return parsed.data as TPayload;
 }
 
 function normalizeEnvFlag(value: string | undefined) {
@@ -189,27 +489,216 @@ function createRequestId() {
   return `agentos:${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`;
 }
 
-function buildConnectParams(options: NativeWsOpenClawGatewayClientOptions) {
-  const token = options.token?.trim() || process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN?.trim();
-  const password = options.password?.trim() || process.env.AGENTOS_OPENCLAW_GATEWAY_PASSWORD?.trim();
+function readConfigString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readConfigPath(source: unknown, path: string) {
+  if (!path.trim()) {
+    return source;
+  }
+
+  let current = source;
+  for (const segment of parseConfigPath(path)) {
+    if (Array.isArray(current) && typeof segment === "number") {
+      current = current[segment];
+      continue;
+    }
+
+    if (!isObjectRecord(current) || typeof segment !== "string") {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
+}
+
+function parseConfigPath(path: string): Array<string | number> {
+  const segments: Array<string | number> = [];
+  const matcher = /([^[.\]]+)|\[(\d+)\]/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(path))) {
+    if (match[1]) {
+      segments.push(match[1]);
+    } else if (match[2]) {
+      segments.push(Number(match[2]));
+    }
+  }
+
+  return segments;
+}
+
+function cloneJsonObject(value: Record<string, unknown>) {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function setConfigPathValue(config: Record<string, unknown>, path: string, value: unknown) {
+  const segments = parseConfigPath(path);
+  if (segments.length === 0) {
+    throw new OpenClawGatewayClientError("Config path is required.", "unknown");
+  }
+
+  let current: Record<string, unknown> = config;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    const nextSegment = segments[index + 1];
+    if (typeof segment !== "string") {
+      throw new OpenClawGatewayClientError("Array root config paths are not supported.", "unknown");
+    }
+
+    const next = current[segment];
+    if (isObjectRecord(next) || Array.isArray(next)) {
+      current = next as Record<string, unknown>;
+      continue;
+    }
+
+    const created = typeof nextSegment === "number" ? [] : {};
+    current[segment] = created;
+    current = created as Record<string, unknown>;
+  }
+
+  const last = segments[segments.length - 1];
+  if (typeof last === "number") {
+    if (!Array.isArray(current)) {
+      throw new OpenClawGatewayClientError("Config path points to an array index on a non-array parent.", "unknown");
+    }
+    current[last] = value;
+    return;
+  }
+
+  current[last] = value;
+}
+
+function unsetConfigPathValue(config: Record<string, unknown>, path: string) {
+  const segments = parseConfigPath(path);
+  if (segments.length === 0) {
+    throw new OpenClawGatewayClientError("Config path is required.", "unknown");
+  }
+
+  let current: unknown = config;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    const segment = segments[index];
+    current = Array.isArray(current) && typeof segment === "number"
+      ? current[segment]
+      : isObjectRecord(current) && typeof segment === "string"
+        ? current[segment]
+        : undefined;
+
+    if (current === undefined) {
+      return;
+    }
+  }
+
+  const last = segments[segments.length - 1];
+  if (Array.isArray(current) && typeof last === "number") {
+    current.splice(last, 1);
+    return;
+  }
+
+  if (isObjectRecord(current) && typeof last === "string") {
+    delete current[last];
+  }
+}
+
+function commandResultFromGatewayPayload(payload: unknown): CommandResult {
+  return {
+    stdout: JSON.stringify(payload ?? {}),
+    stderr: ""
+  };
+}
+
+function isRedactedOpenClawSecret(value: string) {
+  return value === REDACTED_OPENCLAW_SECRET;
+}
+
+async function resolveConfiguredGatewaySecret(
+  fallback: OpenClawGatewayClient,
+  paths: string[],
+  options: OpenClawCommandOptions
+) {
+  for (const path of paths) {
+    const value = readConfigString(await fallback.getConfig<unknown>(path, options).catch(() => null));
+    if (isRedactedOpenClawSecret(value)) {
+      throw new OpenClawGatewayClientError(
+        `${path} is configured but OpenClaw returned a redacted secret. Set AGENTOS_OPENCLAW_GATEWAY_TOKEN/PASSWORD or OPENCLAW_GATEWAY_TOKEN/PASSWORD to enable native Gateway WS; using CLI fallback.`,
+        "auth"
+      );
+    }
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+async function resolveGatewayAuth(
+  fallback: OpenClawGatewayClient,
+  options: NativeWsOpenClawGatewayClientOptions,
+  url: string,
+  commandOptions: OpenClawCommandOptions
+) {
+  const configTokenPaths = isLocalGatewayUrl(url)
+    ? ["gateway.auth.token", "gateway.remote.token"]
+    : ["gateway.remote.token", "gateway.auth.token"];
+  const configPasswordPaths = isLocalGatewayUrl(url)
+    ? ["gateway.auth.password", "gateway.remote.password"]
+    : ["gateway.remote.password", "gateway.auth.password"];
+  const token =
+    options.token?.trim() ||
+    process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN?.trim() ||
+    process.env.OPENCLAW_GATEWAY_TOKEN?.trim() ||
+    await resolveConfiguredGatewaySecret(fallback, configTokenPaths, commandOptions);
+  const password =
+    options.password?.trim() ||
+    process.env.AGENTOS_OPENCLAW_GATEWAY_PASSWORD?.trim() ||
+    process.env.OPENCLAW_GATEWAY_PASSWORD?.trim() ||
+    await resolveConfiguredGatewaySecret(fallback, configPasswordPaths, commandOptions);
+
+  return { token, password };
+}
+
+function isLocalGatewayUrl(rawUrl: string) {
+  try {
+    const { hostname } = new URL(rawUrl);
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+async function buildConnectParams(
+  fallback: OpenClawGatewayClient,
+  options: NativeWsOpenClawGatewayClientOptions,
+  url: string,
+  commandOptions: OpenClawCommandOptions
+) {
+  const { token, password } = await resolveGatewayAuth(fallback, options, url, commandOptions);
   const auth = token
-    ? { mode: "token", token }
+    ? { token }
     : password
-      ? { mode: "password", password }
+      ? { password }
       : undefined;
 
   return {
     minProtocol: CONTROL_PROTOCOL_VERSION,
     maxProtocol: CONTROL_PROTOCOL_VERSION,
     client: {
-      id: options.clientName ?? "agentos",
+      id: options.clientName ?? SERVER_OPERATOR_CLIENT_ID,
       version: options.clientVersion ?? "agentos",
       platform: process.platform,
-      mode: "agentos",
+      mode: SERVER_OPERATOR_CLIENT_MODE,
       instanceId: options.instanceId
     },
     role: options.role ?? "operator",
-    scopes: options.scopes ?? [],
+    scopes: options.scopes ?? DEFAULT_OPERATOR_SCOPES,
     caps: ["tool-events"],
     ...(auth ? { auth } : {}),
     userAgent: "AgentOS",
@@ -341,35 +830,107 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   getStatus(options: OpenClawCommandOptions = {}) {
-    return this.fallback.getStatus(options);
+    return this.gatewayFirst(
+      "status",
+      {},
+      options,
+      (payload) => parseGatewayPayload<StatusPayload>("status", statusPayloadSchema, payload),
+      () => this.fallback.getStatus(options)
+    );
   }
 
   getGatewayStatus(options: OpenClawCommandOptions = {}) {
-    return this.fallback.getGatewayStatus(options);
+    return this.gatewayFirst(
+      "gateway.status",
+      {},
+      options,
+      (payload) => parseGatewayPayload<GatewayStatusPayload>("gateway.status", gatewayStatusPayloadSchema, payload),
+      () => this.fallback.getGatewayStatus(options)
+    );
   }
 
   getModelStatus(options: OpenClawCommandOptions = {}) {
-    return this.fallback.getModelStatus(options);
+    return this.gatewayFirst(
+      "models.status",
+      {},
+      options,
+      (payload) => parseGatewayPayload<ModelsStatusPayload>("models.status", modelStatusPayloadSchema, payload),
+      () => this.fallback.getModelStatus(options)
+    );
+  }
+
+  listAgents(options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst(
+      "agents.list",
+      {},
+      options,
+      (payload) => parseGatewayPayload<OpenClawAgentListPayload>("agents.list", agentListPayloadSchema, payload),
+      () => this.fallback.listAgents(options)
+    );
+  }
+
+  listSessions(input: OpenClawListSessionsInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst(
+      "sessions.list",
+      { ...input },
+      options,
+      (payload) => parseGatewayPayload<OpenClawSessionsPayload>("sessions.list", sessionsPayloadSchema, payload),
+      () => this.fallback.listSessions(input, options)
+    );
   }
 
   listSkills(options: OpenClawCommandOptions & { eligible?: boolean } = {}) {
-    return this.fallback.listSkills(options);
+    return this.gatewayFirst(
+      "skills.list",
+      { eligible: options.eligible === true },
+      options,
+      (payload) => parseGatewayPayload<OpenClawSkillListPayload>("skills.list", skillsPayloadSchema, payload),
+      () => this.fallback.listSkills(options)
+    );
   }
 
   listPlugins(options: OpenClawCommandOptions = {}) {
-    return this.fallback.listPlugins(options);
+    return this.gatewayFirst(
+      "plugins.list",
+      {},
+      options,
+      (payload) => parseGatewayPayload<OpenClawPluginListPayload>("plugins.list", pluginsPayloadSchema, payload),
+      () => this.fallback.listPlugins(options)
+    );
   }
 
   listModels(input: OpenClawListModelsInput = {}, options: OpenClawCommandOptions = {}) {
-    return this.fallback.listModels(input, options);
+    return this.gatewayFirst(
+      "models.list",
+      { ...input },
+      options,
+      (payload) => parseGatewayPayload<ModelsPayload>("models.list", modelsPayloadSchema, payload),
+      () => this.fallback.listModels(input, options)
+    );
   }
 
   scanModels(options: OpenClawCommandOptions & { yes?: boolean; noInput?: boolean; noProbe?: boolean } = {}) {
-    return this.fallback.scanModels(options);
+    return this.gatewayFirst(
+      "models.scan",
+      {
+        yes: options.yes === true,
+        noInput: options.noInput === true,
+        noProbe: options.noProbe === true
+      },
+      options,
+      (payload) => parseGatewayPayload<OpenClawModelScanPayload>("models.scan", modelScanPayloadSchema, payload),
+      () => this.fallback.scanModels(options)
+    );
   }
 
   probeGateway(options: OpenClawCommandOptions = {}) {
-    return this.fallback.probeGateway(options);
+    return this.gatewayFirst(
+      "gateway.probe",
+      {},
+      options,
+      (payload) => payload as GatewayProbePayload,
+      () => this.fallback.probeGateway(options)
+    );
   }
 
   controlGateway(action: "start" | "stop" | "restart", options: OpenClawCommandOptions = {}) {
@@ -386,27 +947,61 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     }
 
     try {
-      return await this.callNative<TPayload>(method, params, options);
+      const payload = await this.callNative<TPayload>(method, params, options);
+      clearGatewayFallbackDiagnostic(method);
+      return payload;
     } catch (error) {
       this.options.onNativeFailure?.(error, method);
+      recordGatewayFallbackDiagnostic(method, error);
       return this.fallback.call<TPayload>(method, params, options);
     }
   }
 
   getConfig<TPayload>(path: string, options: OpenClawCommandOptions = {}) {
-    return this.fallback.getConfig<TPayload>(path, options);
+    return this.gatewayFirst<TPayload | null>(
+      "config.get",
+      {},
+      options,
+      (payload) => {
+        const snapshot = parseGatewayPayload<Record<string, unknown>>(
+          "config.get",
+          configSnapshotPayloadSchema,
+          payload
+        );
+        const config = isObjectRecord(snapshot.config) ? snapshot.config : {};
+        const resolved = isObjectRecord(snapshot.resolved) ? snapshot.resolved : {};
+        const value = readConfigPath(config, path) ?? readConfigPath(resolved, path);
+        return value === undefined ? null : value as TPayload;
+      },
+      () => this.fallback.getConfig<TPayload>(path, options)
+    );
   }
 
-  hasConfig(path: string, options: OpenClawCommandOptions = {}) {
-    return this.fallback.hasConfig(path, options);
+  async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
+    try {
+      const value = await this.getConfig(path, options);
+      return value !== null && value !== undefined;
+    } catch {
+      return this.fallback.hasConfig(path, options);
+    }
   }
 
   setConfig(path: string, value: unknown, options: OpenClawCommandOptions & { strictJson?: boolean } = {}) {
-    return this.fallback.setConfig(path, value, options);
+    return this.gatewayConfigMutationFirst(
+      "config.set",
+      options,
+      (config) => setConfigPathValue(config, path, value),
+      () => this.fallback.setConfig(path, value, options)
+    );
   }
 
   unsetConfig(path: string, options: OpenClawCommandOptions = {}) {
-    return this.fallback.unsetConfig(path, options);
+    return this.gatewayConfigMutationFirst(
+      "config.unset",
+      options,
+      (config) => unsetConfigPathValue(config, path),
+      () => this.fallback.unsetConfig(path, options)
+    );
   }
 
   addAgent(input: OpenClawAddAgentInput, options: OpenClawCommandOptions = {}) {
@@ -499,7 +1094,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         socket,
         pending,
         CONNECT_METHOD,
-        buildConnectParams(this.options),
+        await buildConnectParams(this.fallback, this.options, url, options),
         timeoutMs,
         options.signal
       );
@@ -515,6 +1110,64 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       } catch {
         // Ignore close errors during cleanup.
       }
+    }
+  }
+
+  private async gatewayFirst<TPayload>(
+    method: string,
+    params: Record<string, unknown>,
+    options: OpenClawCommandOptions,
+    normalize: (payload: unknown) => TPayload,
+    fallback: () => Promise<TPayload>
+  ) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return fallback();
+    }
+
+    try {
+      const payload = normalize(await this.callNative<unknown>(method, params, options));
+      clearGatewayFallbackDiagnostic(method);
+      return payload;
+    } catch (error) {
+      this.options.onNativeFailure?.(error, method);
+      recordGatewayFallbackDiagnostic(method, error);
+      return fallback();
+    }
+  }
+
+  private async gatewayConfigMutationFirst(
+    operation: string,
+    options: OpenClawCommandOptions,
+    mutate: (config: Record<string, unknown>) => void,
+    fallback: () => Promise<CommandResult>
+  ) {
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return fallback();
+    }
+
+    try {
+      const snapshot = parseGatewayPayload<Record<string, unknown>>(
+        "config.get",
+        configSnapshotPayloadSchema,
+        await this.callNative<unknown>("config.get", {}, options)
+      );
+      const config = cloneJsonObject(isObjectRecord(snapshot.config) ? snapshot.config : {});
+      mutate(config);
+      const params: Record<string, unknown> = {
+        raw: JSON.stringify(config)
+      };
+
+      if (typeof snapshot.hash === "string" && snapshot.hash.trim()) {
+        params.baseHash = snapshot.hash;
+      }
+
+      const payload = await this.callNative<unknown>("config.set", params, options);
+      clearGatewayFallbackDiagnostic(operation);
+      return commandResultFromGatewayPayload(payload);
+    } catch (error) {
+      this.options.onNativeFailure?.(error, operation);
+      recordGatewayFallbackDiagnostic(operation, error);
+      return fallback();
     }
   }
 }

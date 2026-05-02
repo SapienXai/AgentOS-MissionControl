@@ -49,6 +49,33 @@ test("OpenClaw production code does not import the legacy service entrypoint", (
   assert.deepEqual(offenders, []);
 });
 
+test("app, components, and hooks do not import low-level OpenClaw clients directly", () => {
+  const allowedTransitionalApiRoutes = new Set([
+    "app/api/models/providers/route.ts",
+    "app/api/onboarding/models/route.ts",
+    "app/api/onboarding/route.ts",
+    "app/api/settings/openclaw-binary/route.ts",
+    "app/api/update/route.ts"
+  ]);
+  const forbidden = [
+    "@/lib/openclaw/cli",
+    "@/lib/openclaw/client/cli-gateway-client",
+    "@/lib/openclaw/client/native-ws-gateway-client",
+    "@/lib/openclaw/client/gateway-client-factory"
+  ];
+  const offenders = readProjectSourceFiles(["app", "components", "hooks"])
+    .filter((filePath) => !allowedTransitionalApiRoutes.has(toProjectPath(filePath)))
+    .flatMap((filePath) => {
+      const source = readFileSync(filePath, "utf8");
+      return forbidden
+        .filter((specifier) => source.includes(`from "${specifier}"`) || source.includes(`from '${specifier}'`))
+        .map((specifier) => `${toProjectPath(filePath)} -> ${specifier}`);
+    })
+    .sort();
+
+  assert.deepEqual(offenders, []);
+});
+
 test("OpenClaw direct CLI JSON usage remains in documented fallback/discovery files", () => {
   const allowed = new Set([
     "lib/openclaw/cli.ts",

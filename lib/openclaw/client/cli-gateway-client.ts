@@ -7,18 +7,22 @@ import {
 } from "@/lib/openclaw/cli";
 import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import type {
+  AgentPayload,
   GatewayProbePayload,
   GatewayStatusPayload,
   MissionCommandPayload,
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
   OpenClawGatewayClient,
   OpenClawListModelsInput,
+  OpenClawListSessionsInput,
   OpenClawModelScanPayload,
   OpenClawPluginListPayload,
+  OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
   StatusPayload
@@ -59,6 +63,27 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   getModelStatus(options: OpenClawCommandOptions = {}) {
     return runOpenClawJson<ModelsStatusPayload>(["models", "status", "--json"], options);
+  }
+
+  async listAgents(options: OpenClawCommandOptions = {}) {
+    const agents = await runOpenClawJson<AgentPayload>(["agents", "list", "--json"], options);
+
+    return {
+      agents: agents.map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        identity: {
+          name: agent.identityName,
+          emoji: agent.identityEmoji
+        },
+        workspace: agent.workspace,
+        model: agent.model ? { primary: agent.model } : undefined
+      }))
+    } satisfies OpenClawAgentListPayload;
+  }
+
+  listSessions(input: OpenClawListSessionsInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawSessionsPayload>("sessions.list", { ...input }, options);
   }
 
   listSkills(options: OpenClawCommandOptions & { eligible?: boolean } = {}) {

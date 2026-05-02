@@ -32,7 +32,10 @@ import {
   buildModelsPayloadFromFallbackSources,
   buildModelStatusFromAgentConfig
 } from "@/lib/openclaw/adapter/model-adapter";
-import { buildAgentPayloadsFromConfig } from "@/lib/openclaw/adapter/agent-adapter";
+import {
+  buildAgentPayloadsFromConfig,
+  buildAgentPayloadsFromGatewayList
+} from "@/lib/openclaw/adapter/agent-adapter";
 import { buildSnapshotAgentEntry } from "@/lib/openclaw/adapter/agent-snapshot-adapter";
 import { readAgentBootstrapProfile } from "@/lib/openclaw/adapter/agent-profile-adapter";
 import { buildPresenceRecords } from "@/lib/openclaw/adapter/presence-adapter";
@@ -52,14 +55,15 @@ import {
   SLOW_PAYLOAD_CACHE_TTL_MS,
   type CachedPayload
 } from "@/lib/openclaw/client/payload-cache";
-import type {
-  AgentConfigPayload,
-  AgentPayload,
-  GatewayStatusPayload,
-  ModelsPayload,
-  ModelsStatusPayload,
-  PresencePayload,
-  StatusPayload
+import {
+  getRecentOpenClawGatewayFallbackDiagnostics,
+  type AgentConfigPayload,
+  type AgentPayload,
+  type GatewayStatusPayload,
+  type ModelsPayload,
+  type ModelsStatusPayload,
+  type PresencePayload,
+  type StatusPayload
 } from "@/lib/openclaw/client/gateway-client";
 import {
   buildOpenClawBinarySelectionSnapshot,
@@ -200,6 +204,49 @@ async function readGatewayRemoteUrlConfig(): Promise<PromiseSettledResult<unknow
   }
 }
 
+async function settleAgentPayloadFromOpenClaw(
+  agentConfig: AgentConfigPayload
+): Promise<PromiseSettledResult<AgentPayload>> {
+  try {
+    const payload = await getOpenClawAdapter().listAgents({ timeoutMs: 15_000 });
+
+    return {
+      status: "fulfilled",
+      value: buildAgentPayloadsFromGatewayList(payload, agentConfig, openClawStateRootPath)
+    };
+  } catch (reason) {
+    return {
+      status: "rejected",
+      reason
+    };
+  }
+}
+
+async function settleSessionsPayloadFromOpenClaw(
+  agentConfig: AgentConfigPayload
+): Promise<PromiseSettledResult<SessionsPayload>> {
+  try {
+    const payload = await getOpenClawAdapter().listSessions({
+      limit: 500,
+      includeGlobal: false,
+      includeUnknown: false
+    }, { timeoutMs: 15_000 });
+
+    if (!payload || !Array.isArray(payload.sessions)) {
+      throw new Error("OpenClaw Gateway sessions.list returned an invalid payload.");
+    }
+
+    return {
+      status: "fulfilled",
+      value: {
+        sessions: payload.sessions as SessionsPayload["sessions"]
+      }
+    };
+  } catch {
+    return settleSessionsPayloadFromSessionCatalogs(agentConfig, openClawStateRootPath);
+  }
+}
+
 function normalizeGatewayRemoteUrlConfigValue(value: unknown) {
   if (typeof value === "string") {
     return normalizeOptionalValue(value);
@@ -308,10 +355,11 @@ async function loadMissionControlSnapshots({
     const resolvedAgentConfig = resolveCachedPayload(agentConfigResult, agentConfigPayloadCache, (entry) => {
       agentConfigPayloadCache = entry;
     });
-    const sessionsResult = await settleSessionsPayloadFromSessionCatalogs(
-      resolvedAgentConfig.value ?? [],
-      openClawStateRootPath
-    );
+    const agentConfig = resolvedAgentConfig.value ?? [];
+    if (isDeferredPayloadResult(agentsResult)) {
+      agentsResult = await settleAgentPayloadFromOpenClaw(agentConfig);
+    }
+    const sessionsResult = await settleSessionsPayloadFromOpenClaw(agentConfig);
     const resolvedAgents = resolveCachedPayload(agentsResult, agentPayloadCache, (entry) => {
       agentPayloadCache = entry;
     });
@@ -328,7 +376,6 @@ async function loadMissionControlSnapshots({
       presencePayloadCache = entry;
     });
     const status = resolvedStatus.value;
-    const agentConfig = resolvedAgentConfig.value ?? [];
     const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, openClawStateRootPath);
     const modelStatus = resolvedModelStatus.value ?? buildModelStatusFromAgentConfig(agentConfig);
     const localModels = buildModelsPayloadFromFallbackSources(agentConfig, modelStatus);
@@ -556,6 +603,9 @@ async function loadMissionControlSnapshots({
       getResolvedOpenClawBin()
     );
     const runtimeDiagnostics = await runtimeDiagnosticsPromise;
+    const gatewayFallbackIssues = getRecentOpenClawGatewayFallbackDiagnostics().map(
+      (entry) => `gateway.${entry.operation}: Gateway-first request fell back to CLI (${entry.kind}): ${entry.issue}`
+    );
 
     const snapshotIssueResults = {
       gatewayStatus: gatewayStatusResult,
@@ -593,7 +643,7 @@ async function loadMissionControlSnapshots({
           sessions: resolvedSessions,
           presence: resolvedPresence
         },
-        runtimeIssues: runtimeDiagnostics.issues
+        runtimeIssues: [...runtimeDiagnostics.issues, ...gatewayFallbackIssues]
       })
     });
 

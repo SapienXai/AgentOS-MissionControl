@@ -9,12 +9,15 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
   OpenClawGatewayClient,
   OpenClawListModelsInput,
+  OpenClawListSessionsInput,
   OpenClawModelScanPayload,
   OpenClawPluginListPayload,
+  OpenClawSessionsPayload,
   OpenClawSkillListPayload,
   OpenClawStreamCallbacks,
   StatusPayload
@@ -24,6 +27,8 @@ export interface OpenClawAdapter {
   getStatus(options?: OpenClawCommandOptions): Promise<StatusPayload>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
+  listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
+  listSessions(input?: OpenClawListSessionsInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionsPayload>;
   listModels(input?: OpenClawListModelsInput, options?: OpenClawCommandOptions): Promise<ModelsPayload>;
   listSkills(options?: OpenClawCommandOptions & { eligible?: boolean }): Promise<OpenClawSkillListPayload>;
   listPlugins(options?: OpenClawCommandOptions): Promise<OpenClawPluginListPayload>;
@@ -76,6 +81,14 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   getModelStatus(options: OpenClawCommandOptions = {}) {
     return this.getClient().getModelStatus(options);
+  }
+
+  listAgents(options: OpenClawCommandOptions = {}) {
+    return this.getClient().listAgents(options);
+  }
+
+  listSessions(input: OpenClawListSessionsInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.getClient().listSessions(input, options);
   }
 
   listModels(input: OpenClawListModelsInput = {}, options: OpenClawCommandOptions = {}) {
