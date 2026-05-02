@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -45,6 +44,7 @@ import {
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-normalization";
 import { writeTextFileEnsured } from "@/lib/openclaw/domains/workspace-bootstrap";
+import { workspaceIdFromPath, workspacePathMatchesId } from "@/lib/openclaw/domains/workspace-id";
 import type {
   AgentCreateInput,
   AgentDeleteInput,
@@ -64,17 +64,17 @@ export async function createAgent(input: AgentCreateInput) {
   let snapshot = await getMissionControlSnapshot({ includeHidden: true });
   let resolvedWorkspacePath =
     normalizeOptionalValue(input.workspacePath) ??
-    snapshot.workspaces.find((entry) => entry.id === input.workspaceId)?.path;
+    findWorkspacePathById(snapshot, input.workspaceId);
 
   if (!resolvedWorkspacePath) {
     snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
     resolvedWorkspacePath =
       normalizeOptionalValue(input.workspacePath) ??
-      snapshot.workspaces.find((entry) => entry.id === input.workspaceId)?.path;
+      findWorkspacePathById(snapshot, input.workspaceId);
   }
 
   const resolvedWorkspaceId =
-    input.workspaceId || (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : null);
+    resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || null;
   assertAgentIdAvailable(snapshot, agentId, resolvedWorkspaceId);
 
   if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
@@ -207,10 +207,10 @@ export async function updateAgent(input: AgentUpdateInput) {
 
   const resolvedWorkspacePath =
     normalizeOptionalValue(input.workspacePath) ??
-    snapshot.workspaces.find((entry) => entry.id === (input.workspaceId || agent.workspaceId))?.path ??
+    findWorkspacePathById(snapshot, input.workspaceId || agent.workspaceId) ??
     agent.workspacePath;
   const resolvedWorkspaceId =
-    input.workspaceId || (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : agent.workspaceId);
+    resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || agent.workspaceId;
 
   if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
     throw new Error("Workspace was not found for this agent.");
@@ -632,13 +632,16 @@ async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentI
   await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
 }
 
-function workspaceIdFromPath(workspacePath: string) {
-  const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
-  return `workspace:${hash}`;
-}
-
 function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function findWorkspacePathById(snapshot: MissionControlSnapshot, workspaceId: string | undefined) {
+  if (!workspaceId) {
+    return undefined;
+  }
+
+  return snapshot.workspaces.find((entry) => entry.id === workspaceId || workspacePathMatchesId(entry.path, workspaceId))?.path;
 }
 
 function slugify(value: string) {

@@ -120,6 +120,7 @@ import {
   normalizeConfiguredWorkspaceRootValue,
   readMissionControlSettings
 } from "@/lib/openclaw/domains/control-plane-settings";
+import { workspaceIdFromPath } from "@/lib/openclaw/domains/workspace-id";
 import type { MissionControlSettings } from "@/lib/openclaw/domains/control-plane-settings";
 import type {
   ChannelAccountRecord,
@@ -696,21 +697,6 @@ function resolveDefaultWorkspaceRoot() {
 
 function resolveWorkspaceRoot(configuredWorkspaceRoot?: string | null) {
   return configuredWorkspaceRoot || resolveDefaultWorkspaceRoot();
-}
-
-function workspaceIdFromPath(workspacePath: string) {
-  const base = path.basename(workspacePath) || workspacePath;
-  return slugify(base) || createHashFallback(workspacePath);
-}
-
-function createHashFallback(value: string) {
-  let hash = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-  }
-
-  return `workspace-${Math.abs(hash)}`;
 }
 
 function prettifyWorkspaceName(workspacePath: string) {

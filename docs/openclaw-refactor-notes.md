@@ -204,7 +204,14 @@ Latest verification:
 
 - `pnpm typecheck` passed.
 - `pnpm lint` passed with 0 warnings.
-- `pnpm test` passed: 90 tests.
+- `pnpm test` passed: 91 tests.
+
+Runtime production-readiness follow-up:
+
+- Workspace creation now returns the same path-derived slug id used by mission-control snapshots and `/api/workspaces`.
+- Workspace update/delete and agent workspace resolution still accept the previous `workspace:<hash>` id as a legacy alias so older compatibility callers do not fail immediately.
+- Runtime session normalization now uses the same workspace id helper, keeping task/runtime workspace links aligned with snapshot workspace ids.
+- This fixes the observed create flow where a newly created workspace selected an id that did not exist in the refreshed snapshot, leaving the canvas empty until a page reload.
 
 Added/updated coverage:
 
@@ -217,6 +224,7 @@ Added/updated coverage:
 - Mission-service compatibility for submit validation and missing-task abort shape.
 - Settings-service compatibility for gateway URL and workspace root validation shapes.
 - Workspace-service compatibility for workspace create/update/delete validation shapes.
+- Workspace id compatibility for current snapshot ids and legacy hash aliases.
 - Workspace document render helper compatibility delegates.
 - Channel-service compatibility for registry mutation validation and missing-channel shapes.
 - Channel-service compatibility for managed provisioning validation shapes across chat and surface providers.

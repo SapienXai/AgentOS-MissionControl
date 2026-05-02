@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { resolveRuntimeStatus } from "@/lib/openclaw/domains/control-plane-normalization";
 import type { SessionsPayload } from "@/lib/openclaw/domains/session-catalog";
+import { workspaceIdFromPath } from "@/lib/openclaw/domains/workspace-id";
 import type { RuntimeRecord } from "@/lib/openclaw/types";
 
 export type RuntimeAgentConfigInput = Array<{
@@ -98,11 +99,6 @@ export function extractRuntimeKeyToken(key: string | undefined, prefix: string) 
 
   const tail = key.slice(index + marker.length);
   return tail.split(":")[0];
-}
-
-function workspaceIdFromPath(workspacePath: string) {
-  const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
-  return `workspace:${hash}`;
 }
 
 function prettifyAgentName(agentId: string | undefined) {

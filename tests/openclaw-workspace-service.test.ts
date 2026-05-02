@@ -42,6 +42,11 @@ import {
   renderTemplateSpecificDoc as renderDomainTemplateSpecificDoc,
   renderToolsMarkdown as renderDomainToolsMarkdown
 } from "@/lib/openclaw/domains/workspace-document-renderers";
+import {
+  legacyWorkspaceHashIdFromPath,
+  workspaceIdFromPath,
+  workspacePathMatchesId
+} from "@/lib/openclaw/domains/workspace-id";
 
 async function readErrorMessage(action: () => Promise<unknown>) {
   try {
@@ -100,6 +105,19 @@ test("workspace application service preserves delete validation shape", async ()
     await readErrorMessage(() => deleteApplicationWorkspaceProject(input)),
     await readErrorMessage(() => deleteCompatibilityWorkspaceProject(input))
   );
+});
+
+test("workspace ids match snapshot slugs while accepting legacy hash aliases", () => {
+  const workspacePath = "/tmp/AgentOS Consistency Probe";
+  const currentId = workspaceIdFromPath(workspacePath);
+  const legacyId = legacyWorkspaceHashIdFromPath(workspacePath);
+
+  assert.equal(currentId, "agentos-consistency-probe");
+  assert.match(legacyId, /^workspace:[a-f0-9]{8}$/);
+  assert.notEqual(currentId, legacyId);
+  assert.equal(workspacePathMatchesId(workspacePath, currentId), true);
+  assert.equal(workspacePathMatchesId(workspacePath, legacyId), true);
+  assert.equal(workspacePathMatchesId(workspacePath, "other-workspace"), false);
 });
 
 test("service workspace document render helpers delegate to domain renderers", () => {

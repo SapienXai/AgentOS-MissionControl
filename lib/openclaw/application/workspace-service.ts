@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { access, readFile, rename, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -78,6 +77,10 @@ import { normalizeOptionalValue } from "@/lib/openclaw/domains/control-plane-nor
 import {
   getConfiguredWorkspaceRoot
 } from "@/lib/openclaw/domains/control-plane-settings";
+import {
+  workspaceIdFromPath,
+  workspacePathMatchesId
+} from "@/lib/openclaw/domains/workspace-id";
 import type {
   MissionControlSnapshot,
   OpenClawAgent,
@@ -340,7 +343,7 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
   }
 
   const snapshot = await getMissionControlSnapshot({ force: true });
-  const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+  const workspace = findWorkspaceById(snapshot.workspaces, workspaceId);
 
   if (!workspace) {
     throw new Error("Workspace was not found.");
@@ -394,7 +397,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
   }
 
   const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+  const workspace = findWorkspaceById(snapshot.workspaces, workspaceId);
 
   if (!workspace) {
     throw new Error("Workspace was not found.");
@@ -434,7 +437,7 @@ export async function deleteWorkspaceProject(input: WorkspaceDeleteInput) {
 
 export async function readWorkspaceEditSeed(workspaceId: string): Promise<WorkspaceEditSeed> {
   const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
-  const workspace = snapshot.workspaces.find((entry) => entry.id === workspaceId);
+  const workspace = findWorkspaceById(snapshot.workspaces, workspaceId);
 
   if (!workspace) {
     throw new Error("Workspace was not found.");
@@ -592,11 +595,6 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-export function workspaceIdFromPath(workspacePath: string) {
-  const hash = createHash("sha1").update(workspacePath).digest("hex").slice(0, 8);
-  return `workspace:${hash}`;
 }
 
 async function applyWorkspacePlanEdits(
@@ -828,6 +826,10 @@ async function applyWorkspacePlanEdits(
     previousWorkspaceId: workspace.id,
     workspacePath: currentWorkspacePath
   };
+}
+
+function findWorkspaceById(workspaces: WorkspaceProject[], workspaceId: string) {
+  return workspaces.find((entry) => entry.id === workspaceId || workspacePathMatchesId(entry.path, workspaceId));
 }
 
 async function syncWorkspaceAgentsToPlan(input: {
