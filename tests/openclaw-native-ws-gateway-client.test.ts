@@ -69,6 +69,10 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
     return null;
   }
 
+  async hasConfig() {
+    return false;
+  }
+
   async setConfig() {
     return { stdout: "", stderr: "", code: 0 };
   }

@@ -147,7 +147,7 @@ Fallback is preserved at every layer:
 
 ## Still In `service.ts`
 
-`lib/openclaw/service.ts` is now a legacy compatibility/delegation entrypoint.
+`lib/openclaw/service.ts` is now an intentionally retained legacy compatibility/delegation entrypoint. Decision: keep the public compatibility surface for now, block new production imports, and require a deliberate compatibility audit before removing any export.
 
 Remaining exports are classified as:
 
@@ -189,7 +189,8 @@ Production-safety scans:
 - Direct `runOpenClawJson` remains in `lib/openclaw/cli.ts`, which defines the CLI JSON helper.
 - Direct `runOpenClawJson` remains in `lib/openclaw/client/cli-gateway-client.ts`, which is the intended CLI fallback layer.
 - Direct `runOpenClawJson` also remains in `lib/openclaw/domains/agent-config.ts`, `lib/openclaw/domains/channels.ts`, `lib/openclaw/surface-adapters.ts`, and the legacy planner runtime path in `lib/openclaw/planner.ts`. These are existing config/discovery/planner readers for OpenClaw state or legacy runtime execution paths that have not yet been given stable Gateway RPC equivalents. They are intentionally left unchanged in this stabilization pass to preserve fallback behavior and response shapes.
-- Direct `runOpenClaw` remains in `lib/openclaw/client/cli-gateway-client.ts`, `lib/openclaw/application/channel-service.ts`, `lib/openclaw/domains/agent-config.ts`, `lib/openclaw/domains/agent-provisioning.ts`, `lib/openclaw/domains/control-plane-settings.ts`, `lib/openclaw/planner.ts`, and `lib/openclaw/reset.ts`. These are still intentional CLI-backed fallback, provisioning, config sync, planner, and reset workflows until equivalent OpenClaw protocol support is confirmed.
+- Direct `runOpenClaw` remains in `lib/openclaw/client/cli-gateway-client.ts`, `lib/openclaw/application/channel-service.ts`, `lib/openclaw/domains/agent-config.ts`, `lib/openclaw/domains/agent-provisioning.ts`, `lib/openclaw/planner.ts`, and `lib/openclaw/reset.ts`. These are still intentional CLI-backed fallback, provisioning, config sync, planner, and reset workflows until equivalent OpenClaw protocol support is confirmed.
+- `hasGatewayRemoteUrlConfig` was removed from `lib/openclaw/domains/control-plane-settings.ts`; gateway remote URL existence checks now go through `OpenClawAdapter.hasConfig`, backed by the CLI fallback client. This moves that direct CLI command out of the domain layer without expanding native WS behavior.
 
 ## Prompt And Codebase Conflicts
 
@@ -211,6 +212,7 @@ Added/updated coverage:
 - Native WS handshake failure fallback to CLI.
 - Native WS timeout fallback to CLI.
 - Expanded adapter methods through `setOpenClawGatewayClientForTesting`.
+- Adapter/client coverage for `hasConfig`, used by settings-service to avoid direct CLI config existence checks in the domain layer.
 - Runtime-service compatibility for missing runtime and missing task shapes.
 - Mission-service compatibility for submit validation and missing-task abort shape.
 - Settings-service compatibility for gateway URL and workspace root validation shapes.

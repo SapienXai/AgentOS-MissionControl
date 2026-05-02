@@ -397,6 +397,10 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     return this.fallback.getConfig<TPayload>(path, options);
   }
 
+  hasConfig(path: string, options: OpenClawCommandOptions = {}) {
+    return this.fallback.hasConfig(path, options);
+  }
+
   setConfig(path: string, value: unknown, options: OpenClawCommandOptions & { strictJson?: boolean } = {}) {
     return this.fallback.setConfig(path, value, options);
   }

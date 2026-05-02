@@ -90,8 +90,9 @@ export { inferFallbackModelMetadata } from "@/lib/openclaw/adapter/model-adapter
 
 export { discoverDiscordRoutes, discoverSurfaceRoutes, discoverTelegramGroups, getChannelRegistry };
 
-// Compatibility exports: new code should prefer application services, the adapter,
-// or client layer directly. Keep this module stable until legacy imports are removed.
+// Public compatibility surface. New production code should prefer application
+// services, domain modules, the adapter, or client layer directly. Keep these
+// exports stable unless a deliberate compatibility audit removes them.
 type WorkspaceCreateOptions = {
   onProgress?: (snapshot: OperationProgressSnapshot) => Promise<void> | void;
 };

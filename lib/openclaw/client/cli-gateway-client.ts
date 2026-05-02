@@ -5,6 +5,7 @@ import {
   runOpenClawJson,
   runOpenClawJsonStream
 } from "@/lib/openclaw/cli";
+import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
 import type {
   GatewayProbePayload,
   GatewayStatusPayload,
@@ -123,6 +124,21 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   async getConfig<TPayload>(path: string, options: OpenClawCommandOptions = {}) {
     return runOpenClawJson<TPayload>(["config", "get", path, "--json"], options).catch(() => null);
+  }
+
+  async hasConfig(path: string, options: OpenClawCommandOptions = {}) {
+    try {
+      await runOpenClaw(["config", "get", path, "--json"], options);
+      return true;
+    } catch (error) {
+      const detail = stringifyCommandFailure(error);
+
+      if (detail.includes("Config path not found")) {
+        return false;
+      }
+
+      throw error;
+    }
   }
 
   setConfig(

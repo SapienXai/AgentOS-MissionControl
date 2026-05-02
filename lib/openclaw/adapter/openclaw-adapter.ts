@@ -33,6 +33,7 @@ export interface OpenClawAdapter {
     noProbe?: boolean;
   }): Promise<OpenClawModelScanPayload>;
   getConfig<TPayload>(path: string, options?: OpenClawCommandOptions): Promise<TPayload | null>;
+  hasConfig(path: string, options?: OpenClawCommandOptions): Promise<boolean>;
   setConfig(
     path: string,
     value: unknown,
@@ -95,6 +96,10 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   getConfig<TPayload>(path: string, options: OpenClawCommandOptions = {}) {
     return this.getClient().getConfig<TPayload>(path, options);
+  }
+
+  hasConfig(path: string, options: OpenClawCommandOptions = {}) {
+    return this.getClient().hasConfig(path, options);
   }
 
   setConfig(path: string, value: unknown, options: OpenClawCommandOptions & { strictJson?: boolean } = {}) {

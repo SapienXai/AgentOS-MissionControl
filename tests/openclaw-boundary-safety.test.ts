@@ -71,7 +71,6 @@ test("OpenClaw direct CLI command usage remains in documented fallback/provision
     "lib/openclaw/client/cli-gateway-client.ts",
     "lib/openclaw/domains/agent-config.ts",
     "lib/openclaw/domains/agent-provisioning.ts",
-    "lib/openclaw/domains/control-plane-settings.ts",
     "lib/openclaw/planner.ts",
     "lib/openclaw/reset.ts",
     "lib/openclaw/application/channel-service.ts"

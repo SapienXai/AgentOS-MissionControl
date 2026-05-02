@@ -51,6 +51,10 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "getConfig", action: path, options });
       return { path } as TPayload;
     },
+    async hasConfig(path: string, options?: OpenClawCommandOptions) {
+      calls.push({ method: "hasConfig", action: path, options });
+      return true;
+    },
     async setConfig(path: string, _value: unknown, options?: OpenClawCommandOptions & { strictJson?: boolean }) {
       calls.push({ method: "setConfig", action: path, options });
       return { stdout: "", stderr: "", code: 0 };
@@ -159,19 +163,20 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.listModels({ all: true }, { timeoutMs: 3 });
   await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
   assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
-  await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 6 });
-  await adapter.unsetConfig("gateway.remote.url", { timeoutMs: 7 });
-  await adapter.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }, { timeoutMs: 8 });
-  await adapter.deleteAgent("agent-1", { timeoutMs: 9 });
-  assert.deepEqual(await adapter.runAgentTurn({ agentId: "agent-1", message: "hello" }, { timeoutMs: 10 }), {
+  assert.equal(await adapter.hasConfig("gateway.remote.url", { timeoutMs: 6 }), true);
+  await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 7 });
+  await adapter.unsetConfig("gateway.remote.url", { timeoutMs: 8 });
+  await adapter.addAgent({ id: "agent-1", workspace: "/workspace", agentDir: "/agent" }, { timeoutMs: 9 });
+  await adapter.deleteAgent("agent-1", { timeoutMs: 10 });
+  assert.deepEqual(await adapter.runAgentTurn({ agentId: "agent-1", message: "hello" }, { timeoutMs: 11 }), {
     runId: "run-1"
   });
   assert.deepEqual(
-    await adapter.streamAgentTurn({ agentId: "agent-1", message: "hello" }, {}, { timeoutMs: 11 }),
+    await adapter.streamAgentTurn({ agentId: "agent-1", message: "hello" }, {}, { timeoutMs: 12 }),
     { runId: "run-2" }
   );
-  await adapter.probeGateway({ timeoutMs: 12 });
-  assert.deepEqual(await adapter.call("health", { probe: true }, { timeoutMs: 13 }), { params: { probe: true } });
+  await adapter.probeGateway({ timeoutMs: 13 });
+  assert.deepEqual(await adapter.call("health", { probe: true }, { timeoutMs: 14 }), { params: { probe: true } });
 
   assert.deepEqual(calls, [
     { method: "listSkills", options: { eligible: true, timeoutMs: 1 } },
@@ -179,13 +184,14 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "listModels", options: { timeoutMs: 3 } },
     { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
     { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
-    { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 6 } },
-    { method: "unsetConfig", action: "gateway.remote.url", options: { timeoutMs: 7 } },
-    { method: "addAgent", action: "agent-1", options: { timeoutMs: 8 } },
-    { method: "deleteAgent", action: "agent-1", options: { timeoutMs: 9 } },
-    { method: "runAgentTurn", action: "agent-1", options: { timeoutMs: 10 } },
-    { method: "streamAgentTurn", action: "agent-1", options: { timeoutMs: 11 } },
-    { method: "probeGateway", options: { timeoutMs: 12 } },
-    { method: "call", action: "health", options: { timeoutMs: 13 } }
+    { method: "hasConfig", action: "gateway.remote.url", options: { timeoutMs: 6 } },
+    { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 7 } },
+    { method: "unsetConfig", action: "gateway.remote.url", options: { timeoutMs: 8 } },
+    { method: "addAgent", action: "agent-1", options: { timeoutMs: 9 } },
+    { method: "deleteAgent", action: "agent-1", options: { timeoutMs: 10 } },
+    { method: "runAgentTurn", action: "agent-1", options: { timeoutMs: 11 } },
+    { method: "streamAgentTurn", action: "agent-1", options: { timeoutMs: 12 } },
+    { method: "probeGateway", options: { timeoutMs: 13 } },
+    { method: "call", action: "health", options: { timeoutMs: 14 } }
   ]);
 });

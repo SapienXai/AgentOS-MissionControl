@@ -250,6 +250,7 @@ export interface OpenClawGatewayClient {
     params?: Record<string, unknown>,
     options?: OpenClawCommandOptions
   ): Promise<TPayload>;
+  hasConfig(path: string, options?: OpenClawCommandOptions): Promise<boolean>;
   getConfig<TPayload>(path: string, options?: OpenClawCommandOptions): Promise<TPayload | null>;
   setConfig(
     path: string,

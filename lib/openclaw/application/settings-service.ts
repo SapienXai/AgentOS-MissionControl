@@ -7,7 +7,6 @@ import {
   invalidateMissionControlSnapshotCache
 } from "@/lib/openclaw/application/mission-control-service";
 import {
-  hasGatewayRemoteUrlConfig,
   normalizeGatewayRemoteUrl,
   normalizeWorkspaceRoot,
   readMissionControlSettings,
@@ -26,7 +25,7 @@ export async function updateGatewayRemoteUrl(input: { gatewayUrl?: string | null
 
   if (gatewayUrl) {
     await getOpenClawAdapter().setConfig(GATEWAY_REMOTE_URL_CONFIG_KEY, gatewayUrl);
-  } else if (await hasGatewayRemoteUrlConfig()) {
+  } else if (await getOpenClawAdapter().hasConfig(GATEWAY_REMOTE_URL_CONFIG_KEY)) {
     await getOpenClawAdapter().unsetConfig(GATEWAY_REMOTE_URL_CONFIG_KEY);
   }
 

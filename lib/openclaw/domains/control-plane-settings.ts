@@ -2,11 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { stringifyCommandFailure } from "@/lib/openclaw/command-failure";
-import { runOpenClaw } from "@/lib/openclaw/cli";
 import type { OpenClawRuntimeSmokeTest } from "@/lib/agentos/contracts";
 
-const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
 const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
 const missionControlSettingsPath = path.join(missionControlRootPath, "settings.json");
 const runtimeSmokeTestTtlMs = 12 * 60 * 60 * 1000;
@@ -78,21 +75,6 @@ export function normalizeConfiguredWorkspaceRootValue(value: string | null | und
   const normalized = path.normalize(expanded);
 
   return normalized.length > 1 ? normalized.replace(/[\\/]+$/, "") : normalized;
-}
-
-export async function hasGatewayRemoteUrlConfig() {
-  try {
-    await runOpenClaw(["config", "get", GATEWAY_REMOTE_URL_CONFIG_KEY, "--json"]);
-    return true;
-  } catch (error) {
-    const detail = stringifyCommandFailure(error);
-
-    if (detail.includes("Config path not found")) {
-      return false;
-    }
-
-    throw error;
-  }
 }
 
 export async function getConfiguredWorkspaceRoot() {
