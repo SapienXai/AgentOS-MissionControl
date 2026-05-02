@@ -147,18 +147,55 @@ Fallback is preserved at every layer:
 
 ## Still In `service.ts`
 
-`lib/openclaw/service.ts` is smaller and now mostly owns compatibility exports plus legacy workspace document render helpers:
+`lib/openclaw/service.ts` is now a legacy compatibility/delegation entrypoint.
 
-- Legacy workspace document render helper exports.
-- Compatibility exports for older imports.
+Remaining exports are classified as:
 
-The remaining cleanup should focus on replacing or relocating legacy render helper exports, then adding an import guard once compatibility imports are limited to tests and known transitional modules.
+- Compatibility delegates:
+  - Mission control: `clearMissionControlCaches`, `getMissionControlSnapshot`
+  - Runtime reads/smoke checks: `ensureOpenClawRuntimeStateAccess`, `touchOpenClawRuntimeStateAccess`, `ensureOpenClawRuntimeSmokeTest`, `getRuntimeOutput`, `getTaskDetail`
+  - Mission workflows: `submitMission`, `abortMissionTask`
+  - Agent workflows: `createAgent`, `updateAgent`, `deleteAgent`
+  - Workspace workflows: `createWorkspaceProject`, `updateWorkspaceProject`, `deleteWorkspaceProject`, `readWorkspaceEditSeed`
+  - Settings workflows: `updateGatewayRemoteUrl`, `updateWorkspaceRoot`
+  - Channel workflows: `upsertWorkspaceChannel`, `disconnectWorkspaceChannel`, `deleteWorkspaceChannelEverywhere`, `setWorkspaceChannelPrimary`, `setWorkspaceChannelGroups`, `bindWorkspaceChannelAgent`, `unbindWorkspaceChannelAgent`
+  - Managed provisioning: `createManagedChatChannelAccount`, `createManagedSurfaceAccount`, `createTelegramChannelAccount`
+  - Discovery/model/session re-exports: `discoverDiscordRoutes`, `discoverSurfaceRoutes`, `discoverTelegramGroups`, `getChannelRegistry`, `inferSessionKindFromCatalogEntry`, `inferFallbackModelMetadata`
+- Legacy workspace document render helper compatibility delegates:
+  - `renderAgentsMarkdown`, `renderSoulMarkdown`, `renderIdentityMarkdown`, `renderToolsMarkdown`, `renderHeartbeatMarkdown`, `renderMemoryMarkdown`, `renderBlueprintMarkdown`, `renderDecisionsMarkdown`, `renderBriefMarkdown`, `renderArchitectureMarkdown`, `renderDeliverablesMarkdown`, `renderTemplateSpecificDoc`
+- Shared helpers still used by production:
+  - None directly implemented in `service.ts`.
+- Dead/unused exports:
+  - None removed in this pass. The previously local, unused bootstrap-agent-id helper block in `service.ts` was removed because the real production implementation already lives in `lib/openclaw/domains/agent-provisioning.ts` and `workspace-service.ts`.
+
+Legacy workspace document render helper implementation moved to `lib/openclaw/domains/workspace-document-renderers.ts`. `service.ts` still exports the same helper names and delegates to that domain module to preserve compatibility.
+
+Direct production imports from `lib/openclaw/service.ts`: none found. Current imports are compatibility tests only:
+
+- `tests/openclaw-application-service-compat.test.ts`
+- `tests/openclaw-agent-service.test.ts`
+- `tests/openclaw-channel-service.test.ts`
+- `tests/openclaw-import-guard.test.ts` uses a synthetic import string to verify the guard.
+- `tests/openclaw-mission-control-service.test.ts`
+- `tests/openclaw-service-surface.test.ts`
+- `tests/openclaw-workspace-service.test.ts`
+
+Import guard status: `eslint.config.mjs` now blocks production TS/TSX imports of `@/lib/openclaw/service` and relative OpenClaw service imports. Tests remain allowed so compatibility coverage can keep exercising the legacy entrypoint. The guard is covered by tests that verify production imports fail once and compatibility test imports remain allowed.
+
+Production-safety scans:
+
+- No `lib/openclaw` import cycles were detected by a lightweight local import graph scan.
+- No production direct imports from `lib/openclaw/service.ts` were found.
+- Direct `runOpenClawJson` remains in `lib/openclaw/cli.ts`, which defines the CLI JSON helper.
+- Direct `runOpenClawJson` remains in `lib/openclaw/client/cli-gateway-client.ts`, which is the intended CLI fallback layer.
+- Direct `runOpenClawJson` also remains in `lib/openclaw/domains/agent-config.ts`, `lib/openclaw/domains/channels.ts`, `lib/openclaw/surface-adapters.ts`, and the legacy planner runtime path in `lib/openclaw/planner.ts`. These are existing config/discovery/planner readers for OpenClaw state or legacy runtime execution paths that have not yet been given stable Gateway RPC equivalents. They are intentionally left unchanged in this stabilization pass to preserve fallback behavior and response shapes.
+- Direct `runOpenClaw` remains in `lib/openclaw/client/cli-gateway-client.ts`, `lib/openclaw/application/channel-service.ts`, `lib/openclaw/domains/agent-config.ts`, `lib/openclaw/domains/agent-provisioning.ts`, `lib/openclaw/domains/control-plane-settings.ts`, `lib/openclaw/planner.ts`, and `lib/openclaw/reset.ts`. These are still intentional CLI-backed fallback, provisioning, config sync, planner, and reset workflows until equivalent OpenClaw protocol support is confirmed.
 
 ## Prompt And Codebase Conflicts
 
 - The prompt asked for native WS first. The codebase and local OpenClaw artifacts confirmed only the generic request/response Gateway RPC envelope, not a complete replacement for all CLI workflows. Decision: add native WS only for confirmed generic RPC calls and keep CLI fallback for typed workflows.
 - Workspace mutation and channel/provisioning were moved incrementally with compatibility tests and CLI fallback preserved.
-- A no-restricted-imports rule was not added yet because current compatibility tests and transitional modules still intentionally import `lib/openclaw/service.ts`. Adding it now would create noisy exceptions instead of a useful guard.
+- A no-restricted-imports guard is now active for production code. Compatibility tests still intentionally import `lib/openclaw/service.ts`.
 
 ## Tests
 
@@ -166,7 +203,7 @@ Latest verification:
 
 - `pnpm typecheck` passed.
 - `pnpm lint` passed with 0 warnings.
-- `pnpm test` passed: 78 tests.
+- `pnpm test` passed: 90 tests.
 
 Added/updated coverage:
 
@@ -178,13 +215,27 @@ Added/updated coverage:
 - Mission-service compatibility for submit validation and missing-task abort shape.
 - Settings-service compatibility for gateway URL and workspace root validation shapes.
 - Workspace-service compatibility for workspace create/update/delete validation shapes.
+- Workspace document render helper compatibility delegates.
 - Channel-service compatibility for registry mutation validation and missing-channel shapes.
 - Channel-service compatibility for managed provisioning validation shapes across chat and surface providers.
+- Additional channel-service compatibility for direct managed chat provisioning validation shapes across Telegram, Discord, Slack, and Google Chat.
+- Import guard coverage for blocking production `service.ts` imports without duplicate lint noise while allowing compatibility tests.
+- Boundary safety coverage for production `service.ts` imports, allowlisted direct `runOpenClawJson` usage, allowlisted direct `runOpenClaw` usage, and `lib/openclaw` import cycles.
+- Compatibility surface coverage that keeps the explicit `service.ts` export list from changing accidentally.
+
+Native WS status is unchanged from the previous continuation: narrow generic RPC support only, with typed workflows still CLI-backed. CLI fallback status is unchanged and remains required for production safety.
+
+Current risks:
+
+- `service.ts` is still part of the public compatibility surface, so removing any export requires a separate caller audit and migration.
+- Workspace document rendering now has a dedicated legacy renderer module for compatibility, while `workspace-docs.ts` continues to own richer scaffold rendering used by production workspace creation. These are intentionally not merged in this pass to avoid changing scaffold output.
+- Some domain/application workflows still call the OpenClaw CLI directly because no stable native Gateway method mapping is confirmed for those operations.
+- Channel-service remains broad. No additional split was made because the current helper groups are coupled to routing sync, account discovery, and provisioning side effects.
 
 ## Next Safe Migrations
 
 Recommended next order:
 
-1. Move or remove legacy workspace document render helper exports from `service.ts` after confirming no production callers depend on them.
-2. Continue reducing `service.ts` until it is only compatibility exports.
-3. Add an import guard once compatibility imports are limited to known allowlisted files.
+1. Keep the import guard in place and migrate any future production caller to the owning application/domain module instead of `service.ts`.
+2. If the compatibility render helpers are still needed by external callers, keep them delegated through `service.ts`; otherwise remove them in a separate breaking-surface audit.
+3. When OpenClaw exposes confirmed Gateway RPC equivalents for channel/config discovery and provisioning, move those remaining direct CLI-backed domain/application calls behind the adapter/client boundary.

@@ -13,9 +13,35 @@ import {
 import {
   createWorkspaceProject as createCompatibilityWorkspaceProject,
   deleteWorkspaceProject as deleteCompatibilityWorkspaceProject,
+  renderAgentsMarkdown as renderCompatibilityAgentsMarkdown,
+  renderArchitectureMarkdown as renderCompatibilityArchitectureMarkdown,
+  renderBlueprintMarkdown as renderCompatibilityBlueprintMarkdown,
+  renderBriefMarkdown as renderCompatibilityBriefMarkdown,
+  renderDecisionsMarkdown as renderCompatibilityDecisionsMarkdown,
+  renderDeliverablesMarkdown as renderCompatibilityDeliverablesMarkdown,
+  renderHeartbeatMarkdown as renderCompatibilityHeartbeatMarkdown,
+  renderIdentityMarkdown as renderCompatibilityIdentityMarkdown,
+  renderMemoryMarkdown as renderCompatibilityMemoryMarkdown,
+  renderSoulMarkdown as renderCompatibilitySoulMarkdown,
+  renderTemplateSpecificDoc as renderCompatibilityTemplateSpecificDoc,
+  renderToolsMarkdown as renderCompatibilityToolsMarkdown,
   readWorkspaceEditSeed as readCompatibilityWorkspaceEditSeed,
   updateWorkspaceProject as updateCompatibilityWorkspaceProject
 } from "@/lib/openclaw/service";
+import {
+  renderAgentsMarkdown as renderDomainAgentsMarkdown,
+  renderArchitectureMarkdown as renderDomainArchitectureMarkdown,
+  renderBlueprintMarkdown as renderDomainBlueprintMarkdown,
+  renderBriefMarkdown as renderDomainBriefMarkdown,
+  renderDecisionsMarkdown as renderDomainDecisionsMarkdown,
+  renderDeliverablesMarkdown as renderDomainDeliverablesMarkdown,
+  renderHeartbeatMarkdown as renderDomainHeartbeatMarkdown,
+  renderIdentityMarkdown as renderDomainIdentityMarkdown,
+  renderMemoryMarkdown as renderDomainMemoryMarkdown,
+  renderSoulMarkdown as renderDomainSoulMarkdown,
+  renderTemplateSpecificDoc as renderDomainTemplateSpecificDoc,
+  renderToolsMarkdown as renderDomainToolsMarkdown
+} from "@/lib/openclaw/domains/workspace-document-renderers";
 
 async function readErrorMessage(action: () => Promise<unknown>) {
   try {
@@ -74,4 +100,53 @@ test("workspace application service preserves delete validation shape", async ()
     await readErrorMessage(() => deleteApplicationWorkspaceProject(input)),
     await readErrorMessage(() => deleteCompatibilityWorkspaceProject(input))
   );
+});
+
+test("service workspace document render helpers delegate to domain renderers", () => {
+  const agentsInput = {
+    name: "Example",
+    brief: "Ship the thing.",
+    template: "software" as const,
+    sourceMode: "empty" as const,
+    agents: [
+      {
+        id: "builder",
+        role: "Builder",
+        name: "Builder",
+        enabled: true,
+        skillId: "project-builder"
+      }
+    ],
+    rules: {
+      workspaceOnly: true,
+      generateStarterDocs: true,
+      generateMemory: true,
+      kickoffMission: false
+    }
+  };
+
+  assert.equal(renderCompatibilityAgentsMarkdown(agentsInput), renderDomainAgentsMarkdown(agentsInput));
+  assert.equal(renderCompatibilitySoulMarkdown("software", "Focus"), renderDomainSoulMarkdown("software", "Focus"));
+  assert.equal(renderCompatibilityIdentityMarkdown("frontend"), renderDomainIdentityMarkdown("frontend"));
+  assert.equal(
+    renderCompatibilityToolsMarkdown("backend", ["pnpm test"]),
+    renderDomainToolsMarkdown("backend", ["pnpm test"])
+  );
+  assert.equal(renderCompatibilityHeartbeatMarkdown("research"), renderDomainHeartbeatMarkdown("research"));
+  assert.equal(
+    renderCompatibilityMemoryMarkdown("Example", "content", "Focus"),
+    renderDomainMemoryMarkdown("Example", "content", "Focus")
+  );
+  assert.equal(
+    renderCompatibilityBlueprintMarkdown("Example", "software", "Outcome"),
+    renderDomainBlueprintMarkdown("Example", "software", "Outcome")
+  );
+  assert.equal(renderCompatibilityDecisionsMarkdown(), renderDomainDecisionsMarkdown());
+  assert.equal(
+    renderCompatibilityBriefMarkdown("Example", "frontend", "Brief", "empty"),
+    renderDomainBriefMarkdown("Example", "frontend", "Brief", "empty")
+  );
+  assert.equal(renderCompatibilityArchitectureMarkdown("backend"), renderDomainArchitectureMarkdown("backend"));
+  assert.equal(renderCompatibilityDeliverablesMarkdown(), renderDomainDeliverablesMarkdown());
+  assert.equal(renderCompatibilityTemplateSpecificDoc("ux"), renderDomainTemplateSpecificDoc("ux"));
 });

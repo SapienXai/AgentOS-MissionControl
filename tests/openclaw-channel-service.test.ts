@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   bindWorkspaceChannelAgent as bindApplicationWorkspaceChannelAgent,
+  createManagedChatChannelAccount as createApplicationManagedChatChannelAccount,
   createManagedSurfaceAccount as createApplicationManagedSurfaceAccount,
   deleteWorkspaceChannelEverywhere as deleteApplicationWorkspaceChannelEverywhere,
   disconnectWorkspaceChannel as disconnectApplicationWorkspaceChannel,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/openclaw/application/channel-service";
 import {
   bindWorkspaceChannelAgent as bindCompatibilityWorkspaceChannelAgent,
+  createManagedChatChannelAccount as createCompatibilityManagedChatChannelAccount,
   createManagedSurfaceAccount as createCompatibilityManagedSurfaceAccount,
   deleteWorkspaceChannelEverywhere as deleteCompatibilityWorkspaceChannelEverywhere,
   disconnectWorkspaceChannel as disconnectCompatibilityWorkspaceChannel,
@@ -127,11 +129,24 @@ test("channel application service preserves Telegram provisioning validation sha
     provider: "telegram",
     name: "Telegram",
     token: " "
-  };
+  } as const;
 
   assert.equal(
     await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
     await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves managed Telegram chat validation shape", async () => {
+  const input = {
+    provider: "telegram",
+    name: "Telegram",
+    token: " "
+  } as const;
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedChatChannelAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedChatChannelAccount(input))
   );
 });
 
@@ -140,11 +155,24 @@ test("channel application service preserves Discord provisioning validation shap
     provider: "discord",
     name: "Discord",
     token: " "
-  };
+  } as const;
 
   assert.equal(
     await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
     await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves managed Discord chat validation shape", async () => {
+  const input = {
+    provider: "discord",
+    name: "Discord",
+    token: " "
+  } as const;
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedChatChannelAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedChatChannelAccount(input))
   );
 });
 
@@ -153,11 +181,24 @@ test("channel application service preserves Slack provisioning validation shape"
     provider: "slack",
     name: "Slack",
     botToken: " "
-  };
+  } as const;
 
   assert.equal(
     await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
     await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves managed Slack chat validation shape", async () => {
+  const input = {
+    provider: "slack",
+    name: "Slack",
+    botToken: " "
+  } as const;
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedChatChannelAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedChatChannelAccount(input))
   );
 });
 
@@ -166,11 +207,24 @@ test("channel application service preserves Google Chat provisioning validation 
     provider: "googlechat",
     name: "Google Chat",
     webhookUrl: " "
-  };
+  } as const;
 
   assert.equal(
     await readErrorMessage(() => createApplicationManagedSurfaceAccount(input)),
     await readErrorMessage(() => createCompatibilityManagedSurfaceAccount(input))
+  );
+});
+
+test("channel application service preserves managed Google Chat validation shape", async () => {
+  const input = {
+    provider: "googlechat",
+    name: "Google Chat",
+    webhookUrl: " "
+  } as const;
+
+  assert.equal(
+    await readErrorMessage(() => createApplicationManagedChatChannelAccount(input)),
+    await readErrorMessage(() => createCompatibilityManagedChatChannelAccount(input))
   );
 });
 

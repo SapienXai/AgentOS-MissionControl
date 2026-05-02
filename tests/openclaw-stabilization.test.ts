@@ -32,7 +32,7 @@ import {
   resolveWorkspaceBootstrapInput,
   resolveWorkspaceCreationTargetDir
 } from "@/lib/openclaw/domains/workspace-bootstrap";
-import { inferFallbackModelMetadata } from "@/lib/openclaw/service";
+import { inferFallbackModelMetadata } from "@/lib/openclaw/adapter/model-adapter";
 import { inferSessionKindFromCatalogEntry } from "@/lib/openclaw/domains/session-catalog";
 import {
   resolveInitialOnboardingProviderId
