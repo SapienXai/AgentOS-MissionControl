@@ -26,6 +26,7 @@ import type {
 } from "@/lib/openclaw/state/snapshot-cache";
 import { MissionControlCacheService } from "@/lib/openclaw/application/mission-control-cache-service";
 import { buildRuntimeDiagnosticsFromState } from "@/lib/openclaw/adapter/runtime-diagnostics-adapter";
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import {
   buildModelRecords,
   buildModelsPayloadFromFallbackSources,
@@ -120,7 +121,7 @@ import {
   normalizeConfiguredWorkspaceRootValue,
   readMissionControlSettings
 } from "@/lib/openclaw/domains/control-plane-settings";
-import { workspaceIdFromPath } from "@/lib/openclaw/domains/workspace-id";
+import { createWorkspaceIdResolver } from "@/lib/openclaw/domains/workspace-id";
 import type { MissionControlSettings } from "@/lib/openclaw/domains/control-plane-settings";
 import type {
   ChannelAccountRecord,
@@ -144,6 +145,7 @@ let presencePayloadCache: CachedPayload<PresencePayload> | null = null;
 let runtimeHistoryCache = new Map<string, RuntimeRecord>();
 const statusPayloadCache = new CachedPayloadController<StatusPayload>();
 const gatewayStatusCache = new GatewayStatusCache(GATEWAY_STATUS_STALE_GRACE_MS);
+const gatewayRemoteUrlConfigKey = "gateway.remote.url";
 const missionControlCacheService = new MissionControlCacheService<MissionControlSnapshot>({
   ttlMs: SNAPSHOT_CACHE_TTL_MS,
   load: (profile, generation) => loadMissionControlSnapshots({ profile, generation })
@@ -184,6 +186,32 @@ export async function getMissionControlSnapshot(options: { force?: boolean; incl
   return missionControlCacheService.getSnapshot(options);
 }
 
+async function readGatewayRemoteUrlConfig(): Promise<PromiseSettledResult<unknown>> {
+  try {
+    return {
+      status: "fulfilled",
+      value: await getOpenClawAdapter().getConfig<unknown>(gatewayRemoteUrlConfigKey, { timeoutMs: 5_000 })
+    };
+  } catch (reason) {
+    return {
+      status: "rejected",
+      reason
+    };
+  }
+}
+
+function normalizeGatewayRemoteUrlConfigValue(value: unknown) {
+  if (typeof value === "string") {
+    return normalizeOptionalValue(value);
+  }
+
+  if (value && typeof value === "object" && "value" in value && typeof value.value === "string") {
+    return normalizeOptionalValue(value.value);
+  }
+
+  return undefined;
+}
+
 async function loadMissionControlSnapshots({
   profile = "interactive",
   generation = missionControlCacheService.getGeneration()
@@ -207,7 +235,7 @@ async function loadMissionControlSnapshots({
   try {
     const settings = await readMissionControlSettings();
     const configuredWorkspaceRoot = normalizeConfiguredWorkspaceRootValue(settings.workspaceRoot) ?? null;
-    const gatewayRemoteUrlResult = createDeferredPayloadResult<string>();
+    const gatewayRemoteUrlResult = await readGatewayRemoteUrlConfig();
     let gatewayStatusResult: PromiseSettledResult<GatewayStatusPayload>;
     let statusResult: PromiseSettledResult<StatusPayload>;
     let agentsResult: PromiseSettledResult<AgentPayload>;
@@ -274,7 +302,7 @@ async function loadMissionControlSnapshots({
     const gatewayStatus = resolvedGatewayStatus.value;
     const configuredGatewayUrl =
       gatewayRemoteUrlResult.status === "fulfilled"
-        ? normalizeOptionalValue(gatewayRemoteUrlResult.value)
+        ? normalizeGatewayRemoteUrlConfigValue(gatewayRemoteUrlResult.value)
         : undefined;
     const resolvedStatus = statusPayloadCache.resolve(statusResult);
     const resolvedAgentConfig = resolveCachedPayload(agentConfigResult, agentConfigPayloadCache, (entry) => {
@@ -366,10 +394,17 @@ async function loadMissionControlSnapshots({
       recentSessionsByAgent.set(session.agentId, list);
     }
 
+    const workspaceBoundAgents = agentsList.filter(
+      (agent): agent is AgentPayload[number] & { workspace: string } => Boolean(agent.workspace)
+    );
+    const workspacePaths = Array.from(new Set(workspaceBoundAgents.map((agent) => agent.workspace)));
+    const resolveWorkspaceId = createWorkspaceIdResolver(workspacePaths);
     const liveSessionRuntimes = (
       await Promise.all(
         sessions.map((session) =>
-          mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, mapSessionCatalogEntryToRuntime)
+          mapSessionToRuntimesFromTranscript(session, agentConfig, agentsList, (entry, config, agentList) =>
+            mapSessionCatalogEntryToRuntime(entry, config, agentList, { resolveWorkspaceId })
+          )
         )
       )
     ).flat();
@@ -388,11 +423,6 @@ async function loadMissionControlSnapshots({
       }
     );
     const runtimes = mergeRuntimeHistory([...dispatchRuntimes, ...annotatedLiveSessionRuntimes]);
-    const workspaceBoundAgents = agentsList.filter(
-      (agent): agent is AgentPayload[number] & { workspace: string } => Boolean(agent.workspace)
-    );
-    const workspacePaths = Array.from(new Set(workspaceBoundAgents.map((agent) => agent.workspace)));
-
     await Promise.all(
       workspacePaths.map(async (workspacePath) => {
         const manifest = await readWorkspaceProjectManifest(workspacePath);
@@ -412,7 +442,7 @@ async function loadMissionControlSnapshots({
       workspaceBoundAgents.map(async (rawAgent) => {
         const configured = configByAgent.get(rawAgent.id);
         const identityOverrides = await readAgentIdentityOverrides(rawAgent.agentDir);
-        const workspaceId = workspaceIdFromPath(rawAgent.workspace);
+        const workspaceId = resolveWorkspaceId(rawAgent.workspace);
         const sessionList = recentSessionsByAgent.get(rawAgent.id) ?? [];
         const manifest =
           manifestByWorkspace.get(rawAgent.workspace) ??
@@ -466,7 +496,7 @@ async function loadMissionControlSnapshots({
     );
 
     for (const entry of agentEntries) {
-      const workspace = ensureWorkspace(workspaceByPath, entry.workspacePath);
+      const workspace = ensureWorkspace(workspaceByPath, entry.workspacePath, resolveWorkspaceId);
       workspace.agentIds.push(entry.agent.id);
       workspace.modelIds.push(entry.primaryModel);
       workspace.activeRuntimeIds.push(...entry.activeRuntimeIds);
@@ -642,8 +672,12 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function ensureWorkspace(store: Map<string, WorkspaceProject>, workspacePath: string) {
-  const workspaceId = workspaceIdFromPath(workspacePath);
+function ensureWorkspace(
+  store: Map<string, WorkspaceProject>,
+  workspacePath: string,
+  resolveWorkspaceId: (workspacePath: string) => string
+) {
+  const workspaceId = resolveWorkspaceId(workspacePath);
   const existing = store.get(workspaceId);
 
   if (existing) {

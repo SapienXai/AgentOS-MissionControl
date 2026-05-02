@@ -62,19 +62,21 @@ export async function createAgent(input: AgentCreateInput) {
   }
 
   let snapshot = await getMissionControlSnapshot({ includeHidden: true });
+  let resolvedWorkspace = findWorkspaceById(snapshot, input.workspaceId);
   let resolvedWorkspacePath =
     normalizeOptionalValue(input.workspacePath) ??
-    findWorkspacePathById(snapshot, input.workspaceId);
+    resolvedWorkspace?.path;
 
   if (!resolvedWorkspacePath) {
     snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+    resolvedWorkspace = findWorkspaceById(snapshot, input.workspaceId);
     resolvedWorkspacePath =
       normalizeOptionalValue(input.workspacePath) ??
-      findWorkspacePathById(snapshot, input.workspaceId);
+      resolvedWorkspace?.path;
   }
 
   const resolvedWorkspaceId =
-    resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || null;
+    resolvedWorkspace?.id ?? (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || null);
   assertAgentIdAvailable(snapshot, agentId, resolvedWorkspaceId);
 
   if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
@@ -205,12 +207,13 @@ export async function updateAgent(input: AgentUpdateInput) {
     throw new Error("Agent was not found.");
   }
 
+  const resolvedWorkspace = findWorkspaceById(snapshot, input.workspaceId || agent.workspaceId);
   const resolvedWorkspacePath =
     normalizeOptionalValue(input.workspacePath) ??
-    findWorkspacePathById(snapshot, input.workspaceId || agent.workspaceId) ??
+    resolvedWorkspace?.path ??
     agent.workspacePath;
   const resolvedWorkspaceId =
-    resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || agent.workspaceId;
+    resolvedWorkspace?.id ?? (resolvedWorkspacePath ? workspaceIdFromPath(resolvedWorkspacePath) : input.workspaceId || agent.workspaceId);
 
   if (!resolvedWorkspacePath || !resolvedWorkspaceId) {
     throw new Error("Workspace was not found for this agent.");
@@ -636,12 +639,15 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function findWorkspacePathById(snapshot: MissionControlSnapshot, workspaceId: string | undefined) {
+function findWorkspaceById(snapshot: MissionControlSnapshot, workspaceId: string | undefined) {
   if (!workspaceId) {
     return undefined;
   }
 
-  return snapshot.workspaces.find((entry) => entry.id === workspaceId || workspacePathMatchesId(entry.path, workspaceId))?.path;
+  return (
+    snapshot.workspaces.find((entry) => entry.id === workspaceId) ??
+    snapshot.workspaces.find((entry) => workspacePathMatchesId(entry.path, workspaceId))
+  );
 }
 
 function slugify(value: string) {

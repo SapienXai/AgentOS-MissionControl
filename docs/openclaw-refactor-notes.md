@@ -204,7 +204,7 @@ Latest verification:
 
 - `pnpm typecheck` passed.
 - `pnpm lint` passed with 0 warnings.
-- `pnpm test` passed: 91 tests.
+- `pnpm test` passed: 92 tests.
 
 Runtime production-readiness follow-up:
 
@@ -212,6 +212,8 @@ Runtime production-readiness follow-up:
 - Workspace update/delete and agent workspace resolution still accept the previous `workspace:<hash>` id as a legacy alias so older compatibility callers do not fail immediately.
 - Runtime session normalization now uses the same workspace id helper, keeping task/runtime workspace links aligned with snapshot workspace ids.
 - This fixes the observed create flow where a newly created workspace selected an id that did not exist in the refreshed snapshot, leaving the canvas empty until a page reload.
+- Same-basename workspace paths are now disambiguated with a short path hash only when a collision is present, preserving normal slug ids for non-colliding workspaces.
+- Mission-control snapshots now read `gateway.remote.url` through the adapter so gateway remote URL set/clear mutations are reflected in `diagnostics.configuredGatewayUrl`.
 
 Added/updated coverage:
 
@@ -224,7 +226,7 @@ Added/updated coverage:
 - Mission-service compatibility for submit validation and missing-task abort shape.
 - Settings-service compatibility for gateway URL and workspace root validation shapes.
 - Workspace-service compatibility for workspace create/update/delete validation shapes.
-- Workspace id compatibility for current snapshot ids and legacy hash aliases.
+- Workspace id compatibility for current snapshot ids, same-basename collision disambiguation, and legacy hash aliases.
 - Workspace document render helper compatibility delegates.
 - Channel-service compatibility for registry mutation validation and missing-channel shapes.
 - Channel-service compatibility for managed provisioning validation shapes across chat and surface providers.
@@ -241,6 +243,7 @@ Current risks:
 - Workspace document rendering now has a dedicated legacy renderer module for compatibility, while `workspace-docs.ts` continues to own richer scaffold rendering used by production workspace creation. These are intentionally not merged in this pass to avoid changing scaffold output.
 - Some domain/application workflows still call the OpenClaw CLI directly because no stable native Gateway method mapping is confirmed for those operations.
 - Channel-service remains broad. No additional split was made because the current helper groups are coupled to routing sync, account discovery, and provisioning side effects.
+- Real runtime model completion was blocked during smoke testing by local ChatGPT/OpenClaw usage limits; API streaming and stalled-state handling were validated, but a successful model-completion demo still needs available quota or another configured provider.
 
 ## Next Safe Migrations
 

@@ -20,12 +20,17 @@ export type RuntimeAgentInput = Array<{
 export function mapSessionCatalogEntryToRuntime(
   session: SessionsPayload["sessions"][number],
   agentConfig: RuntimeAgentConfigInput,
-  agentsList: RuntimeAgentInput
+  agentsList: RuntimeAgentInput,
+  options: {
+    resolveWorkspaceId?: (workspacePath: string) => string;
+  } = {}
 ): RuntimeRecord {
   const agent = agentsList.find((entry) => entry.id === session.agentId);
   const config = agentConfig.find((entry) => entry.id === session.agentId);
   const workspacePath = agent?.workspace || config?.workspace;
-  const workspaceId = workspacePath ? workspaceIdFromPath(workspacePath) : undefined;
+  const workspaceId = workspacePath
+    ? (options.resolveWorkspaceId ?? workspaceIdFromPath)(workspacePath)
+    : undefined;
   const taskId = extractRuntimeKeyToken(session.key, "task");
   const stage = extractRuntimeKeyToken(session.key, "stage");
   const modelId =

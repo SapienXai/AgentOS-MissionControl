@@ -43,7 +43,9 @@ import {
   renderToolsMarkdown as renderDomainToolsMarkdown
 } from "@/lib/openclaw/domains/workspace-document-renderers";
 import {
+  createWorkspaceIdResolver,
   legacyWorkspaceHashIdFromPath,
+  workspaceDisambiguatedIdFromPath,
   workspaceIdFromPath,
   workspacePathMatchesId
 } from "@/lib/openclaw/domains/workspace-id";
@@ -118,6 +120,18 @@ test("workspace ids match snapshot slugs while accepting legacy hash aliases", (
   assert.equal(workspacePathMatchesId(workspacePath, currentId), true);
   assert.equal(workspacePathMatchesId(workspacePath, legacyId), true);
   assert.equal(workspacePathMatchesId(workspacePath, "other-workspace"), false);
+});
+
+test("workspace id resolver disambiguates same-basename workspace paths", () => {
+  const firstPath = "/tmp/one/Same Workspace";
+  const secondPath = "/tmp/two/Same Workspace";
+  const resolveWorkspaceId = createWorkspaceIdResolver([firstPath, secondPath]);
+
+  assert.equal(resolveWorkspaceId(firstPath), "same-workspace");
+  assert.equal(resolveWorkspaceId(secondPath), workspaceDisambiguatedIdFromPath(secondPath));
+  assert.notEqual(resolveWorkspaceId(firstPath), resolveWorkspaceId(secondPath));
+  assert.equal(workspacePathMatchesId(secondPath, resolveWorkspaceId(secondPath)), true);
+  assert.equal(workspacePathMatchesId(secondPath, legacyWorkspaceHashIdFromPath(secondPath)), true);
 });
 
 test("service workspace document render helpers delegate to domain renderers", () => {

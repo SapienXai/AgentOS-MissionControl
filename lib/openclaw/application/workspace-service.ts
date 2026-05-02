@@ -78,7 +78,7 @@ import {
   getConfiguredWorkspaceRoot
 } from "@/lib/openclaw/domains/control-plane-settings";
 import {
-  workspaceIdFromPath,
+  resolveWorkspaceIdForPath,
   workspacePathMatchesId
 } from "@/lib/openclaw/domains/workspace-id";
 import type {
@@ -315,7 +315,7 @@ export async function createWorkspaceProject(
   clearRuntimeHistoryCache();
 
   return {
-    workspaceId: workspaceIdFromPath(targetDir),
+    workspaceId: resolveWorkspaceIdForSnapshotPath(snapshot.workspaces, targetDir),
     workspacePath: targetDir,
     agentIds: createdAgentIds,
     primaryAgentId,
@@ -383,7 +383,7 @@ export async function updateWorkspaceProject(input: WorkspaceUpdateInput) {
   clearRuntimeHistoryCache();
 
   return {
-    workspaceId: workspaceIdFromPath(targetPath),
+    workspaceId: resolveWorkspaceIdForSnapshotPath(snapshot.workspaces, targetPath, workspace.path),
     previousWorkspaceId: workspace.id,
     workspacePath: targetPath
   };
@@ -801,9 +801,12 @@ async function applyWorkspacePlanEdits(
   }
 
   if (workspaceRelocated || !areWorkspaceAgentsEqual(currentEnabledAgents, baselineEnabledAgents)) {
+    const currentWorkspaceId = workspaceRelocated
+      ? resolveWorkspaceIdForSnapshotPath(snapshot?.workspaces ?? [], currentWorkspacePath, workspace.path)
+      : workspace.id;
     const currentWorkspace = {
       ...workspace,
-      id: workspaceIdFromPath(currentWorkspacePath),
+      id: currentWorkspaceId,
       path: currentWorkspacePath
     };
 
@@ -822,14 +825,35 @@ async function applyWorkspacePlanEdits(
   clearRuntimeHistoryCache();
 
   return {
-    workspaceId: workspaceIdFromPath(currentWorkspacePath),
+    workspaceId: workspaceRelocated
+      ? resolveWorkspaceIdForSnapshotPath(snapshot?.workspaces ?? [], currentWorkspacePath, workspace.path)
+      : workspace.id,
     previousWorkspaceId: workspace.id,
     workspacePath: currentWorkspacePath
   };
 }
 
 function findWorkspaceById(workspaces: WorkspaceProject[], workspaceId: string) {
-  return workspaces.find((entry) => entry.id === workspaceId || workspacePathMatchesId(entry.path, workspaceId));
+  return (
+    workspaces.find((entry) => entry.id === workspaceId) ??
+    workspaces.find((entry) => workspacePathMatchesId(entry.path, workspaceId))
+  );
+}
+
+function resolveWorkspaceIdForSnapshotPath(
+  workspaces: WorkspaceProject[],
+  workspacePath: string,
+  previousWorkspacePath?: string
+) {
+  const previousWorkspacePathKey = previousWorkspacePath ? path.resolve(previousWorkspacePath) : null;
+  const paths = [
+    ...workspaces
+      .map((workspace) => workspace.path)
+      .filter((entry) => !previousWorkspacePathKey || path.resolve(entry) !== previousWorkspacePathKey),
+    workspacePath
+  ];
+
+  return resolveWorkspaceIdForPath(workspacePath, paths);
 }
 
 async function syncWorkspaceAgentsToPlan(input: {
@@ -995,11 +1019,12 @@ async function resolveExistingWorkspaceCreateResult(
     return null;
   }
 
-  const workspaceId = workspaceIdFromPath(targetDir);
+  const expectedWorkspaceId = resolveWorkspaceIdForSnapshotPath(snapshot.workspaces, targetDir);
   const workspace =
-    snapshot.workspaces.find((entry) => entry.id === workspaceId) ??
+    findWorkspaceById(snapshot.workspaces, expectedWorkspaceId) ??
     snapshot.workspaces.find((entry) => path.resolve(entry.path) === path.resolve(targetDir)) ??
     null;
+  const workspaceId = workspace?.id ?? expectedWorkspaceId;
 
   const workspaceAgents = snapshot.agents.filter(
     (agent) => agent.workspaceId === workspaceId || path.resolve(agent.workspacePath) === path.resolve(targetDir)
