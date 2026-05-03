@@ -1032,6 +1032,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs);
     const url = resolveGatewayUrl(this.options.url);
     const WebSocketImpl = resolveWebSocketFactory(this.options.webSocketFactory);
+    const connectParams = await buildConnectParams(this.fallback, this.options, url, options);
     const socket = new WebSocketImpl(url);
     const pending = new Map<string, PendingRequest>();
     const cleanupCallbacks: Array<() => void> = [];
@@ -1094,7 +1095,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         socket,
         pending,
         CONNECT_METHOD,
-        await buildConnectParams(this.fallback, this.options, url, options),
+        connectParams,
         timeoutMs,
         options.signal
       );

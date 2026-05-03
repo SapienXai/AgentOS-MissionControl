@@ -2,6 +2,8 @@
 
 Date: 2026-05-02
 
+Latest production-readiness validation update: 2026-05-03.
+
 This pass moves AgentOS closer to the target provider shape:
 
 `AgentOS UI/API -> AgentOS Control Plane Contract -> OpenClawAdapter -> OpenClawGatewayClient -> Gateway-first implementation -> CLI fallback`
@@ -110,6 +112,8 @@ Native WS credential discovery is intentionally conservative:
 - OpenClaw-redacted config values such as `__OPENCLAW_REDACTED__` are never sent as credentials;
 - when only a redacted config secret is available, AgentOS records an auth diagnostic and uses CLI fallback.
 
+The 2026-05-03 validation pass fixed a diagnostic ordering bug in this path: AgentOS now resolves and validates native WS connect params before opening the socket, so redacted secrets are reported as `auth` fallback diagnostics instead of being masked by an early Gateway close.
+
 ## Provider Factory And SDK Extension Point
 
 `lib/openclaw/client/gateway-client-factory.ts` is the SDK replacement point.
@@ -165,6 +169,14 @@ Latest verification:
 - `pnpm test`: passed, 105 tests.
 - `pnpm build`: passed when rerun outside the sandbox. The first sandboxed attempt failed with Turbopack `Operation not permitted` while trying to create a worker/bind a port during CSS processing.
 - `node scripts/openclaw-runtime-smoke.mjs`: passed when rerun outside the sandbox. The sandboxed attempt failed because Node fetch to localhost was blocked.
+
+2026-05-03 validation:
+
+- Native WS redacted-secret auth diagnostics were verified against both unit tests and a real local Gateway.
+- Invalid env token behavior was verified against the real local Gateway and correctly produced an `auth` fallback diagnostic.
+- Fresh-install/no-gateway behavior was verified by temporarily stopping the local Gateway and running a snapshot load with temporary `HOME` and restricted `PATH`; the snapshot returned offline fallback state.
+- Real agent chat stream completed successfully through the AgentOS API and was visible in the refreshed runtime/session snapshot.
+- `pnpm typecheck`, `pnpm lint`, `pnpm test`, and sandbox-external `pnpm build` passed.
 
 ## Remaining Risks
 

@@ -333,7 +333,9 @@ test("native WS gateway client does not send redacted OpenClaw secrets", async (
 
   assert.deepEqual(await client.getStatus(), {});
   assert.equal(sentFrames.length, 0);
-  assert.match(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.issue, /redacted secret/);
+  const [diagnostic] = getRecentOpenClawGatewayFallbackDiagnostics();
+  assert.equal(diagnostic?.kind, "auth");
+  assert.match(diagnostic?.issue, /redacted secret/);
 });
 
 test("native WS gateway client falls back when Gateway typed response is malformed", async () => {
