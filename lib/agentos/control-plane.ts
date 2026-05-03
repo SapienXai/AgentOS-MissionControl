@@ -20,6 +20,10 @@ import {
   touchOpenClawRuntimeStateAccess
 } from "@/lib/openclaw/application/runtime-service";
 import {
+  generateGatewayNativeAuthToken,
+  getGatewayNativeAuthStatus,
+  repairGatewayNativeDeviceAccess,
+  saveGatewayNativeAuthCredential,
   updateGatewayRemoteUrl,
   updateWorkspaceRoot
 } from "@/lib/openclaw/application/settings-service";
@@ -68,10 +72,14 @@ export {
   discoverTelegramGroups,
   ensureOpenClawRuntimeSmokeTest,
   ensureOpenClawRuntimeStateAccess,
+  generateGatewayNativeAuthToken,
   getChannelRegistry,
+  getGatewayNativeAuthStatus,
   getRuntimeOutput,
   getTaskDetail,
   readWorkspaceEditSeed,
+  repairGatewayNativeDeviceAccess,
+  saveGatewayNativeAuthCredential,
   setWorkspaceChannelGroups,
   setWorkspaceChannelPrimary,
   submitMission,

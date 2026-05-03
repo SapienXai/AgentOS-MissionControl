@@ -1,5 +1,10 @@
 import "server-only";
 
+import { createPrivateKey, createPublicKey, sign } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import { z } from "zod";
 
 import { CliOpenClawGatewayClient } from "@/lib/openclaw/client/cli-gateway-client";
@@ -32,6 +37,9 @@ const CONNECT_METHOD = "connect";
 const CONTROL_PROTOCOL_VERSION = 3;
 const SERVER_OPERATOR_CLIENT_ID = "cli";
 const SERVER_OPERATOR_CLIENT_MODE = "cli";
+const OPENCLAW_DEVICE_AUTH_FILE_NAME = "device-auth.json";
+const OPENCLAW_DEVICE_IDENTITY_FILE_NAME = "device.json";
+const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const DEFAULT_OPERATOR_SCOPES = [
   "operator.admin",
   "operator.read",
@@ -79,6 +87,24 @@ type GatewayResponseFrame = {
   error?: unknown;
   message?: string;
   code?: string;
+};
+
+type GatewayEventFrame = {
+  type?: string;
+  event?: string;
+  payload?: unknown;
+};
+
+type LocalDeviceAuth = {
+  deviceId: string;
+  publicKeyPem: string;
+  privateKeyPem: string;
+  token: string;
+};
+
+type ConnectParamsContext = {
+  params: Record<string, unknown>;
+  deviceAuth: LocalDeviceAuth | null;
 };
 
 class NativeGatewayError extends Error {
@@ -716,35 +742,193 @@ function isLocalGatewayUrl(rawUrl: string) {
   }
 }
 
+async function resolveLocalGatewayDeviceAuth(
+  rawUrl: string,
+  options: NativeWsOpenClawGatewayClientOptions
+): Promise<LocalDeviceAuth | null> {
+  if (!isLocalGatewayUrl(rawUrl) || options.webSocketFactory) {
+    return null;
+  }
+
+  const stateDir = resolveOpenClawStateDir();
+  const [identity, authStore] = await Promise.all([
+    readJsonFile<{
+      version?: unknown;
+      deviceId?: unknown;
+      publicKeyPem?: unknown;
+      privateKeyPem?: unknown;
+    }>(join(stateDir, "identity", OPENCLAW_DEVICE_IDENTITY_FILE_NAME)),
+    readJsonFile<{
+      version?: unknown;
+      deviceId?: unknown;
+      tokens?: {
+        operator?: {
+          token?: unknown;
+          scopes?: unknown;
+        };
+      };
+    }>(join(stateDir, "identity", OPENCLAW_DEVICE_AUTH_FILE_NAME))
+  ]);
+  const deviceId = readNonEmptyString(identity?.deviceId);
+  const publicKeyPem = readNonEmptyString(identity?.publicKeyPem);
+  const privateKeyPem = readNonEmptyString(identity?.privateKeyPem);
+  const token = readNonEmptyString(authStore?.tokens?.operator?.token);
+
+  if (!deviceId || !publicKeyPem || !privateKeyPem || !token || authStore?.deviceId !== deviceId) {
+    return null;
+  }
+
+  return {
+    deviceId,
+    publicKeyPem,
+    privateKeyPem,
+    token
+  };
+}
+
+function resolveOpenClawStateDir() {
+  const override = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (override) {
+    return override.startsWith("~") ? join(homedir(), override.slice(1)) : override;
+  }
+
+  return join(homedir(), ".openclaw");
+}
+
+async function readJsonFile<TPayload>(path: string): Promise<TPayload | null> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as TPayload;
+  } catch {
+    return null;
+  }
+}
+
+function readNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function base64UrlEncode(buffer: Buffer) {
+  return buffer.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+}
+
+function publicKeyRawBase64UrlFromPem(publicKeyPem: string) {
+  const spki = createPublicKeyDer(publicKeyPem);
+
+  if (
+    spki.length === ED25519_SPKI_PREFIX.length + 32 &&
+    spki.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)
+  ) {
+    return base64UrlEncode(spki.subarray(ED25519_SPKI_PREFIX.length));
+  }
+
+  return base64UrlEncode(spki);
+}
+
+function createPublicKeyDer(publicKeyPem: string) {
+  return Buffer.from(createPublicKey(publicKeyPem).export({
+    type: "spki",
+    format: "der"
+  }) as Buffer);
+}
+
+function signDevicePayload(privateKeyPem: string, payload: string) {
+  const key = createPrivateKey(privateKeyPem);
+  return base64UrlEncode(sign(null, Buffer.from(payload, "utf8"), key));
+}
+
+function buildDeviceAuthPayloadV3(params: {
+  deviceId: string;
+  clientId: string;
+  clientMode: string;
+  role: string;
+  scopes: string[];
+  signedAtMs: number;
+  token: string | null;
+  nonce: string;
+  platform: string;
+  deviceFamily: string | null;
+}) {
+  return [
+    "v3",
+    params.deviceId,
+    params.clientId,
+    params.clientMode,
+    params.role,
+    params.scopes.join(","),
+    String(params.signedAtMs),
+    params.token ?? "",
+    params.nonce,
+    normalizeDeviceMetadataForAuth(params.platform),
+    normalizeDeviceMetadataForAuth(params.deviceFamily)
+  ].join("|");
+}
+
+function normalizeDeviceMetadataForAuth(value: unknown) {
+  return typeof value === "string" ? value.trim().replaceAll("|", "") : "";
+}
+
 async function buildConnectParams(
   fallback: OpenClawGatewayClient,
   options: NativeWsOpenClawGatewayClientOptions,
   url: string,
-  commandOptions: OpenClawCommandOptions
-) {
+  commandOptions: OpenClawCommandOptions,
+  nonce?: string | null
+): Promise<ConnectParamsContext> {
   const { token, password } = await resolveGatewayAuth(fallback, options, url, commandOptions);
-  const auth = token
-    ? { token }
+  const deviceAuth = await resolveLocalGatewayDeviceAuth(url, options);
+  const authToken = deviceAuth?.token ?? token;
+  const auth = authToken
+    ? { token: authToken }
     : password
       ? { password }
       : undefined;
+  const scopes = options.scopes ?? DEFAULT_OPERATOR_SCOPES;
+  const signedAtMs = Date.now();
+  const platform = process.platform;
+  const device = deviceAuth && nonce
+    ? {
+      id: deviceAuth.deviceId,
+      publicKey: publicKeyRawBase64UrlFromPem(deviceAuth.publicKeyPem),
+      signature: signDevicePayload(
+        deviceAuth.privateKeyPem,
+        buildDeviceAuthPayloadV3({
+          deviceId: deviceAuth.deviceId,
+          clientId: options.clientName ?? SERVER_OPERATOR_CLIENT_ID,
+          clientMode: SERVER_OPERATOR_CLIENT_MODE,
+          role: options.role ?? "operator",
+          scopes,
+          signedAtMs,
+          token: authToken ?? null,
+          nonce,
+          platform,
+          deviceFamily: null
+        })
+      ),
+      signedAt: signedAtMs,
+      nonce
+    }
+    : undefined;
 
   return {
+    deviceAuth,
+    params: {
     minProtocol: CONTROL_PROTOCOL_VERSION,
     maxProtocol: CONTROL_PROTOCOL_VERSION,
     client: {
       id: options.clientName ?? SERVER_OPERATOR_CLIENT_ID,
       version: options.clientVersion ?? "agentos",
-      platform: process.platform,
+      platform,
       mode: SERVER_OPERATOR_CLIENT_MODE,
       instanceId: options.instanceId
     },
     role: options.role ?? "operator",
-    scopes: options.scopes ?? DEFAULT_OPERATOR_SCOPES,
+    scopes,
     caps: ["tool-events"],
     ...(auth ? { auth } : {}),
+    ...(device ? { device } : {}),
     userAgent: "AgentOS",
     locale: "en"
+    }
   };
 }
 
@@ -797,6 +981,71 @@ async function waitForSocketOpen(socket: WebSocketLike, timeoutMs: number, signa
           reject(
             new NativeGatewayError(
               `OpenClaw Gateway closed before the connection was ready${readSocketCloseReason(event) ? ` (${readSocketCloseReason(event)})` : ""}.`
+            )
+          )
+        )
+      )
+    );
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitForConnectChallenge(socket: WebSocketLike, timeoutMs: number, signal?: AbortSignal) {
+  throwIfAborted(signal);
+
+  return await new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const cleanupCallbacks: Array<() => void> = [];
+
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      globalThis.clearTimeout(timer);
+      for (const cleanup of cleanupCallbacks) {
+        cleanup();
+      }
+      signal?.removeEventListener("abort", onAbort);
+      callback();
+    };
+
+    const timer = globalThis.setTimeout(() => {
+      settle(() => reject(new NativeGatewayError("OpenClaw Gateway connect challenge timed out.")));
+    }, timeoutMs);
+
+    const onAbort = () => {
+      settle(() => reject(new NativeGatewayError("OpenClaw Gateway request was aborted.")));
+    };
+
+    cleanupCallbacks.push(
+      addSocketListener(socket, "message", (event) => {
+        try {
+          const data = (event as { data?: unknown })?.data ?? event;
+          const frame = parseGatewayFrameData(data) as GatewayEventFrame | null;
+
+          if (frame?.type !== "event" || frame.event !== "connect.challenge") {
+            return;
+          }
+
+          const nonce = (frame.payload as { nonce?: unknown } | null)?.nonce;
+
+          if (typeof nonce !== "string" || !nonce.trim()) {
+            settle(() => reject(new NativeGatewayError("OpenClaw Gateway connect challenge is missing a nonce.")));
+            return;
+          }
+
+          settle(() => resolve(nonce.trim()));
+        } catch (error) {
+          settle(() => reject(error));
+        }
+      }),
+      addSocketListener(socket, "close", (event) =>
+        settle(() =>
+          reject(
+            new NativeGatewayError(
+              `OpenClaw Gateway closed before the connect challenge${readSocketCloseReason(event) ? ` (${readSocketCloseReason(event)})` : ""}.`
             )
           )
         )
@@ -1088,7 +1337,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     const timeoutMs = resolveNativeTimeoutMs(options.timeoutMs ?? this.options.timeoutMs);
     const url = resolveGatewayUrl(this.options.url);
     const WebSocketImpl = resolveWebSocketFactory(this.options.webSocketFactory);
-    const connectParams = await buildConnectParams(this.fallback, this.options, url, options);
+    const connectContext = await buildConnectParams(this.fallback, this.options, url, options);
     const socket = new WebSocketImpl(url);
     const pending = new Map<string, PendingRequest>();
     const cleanupCallbacks: Array<() => void> = [];
@@ -1147,6 +1396,15 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
 
     try {
       await waitForSocketOpen(socket, timeoutMs, options.signal);
+      const connectParams = connectContext.deviceAuth
+        ? (await buildConnectParams(
+          this.fallback,
+          this.options,
+          url,
+          options,
+          await waitForConnectChallenge(socket, timeoutMs, options.signal)
+        )).params
+        : connectContext.params;
       await sendGatewayRequest(
         socket,
         pending,

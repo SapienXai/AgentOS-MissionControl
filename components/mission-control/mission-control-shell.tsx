@@ -1862,6 +1862,13 @@ export function MissionControlShell({
     setIsOnboardingForcedOpen(true);
   };
 
+  const openGatewayAuthSettings = () => {
+    setIsOnboardingForcedOpen(false);
+    setShowOnboardingReadyState(false);
+    setIsOnboardingDismissed(true);
+    setIsSettingsOpen(true);
+  };
+
   const enterAgentOS = useCallback(() => {
     if (!hasAgentOSWorkspaceSetup(snapshot)) {
       void runLaunchpadWorkspaceCreate();
@@ -2908,6 +2915,7 @@ export function MissionControlShell({
             onRunSystemSetup={runOpenClawOnboarding}
             onRunModelSetDefault={runModelSetDefault}
             onOpenAddModels={openAddModelsDialog}
+            onOpenGatewayAuthSettings={openGatewayAuthSettings}
             onEnterAgentOS={enterAgentOS}
             onCreateWorkspace={runLaunchpadWorkspaceCreate}
             onContinueToModels={() => setOnboardingStage("models")}

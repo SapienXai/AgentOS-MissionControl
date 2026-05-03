@@ -5,6 +5,7 @@ import {
   ArrowUpCircle,
   AlertTriangle,
   ChevronDown,
+  KeyRound,
   LoaderCircle,
   RefreshCw,
   Square,
@@ -22,6 +23,10 @@ import type {
   OpenClawBinarySelection,
   ResetTarget
 } from "@/lib/agentos/contracts";
+import type {
+  GatewayNativeAuthCredentialKind,
+  GatewayNativeAuthStatus
+} from "@/lib/openclaw/gateway-auth";
 import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
 import { cn } from "@/lib/utils";
 
@@ -107,6 +112,16 @@ export function MissionControlShellSettingsPanel({
   const settingsWarningButtonStyles = settingsButtonClassName(surfaceTheme, "warning");
   const settingsWarningSolidButtonStyles = settingsButtonClassName(surfaceTheme, "warningSolid");
   const [gatewayServiceMenuOpen, setGatewayServiceMenuOpen] = useState(false);
+  const [gatewayAuthStatus, setGatewayAuthStatus] = useState<GatewayNativeAuthStatus | null>(null);
+  const [gatewayAuthError, setGatewayAuthError] = useState<string | null>(null);
+  const [isCheckingGatewayAuth, setIsCheckingGatewayAuth] = useState(false);
+  const [gatewayAuthCredentialKind, setGatewayAuthCredentialKind] =
+    useState<GatewayNativeAuthCredentialKind>("token");
+  const [gatewayAuthCredential, setGatewayAuthCredential] = useState("");
+  const [gatewayAuthSaveMessage, setGatewayAuthSaveMessage] = useState<string | null>(null);
+  const [isSavingGatewayAuthCredential, setIsSavingGatewayAuthCredential] = useState(false);
+  const [isGeneratingGatewayAuthToken, setIsGeneratingGatewayAuthToken] = useState(false);
+  const [isRepairingGatewayDeviceAccess, setIsRepairingGatewayDeviceAccess] = useState(false);
   const gatewayServiceMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -126,6 +141,168 @@ export function MissionControlShellSettingsPanel({
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [gatewayServiceMenuOpen]);
 
+  const refreshGatewayAuthStatus = async () => {
+    setIsCheckingGatewayAuth(true);
+    setGatewayAuthError(null);
+
+    try {
+      setGatewayAuthStatus(await fetchGatewayAuthStatus());
+    } catch (error) {
+      setGatewayAuthError(error instanceof Error ? error.message : "Unable to check Gateway auth status.");
+    } finally {
+      setIsCheckingGatewayAuth(false);
+    }
+  };
+
+  const saveGatewayAuthCredential = async () => {
+    const credential = gatewayAuthCredential.trim();
+    if (!credential) {
+      setGatewayAuthError("Gateway token/password is required.");
+      return;
+    }
+
+    setIsSavingGatewayAuthCredential(true);
+    setGatewayAuthError(null);
+    setGatewayAuthSaveMessage(null);
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          kind: gatewayAuthCredentialKind,
+          value: credential
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Gateway credential could not be saved.");
+      }
+
+      const result = (await response.json()) as { authStatus: GatewayNativeAuthStatus };
+      setGatewayAuthStatus(result.authStatus);
+      setGatewayAuthCredential("");
+      setGatewayAuthSaveMessage(
+        "Saved to .env.local, applied to this server session, and re-tested. Restart AgentOS to keep it after the next launch."
+      );
+    } catch (error) {
+      setGatewayAuthError(error instanceof Error ? error.message : "Unable to save Gateway credential.");
+    } finally {
+      setIsSavingGatewayAuthCredential(false);
+    }
+  };
+
+  const generateGatewayAuthToken = async () => {
+    setIsGeneratingGatewayAuthToken(true);
+    setGatewayAuthError(null);
+    setGatewayAuthSaveMessage(null);
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "generateLocalToken"
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Gateway token could not be generated.");
+      }
+
+      const result = (await response.json()) as {
+        authStatus: GatewayNativeAuthStatus;
+        result?: { restarted?: boolean; restartIssue?: string | null };
+      };
+      setGatewayAuthStatus(result.authStatus);
+      setGatewayAuthCredential("");
+      setGatewayAuthCredentialKind("token");
+      setGatewayAuthSaveMessage(
+        result.result?.restartIssue
+          ? `Generated a local token and saved it to .env.local. Gateway restart still needs attention: ${result.result.restartIssue}`
+          : "Generated a local token, saved it to .env.local, restarted Gateway, and re-tested native auth."
+      );
+    } catch (error) {
+      setGatewayAuthError(error instanceof Error ? error.message : "Unable to generate Gateway token.");
+    } finally {
+      setIsGeneratingGatewayAuthToken(false);
+    }
+  };
+
+  const repairGatewayDeviceAccess = async () => {
+    setIsRepairingGatewayDeviceAccess(true);
+    setGatewayAuthError(null);
+    setGatewayAuthSaveMessage(null);
+
+    try {
+      const response = await fetch("/api/settings/gateway", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "repairDeviceAccess"
+        })
+      });
+
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(result?.error || "Gateway device access could not be repaired.");
+      }
+
+      const result = (await response.json()) as {
+        authStatus: GatewayNativeAuthStatus;
+        result?: { scopes?: string[] };
+      };
+      setGatewayAuthStatus(result.authStatus);
+      setGatewayAuthSaveMessage(
+        result.authStatus.native.ok
+          ? "Local AgentOS device access is approved and native Gateway WS auth is ready."
+          : "Local AgentOS device access was repaired. Test auth again if the Gateway is still settling."
+      );
+    } catch (error) {
+      setGatewayAuthError(error instanceof Error ? error.message : "Unable to repair Gateway device access.");
+    } finally {
+      setIsRepairingGatewayDeviceAccess(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadGatewayAuthStatus = async () => {
+      setIsCheckingGatewayAuth(true);
+      setGatewayAuthError(null);
+
+      try {
+        const authStatus = await fetchGatewayAuthStatus();
+        if (isMounted) {
+          setGatewayAuthStatus(authStatus);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setGatewayAuthError(error instanceof Error ? error.message : "Unable to check Gateway auth status.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsCheckingGatewayAuth(false);
+        }
+      }
+    };
+
+    void loadGatewayAuthStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const gatewayServiceStatus = snapshot.diagnostics.rpcOk
     ? "Online"
     : snapshot.diagnostics.loaded
@@ -141,6 +318,11 @@ export function MissionControlShellSettingsPanel({
       : openClawBinarySelection.mode === "local-prefix"
         ? "Local prefix"
         : "Auto");
+  const gatewayAuthBadge = getGatewayAuthBadge(gatewayAuthStatus, isCheckingGatewayAuth);
+  const gatewayAuthSummary = getGatewayAuthSummary(gatewayAuthStatus, gatewayAuthError);
+  const gatewayAuthControlsBusy =
+    isGeneratingGatewayAuthToken || isSavingGatewayAuthCredential || isRepairingGatewayDeviceAccess;
+  const isGatewayAuthScopeLimited = gatewayAuthStatus?.native.kind === "scope-limited";
 
   return (
     <div
@@ -746,6 +928,7 @@ export function MissionControlShellSettingsPanel({
               )}
             </Button>
           </div>
+
         </div>
       </div>
 
@@ -1090,6 +1273,211 @@ export function MissionControlShellSettingsPanel({
               )}
             </Button>
           </div>
+
+          <div
+            className={cn(
+              "rounded-[14px] border px-2.5 py-2",
+              surfaceTheme === "light"
+                ? "border-[#ead8c8] bg-white"
+                : "border-white/8 bg-white/[0.03]"
+            )}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p
+                  className={cn(
+                    "text-[8px] uppercase tracking-[0.18em]",
+                    surfaceTheme === "light" ? "text-[#9a7f6c]" : "text-slate-500"
+                  )}
+                >
+                  Native Gateway auth
+                </p>
+                <p
+                  className={cn(
+                    "mt-1 text-[10px] leading-[1.05rem]",
+                    surfaceTheme === "light" ? "text-[#816958]" : "text-slate-400"
+                  )}
+                >
+                  {gatewayAuthSummary}
+                </p>
+              </div>
+              <span
+                className={cn(
+                  "shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-[0.18em]",
+                  gatewayAuthBadgeClassName(gatewayAuthBadge.tone, surfaceTheme)
+                )}
+              >
+                {gatewayAuthBadge.label}
+              </span>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={gatewayAuthControlsBusy}
+                onClick={() => {
+                  void generateGatewayAuthToken();
+                }}
+                className={settingsPrimaryButtonStyles}
+              >
+                {isGeneratingGatewayAuthToken ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  "Generate local token"
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={isGatewayAuthScopeLimited ? "default" : "secondary"}
+                disabled={gatewayAuthControlsBusy}
+                onClick={() => {
+                  void repairGatewayDeviceAccess();
+                }}
+                className={isGatewayAuthScopeLimited ? settingsPrimaryButtonStyles : settingsSecondaryButtonStyles}
+              >
+                {isRepairingGatewayDeviceAccess ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Repairing...
+                  </>
+                ) : (
+                  "Repair local access"
+                )}
+              </Button>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div
+                className={cn(
+                  "inline-flex rounded-[12px] border p-0.5",
+                  surfaceTheme === "light"
+                    ? "border-[#dcc6b6] bg-[#f4e8dd]"
+                    : "border-white/10 bg-white/[0.04]"
+                )}
+              >
+                {(["token", "password"] as const).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => setGatewayAuthCredentialKind(kind)}
+                    disabled={gatewayAuthControlsBusy}
+                    className={cn(
+                      "h-7 rounded-[10px] px-2 text-[8px] uppercase tracking-[0.16em] transition-colors",
+                      gatewayAuthCredentialKind === kind
+                        ? surfaceTheme === "light"
+                          ? "bg-white text-[#4f3d31] shadow-sm"
+                          : "bg-white/10 text-white"
+                        : surfaceTheme === "light"
+                          ? "text-[#876c5a] hover:bg-white/55"
+                          : "text-slate-400 hover:bg-white/[0.06]"
+                    )}
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </div>
+              <Input
+                type="password"
+                value={gatewayAuthCredential}
+                onChange={(event) => {
+                  setGatewayAuthCredential(event.target.value);
+                  setGatewayAuthSaveMessage(null);
+                }}
+                placeholder={
+                  gatewayAuthCredentialKind === "token"
+                    ? "Paste known token"
+                    : "Paste known password"
+                }
+                disabled={gatewayAuthControlsBusy}
+                style={surfaceTheme === "light" ? { colorScheme: "light" } : undefined}
+                className={cn(
+                  "h-8 min-w-0 flex-1 rounded-[12px] px-2.5 font-mono text-[11px]",
+                  surfaceTheme === "light"
+                    ? "border-[#d9c9bc] bg-[#fffdfb] text-[#4f3d31] caret-[#7c5a46] placeholder:text-[#b29b8b] shadow-[inset_0_0_0_1000px_#fffdfb] [-webkit-text-fill-color:#4f3d31] focus-visible:ring-[#c8946f]/45"
+                    : "border-white/10 bg-white/[0.04] text-slate-100 placeholder:text-slate-500"
+                )}
+              />
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                disabled={
+                  isSavingGatewayAuthCredential ||
+                  gatewayAuthControlsBusy ||
+                  !gatewayAuthCredential.trim()
+                }
+                onClick={() => {
+                  void saveGatewayAuthCredential();
+                }}
+                className={settingsPrimaryButtonStyles}
+              >
+                {isSavingGatewayAuthCredential ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save credential"
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={isCheckingGatewayAuth || gatewayAuthControlsBusy}
+                onClick={() => {
+                  void refreshGatewayAuthStatus();
+                }}
+                className={settingsSecondaryButtonStyles}
+              >
+                {isCheckingGatewayAuth ? (
+                  <>
+                    <LoaderCircle className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    Testing...
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+                    Test auth
+                  </>
+                )}
+              </Button>
+              {gatewayAuthStatus?.mode ? (
+                <span
+                  className={cn(
+                    "rounded-full border px-1.5 py-0.5 font-mono text-[8px]",
+                    surfaceTheme === "light"
+                      ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
+                      : "border-white/10 bg-white/[0.05] text-slate-300"
+                  )}
+                >
+                  {gatewayAuthStatus.mode}
+                </span>
+              ) : null}
+            </div>
+            <p
+              className={cn(
+                "mt-2 text-[9px] leading-[0.95rem]",
+                gatewayAuthSaveMessage
+                  ? surfaceTheme === "light"
+                    ? "text-emerald-700"
+                    : "text-emerald-200"
+                  : surfaceTheme === "light"
+                    ? "text-[#8f7664]"
+                    : "text-slate-500"
+              )}
+            >
+              {gatewayAuthSaveMessage ||
+                "Use Repair local access for scope errors. Generate local token creates a local Gateway credential. Manual paste is only for externally managed Gateway credentials."}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -1191,6 +1579,95 @@ function GatewayServiceMenuButton({
       <span>{label}</span>
     </button>
   );
+}
+
+async function fetchGatewayAuthStatus() {
+  const response = await fetch("/api/settings/gateway", {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const result = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(result?.error || "Gateway auth status could not be checked.");
+  }
+
+  const result = (await response.json()) as { authStatus: GatewayNativeAuthStatus };
+  return result.authStatus;
+}
+
+function getGatewayAuthBadge(
+  status: GatewayNativeAuthStatus | null,
+  isChecking: boolean
+): { label: string; tone: "ready" | "warning" | "error" | "neutral" } {
+  if (isChecking) {
+    return { label: "Testing", tone: "neutral" };
+  }
+
+  if (!status) {
+    return { label: "Not tested", tone: "neutral" };
+  }
+
+  if (status.native.ok) {
+    return { label: "Ready", tone: "ready" };
+  }
+
+  if (status.native.kind === "disabled") {
+    return { label: "Disabled", tone: "neutral" };
+  }
+
+  if (status.native.kind === "auth") {
+    return { label: "Needs env", tone: "warning" };
+  }
+
+  if (status.native.kind === "scope-limited") {
+    return { label: "Needs repair", tone: "warning" };
+  }
+
+  if (status.native.kind === "timeout" || status.native.kind === "unreachable") {
+    return { label: "Offline", tone: "warning" };
+  }
+
+  return { label: "Check failed", tone: "error" };
+}
+
+function getGatewayAuthSummary(status: GatewayNativeAuthStatus | null, error: string | null) {
+  if (error) {
+    return error;
+  }
+
+  if (!status) {
+    return "Check whether AgentOS can authenticate to the native Gateway WS endpoint.";
+  }
+
+  return status.recommendation;
+}
+
+function gatewayAuthBadgeClassName(
+  tone: "ready" | "warning" | "error" | "neutral",
+  surfaceTheme: SurfaceTheme
+) {
+  if (tone === "ready") {
+    return surfaceTheme === "light"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : "border-emerald-300/25 bg-emerald-300/10 text-emerald-200";
+  }
+
+  if (tone === "warning") {
+    return surfaceTheme === "light"
+      ? "border-amber-300 bg-amber-50 text-amber-800"
+      : "border-amber-300/25 bg-amber-300/10 text-amber-200";
+  }
+
+  if (tone === "error") {
+    return surfaceTheme === "light"
+      ? "border-rose-300 bg-rose-50 text-rose-700"
+      : "border-rose-300/25 bg-rose-300/10 text-rose-200";
+  }
+
+  return surfaceTheme === "light"
+    ? "border-[#dcc6b6] bg-[#f4e8dd] text-[#876c5a]"
+    : "border-white/10 bg-white/[0.05] text-slate-300";
 }
 
 function commandStatusClassName(

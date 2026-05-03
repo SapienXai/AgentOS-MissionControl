@@ -38,7 +38,9 @@ export function SystemStage({
   statusCopy,
   showDetails,
   phaseLabel,
-  run
+  run,
+  gatewayAuthNeedsSetup,
+  onOpenGatewayAuthSettings
 }: {
   steps: Array<{ id: string; label: string; description: string; state: StepState }>;
   surfaceTheme: SurfaceTheme;
@@ -46,6 +48,8 @@ export function SystemStage({
   showDetails: boolean;
   phaseLabel: string;
   run: StageRunDetails;
+  gatewayAuthNeedsSetup: boolean;
+  onOpenGatewayAuthSettings: () => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
@@ -195,6 +199,41 @@ export function SystemStage({
         onDetailsOpenChange={setDetailsOpen}
         run={run}
       />
+
+      {gatewayAuthNeedsSetup ? (
+        <div
+          className={cn(
+            "mt-2.5 rounded-[14px] border px-2.5 py-2",
+            surfaceTheme === "light"
+              ? "border-amber-300 bg-amber-50 text-amber-950"
+              : "border-amber-300/22 bg-amber-300/10 text-amber-100"
+          )}
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-medium">Native Gateway auth needs an env credential</p>
+              <p
+                className={cn(
+                  "mt-1 text-[9px] leading-[0.95rem]",
+                  surfaceTheme === "light" ? "text-amber-900/78" : "text-amber-100/78"
+                )}
+              >
+                OpenClaw reports the Gateway secret as redacted. Generate a local token in Settings so AgentOS can use native WS instead of CLI fallback.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={onOpenGatewayAuthSettings}
+                className={cn("mt-2", secondaryActionClassName(surfaceTheme))}
+              >
+                Configure Gateway auth
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

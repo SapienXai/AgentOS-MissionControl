@@ -63,6 +63,7 @@ export function OpenClawOnboarding({
   onRunSystemSetup,
   onRunModelSetDefault,
   onOpenAddModels,
+  onOpenGatewayAuthSettings,
   onCreateWorkspace,
   onEnterAgentOS,
   onContinueToModels,
@@ -89,6 +90,7 @@ export function OpenClawOnboarding({
   onRunSystemSetup: () => void;
   onRunModelSetDefault: (modelId?: string) => void;
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
+  onOpenGatewayAuthSettings: () => void;
   onCreateWorkspace: () => void;
   onEnterAgentOS: () => void;
   onContinueToModels: () => void;
@@ -155,6 +157,9 @@ export function OpenClawOnboarding({
     stageRun.log.trim().length > 0 ||
     (stage === "models" && discoveredModels.length > 0);
   const stageBadgeLabel = resolveStageBadgeLabel(stageRun.runState, stage, modelReady);
+  const gatewayAuthNeedsSetup = snapshot.diagnostics.issues.some((issue) =>
+    /gateway\..*auth|redacted secret|AGENTOS_OPENCLAW_GATEWAY_TOKEN|OPENCLAW_GATEWAY_TOKEN/i.test(issue)
+  );
 
   const primaryAction = resolvePrimaryAction({
     stage,
@@ -293,6 +298,8 @@ export function OpenClawOnboarding({
             showDetails={showDetails}
             phaseLabel={phaseLabel}
             run={stageRun}
+            gatewayAuthNeedsSetup={gatewayAuthNeedsSetup}
+            onOpenGatewayAuthSettings={onOpenGatewayAuthSettings}
           />
         ) : (
           <ModelStage

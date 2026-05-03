@@ -114,6 +114,8 @@ Native WS credential discovery is intentionally conservative:
 
 The 2026-05-03 validation pass fixed a diagnostic ordering bug in this path: AgentOS now resolves and validates native WS connect params before opening the socket, so redacted secrets are reported as `auth` fallback diagnostics instead of being masked by an early Gateway close.
 
+The same validation pass also found that a local Gateway can be healthy while the AgentOS device entry is still scope-limited. In that case OpenClaw returns errors such as `INVALID_REQUEST: missing scope: operator.read`; this is not solved by asking the user to paste an unknown token. Settings now exposes a native auth repair action that runs the official `openclaw devices approve --latest --json` path, and the native WS client uses OpenClaw local device auth for loopback Gateway connections. Manual token/password paste remains only for externally managed Gateway credentials.
+
 ## Provider Factory And SDK Extension Point
 
 `lib/openclaw/client/gateway-client-factory.ts` is the SDK replacement point.
@@ -128,6 +130,7 @@ Current fragile areas:
 
 - Gateway RPC method names for typed catalog/status/config reads are assumed from the local protocol shape and are protected by graceful fallback. If OpenClaw changes method names, AgentOS should degrade to CLI and show diagnostics.
 - Native WS cannot use secrets that OpenClaw only returns in redacted form. Set an env token/password or use a future stable SDK/device-auth path to avoid CLI fallback in those environments.
+- AgentOS Settings now exposes native Gateway auth status, a secure credential form, and a server-side auth test. It reports redacted config secrets, env credential presence, disabled native WS flags, and the current recovery recommendation without returning raw token/password values. Saved credentials are written only to local `.env.local`, which is gitignored, and are applied to the current server session.
 - Gateway start/stop/restart still cannot be Gateway-first because it controls the Gateway process itself.
 - Agent create/update/delete still require CLI-backed compatibility. OpenClaw Gateway has agent mutation methods, but the currently confirmed Gateway create schema does not accept AgentOS' existing `agentDir` and model inputs, so migrating it would risk changing workspace/agent config behavior.
 - Streaming is still CLI-backed because AgentOS UI behavior depends on current CLI transcript semantics and no stable native stream contract is confirmed here.
@@ -142,6 +145,7 @@ Current fragile areas:
 - Gateway failure followed by CLI failure returns the actionable CLI failure while recording Gateway diagnostics.
 - Gateway auth discovery prefers local auth for local URLs and remote auth for remote URLs.
 - Redacted OpenClaw secrets are not transmitted as native WS credentials.
+- Settings auth status explains redacted secrets, env credential readiness, force-disabled native WS, and local `.env.local` credential saves without leaking secrets.
 - Recovered Gateway operations clear stale fallback diagnostics for that operation.
 - Agent list, session list, config path reads, and config path mutations use Gateway first where the Gateway contract is usable.
 - The provider factory accepts a replacement client provider for a future SDK-backed implementation.
@@ -166,7 +170,7 @@ Latest verification:
 
 - `pnpm typecheck`: passed.
 - `pnpm lint`: passed.
-- `pnpm test`: passed, 105 tests.
+- `pnpm test`: passed, 111 tests.
 - `pnpm build`: passed when rerun outside the sandbox. The first sandboxed attempt failed with Turbopack `Operation not permitted` while trying to create a worker/bind a port during CSS processing.
 - `node scripts/openclaw-runtime-smoke.mjs`: passed when rerun outside the sandbox. The sandboxed attempt failed because Node fetch to localhost was blocked.
 
@@ -174,6 +178,7 @@ Latest verification:
 
 - Native WS redacted-secret auth diagnostics were verified against both unit tests and a real local Gateway.
 - Invalid env token behavior was verified against the real local Gateway and correctly produced an `auth` fallback diagnostic.
+- Settings now verifies the same redacted-secret auth condition through `/api/settings/gateway` and shows the env-token recovery path in the Settings menu.
 - Fresh-install/no-gateway behavior was verified by temporarily stopping the local Gateway and running a snapshot load with temporary `HOME` and restricted `PATH`; the snapshot returned offline fallback state.
 - Real agent chat stream completed successfully through the AgentOS API and was visible in the refreshed runtime/session snapshot.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and sandbox-external `pnpm build` passed.
