@@ -105,6 +105,13 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
   const [isRepairingGatewayDeviceAccess, setIsRepairingGatewayDeviceAccess] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => resolveInitialSettingsSection());
   const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion);
+  const isUpdateRegistryLoading = Boolean(
+    snapshot.diagnostics.version && !snapshot.diagnostics.latestVersion && !snapshot.diagnostics.updateError
+  );
+  const currentVersion = snapshot.diagnostics.version || "unknown";
+  const latestVersion = snapshot.diagnostics.latestVersion || null;
+  const updateInfo = snapshot.diagnostics.updateInfo?.trim() || null;
+  const updateError = snapshot.diagnostics.updateError?.trim() || null;
   const defaultModel =
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
@@ -371,6 +378,19 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       Open wizard
                     </Button>
                   </div>
+
+                  <UpdateRegistryPanel
+                    surfaceTheme={surfaceTheme}
+                    isCheckingForUpdates={isCheckingForUpdates}
+                    isUpdateRegistryLoading={isUpdateRegistryLoading}
+                    hasUpdateAvailable={hasUpdateAvailable}
+                    currentVersion={currentVersion}
+                    latestVersion={latestVersion}
+                    updateInfo={updateInfo}
+                    updateError={updateError}
+                    lastCheckedAt={lastCheckedAt}
+                    isUpdateRunning={updateRunState === "running"}
+                  />
 
                   <div className="mt-5 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-2">
                     <Metric
@@ -1101,6 +1121,150 @@ function EmptyState({
   );
 }
 
+function UpdateRegistryPanel({
+  surfaceTheme,
+  isCheckingForUpdates,
+  isUpdateRegistryLoading,
+  hasUpdateAvailable,
+  currentVersion,
+  latestVersion,
+  updateInfo,
+  updateError,
+  lastCheckedAt,
+  isUpdateRunning
+}: {
+  surfaceTheme: SurfaceTheme;
+  isCheckingForUpdates: boolean;
+  isUpdateRegistryLoading: boolean;
+  hasUpdateAvailable: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  updateInfo: string | null;
+  updateError: string | null;
+  lastCheckedAt: number | null;
+  isUpdateRunning: boolean;
+}) {
+  const isBusy = isCheckingForUpdates || isUpdateRunning;
+  const statusLabel = isCheckingForUpdates
+    ? "Checking registry"
+    : isUpdateRunning
+      ? "Updating"
+      : hasUpdateAvailable
+        ? "Update available"
+        : updateError
+          ? "Check failed"
+          : isUpdateRegistryLoading
+            ? "Registry loading"
+            : "Up to date";
+  const statusToneClass = hasUpdateAvailable
+    ? surfaceTheme === "light"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+      : "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+    : updateError
+      ? surfaceTheme === "light"
+        ? "border-rose-300 bg-rose-50 text-rose-700"
+        : "border-rose-300/20 bg-rose-300/10 text-rose-100"
+      : isBusy || isUpdateRegistryLoading
+        ? surfaceTheme === "light"
+          ? "border-amber-300 bg-amber-50 text-amber-700"
+          : "border-amber-300/20 bg-amber-300/10 text-amber-100"
+        : surfaceTheme === "light"
+          ? "border-slate-300 bg-white text-slate-600"
+          : "border-white/10 bg-[#0f1826] text-slate-300";
+
+  const detailLabel = isCheckingForUpdates
+    ? "Refreshing OpenClaw update registry..."
+    : isUpdateRunning
+      ? "Installing the selected OpenClaw update."
+      : hasUpdateAvailable
+        ? "A newer release is available and ready to install."
+        : updateError
+          ? "OpenClaw returned an error while checking updates."
+          : isUpdateRegistryLoading
+            ? "OpenClaw has not reported a latest release yet."
+            : "No newer release is currently available.";
+
+  return (
+    <div className={cn("mt-3 rounded-[20px] border p-3.5", insetPanelClassName(surfaceTheme))}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className={cn("text-[10px] uppercase tracking-[0.18em]", mutedTextClassName(surfaceTheme))}>Update status</p>
+          <div className="mt-1 flex items-center gap-2">
+            {isBusy ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-emerald-400" /> : null}
+            <p className={cn("font-medium", surfaceTheme === "light" ? "text-[#2f251f]" : "text-slate-100")}>{statusLabel}</p>
+            <span className={cn("rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.12em]", statusToneClass)}>
+              {hasUpdateAvailable ? "Ready" : isBusy ? "Working" : updateError ? "Attention" : "Stable"}
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className={cn("text-[10px] uppercase tracking-[0.18em]", mutedTextClassName(surfaceTheme))}>Last checked</p>
+          <p className={cn("mt-1 text-[11px]", surfaceTheme === "light" ? "text-[#6b5546]" : "text-slate-300")}>
+            {lastCheckedAt ? new Date(lastCheckedAt).toLocaleTimeString() : "Not yet"}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            isBusy
+              ? "w-1/2 animate-pulse bg-emerald-400/80"
+              : hasUpdateAvailable
+                ? "w-full bg-emerald-500"
+                : updateError
+                  ? "w-2/3 bg-rose-400"
+                  : "w-5/6 bg-slate-400/70"
+          )}
+        />
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <Metric
+          label="Current version"
+          value={`v${currentVersion}`}
+          surfaceTheme={surfaceTheme}
+          dark={surfaceTheme === "dark"}
+          compact
+        />
+        <Metric
+          label="Latest available"
+          value={latestVersion ? `v${latestVersion}` : "Unknown"}
+          badge={hasUpdateAvailable ? "Ready" : updateError ? "Error" : isBusy || isUpdateRegistryLoading ? "Loading" : "Stable"}
+          surfaceTheme={surfaceTheme}
+          dark={surfaceTheme === "dark"}
+          compact
+        />
+      </div>
+
+      <div
+        className={cn(
+          "mt-3 rounded-[18px] border p-3 text-[11px] leading-5",
+          surfaceTheme === "light"
+            ? "border-[#eadbcf] bg-[#fffdf9] text-[#5a4638]"
+            : "border-white/[0.08] bg-[#0d1624] text-slate-300"
+        )}
+      >
+        <p className={cn("text-[10px] uppercase tracking-[0.18em]", mutedTextClassName(surfaceTheme))}>Details</p>
+        <p className="mt-1.5">{detailLabel}</p>
+        {updateInfo ? <p className="mt-1.5 opacity-90">{updateInfo}</p> : null}
+        {updateError ? (
+          <p className={cn("mt-1.5", surfaceTheme === "light" ? "text-rose-700" : "text-rose-200")}>{updateError}</p>
+        ) : null}
+        {hasUpdateAvailable ? (
+          <div className="mt-2 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em]">
+            <span className={cn("rounded-full border px-2 py-1", statusToneClass)}>Update ready</span>
+            <span className={cn("rounded-full border px-2 py-1", mutedTextClassName(surfaceTheme))}>
+              Review before install
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 async function fetchGatewayAuthStatus() {
   const response = await fetch("/api/settings/gateway", {
     method: "GET",
@@ -1247,6 +1411,16 @@ function secondaryButtonClassName(surfaceTheme: SurfaceTheme, extraClassName?: s
         ? "border-emerald-300/15 bg-[#0f1826] text-slate-100 hover:bg-[#182538]"
         : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
   );
+}
+
+function insetPanelClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light"
+    ? "border-[#eadbcf] bg-[#f9f1e8]/80"
+    : "border-white/[0.08] bg-[#101a2a]/92";
+}
+
+function mutedTextClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light" ? "text-[#8c7564]" : "text-slate-400";
 }
 
 function infoRowsShellClassName(surfaceTheme: SurfaceTheme) {
