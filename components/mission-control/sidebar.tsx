@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import { CreateAgentDialog } from "@/components/mission-control/create-agent-dialog";
 import { ChannelBindingPicker } from "@/components/mission-control/channel-binding-picker";
@@ -18,6 +19,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
+  Settings2,
   Workflow
 } from "lucide-react";
 
@@ -86,7 +88,35 @@ type AgentDraft = {
   channelIds: string[];
 };
 
-type SidebarSectionId = "overview" | "workspaces" | "agents" | "models";
+type SidebarSectionId = "overview" | "workspaces" | "agents" | "models" | "settings";
+
+type SettingsSidebarAnchorId =
+  | "general"
+  | "openclaw"
+  | "gateway"
+  | "models"
+  | "workspace"
+  | "agents"
+  | "diagnostics"
+  | "advanced"
+  | "danger-zone";
+
+const settingsSidebarAnchors: Array<{
+  id: SettingsSidebarAnchorId;
+  label: string;
+  icon: LucideIcon;
+  danger?: boolean;
+}> = [
+  { id: "general", label: "General", icon: Settings2 },
+  { id: "openclaw", label: "OpenClaw", icon: Workflow },
+  { id: "gateway", label: "Gateway", icon: Cpu },
+  { id: "models", label: "Models", icon: Cpu },
+  { id: "workspace", label: "Workspace", icon: FolderKanban },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "diagnostics", label: "Diagnostics", icon: AlertTriangle },
+  { id: "advanced", label: "Advanced", icon: Settings2 },
+  { id: "danger-zone", label: "Danger Zone", icon: AlertTriangle, danger: true }
+];
 
 export function MissionSidebar({
   snapshot,
@@ -107,7 +137,8 @@ export function MissionSidebar({
   onOpenAddModels,
   onEditWorkspace,
   onSnapshotChange,
-  onAgentCreatedVisible
+  onAgentCreatedVisible,
+  settingsMode = false
 }: {
   snapshot: MissionControlSnapshot;
   surfaceTheme: "dark" | "light";
@@ -141,7 +172,9 @@ export function MissionSidebar({
   onEditWorkspace: (workspaceId: string) => void;
   onSnapshotChange?: (updater: (snapshot: MissionControlSnapshot) => MissionControlSnapshot) => void;
   onAgentCreatedVisible?: (agentId: string) => void;
+  settingsMode?: boolean;
 }) {
+  const router = useRouter();
   const [isRailCollapsed, setIsRailCollapsed] = useState(false);
   const healthTone = toneForHealth(snapshot.diagnostics.health);
   const statusDot =
@@ -166,7 +199,9 @@ export function MissionSidebar({
   const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
   const [agentDeleteConfirmText, setAgentDeleteConfirmText] = useState("");
-  const [activeSection, setActiveSection] = useState<SidebarSectionId>("workspaces");
+  const [activeSection, setActiveSection] = useState<SidebarSectionId>(
+    settingsMode ? "settings" : "workspaces"
+  );
   const [modelSelectionDraft, setModelSelectionDraft] = useState("");
   const handledRequestedAgentActionIdRef = useRef<string | null>(null);
 
@@ -251,6 +286,11 @@ export function MissionSidebar({
       label: "Models",
       icon: Cpu,
       badge: String(snapshot.models.length)
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: Settings2
     }
   ];
 
@@ -580,6 +620,11 @@ export function MissionSidebar({
                 panelCollapsed={isPanelCollapsed}
                 tooltipSide="right"
                 onClick={() => {
+                  if (item.id === "settings" && !settingsMode) {
+                    router.push("/settings");
+                    return;
+                  }
+
                   setActiveSection(item.id);
 
                   if (isPanelCollapsed) {
@@ -695,7 +740,14 @@ export function MissionSidebar({
                       label={item.label}
                       badge={item.badge}
                       active={activeSection === item.id}
-                      onClick={() => setActiveSection(item.id)}
+                      onClick={() => {
+                        if (item.id === "settings" && !settingsMode) {
+                          router.push("/settings");
+                          return;
+                        }
+
+                        setActiveSection(item.id);
+                      }}
                     />
                   ))}
                 </div>
@@ -1244,6 +1296,22 @@ export function MissionSidebar({
                       ))}
                     </div>
 
+                  </>
+                ) : null}
+
+                {activeSection === "settings" ? (
+                  <>
+                    <SidebarSectionHeader
+                      eyebrow="Settings"
+                      title="Control Center"
+                      detail="Open system, gateway, model, workspace, and diagnostics controls."
+                    />
+
+                    <div className="space-y-2">
+                      {settingsSidebarAnchors.map((item) => (
+                        <SettingsSidebarAnchor key={item.id} item={item} />
+                      ))}
+                    </div>
                   </>
                 ) : null}
                 </div>
@@ -1863,6 +1931,34 @@ function SectionTab({
         </span>
       ) : null}
     </button>
+  );
+}
+
+function SettingsSidebarAnchor({
+  item
+}: {
+  item: {
+    id: SettingsSidebarAnchorId;
+    label: string;
+    icon: LucideIcon;
+    danger?: boolean;
+  };
+}) {
+  const Icon = item.icon;
+
+  return (
+    <a
+      href={`/settings#${item.id}`}
+      className={cn(
+        "flex h-10 items-center gap-3 rounded-[16px] border px-3 text-[12px] transition-all",
+        item.danger
+          ? "border-transparent text-rose-200/86 hover:border-rose-300/16 hover:bg-rose-300/10 hover:text-rose-100"
+          : "border-white/[0.06] bg-white/[0.03] text-slate-300 hover:border-cyan-300/[0.18] hover:bg-cyan-300/[0.06] hover:text-cyan-100"
+      )}
+    >
+      <Icon className={cn("h-3.5 w-3.5", item.danger ? "text-rose-300" : "text-slate-500")} />
+      <span className="truncate">{item.label}</span>
+    </a>
   );
 }
 

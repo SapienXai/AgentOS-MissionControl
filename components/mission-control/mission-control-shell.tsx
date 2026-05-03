@@ -15,6 +15,7 @@ import { MissionControlShellDialogs } from "@/components/mission-control/mission
 import { OpenClawOnboarding } from "@/components/mission-control/openclaw-onboarding";
 import type { ModelSwitchFeedback } from "@/components/mission-control/openclaw-onboarding.stages";
 import { ResetDialog } from "@/components/mission-control/reset-dialog";
+import { SettingsControlCenter } from "@/components/mission-control/settings-control-center";
 import { MissionSidebar } from "@/components/mission-control/sidebar";
 import { WorkspaceChannelsDialog } from "@/components/mission-control/workspace-channels-dialog";
 import { WorkspaceWizardDialog } from "@/components/mission-control/workspace-wizard/workspace-wizard-dialog";
@@ -27,6 +28,7 @@ import {
   CanvasTitlePill as MissionControlCanvasTitlePill,
   CanvasTopBar as MissionControlCanvasTopBar
 } from "@/components/mission-control/mission-control-shell.topbar";
+import type { MissionControlShellSettingsPanelProps } from "@/components/mission-control/mission-control-shell.settings";
 import {
   createOptimisticMissionTaskRecord,
   findReplacementTaskForOptimisticTask,
@@ -148,9 +150,11 @@ function areOpenClawBinarySelectionsEqual(
 }
 
 export function MissionControlShell({
-  initialSnapshot
+  initialSnapshot,
+  mode = "mission"
 }: {
   initialSnapshot: MissionControlSnapshot;
+  mode?: "mission" | "settings";
 }) {
   const { snapshot, connectionState, refresh, refreshSnapshot, setSnapshot } = useMissionControlData(initialSnapshot);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
@@ -1866,6 +1870,12 @@ export function MissionControlShell({
     setIsOnboardingForcedOpen(false);
     setShowOnboardingReadyState(false);
     setIsOnboardingDismissed(true);
+
+    if (mode === "settings" && typeof window !== "undefined") {
+      window.location.hash = "gateway";
+      return;
+    }
+
     setIsSettingsOpen(true);
   };
 
@@ -2440,6 +2450,264 @@ export function MissionControlShell({
     openSetupWizard("system");
   };
 
+  const settingsPanelProps: MissionControlShellSettingsPanelProps = {
+    snapshot,
+    surfaceTheme,
+    gatewayDraft,
+    workspaceRootDraft,
+    isSavingGateway,
+    isSavingWorkspaceRoot,
+    isCheckingForUpdates,
+    updateRunState,
+    selectedModelId: selectedOnboardingModelId,
+    modelOnboardingRunState,
+    gatewayControlAction,
+    lastCheckedAt,
+    onGatewayDraftChange: setGatewayDraft,
+    onWorkspaceRootDraftChange: setWorkspaceRootDraft,
+    onSelectedModelIdChange: setSelectedOnboardingModelId,
+    onSaveGatewaySettings: saveGatewaySettings,
+    onSaveWorkspaceRootSettings: saveWorkspaceRootSettings,
+    onCheckForUpdates: checkForUpdates,
+    onControlGateway: controlGateway,
+    onOpenSetupWizard: openSetupWizard,
+    onRunModelRefresh: runModelRefresh,
+    onRunModelSetDefault: runModelSetDefault,
+    onOpenAddModels: openAddModelsDialog,
+    onOpenUpdateDialog: () => {
+      if (updateRunState === "idle") {
+        resetUpdateDialogState();
+      }
+      setIsUpdateDialogOpen(true);
+    },
+    onOpenResetDialog: (target) => {
+      void openResetDialog(target);
+    },
+    openClawBinarySelection: openClawBinarySelectionDraft,
+    isSavingOpenClawBinary,
+    onOpenClawBinarySelectionModeChange: handleOpenClawBinarySelectionModeChange,
+    onOpenClawBinarySelectionPathChange: handleOpenClawBinarySelectionPathChange,
+    onSaveOpenClawBinarySettings: saveOpenClawBinarySettings,
+    installSummary: openClawInstallSummary
+  };
+
+  const settingsSystemOverlays = (
+    <>
+      {shouldShowOnboarding ? (
+        <OpenClawOnboarding
+          snapshot={snapshot}
+          surfaceTheme={surfaceTheme}
+          stage={onboardingStage}
+          showReadyState={showOnboardingReadyState}
+          systemActionLabel={onboardingAction.label}
+          systemActionDescription={onboardingAction.description}
+          systemPhase={onboardingPhase}
+          modelPhase={modelOnboardingPhase}
+          systemRun={{
+            runState: onboardingRunState,
+            statusMessage: onboardingStatusMessage,
+            resultMessage: onboardingResultMessage,
+            log: onboardingLog,
+            manualCommand: onboardingManualCommand,
+            docsUrl: onboardingDocsUrl
+          }}
+          modelRun={{
+            runState: modelOnboardingRunState,
+            statusMessage: modelOnboardingStatusMessage,
+            resultMessage: modelOnboardingResultMessage,
+            log: modelOnboardingLog,
+            manualCommand: modelOnboardingManualCommand,
+            docsUrl: modelOnboardingDocsUrl
+          }}
+          modelSwitchFeedback={modelSwitchFeedback}
+          selectedModelId={selectedOnboardingModelId}
+          discoveredModels={discoveredModels}
+          onSelectedModelIdChange={setSelectedOnboardingModelId}
+          onClearModelSwitchFeedback={() => setModelSwitchFeedback(initialModelSwitchFeedback)}
+          onRunSystemSetup={runOpenClawOnboarding}
+          onRunModelSetDefault={runModelSetDefault}
+          onOpenAddModels={openAddModelsDialog}
+          onOpenGatewayAuthSettings={openGatewayAuthSettings}
+          onEnterAgentOS={enterAgentOS}
+          onCreateWorkspace={runLaunchpadWorkspaceCreate}
+          onContinueToModels={() => setOnboardingStage("models")}
+          onBackToSystem={() => setOnboardingStage("system")}
+          onSelectStage={(stage) => {
+            setShowOnboardingReadyState(false);
+            setOnboardingStage(stage);
+          }}
+          launchpadCreateProgress={launchpadWorkspaceCreateProgress}
+          launchpadCreateRunState={launchpadWorkspaceCreateRunState}
+        />
+      ) : null}
+
+      <WorkspaceWizardDialog
+        key={workspaceWizardEditId ? `workspace-edit:${workspaceWizardEditId}` : "workspace-create"}
+        open={isWorkspaceWizardOpen}
+        onOpenChange={handleWorkspaceWizardOpenChange}
+        initialMode={workspaceWizardInitialMode}
+        workspaceEditId={workspaceWizardEditId}
+        surfaceTheme={surfaceTheme}
+        snapshot={snapshot}
+        onRefresh={refresh}
+        onWorkspaceCreated={(workspaceId) => {
+          setPendingWorkspaceOpenId(workspaceId);
+          setActiveWorkspaceId(workspaceId);
+          selectNode(workspaceId);
+        }}
+        onWorkspaceUpdated={(workspaceId) => {
+          setPendingWorkspaceOpenId(workspaceId);
+          setActiveWorkspaceId(workspaceId);
+          selectNode(workspaceId);
+        }}
+      />
+
+      <AddModelsDialog
+        open={isAddModelsDialogOpen}
+        onOpenChange={setIsAddModelsDialogOpen}
+        snapshot={snapshot}
+        initialProvider={initialAddModelsProvider}
+        onSnapshotChange={setSnapshot}
+      />
+
+      <ResetDialog
+        open={resetDialogTarget !== null}
+        target={resetDialogTarget}
+        surfaceTheme={surfaceTheme}
+        previewState={resetPreviewState}
+        preview={resetPreview}
+        previewError={resetPreviewError}
+        runState={resetRunState}
+        statusMessage={resetStatusMessage}
+        resultMessage={resetResultMessage}
+        backgroundLogPath={resetBackgroundLogPath}
+        log={resetLog}
+        confirmText={resetConfirmText}
+        onConfirmTextChange={setResetConfirmText}
+        onRefreshPreview={() => {
+          if (!resetDialogTarget) {
+            return;
+          }
+
+          void loadResetPreview(resetDialogTarget);
+        }}
+        onExecute={() => {
+          void runReset();
+        }}
+        onBackToSetup={handleResetBackToSetup}
+        onOpenChange={handleResetDialogOpenChange}
+      />
+
+      <MissionControlShellDialogs
+        snapshot={snapshot}
+        surfaceTheme={surfaceTheme}
+        isInspectorOpen={false}
+        taskAbortRequest={taskAbortRequest}
+        taskAbortRunState={taskAbortRunState}
+        taskAbortMessage={taskAbortMessage}
+        onTaskAbortOpenChange={(open) => {
+          if (taskAbortRunState === "running") {
+            return;
+          }
+
+          if (!open) {
+            setTaskAbortRequest(null);
+            setTaskAbortRunState("idle");
+            setTaskAbortMessage(null);
+          }
+        }}
+        onTaskAbortConfirm={() => {
+          void confirmTaskAbort();
+        }}
+        updateDialogOpen={isUpdateDialogOpen}
+        updateRunState={updateRunState}
+        updateStatusMessage={updateStatusMessage}
+        updateResultMessage={updateResultMessage}
+        updateLog={updateLog}
+        updateManualCommand={updateManualCommand}
+        activeRuntimeCount={activeRuntimeCount}
+        updateInstallSummary={openClawInstallSummary}
+        onUpdateDialogOpenChange={(open) => {
+          if (updateRunState === "running") {
+            setIsUpdateDialogOpen(open);
+            return;
+          }
+
+          setIsUpdateDialogOpen(open);
+
+          if (!open) {
+            resetUpdateDialogState();
+          }
+        }}
+        onRunOpenClawUpdate={() => {
+          void runOpenClawUpdate();
+        }}
+      />
+    </>
+  );
+
+  if (mode === "settings") {
+    return (
+      <div className="mission-shell mission-shell--light relative min-h-screen overflow-hidden">
+        <div className="mission-canvas-backdrop fixed inset-0 z-0">
+          <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
+        </div>
+
+        <div className="pointer-events-auto fixed left-0 top-0 z-30 hidden h-[100dvh] w-[360px] overflow-visible lg:block">
+          <MissionSidebar
+            snapshot={uiSnapshot}
+            surfaceTheme={surfaceTheme}
+            activeWorkspaceId={activeWorkspaceId}
+            requestedAgentAction={agentActionRequest}
+            connectionState={connectionState}
+            collapsed={false}
+            settingsMode
+            modelManager={{
+              runState: modelOnboardingRunState,
+              statusMessage: modelOnboardingStatusMessage,
+              resultMessage: modelOnboardingResultMessage,
+              log: modelOnboardingLog,
+              manualCommand: modelOnboardingManualCommand,
+              docsUrl: modelOnboardingDocsUrl,
+              discoveredModels,
+              systemReady: isOpenClawOnboardingSystemReady
+            }}
+            onToggleCollapsed={() => setIsSidebarOpen((current) => !current)}
+            onSelectWorkspace={(workspaceId) => {
+              setFocusedAgentId(null);
+              setActiveWorkspaceId(workspaceId);
+              selectNode(workspaceId);
+            }}
+            onRefresh={refresh}
+            onRunModelRefresh={runModelRefresh}
+            onRunModelDiscover={runModelDiscover}
+            onRunModelSetDefault={runModelSetDefault}
+            onConnectModelProvider={runModelProviderLogin}
+            onOpenModelSetup={() => openSetupWizard()}
+            onOpenAddModels={openAddModelsDialog}
+            onEditWorkspace={openWorkspaceWizardForEdit}
+            onSnapshotChange={setSnapshot}
+            onAgentCreatedVisible={handleCreatedAgentVisible}
+          />
+        </div>
+
+        <SettingsControlCenter {...settingsPanelProps} />
+        <div className="pointer-events-none fixed top-0 z-40 hidden lg:left-[384px] lg:right-[84px] lg:block">
+          <MissionControlCanvasTopBar
+            settingsRef={settingsRef}
+            isSettingsOpen={isSettingsOpen}
+            onToggleTheme={() =>
+              setSurfaceTheme((current) => (current === "light" ? "dark" : "light"))
+            }
+            onToggleSettings={() => setIsSettingsOpen((current) => !current)}
+            {...settingsPanelProps}
+          />
+        </div>
+        {settingsSystemOverlays}
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -2588,50 +2856,13 @@ export function MissionControlShell({
         )}
       >
         <MissionControlCanvasTopBar
-          snapshot={snapshot}
-          surfaceTheme={surfaceTheme}
           settingsRef={settingsRef}
           isSettingsOpen={isSettingsOpen}
-          gatewayDraft={gatewayDraft}
-          workspaceRootDraft={workspaceRootDraft}
-          openClawBinarySelection={openClawBinarySelectionDraft}
-          isSavingGateway={isSavingGateway}
-          isSavingWorkspaceRoot={isSavingWorkspaceRoot}
-          isSavingOpenClawBinary={isSavingOpenClawBinary}
-          isCheckingForUpdates={isCheckingForUpdates}
-          updateRunState={updateRunState}
-          selectedModelId={selectedOnboardingModelId}
-          modelOnboardingRunState={modelOnboardingRunState}
-          gatewayControlAction={gatewayControlAction}
-          lastCheckedAt={lastCheckedAt}
           onToggleTheme={() =>
             setSurfaceTheme((current) => (current === "light" ? "dark" : "light"))
           }
           onToggleSettings={() => setIsSettingsOpen((current) => !current)}
-          onGatewayDraftChange={setGatewayDraft}
-          onWorkspaceRootDraftChange={setWorkspaceRootDraft}
-          onOpenClawBinarySelectionModeChange={handleOpenClawBinarySelectionModeChange}
-          onOpenClawBinarySelectionPathChange={handleOpenClawBinarySelectionPathChange}
-          onSelectedModelIdChange={setSelectedOnboardingModelId}
-          onSaveGatewaySettings={saveGatewaySettings}
-          onSaveWorkspaceRootSettings={saveWorkspaceRootSettings}
-          onSaveOpenClawBinarySettings={saveOpenClawBinarySettings}
-          onCheckForUpdates={checkForUpdates}
-          onControlGateway={controlGateway}
-          onOpenSetupWizard={openSetupWizard}
-          onRunModelRefresh={runModelRefresh}
-          onRunModelSetDefault={runModelSetDefault}
-          onOpenAddModels={openAddModelsDialog}
-          onOpenUpdateDialog={() => {
-            if (updateRunState === "idle") {
-              resetUpdateDialogState();
-            }
-            setIsUpdateDialogOpen(true);
-          }}
-          onOpenResetDialog={(target) => {
-            void openResetDialog(target);
-          }}
-          installSummary={openClawInstallSummary}
+          {...settingsPanelProps}
         />
       </div>
 
