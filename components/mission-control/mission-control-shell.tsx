@@ -128,6 +128,7 @@ const surfaceThemeStorageKey = "mission-control-surface-theme";
 const hiddenRuntimeIdsStorageKey = "mission-control-hidden-runtime-ids";
 const hiddenTaskKeysStorageKey = "mission-control-hidden-task-keys";
 const lockedTaskKeysStorageKey = "mission-control-locked-task-keys";
+const sidebarOpenStorageKey = "mission-control-sidebar-open";
 const useIsomorphicLayoutEffect = typeof globalThis.window === "undefined" ? useEffect : useLayoutEffect;
 const initialModelSwitchFeedback: ModelSwitchFeedback = {
   phase: "idle",
@@ -183,7 +184,13 @@ export function MissionControlShell({
   const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
   const missionDispatchAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [recentCreatedAgentId, setRecentCreatedAgentId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return globalThis.localStorage?.getItem(sidebarOpenStorageKey) === "true";
+  });
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
@@ -795,6 +802,10 @@ export function MissionControlShell({
   useEffect(() => {
     globalThis.localStorage?.setItem(surfaceThemeStorageKey, surfaceTheme);
   }, [surfaceTheme]);
+
+  useEffect(() => {
+    globalThis.localStorage?.setItem(sidebarOpenStorageKey, String(isSidebarOpen));
+  }, [isSidebarOpen]);
 
   useEffect(() => {
     globalThis.localStorage?.setItem(hiddenRuntimeIdsStorageKey, JSON.stringify(hiddenRuntimeIds));
@@ -1953,6 +1964,10 @@ export function MissionControlShell({
       const nextSnapshot = await refreshSnapshot({ force: true });
       const checkedAt = Date.now();
       const updateInfo = nextSnapshot.diagnostics.updateInfo?.trim();
+      const isUpdateRegistryLoading =
+        Boolean(nextSnapshot.diagnostics.version) &&
+        !nextSnapshot.diagnostics.latestVersion &&
+        !nextSnapshot.diagnostics.updateError;
 
       setLastCheckedAt(checkedAt);
 
@@ -1968,6 +1983,15 @@ export function MissionControlShell({
           description:
             updateInfo ||
             `v${nextSnapshot.diagnostics.latestVersion} is available. Current version: v${nextSnapshot.diagnostics.version || "unknown"}.`
+        });
+        return;
+      }
+
+      if (isUpdateRegistryLoading) {
+        toast.message("Update registry is still loading.", {
+          description:
+            updateInfo ||
+            `Running v${nextSnapshot.diagnostics.version || "unknown"}. OpenClaw has not reported a latest release yet.`
         });
         return;
       }
@@ -2648,7 +2672,12 @@ export function MissionControlShell({
 
   if (mode === "settings") {
     return (
-      <div className="mission-shell mission-shell--light relative min-h-screen overflow-hidden">
+      <div
+        className={cn(
+          "mission-shell relative min-h-screen overflow-hidden",
+          surfaceTheme === "light" && "mission-shell--light"
+        )}
+      >
         <div className="mission-canvas-backdrop fixed inset-0 z-0">
           <div aria-hidden="true" className="mission-canvas-pattern absolute inset-0 z-0" />
         </div>

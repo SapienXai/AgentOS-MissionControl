@@ -144,6 +144,59 @@ test("OpenClaw local module imports do not introduce cycles", () => {
   assert.deepEqual(cycles, []);
 });
 
+test("settings mode sidebar routes non-settings sections back to mission control", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
+
+  assert.match(source, /const sidebarOpenStorageKey = "mission-control-sidebar-open";/);
+  assert.match(
+    source,
+    /if \(settingsMode && sectionId !== "settings"\) \{[\s\S]*?globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, "true"\);[\s\S]*?router\.push\(`\/#\$\{sectionId\}`\);/
+  );
+  assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, "true"\);/);
+  assert.match(source, /if \(sectionId === "settings" && !settingsMode\) \{\s*router\.push\("\/settings"\);/);
+});
+
+test("root sidebar resolves active section from hash on mount", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
+
+  assert.match(source, /resolveInitialSidebarSection\(settingsMode\)/);
+  assert.match(source, /window\.addEventListener\("hashchange", syncSectionFromHash\)/);
+});
+
+test("settings shell no longer hardcodes a light-only wrapper", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
+
+  assert.match(
+    source,
+    /className=\{cn\([\s\S]*?"mission-shell relative min-h-screen overflow-hidden"[\s\S]*?surfaceTheme === "light" && "mission-shell--light"/
+  );
+});
+
+test("mission shell persists sidebar open state across navigation", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
+
+  assert.match(source, /const sidebarOpenStorageKey = "mission-control-sidebar-open";/);
+  assert.match(source, /useState\(\(\) => \{\s*if \(typeof window === "undefined"\)/);
+  assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, String\(isSidebarOpen\)\);/);
+});
+
+test("settings control center renders a single hash-selected section", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/settings-control-center.tsx"), "utf8");
+
+  assert.match(source, /type SettingsSectionId =[\s\S]*?"danger-zone";/);
+  assert.match(source, /const \[activeSection, setActiveSection\] = useState<SettingsSectionId>\(\(\) => resolveInitialSettingsSection\(\)\)/);
+  assert.match(source, /window\.addEventListener\("hashchange", syncActiveSectionFromHash\)/);
+  assert.doesNotMatch(source, /\bGeneral\b/);
+});
+
+test("update check treats loading registry status as loading instead of up to date", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
+
+  assert.match(source, /const isUpdateRegistryLoading =/);
+  assert.match(source, /toast\.message\("Update registry is still loading\."/,);
+  assert.match(source, /if \(isUpdateRegistryLoading\) \{/);
+});
+
 function resolveLocalOpenClawImport(filePath: string, specifier: string) {
   if (specifier.startsWith("@/")) {
     return `${specifier.slice(2)}.ts`;

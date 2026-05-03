@@ -48,9 +48,21 @@ const binaryModes: Array<{
   { value: "custom", label: "Custom" }
 ];
 
+type SurfaceTheme = "dark" | "light";
+type SettingsSectionId =
+  | "openclaw"
+  | "gateway"
+  | "models"
+  | "workspace"
+  | "agents"
+  | "diagnostics"
+  | "advanced"
+  | "danger-zone";
+
 export function SettingsControlCenter(props: MissionControlShellSettingsPanelProps) {
   const {
     snapshot,
+    surfaceTheme,
     gatewayDraft,
     workspaceRootDraft,
     openClawBinarySelection,
@@ -91,6 +103,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
   const [isSavingGatewayAuthCredential, setIsSavingGatewayAuthCredential] = useState(false);
   const [isGeneratingGatewayAuthToken, setIsGeneratingGatewayAuthToken] = useState(false);
   const [isRepairingGatewayDeviceAccess, setIsRepairingGatewayDeviceAccess] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => resolveInitialSettingsSection());
   const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && snapshot.diagnostics.latestVersion);
   const defaultModel =
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
@@ -137,6 +150,23 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
   useEffect(() => {
     void refreshGatewayAuthStatus();
   }, [refreshGatewayAuthStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncActiveSectionFromHash = () => {
+      setActiveSection(resolveInitialSettingsSection());
+    };
+
+    window.addEventListener("hashchange", syncActiveSectionFromHash);
+    syncActiveSectionFromHash();
+
+    return () => {
+      window.removeEventListener("hashchange", syncActiveSectionFromHash);
+    };
+  }, []);
 
   const saveGatewayAuthCredential = async () => {
     const credential = gatewayAuthCredential.trim();
@@ -237,45 +267,76 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
   };
 
   return (
-    <main className="relative z-10 min-h-screen text-[#2c211a]">
+    <main
+      className={cn(
+        "relative z-10 min-h-screen",
+        surfaceTheme === "light" ? "text-[#2c211a]" : "text-slate-100"
+      )}
+    >
         <section className="min-w-0 px-4 pb-8 pt-[86px] sm:px-6 lg:ml-[384px] lg:mr-[84px] lg:px-7 xl:px-8">
           <div className="mx-auto max-w-[1160px] 2xl:max-w-[1240px]">
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col">
               <Link
                 href="/"
-                className="mb-2 inline-flex w-fit items-center gap-2 rounded-full border border-[#decfc2] bg-[#fffaf3]/86 px-3 py-2 text-xs text-[#6f5a4b] shadow-[0_12px_28px_rgba(91,63,43,0.08)] lg:hidden"
+                className={cn(
+                  "mb-2 inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-xs shadow-[0_12px_28px_rgba(91,63,43,0.08)] lg:hidden",
+                  surfaceTheme === "light"
+                    ? "border-[#decfc2] bg-[#fffaf3]/86 text-[#6f5a4b]"
+                    : "border-white/10 bg-[#0e1726]/96 text-slate-200 shadow-[0_12px_28px_rgba(0,0,0,0.24)]"
+                )}
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
                 Mission Control
               </Link>
-              <p className="text-[9px] uppercase tracking-[0.24em] text-[#9a8271]">AgentOS</p>
-              <h1 className="font-display text-[2rem] leading-tight text-[#2b211c] sm:text-[2.35rem]">
-                Settings / Control Center
-              </h1>
-              <p className="max-w-2xl text-[0.84rem] leading-6 text-[#7e6858]">
-                Manage system, models, gateway, workspace, and diagnostics.
-              </p>
             </div>
 
-            <div id="general" className="mt-5 grid gap-4 xl:grid-cols-12">
-              <section id="openclaw" className="scroll-mt-24 xl:col-span-4">
-                <div className="panel-surface panel-glow min-h-full overflow-hidden rounded-[22px] border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,32,0.98),rgba(6,10,18,0.97))] p-4 text-white">
+            <div className="mt-5 flex flex-col gap-4">
+              {activeSection === "openclaw" ? (
+              <section id="openclaw" className="scroll-mt-24">
+                <div
+                  className={cn(
+                    "panel-surface panel-glow min-h-full overflow-hidden rounded-[22px] p-4",
+                    surfaceTheme === "light"
+                      ? "border-white/[0.08] bg-[linear-gradient(180deg,rgba(12,19,32,0.98),rgba(6,10,18,0.97))] text-white"
+                      : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(16,24,38,0.98),rgba(7,11,18,0.96))] text-slate-100"
+                  )}
+                >
                   <div className="flex items-start gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-emerald-200">
+                    <span
+                      className={cn(
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border",
+                        surfaceTheme === "light"
+                          ? "border-white/10 bg-white/[0.04] text-emerald-200"
+                          : "border-cyan-300/15 bg-cyan-300/10 text-cyan-200"
+                      )}
+                    >
                       <Activity className="h-4 w-4" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <h2 className="font-display text-lg">OpenClaw</h2>
-                      <p className="mt-0.5 text-xs leading-5 text-white/54">Source of truth for runtime and control state.</p>
+                      <p
+                        className={cn(
+                          "mt-0.5 text-xs leading-5",
+                          surfaceTheme === "light" ? "text-white/54" : "text-slate-400"
+                        )}
+                      >
+                        Source of truth for runtime and control state.
+                      </p>
                     </div>
                   </div>
 
                   <div className="mt-5 grid grid-cols-2 gap-3">
-                    <Metric label="Current version" value={`v${snapshot.diagnostics.version || "unknown"}`} dark />
+                    <Metric
+                      label="Current version"
+                      value={`v${snapshot.diagnostics.version || "unknown"}`}
+                      surfaceTheme={surfaceTheme}
+                      dark
+                    />
                     <Metric
                       label="Latest available"
                       value={snapshot.diagnostics.latestVersion ? `v${snapshot.diagnostics.latestVersion}` : "Unknown"}
                       badge={hasUpdateAvailable ? "Update" : "Stable"}
+                      surfaceTheme={surfaceTheme}
                       dark
                     />
                   </div>
@@ -295,7 +356,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       variant="secondary"
                       onClick={() => void onCheckForUpdates()}
                       disabled={isCheckingForUpdates || updateRunState === "running"}
-                      className="h-9 rounded-full border-white/10 bg-white/[0.04] px-4 text-xs text-white hover:bg-white/[0.08]"
+                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
                     >
                       <RefreshCw className="h-3.5 w-3.5" />
                       Check
@@ -304,7 +365,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       type="button"
                       variant="secondary"
                       onClick={() => onOpenSetupWizard()}
-                      className="h-9 rounded-full border-white/10 bg-white/[0.04] px-4 text-xs text-white hover:bg-white/[0.08]"
+                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
                     >
                       <Wrench className="h-3.5 w-3.5" />
                       Open wizard
@@ -312,17 +373,24 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                   </div>
 
                   <div className="mt-5 grid gap-3 border-t border-white/10 pt-4 sm:grid-cols-2">
-                    <Metric label="Detected install" value={installSummary.label || "Unknown"} dark compact />
+                    <Metric
+                      label="Detected install"
+                      value={installSummary.label || "Unknown"}
+                      surfaceTheme={surfaceTheme}
+                      dark
+                      compact
+                    />
                     <Metric
                       label="Resolved path"
                       value={shortPath(openClawBinarySelection.resolvedPath || "openclaw", 26)}
+                      surfaceTheme={surfaceTheme}
                       dark
                       compact
                     />
                   </div>
 
                   <div className="mt-4 rounded-[18px] border border-white/10 bg-white/[0.035] p-3.5">
-                    <Label className="text-[10px] text-white/56">OpenClaw binary mode</Label>
+                    <Label className={labelClassName(surfaceTheme)}>OpenClaw binary mode</Label>
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       {binaryModes.map((mode) => (
                         <button
@@ -333,7 +401,9 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                             "h-9 rounded-full border px-3 text-xs transition-colors",
                             openClawBinarySelection.mode === mode.value
                               ? "border-emerald-300 bg-emerald-300/14 text-emerald-100"
-                              : "border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]"
+                              : surfaceTheme === "light"
+                                ? "border-white/10 bg-white/[0.03] text-white/70 hover:bg-white/[0.08]"
+                                : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
                           )}
                         >
                           {mode.label}
@@ -345,7 +415,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         value={openClawBinarySelection.path ?? ""}
                         onChange={(event) => onOpenClawBinarySelectionPathChange(event.target.value)}
                         placeholder="/path/to/openclaw"
-                        className="mt-3 h-10 rounded-[16px] border-white/12 bg-black/20 text-white placeholder:text-white/34"
+                        className={inputClassName(surfaceTheme, "mt-3")}
                       />
                     ) : null}
                     <Button
@@ -353,7 +423,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       variant="secondary"
                       onClick={() => void onSaveOpenClawBinarySettings(openClawBinarySelection)}
                       disabled={isSavingOpenClawBinary}
-                      className="mt-3 h-9 w-full rounded-full border-white/10 bg-white/[0.04] text-xs text-white hover:bg-white/[0.08]"
+                      className={secondaryButtonClassName(surfaceTheme, "mt-3 w-full")}
                     >
                       {isSavingOpenClawBinary ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                       Save selection
@@ -361,10 +431,13 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                   </div>
                 </div>
               </section>
+              ) : null}
 
-              <section id="gateway" className="scroll-mt-24 xl:col-span-4">
-                <Card title="Gateway" icon={ShieldCheck}>
+              {activeSection === "gateway" ? (
+              <section id="gateway" className="scroll-mt-24">
+                <Card title="Gateway" icon={ShieldCheck} surfaceTheme={surfaceTheme}>
                   <InfoRows
+                    surfaceTheme={surfaceTheme}
                     rows={[
                       ["Status", `${resolveGatewayLocality(snapshot)} / ${snapshot.diagnostics.loaded || snapshot.diagnostics.rpcOk ? "Online" : "Offline"}`],
                       ["Endpoint", snapshot.diagnostics.gatewayUrl || "Not configured"],
@@ -375,12 +448,12 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
 
                   <div className="mt-4 space-y-3">
                     <div>
-                      <Label className="text-[10px] text-[#8a7464]">Gateway endpoint</Label>
+                      <Label className={labelClassName(surfaceTheme)}>Gateway endpoint</Label>
                       <Input
                         value={gatewayDraft}
                         onChange={(event) => onGatewayDraftChange(event.target.value)}
                         placeholder="ws://127.0.0.1:18789"
-                        className="mt-2 h-10 rounded-[16px] border-[#e2d1c4] bg-[#fffdf9] text-sm text-[#2d211b] placeholder:text-[#ad9889]"
+                        className={inputClassName(surfaceTheme, "mt-2")}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -398,7 +471,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         variant="secondary"
                         onClick={() => void onSaveGatewaySettings(null)}
                         disabled={isSavingGateway}
-                        className={lightSecondaryButtonClassName()}
+                        className={secondaryButtonClassName(surfaceTheme)}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         Clear
@@ -414,7 +487,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         variant="secondary"
                         onClick={() => void onControlGateway(action)}
                         disabled={gatewayControlAction !== null}
-                        className={cn(lightSecondaryButtonClassName(), "capitalize")}
+                        className={cn(secondaryButtonClassName(surfaceTheme), "capitalize")}
                       >
                         {gatewayControlAction === action ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
                         {action}
@@ -422,12 +495,31 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                     ))}
                   </div>
 
-                  <div className="mt-4 rounded-[18px] border border-emerald-200 bg-emerald-50/55 p-3.5">
+                  <div
+                    className={cn(
+                      "mt-4 rounded-[18px] p-3.5",
+                      surfaceTheme === "light"
+                        ? "border border-emerald-200 bg-emerald-50/55"
+                        : "border border-cyan-300/12 bg-cyan-300/[0.06]"
+                    )}
+                  >
                     <div className="flex items-start gap-3">
-                      <KeyRound className="mt-0.5 h-4 w-4 text-emerald-700" />
+                      <KeyRound
+                        className={cn(
+                          "mt-0.5 h-4 w-4",
+                          surfaceTheme === "light" ? "text-emerald-700" : "text-cyan-200"
+                        )}
+                      />
                       <div>
-                        <p className="text-sm font-medium text-[#2f624b]">Native Gateway auth</p>
-                        <p className="mt-1 text-xs leading-5 text-[#6f836f]">
+                        <p className={cn("text-sm font-medium", surfaceTheme === "light" ? "text-[#2f624b]" : "text-slate-100")}>
+                          Native Gateway auth
+                        </p>
+                        <p
+                          className={cn(
+                            "mt-1 text-xs leading-5",
+                            surfaceTheme === "light" ? "text-[#6f836f]" : "text-slate-400"
+                          )}
+                        >
                           Use local repair when AgentOS reports missing operator scopes.
                         </p>
                       </div>
@@ -438,7 +530,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         variant="secondary"
                         onClick={() => void repairGatewayDeviceAccess()}
                         disabled={isRepairingGatewayDeviceAccess}
-                        className="h-9 rounded-full border-emerald-200 bg-white px-3 text-xs text-[#2f624b] hover:bg-emerald-50"
+                        className={secondaryButtonClassName(surfaceTheme, "px-3", "gateway-contrast")}
                       >
                         {isRepairingGatewayDeviceAccess ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
                         Repair local access
@@ -448,7 +540,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         variant="secondary"
                         onClick={() => void generateGatewayAuthToken()}
                         disabled={isGeneratingGatewayAuthToken}
-                        className="h-9 rounded-full border-emerald-200 bg-white px-3 text-xs text-[#2f624b] hover:bg-emerald-50"
+                        className={secondaryButtonClassName(surfaceTheme, "px-3", "gateway-contrast")}
                       >
                         {isGeneratingGatewayAuthToken ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
                         Generate token
@@ -458,7 +550,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       <select
                         value={gatewayAuthCredentialKind}
                         onChange={(event) => setGatewayAuthCredentialKind(event.target.value as GatewayNativeAuthCredentialKind)}
-                        className="h-10 rounded-[16px] border border-emerald-200 bg-white px-3 text-sm text-[#315f49] outline-none"
+                        className={inputClassName(surfaceTheme)}
                       >
                         <option value="token">Token</option>
                         <option value="password">Password</option>
@@ -468,7 +560,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         value={gatewayAuthCredential}
                         onChange={(event) => setGatewayAuthCredential(event.target.value)}
                         placeholder="Paste known credential"
-                        className="h-10 rounded-[16px] border-emerald-200 bg-white text-sm text-[#2d211b] placeholder:text-[#91a090]"
+                        className={inputClassName(surfaceTheme)}
                       />
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2">
@@ -486,24 +578,38 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         variant="secondary"
                         onClick={() => void refreshGatewayAuthStatus()}
                         disabled={isCheckingGatewayAuth}
-                        className="h-9 rounded-full border-emerald-200 bg-white text-xs text-[#2f624b] hover:bg-emerald-50"
+                        className={secondaryButtonClassName(surfaceTheme, undefined, "gateway-contrast")}
                       >
                         {isCheckingGatewayAuth ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                         Test auth
                       </Button>
                     </div>
                     {gatewayAuthError || gatewayAuthSaveMessage || gatewayAuthStatus?.native.issue ? (
-                      <p className={cn("mt-3 text-xs leading-5", gatewayAuthError ? "text-red-700" : "text-[#52735e]")}>
+                      <p
+                        className={cn(
+                          "mt-3 text-xs leading-5",
+                          gatewayAuthError
+                            ? surfaceTheme === "light"
+                              ? "text-red-700"
+                              : "text-rose-300"
+                            : surfaceTheme === "light"
+                              ? "text-[#52735e]"
+                              : "text-slate-400"
+                        )}
+                      >
                         {gatewayAuthError || gatewayAuthSaveMessage || gatewayAuthStatus?.native.issue}
                       </p>
                     ) : null}
                   </div>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="models" className="scroll-mt-24 xl:col-span-4">
-                <Card title="Models" icon={Box}>
+              {activeSection === "models" ? (
+              <section id="models" className="scroll-mt-24">
+                <Card title="Models" icon={Box} surfaceTheme={surfaceTheme}>
                   <InfoRows
+                    surfaceTheme={surfaceTheme}
                     rows={[
                       ["Default model", defaultModel || "Not selected"],
                       ["Provider", modelProvider],
@@ -511,11 +617,11 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                     ]}
                   />
                   <div className="mt-4">
-                    <Label className="text-[10px] text-[#8a7464]">Model</Label>
+                    <Label className={labelClassName(surfaceTheme)}>Model</Label>
                     <select
                       value={selectedOrDefaultModelId}
                       onChange={(event) => onSelectedModelIdChange(event.target.value)}
-                      className="mt-2 h-10 w-full rounded-[16px] border border-[#e2d1c4] bg-[#fffdf9] px-3 text-sm text-[#2d211b] outline-none focus:ring-2 focus:ring-emerald-300"
+                      className={inputClassName(surfaceTheme, "mt-2")}
                     >
                       <option value="">Choose model</option>
                       {snapshot.models.map((model) => (
@@ -539,7 +645,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       type="button"
                       variant="secondary"
                       onClick={() => onOpenAddModels(null)}
-                      className={lightSecondaryButtonClassName()}
+                      className={secondaryButtonClassName(surfaceTheme)}
                     >
                       Add models
                     </Button>
@@ -549,30 +655,32 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                     variant="secondary"
                     onClick={() => void onRunModelRefresh()}
                     disabled={modelOnboardingRunState === "running"}
-                    className={cn(lightSecondaryButtonClassName(), "mt-3 w-full")}
+                    className={cn(secondaryButtonClassName(surfaceTheme), "mt-3 w-full")}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     Refresh models
                   </Button>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="workspace" className="scroll-mt-24 xl:col-span-4">
-                <Card title="Workspace" icon={Folder}>
+              {activeSection === "workspace" ? (
+              <section id="workspace" className="scroll-mt-24">
+                <Card title="Workspace" icon={Folder} surfaceTheme={surfaceTheme}>
                   <div>
-                    <Label className="text-[10px] text-[#8a7464]">Workspace root</Label>
+                    <Label className={labelClassName(surfaceTheme)}>Workspace root</Label>
                     <div className="mt-2 flex gap-2">
                       <Input
                         value={workspaceRootDraft}
                         onChange={(event) => onWorkspaceRootDraftChange(event.target.value)}
                         placeholder="~/Documents/AgentOS"
-                        className="h-10 rounded-[16px] border-[#e2d1c4] bg-[#fffdf9] text-sm text-[#2d211b] placeholder:text-[#ad9889]"
+                        className={inputClassName(surfaceTheme)}
                       />
                       <button
                         type="button"
                         aria-label="Copy workspace root"
                         onClick={() => copyToClipboard(workspaceRootDraft || snapshot.diagnostics.workspaceRoot)}
-                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] border border-[#e2d1c4] bg-white text-[#7b6353]"
+                        className={copyButtonClassName(surfaceTheme)}
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </button>
@@ -593,27 +701,44 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                       variant="secondary"
                       onClick={() => void onSaveWorkspaceRootSettings(null)}
                       disabled={isSavingWorkspaceRoot}
-                      className={lightSecondaryButtonClassName()}
+                      className={secondaryButtonClassName(surfaceTheme)}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       Reset
                     </Button>
                   </div>
-                  <div className="mt-4 rounded-[18px] border border-[#eadbcf] bg-[#fbf4ec]/78 p-3.5">
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-[#9a8271]">Current root</p>
-                    <p className="mt-2 break-all text-sm text-[#4f3e34]">
+                  <div
+                    className={cn(
+                      "mt-4 rounded-[18px] p-3.5",
+                      surfaceTheme === "light"
+                        ? "border border-[#eadbcf] bg-[#fbf4ec]/78"
+                        : "border border-white/[0.08] bg-[#101a2a]/92"
+                    )}
+                  >
+                    <p className={labelClassName(surfaceTheme)}>Current root</p>
+                    <p className={cn("mt-2 break-all text-sm", surfaceTheme === "light" ? "text-[#4f3e34]" : "text-slate-200")}>
                       {shortPath(snapshot.diagnostics.workspaceRoot, 56)}
                     </p>
                   </div>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="diagnostics" className="scroll-mt-24 xl:col-span-8">
+              {activeSection === "diagnostics" ? (
+              <section id="diagnostics" className="scroll-mt-24">
                 <Card
                   title="Diagnostics"
                   icon={TerminalSquare}
+                  surfaceTheme={surfaceTheme}
                   action={
-                    <span className="inline-flex items-center gap-2 rounded-full border border-[#e2d1c4] bg-white px-3 py-1.5 text-xs text-[#7b6353]">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs",
+                        surfaceTheme === "light"
+                          ? "border-[#e2d1c4] bg-white text-[#7b6353]"
+                          : "border-white/[0.08] bg-[#101a2a]/92 text-slate-300"
+                      )}
+                    >
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                       {commandStats.ok} OK
                       {commandStats.failed ? <span className="text-red-600">{commandStats.failed} failed</span> : null}
@@ -623,9 +748,17 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                   <div className="space-y-2">
                     {latestCommands.length ? (
                       latestCommands.map((command) => (
-                        <details key={command.id} className="group rounded-[16px] border border-[#e7d8ca] bg-[#fffdf9]">
+                        <details
+                          key={command.id}
+                          className={cn(
+                            "group rounded-[16px] border",
+                            surfaceTheme === "light"
+                              ? "border-[#e7d8ca] bg-[#fffdf9]"
+                              : "border-white/[0.08] bg-[#101a2a]/92"
+                          )}
+                        >
                           <summary className="flex cursor-pointer list-none items-center gap-3 px-3.5 py-2.5">
-                            <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-[#3b2d24]">
+                            <code className={cn("min-w-0 flex-1 truncate font-mono text-[11px]", surfaceTheme === "light" ? "text-[#3b2d24]" : "text-slate-200")}>
                               {command.command} {command.args.join(" ")}
                             </code>
                             <span
@@ -638,30 +771,44 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                             >
                               {command.status}
                             </span>
-                            <span className="hidden text-xs text-[#9a8271] sm:inline">{command.durationMs} ms</span>
-                            <ChevronDown className="h-4 w-4 text-[#9a8271] transition-transform group-open:rotate-180" />
+                            <span className={cn("hidden text-xs sm:inline", surfaceTheme === "light" ? "text-[#9a8271]" : "text-slate-400")}>
+                              {command.durationMs} ms
+                            </span>
+                            <ChevronDown className={cn("h-4 w-4 transition-transform group-open:rotate-180", surfaceTheme === "light" ? "text-[#9a8271]" : "text-slate-400")} />
                           </summary>
-                          <div className="border-t border-[#eadbcf] p-3.5">
+                          <div
+                            className={cn(
+                              "border-t p-3.5",
+                              surfaceTheme === "light" ? "border-[#eadbcf]" : "border-white/[0.08]"
+                            )}
+                          >
                             <div className="grid gap-3 sm:grid-cols-2">
-                              <DiagnosticBlock title="stdout" value={command.stdoutPreview} />
-                              <DiagnosticBlock title="stderr" value={command.stderrPreview} />
+                              <DiagnosticBlock title="stdout" value={command.stdoutPreview} surfaceTheme={surfaceTheme} />
+                              <DiagnosticBlock title="stderr" value={command.stderrPreview} surfaceTheme={surfaceTheme} />
                             </div>
-                            <p className="mt-3 text-xs text-[#8a7464]">
+                            <p className={cn("mt-3 text-xs", surfaceTheme === "light" ? "text-[#8a7464]" : "text-slate-400")}>
                               Exit code: {command.exitCode ?? "n/a"} | Started: {formatTimestamp(command.startedAt)}
                             </p>
                           </div>
                         </details>
                       ))
                     ) : (
-                      <EmptyState title="No recent CLI calls" detail="Diagnostics will appear after AgentOS uses fallback commands." />
+                      <EmptyState
+                        title="No recent CLI calls"
+                        detail="Diagnostics will appear after AgentOS uses fallback commands."
+                        surfaceTheme={surfaceTheme}
+                      />
                     )}
                   </div>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="agents" className="scroll-mt-24 xl:col-span-4">
-                <Card title="Agents" icon={Bot}>
+              {activeSection === "agents" ? (
+              <section id="agents" className="scroll-mt-24">
+                <Card title="Agents" icon={Bot} surfaceTheme={surfaceTheme}>
                   <InfoRows
+                    surfaceTheme={surfaceTheme}
                     rows={[
                       ["Agents", String(snapshot.agents.length)],
                       ["Workspaces", String(snapshot.workspaces.length)],
@@ -671,39 +818,78 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                   <Button
                     asChild
                     variant="secondary"
-                    className={cn(lightSecondaryButtonClassName(), "mt-4 w-full")}
+                    className={cn(secondaryButtonClassName(surfaceTheme), "mt-4 w-full")}
                   >
                     <Link href="/">Open mission control</Link>
                   </Button>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="advanced" className="scroll-mt-24 xl:col-span-8">
-                <Card title="Advanced" icon={Settings2}>
+              {activeSection === "advanced" ? (
+              <section id="advanced" className="scroll-mt-24">
+                <Card title="Advanced" icon={Settings2} surfaceTheme={surfaceTheme}>
                   <div className="grid gap-3 sm:grid-cols-3">
-                    <Metric label="Install method" value={snapshot.diagnostics.updateInstallKind || installSummary.label || "Unknown"} />
-                    <Metric label="Updater" value={snapshot.diagnostics.updatePackageManager || "Unknown"} />
-                    <Metric label="Last checked" value={lastCheckedAt ? new Date(lastCheckedAt).toLocaleTimeString() : "Not checked"} />
+                    <Metric
+                      label="Install method"
+                      value={snapshot.diagnostics.updateInstallKind || installSummary.label || "Unknown"}
+                      surfaceTheme={surfaceTheme}
+                    />
+                    <Metric
+                      label="Updater"
+                      value={snapshot.diagnostics.updatePackageManager || "Unknown"}
+                      surfaceTheme={surfaceTheme}
+                    />
+                    <Metric
+                      label="Last checked"
+                      value={lastCheckedAt ? new Date(lastCheckedAt).toLocaleTimeString() : "Not checked"}
+                      surfaceTheme={surfaceTheme}
+                    />
                   </div>
-                  <div className="mt-4 rounded-[18px] border border-[#eadbcf] bg-[#fbf4ec]/78 p-3.5">
-                    <p className="text-[10px] uppercase tracking-[0.18em] text-[#9a8271]">Install root</p>
-                    <p className="mt-2 break-all text-sm text-[#4f3e34]">
+                  <div
+                    className={cn(
+                      "mt-4 rounded-[18px] p-3.5",
+                      surfaceTheme === "light"
+                        ? "border border-[#eadbcf] bg-[#fbf4ec]/78"
+                        : "border border-white/[0.08] bg-[#101a2a]/92"
+                    )}
+                  >
+                    <p className={labelClassName(surfaceTheme)}>Install root</p>
+                    <p className={cn("mt-2 break-all text-sm", surfaceTheme === "light" ? "text-[#4f3e34]" : "text-slate-200")}>
                       {shortPath(snapshot.diagnostics.updateRoot || installSummary.root || "Not detected", 80)}
                     </p>
                   </div>
                 </Card>
               </section>
+              ) : null}
 
-              <section id="danger-zone" className="scroll-mt-24 xl:col-span-12">
-                <div className="rounded-[22px] border border-red-200 bg-red-50/58 p-4 shadow-[0_18px_44px_rgba(185,28,28,0.06)]">
+              {activeSection === "danger-zone" ? (
+              <section id="danger-zone" className="scroll-mt-24">
+                <div
+                  className={cn(
+                    "rounded-[22px] p-4 shadow-[0_18px_44px_rgba(185,28,28,0.06)]",
+                    surfaceTheme === "light"
+                      ? "border border-red-200 bg-red-50/58"
+                      : "border border-rose-400/20 bg-rose-500/[0.08]"
+                  )}
+                >
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-start gap-3">
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-red-200 bg-white text-red-600">
+                      <span
+                        className={cn(
+                          "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border",
+                          surfaceTheme === "light"
+                            ? "border-red-200 bg-white text-red-600"
+                            : "border-rose-300/20 bg-rose-400/10 text-rose-200"
+                        )}
+                      >
                         <AlertTriangle className="h-4 w-4" />
                       </span>
                       <div>
-                        <h2 className="font-display text-lg text-red-700">Danger Zone</h2>
-                        <p className="mt-1.5 max-w-2xl text-sm leading-6 text-red-700/72">
+                        <h2 className={cn("font-display text-lg", surfaceTheme === "light" ? "text-red-700" : "text-rose-100")}>
+                          Danger Zone
+                        </h2>
+                        <p className={cn("mt-1.5 max-w-2xl text-sm leading-6", surfaceTheme === "light" ? "text-red-700/72" : "text-rose-100/80")}>
                           These actions are destructive and cannot be undone. Confirmation is required before anything runs.
                         </p>
                       </div>
@@ -722,7 +908,12 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                         type="button"
                         variant="secondary"
                         onClick={() => onOpenResetDialog("full-uninstall")}
-                        className="h-9 rounded-full border-red-200 bg-white text-xs text-red-700 hover:bg-red-50"
+                        className={cn(
+                          "h-9 rounded-full text-xs",
+                          surfaceTheme === "light"
+                            ? "border-red-200 bg-white text-red-700 hover:bg-red-50"
+                            : "border-rose-300/20 bg-[#121d2d] text-rose-100 hover:bg-[#182538]"
+                        )}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         Full uninstall
@@ -731,6 +922,7 @@ export function SettingsControlCenter(props: MissionControlShellSettingsPanelPro
                   </div>
                 </div>
               </section>
+              ) : null}
             </div>
           </div>
         </section>
@@ -742,21 +934,30 @@ function Card({
   title,
   icon: Icon,
   children,
-  action
+  action,
+  surfaceTheme
 }: {
   title: string;
   icon: LucideIcon;
   children: ReactNode;
   action?: ReactNode;
+  surfaceTheme: SurfaceTheme;
 }) {
   return (
-    <div className="min-h-full rounded-[22px] border border-[#dfd0c2]/90 bg-[#fffaf3]/80 p-4 shadow-[0_20px_54px_rgba(101,74,54,0.07)] backdrop-blur-xl">
+    <div
+      className={cn(
+        "min-h-full rounded-[22px] p-4 shadow-[0_20px_54px_rgba(101,74,54,0.07)] backdrop-blur-xl",
+        cardClassName(surfaceTheme)
+      )}
+    >
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+          <span className={cardIconClassName(surfaceTheme)}>
             <Icon className="h-4 w-4" />
           </span>
-          <h2 className="font-display text-lg text-[#2d211b]">{title}</h2>
+          <h2 className={cn("font-display text-lg", surfaceTheme === "light" ? "text-[#2d211b]" : "text-slate-100")}>
+            {title}
+          </h2>
         </div>
         {action}
       </div>
@@ -769,24 +970,27 @@ function Metric({
   label,
   value,
   badge,
+  surfaceTheme,
   dark = false,
   compact = false
 }: {
   label: string;
   value: string;
   badge?: string;
+  surfaceTheme: SurfaceTheme;
   dark?: boolean;
   compact?: boolean;
 }) {
+  const cardToneIsDark = dark || surfaceTheme === "dark";
   return (
     <div>
-      <p className={cn("text-[11px]", dark ? "text-white/54" : "text-[#8a7464]")}>{label}</p>
+      <p className={cn("text-[11px]", cardToneIsDark ? "text-white/54" : "text-[#8a7464]")}>{label}</p>
       <div className="mt-1.5 flex items-center gap-2">
         <p
           className={cn(
             "min-w-0 truncate font-medium",
             compact ? "text-sm" : "text-[1.05rem]",
-            dark ? "text-white" : "text-[#2f251f]"
+            cardToneIsDark ? "text-white" : "text-[#2f251f]"
           )}
           title={value}
         >
@@ -796,7 +1000,9 @@ function Metric({
           <span
             className={cn(
               "shrink-0 rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-[0.12em]",
-              dark ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              cardToneIsDark
+                ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
             )}
           >
             {badge}
@@ -809,20 +1015,28 @@ function Metric({
 
 function InfoRows({
   rows,
-  successIndex
+  successIndex,
+  surfaceTheme
 }: {
   rows: Array<[string, string]>;
   successIndex?: number;
+  surfaceTheme: SurfaceTheme;
 }) {
+  const cardToneIsDark = surfaceTheme === "dark";
   return (
-    <div className="overflow-hidden rounded-[18px] border border-[#eadbcf] bg-[#fffdf9]">
+    <div className={cn("overflow-hidden rounded-[18px] border", infoRowsShellClassName(surfaceTheme))}>
       {rows.map(([label, value], index) => (
-        <div key={label} className="flex items-center justify-between gap-3 border-b border-[#eadbcf] px-3.5 py-2.5 last:border-b-0">
-          <span className="text-sm text-[#8a7464]">{label}</span>
+        <div key={label} className={cn("flex items-center justify-between gap-3 px-3.5 py-2.5 last:border-b-0", infoRowBorderClassName(surfaceTheme))}>
+          <span className={cn("text-sm", cardToneIsDark ? "text-slate-400" : "text-[#8a7464]")}>{label}</span>
           <span
             className={cn(
-              "min-w-0 truncate text-right text-sm text-[#352820]",
-              successIndex === index ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700" : ""
+              "min-w-0 truncate text-right text-sm",
+              cardToneIsDark ? "text-slate-100" : "text-[#352820]",
+              successIndex === index
+                ? cardToneIsDark
+                  ? "rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-xs text-emerald-100"
+                  : "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-700"
+                : ""
             )}
             title={value}
           >
@@ -834,22 +1048,55 @@ function InfoRows({
   );
 }
 
-function DiagnosticBlock({ title, value }: { title: string; value: string | null }) {
+function DiagnosticBlock({
+  title,
+  value,
+  surfaceTheme
+}: {
+  title: string;
+  value: string | null;
+  surfaceTheme: SurfaceTheme;
+}) {
+  const cardToneIsDark = surfaceTheme === "dark";
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-[0.18em] text-[#9a8271]">{title}</p>
-      <pre className="mt-2 max-h-40 overflow-auto rounded-[14px] border border-[#eadbcf] bg-[#fbf4ec] p-3 text-xs text-[#4b3a30]">
+      <p className={labelClassName(surfaceTheme)}>{title}</p>
+      <pre
+        className={cn(
+          "mt-2 max-h-40 overflow-auto rounded-[14px] border p-3 text-xs",
+          cardToneIsDark
+            ? "border-white/[0.08] bg-[#0d1624]/92 text-slate-200"
+            : "border-[#eadbcf] bg-[#fbf4ec] text-[#4b3a30]"
+        )}
+      >
         {value || "No output"}
       </pre>
     </div>
   );
 }
 
-function EmptyState({ title, detail }: { title: string; detail: string }) {
+function EmptyState({
+  title,
+  detail,
+  surfaceTheme
+}: {
+  title: string;
+  detail: string;
+  surfaceTheme: SurfaceTheme;
+}) {
   return (
-    <div className="rounded-[18px] border border-dashed border-[#decfc2] bg-[#fbf4ec]/60 p-4 text-center">
-      <p className="text-sm font-medium text-[#5f493b]">{title}</p>
-      <p className="mt-1 text-xs text-[#8a7464]">{detail}</p>
+    <div
+      className={cn(
+        "rounded-[18px] border border-dashed p-4 text-center",
+        surfaceTheme === "light"
+          ? "border-[#decfc2] bg-[#fbf4ec]/60"
+          : "border-white/[0.08] bg-[#0d1624]/60"
+      )}
+    >
+      <p className={cn("text-sm font-medium", surfaceTheme === "light" ? "text-[#5f493b]" : "text-slate-100")}>
+        {title}
+      </p>
+      <p className={cn("mt-1 text-xs", surfaceTheme === "light" ? "text-[#8a7464]" : "text-slate-400")}>{detail}</p>
     </div>
   );
 }
@@ -929,6 +1176,85 @@ function copyToClipboard(value: string) {
   void navigator.clipboard.writeText(value);
 }
 
-function lightSecondaryButtonClassName() {
-  return "h-9 rounded-full border-[#d7c4b6] bg-white px-3 text-xs text-[#6b5546] hover:bg-[#f4e9de]";
+function resolveInitialSettingsSection(): SettingsSectionId {
+  if (typeof window === "undefined") {
+    return "openclaw";
+  }
+
+  switch (window.location.hash.replace(/^#/, "")) {
+    case "gateway":
+      return "gateway";
+    case "models":
+      return "models";
+    case "workspace":
+      return "workspace";
+    case "agents":
+      return "agents";
+    case "diagnostics":
+      return "diagnostics";
+    case "advanced":
+      return "advanced";
+    case "danger-zone":
+      return "danger-zone";
+    case "openclaw":
+    default:
+      return "openclaw";
+  }
+}
+
+function cardClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light"
+    ? "border-[#dfd0c2]/90 bg-[#fffaf3]/80 text-[#2d211b]"
+    : "border-white/[0.08] bg-[#0d1624]/96 text-slate-100 shadow-[0_20px_54px_rgba(0,0,0,0.26)]";
+}
+
+function cardIconClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light"
+    ? "flex h-10 w-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700"
+    : "flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-300/10 text-cyan-200";
+}
+
+function labelClassName(surfaceTheme: SurfaceTheme) {
+  return cn("text-[10px] uppercase tracking-[0.18em]", surfaceTheme === "light" ? "text-[#9a8271]" : "text-slate-400");
+}
+
+function inputClassName(surfaceTheme: SurfaceTheme, extraClassName?: string) {
+  return cn(
+    "h-10 rounded-[16px] px-3 text-sm outline-none",
+    extraClassName,
+    surfaceTheme === "light"
+      ? "border-[#e2d1c4] bg-[#fffdf9] text-[#2d211b] placeholder:text-[#ad9889]"
+      : "border-white/10 bg-[#0f1826] text-slate-100 placeholder:text-slate-500"
+  );
+}
+
+function copyButtonClassName(surfaceTheme: SurfaceTheme) {
+  return cn(
+    "flex h-10 w-10 shrink-0 items-center justify-center rounded-[16px] border",
+    surfaceTheme === "light"
+      ? "border-[#e2d1c4] bg-white text-[#7b6353]"
+      : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
+  );
+}
+
+function secondaryButtonClassName(surfaceTheme: SurfaceTheme, extraClassName?: string, mode?: "default" | "gateway-contrast") {
+  return cn(
+    "h-9 rounded-full px-3 text-xs",
+    extraClassName,
+    surfaceTheme === "light"
+      ? "border-[#d7c4b6] bg-white text-[#6b5546] hover:bg-[#f4e9de]"
+      : mode === "gateway-contrast"
+        ? "border-emerald-300/15 bg-[#0f1826] text-slate-100 hover:bg-[#182538]"
+        : "border-white/10 bg-[#121d2d] text-slate-200 hover:bg-[#182538]"
+  );
+}
+
+function infoRowsShellClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light"
+    ? "border-[#eadbcf] bg-[#fffdf9]"
+    : "border-white/[0.08] bg-[#0f1826]";
+}
+
+function infoRowBorderClassName(surfaceTheme: SurfaceTheme) {
+  return surfaceTheme === "light" ? "border-b border-[#eadbcf]" : "border-b border-white/[0.08]";
 }

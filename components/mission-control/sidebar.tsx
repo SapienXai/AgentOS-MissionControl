@@ -91,7 +91,6 @@ type AgentDraft = {
 type SidebarSectionId = "overview" | "workspaces" | "agents" | "models" | "settings";
 
 type SettingsSidebarAnchorId =
-  | "general"
   | "openclaw"
   | "gateway"
   | "models"
@@ -107,7 +106,6 @@ const settingsSidebarAnchors: Array<{
   icon: LucideIcon;
   danger?: boolean;
 }> = [
-  { id: "general", label: "General", icon: Settings2 },
   { id: "openclaw", label: "OpenClaw", icon: Workflow },
   { id: "gateway", label: "Gateway", icon: Cpu },
   { id: "models", label: "Models", icon: Cpu },
@@ -117,6 +115,29 @@ const settingsSidebarAnchors: Array<{
   { id: "advanced", label: "Advanced", icon: Settings2 },
   { id: "danger-zone", label: "Danger Zone", icon: AlertTriangle, danger: true }
 ];
+
+const sidebarOpenStorageKey = "mission-control-sidebar-open";
+
+function resolveInitialSidebarSection(settingsMode: boolean): SidebarSectionId {
+  if (settingsMode || typeof window === "undefined") {
+    return settingsMode ? "settings" : "workspaces";
+  }
+
+  switch (window.location.hash.replace(/^#/, "")) {
+    case "overview":
+      return "overview";
+    case "workspaces":
+      return "workspaces";
+    case "agents":
+      return "agents";
+    case "models":
+      return "models";
+    case "settings":
+      return "settings";
+    default:
+      return "workspaces";
+  }
+}
 
 export function MissionSidebar({
   snapshot,
@@ -199,8 +220,8 @@ export function MissionSidebar({
   const [workspaceDeleteConfirmText, setWorkspaceDeleteConfirmText] = useState("");
   const [agentDeleteTarget, setAgentDeleteTarget] = useState<MissionControlSnapshot["agents"][number] | null>(null);
   const [agentDeleteConfirmText, setAgentDeleteConfirmText] = useState("");
-  const [activeSection, setActiveSection] = useState<SidebarSectionId>(
-    settingsMode ? "settings" : "workspaces"
+  const [activeSection, setActiveSection] = useState<SidebarSectionId>(() =>
+    resolveInitialSidebarSection(settingsMode)
   );
   const [modelSelectionDraft, setModelSelectionDraft] = useState("");
   const handledRequestedAgentActionIdRef = useRef<string | null>(null);
@@ -258,6 +279,40 @@ export function MissionSidebar({
 
     onToggleCollapsed();
   };
+  const handleSectionNavigation = useCallback(
+    (sectionId: SidebarSectionId) => {
+      if (settingsMode && sectionId !== "settings") {
+        globalThis.localStorage?.setItem(sidebarOpenStorageKey, "true");
+        router.push(`/#${sectionId}`);
+        return;
+      }
+
+      if (sectionId === "settings" && !settingsMode) {
+        router.push("/settings");
+        return;
+      }
+
+      setActiveSection(sectionId);
+    },
+    [router, settingsMode]
+  );
+  useEffect(() => {
+    if (settingsMode || typeof window === "undefined") {
+      return;
+    }
+
+    const syncSectionFromHash = () => {
+      const nextSection = resolveInitialSidebarSection(false);
+      setActiveSection((current) => (current === nextSection ? current : nextSection));
+    };
+
+    window.addEventListener("hashchange", syncSectionFromHash);
+    syncSectionFromHash();
+
+    return () => {
+      window.removeEventListener("hashchange", syncSectionFromHash);
+    };
+  }, [settingsMode]);
   const navItems: Array<{
     id: SidebarSectionId;
     label: string;
@@ -620,12 +675,7 @@ export function MissionSidebar({
                 panelCollapsed={isPanelCollapsed}
                 tooltipSide="right"
                 onClick={() => {
-                  if (item.id === "settings" && !settingsMode) {
-                    router.push("/settings");
-                    return;
-                  }
-
-                  setActiveSection(item.id);
+                  handleSectionNavigation(item.id);
 
                   if (isPanelCollapsed) {
                     openPanelFromRail();
@@ -731,25 +781,6 @@ export function MissionSidebar({
                     </Button>
                   </div>
                 ) : null}
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {navItems.map((item) => (
-                    <SectionTab
-                      key={item.id}
-                      label={item.label}
-                      badge={item.badge}
-                      active={activeSection === item.id}
-                      onClick={() => {
-                        if (item.id === "settings" && !settingsMode) {
-                          router.push("/settings");
-                          return;
-                        }
-
-                        setActiveSection(item.id);
-                      }}
-                    />
-                  ))}
                 </div>
               </div>
 
@@ -1894,43 +1925,6 @@ function RailNavButton({
         <Icon className="h-3.5 w-3.5" />
       </button>
     </RailTooltip>
-  );
-}
-
-function SectionTab({
-  label,
-  badge,
-  active,
-  onClick
-}: {
-  label: string;
-  badge?: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] uppercase tracking-[0.16em] transition-all",
-        active
-          ? "border-cyan-300/20 bg-cyan-400 text-slate-950 shadow-[0_10px_24px_rgba(96,165,250,0.28)]"
-          : "border-white/[0.08] bg-white/[0.03] text-slate-300 hover:bg-white/[0.07] hover:text-white"
-      )}
-    >
-      <span>{label}</span>
-      {badge ? (
-        <span
-          className={cn(
-            "rounded-full px-1.5 py-0.5 text-[9px] tracking-normal",
-            active ? "bg-slate-950/14 text-slate-950" : "bg-white/[0.08] text-slate-400"
-          )}
-        >
-          {badge}
-        </span>
-      ) : null}
-    </button>
   );
 }
 
