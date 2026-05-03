@@ -119,24 +119,7 @@ const settingsSidebarAnchors: Array<{
 const sidebarOpenStorageKey = "mission-control-sidebar-open";
 
 function resolveInitialSidebarSection(settingsMode: boolean): SidebarSectionId {
-  if (settingsMode || typeof window === "undefined") {
-    return settingsMode ? "settings" : "workspaces";
-  }
-
-  switch (window.location.hash.replace(/^#/, "")) {
-    case "overview":
-      return "overview";
-    case "workspaces":
-      return "workspaces";
-    case "agents":
-      return "agents";
-    case "models":
-      return "models";
-    case "settings":
-      return "settings";
-    default:
-      return "workspaces";
-  }
+  return settingsMode ? "settings" : "workspaces";
 }
 
 export function MissionSidebar({
@@ -312,6 +295,36 @@ export function MissionSidebar({
     return () => {
       window.removeEventListener("hashchange", syncSectionFromHash);
     };
+  }, [settingsMode]);
+
+  useEffect(() => {
+    if (settingsMode || typeof window === "undefined") {
+      return;
+    }
+
+    const syncSectionFromHash = () => {
+      switch (window.location.hash.replace(/^#/, "")) {
+        case "overview":
+          setActiveSection("overview");
+          return;
+        case "workspaces":
+          setActiveSection("workspaces");
+          return;
+        case "agents":
+          setActiveSection("agents");
+          return;
+        case "models":
+          setActiveSection("models");
+          return;
+        case "settings":
+          setActiveSection("settings");
+          return;
+        default:
+          setActiveSection("workspaces");
+      }
+    };
+
+    syncSectionFromHash();
   }, [settingsMode]);
   const navItems: Array<{
     id: SidebarSectionId;

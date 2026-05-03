@@ -160,6 +160,7 @@ test("root sidebar resolves active section from hash on mount", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
 
   assert.match(source, /resolveInitialSidebarSection\(settingsMode\)/);
+  assert.match(source, /return settingsMode \? "settings" : "workspaces";/);
   assert.match(source, /window\.addEventListener\("hashchange", syncSectionFromHash\)/);
 });
 
@@ -176,7 +177,9 @@ test("mission shell persists sidebar open state across navigation", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
 
   assert.match(source, /const sidebarOpenStorageKey = "mission-control-sidebar-open";/);
-  assert.match(source, /useState\(\(\) => \{\s*if \(typeof window === "undefined"\)/);
+  assert.match(source, /const \[isSidebarOpen, setIsSidebarOpen\] = useState\(false\);/);
+  assert.match(source, /const storedSidebarOpen = globalThis\.localStorage\?\.getItem\(sidebarOpenStorageKey\);/);
+  assert.match(source, /if \(storedSidebarOpen === "true"\) \{\s*setIsSidebarOpen\(true\);/);
   assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, String\(isSidebarOpen\)\);/);
 });
 

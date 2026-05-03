@@ -26,6 +26,7 @@ Reference docs inspected during this continuation:
 - Normalizes Gateway error payloads before falling back.
 - Supports native WS for generic `call(method, params)`.
 - Attempts Gateway-first typed reads/probes for status, gateway status/probe, model status/list/scan, skills, plugins, agents list, sessions list, and config get.
+- If native `status` omits update registry data, it backfills only `update.registry.latestVersion`/`error` from the CLI status payload so update visibility stays accurate while the rest of the snapshot remains Gateway-first.
 - Attempts Gateway-first config set/unset through config snapshot mutation when Gateway exposes a usable config hash.
 - Validates Gateway payloads at the client boundary and falls back to CLI on malformed required fields.
 - Records recent Gateway-first fallback diagnostics for mission-control diagnostics.

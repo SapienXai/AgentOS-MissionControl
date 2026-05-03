@@ -184,13 +184,7 @@ export function MissionControlShell({
   const [taskAbortMessage, setTaskAbortMessage] = useState<string | null>(null);
   const missionDispatchAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [recentCreatedAgentId, setRecentCreatedAgentId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return globalThis.localStorage?.getItem(sidebarOpenStorageKey) === "true";
-  });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
@@ -763,12 +757,17 @@ export function MissionControlShell({
 
   useEffect(() => {
     const storedTheme = globalThis.localStorage?.getItem(surfaceThemeStorageKey);
+    const storedSidebarOpen = globalThis.localStorage?.getItem(sidebarOpenStorageKey);
     const storedHiddenRuntimeIds = globalThis.localStorage?.getItem(hiddenRuntimeIdsStorageKey);
     const storedHiddenTaskKeys = globalThis.localStorage?.getItem(hiddenTaskKeysStorageKey);
     const storedLockedTaskKeys = globalThis.localStorage?.getItem(lockedTaskKeysStorageKey);
 
     if (storedTheme === "dark" || storedTheme === "light") {
       setSurfaceTheme(storedTheme);
+    }
+
+    if (storedSidebarOpen === "true") {
+      setIsSidebarOpen(true);
     }
 
     if (storedHiddenRuntimeIds) {

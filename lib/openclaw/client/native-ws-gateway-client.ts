@@ -431,6 +431,34 @@ function parseGatewayPayload<TPayload>(operation: string, schema: z.ZodTypeAny, 
   return parsed.data as TPayload;
 }
 
+function hasNativeStatusUpdateRegistry(status: StatusPayload) {
+  return Boolean(status.update?.registry?.latestVersion || status.update?.registry?.error);
+}
+
+function mergeStatusPayload(status: StatusPayload, fallbackStatus: StatusPayload | null) {
+  if (!fallbackStatus) {
+    return status;
+  }
+
+  const nativeUpdate = status.update ?? {};
+  const fallbackUpdate = fallbackStatus.update ?? {};
+  const registry = nativeUpdate.registry ?? fallbackUpdate.registry;
+
+  if (registry === nativeUpdate.registry) {
+    return status;
+  }
+
+  return {
+    ...fallbackStatus,
+    ...status,
+    update: {
+      ...fallbackUpdate,
+      ...nativeUpdate,
+      registry
+    }
+  };
+}
+
 function normalizeEnvFlag(value: string | undefined) {
   return value?.trim().toLowerCase();
 }
@@ -1121,13 +1149,28 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   getStatus(options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirst(
-      "status",
-      {},
-      options,
-      (payload) => parseGatewayPayload<StatusPayload>("status", statusPayloadSchema, payload),
-      () => this.fallback.getStatus(options)
-    );
+    if (this.options.forceCli || isCliGatewayClientForcedByEnv()) {
+      return this.fallback.getStatus(options);
+    }
+
+    return this.callNative<unknown>("status", {}, options)
+      .then(async (payload) => {
+        const status = parseGatewayPayload<StatusPayload>("status", statusPayloadSchema, payload);
+
+        clearGatewayFallbackDiagnostic("status");
+
+        if (hasNativeStatusUpdateRegistry(status)) {
+          return status;
+        }
+
+        const fallbackStatus = await this.fallback.getStatus(options).catch(() => null);
+        return mergeStatusPayload(status, fallbackStatus);
+      })
+      .catch((error) => {
+        this.options.onNativeFailure?.(error, "status");
+        recordGatewayFallbackDiagnostic("status", error);
+        return this.fallback.getStatus(options);
+      });
   }
 
   getGatewayStatus(options: OpenClawCommandOptions = {}) {

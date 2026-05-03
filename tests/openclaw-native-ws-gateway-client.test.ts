@@ -23,13 +23,14 @@ class FallbackGatewayClient implements OpenClawGatewayClient {
   calls: Array<{ method: string; params?: Record<string, unknown>; options?: OpenClawCommandOptions }> = [];
   config = new Map<string, unknown>();
   failStatus = false;
+  statusPayload: Record<string, unknown> = {};
 
   async getStatus() {
     this.calls.push({ method: "getStatus" });
     if (this.failStatus) {
       throw new Error("CLI status failed");
     }
-    return {};
+    return this.statusPayload;
   }
 
   async getGatewayStatus() {
@@ -233,17 +234,25 @@ test("native WS gateway client uses Gateway first for typed status requests", as
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();
   const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
-    globalThis.queueMicrotask(() => {
-      socket.emitMessage({
-        type: "res",
-        id: frame.id,
-        ok: true,
-        payload: frame.method === "connect"
-          ? { protocol: 3 }
-          : { version: "9.9.9", ignored: true }
+      globalThis.queueMicrotask(() => {
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: true,
+          payload: frame.method === "connect"
+            ? { protocol: 3 }
+            : {
+                version: "9.9.9",
+                update: {
+                  registry: {
+                    latestVersion: "10.0.0"
+                  }
+                },
+                ignored: true
+              }
+        });
       });
     });
-  });
   const client = new NativeWsOpenClawGatewayClient({
     fallback,
     webSocketFactory: WebSocketImpl,
@@ -251,7 +260,15 @@ test("native WS gateway client uses Gateway first for typed status requests", as
     timeoutMs: 250
   });
 
-  assert.deepEqual(await client.getStatus(), { version: "9.9.9", ignored: true });
+  assert.deepEqual(await client.getStatus(), {
+    version: "9.9.9",
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    },
+    ignored: true
+  });
   assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "status"]);
   assert.deepEqual(sentFrames[0]?.params.client, {
     id: "cli",
@@ -268,6 +285,46 @@ test("native WS gateway client uses Gateway first for typed status requests", as
   ]);
   assert.deepEqual(fallback.calls, []);
   assert.deepEqual(getRecentOpenClawGatewayFallbackDiagnostics(), []);
+});
+
+test("native WS gateway client backfills missing update registry details from CLI status", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  fallback.statusPayload = {
+    version: "9.9.9",
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    }
+  };
+  const { WebSocketImpl, sentFrames } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 3 } : { version: "9.9.9" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  assert.deepEqual(await client.getStatus(), {
+    version: "9.9.9",
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    }
+  });
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "status"]);
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["getStatus"]);
 });
 
 test("native WS gateway client discovers configured Gateway auth for handshakes", async () => {

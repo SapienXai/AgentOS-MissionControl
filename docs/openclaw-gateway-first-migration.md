@@ -116,6 +116,11 @@ The 2026-05-03 validation pass fixed a diagnostic ordering bug in this path: Age
 
 The same validation pass also found that a local Gateway can be healthy while the AgentOS device entry is still scope-limited. In that case OpenClaw returns errors such as `INVALID_REQUEST: missing scope: operator.read`; this is not solved by asking the user to paste an unknown token. Settings now exposes a native auth repair action that runs the official `openclaw devices approve --latest --json` path, and the native WS client uses OpenClaw local device auth for loopback Gateway connections. Manual token/password paste remains only for externally managed Gateway credentials.
 
+Status update registry backfill:
+
+- `status` remains Gateway-first for the live RPC, but if the native Gateway payload omits `update.registry.latestVersion` and `update.registry.error`, AgentOS backfills only that update registry slice from the CLI `status` payload.
+- This keeps `latestVersion` and `updateAvailable` visible in Settings and update toasts when the Gateway does not yet expose the registry fields, without changing the primary Gateway-first control flow for the rest of the snapshot.
+
 ## Provider Factory And SDK Extension Point
 
 `lib/openclaw/client/gateway-client-factory.ts` is the SDK replacement point.
