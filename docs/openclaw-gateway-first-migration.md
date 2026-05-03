@@ -119,6 +119,7 @@ The same validation pass also found that a local Gateway can be healthy while th
 Status update registry backfill:
 
 - `status` remains Gateway-first for the live RPC, but if the native Gateway payload omits `update.registry.latestVersion` and `update.registry.error`, AgentOS backfills only that update registry slice from the CLI `status` payload.
+- Once a registry value is found, the native client reuses that cached update registry slice for later Gateway status payloads that omit it, avoiding repeated CLI status backfills and preventing the Settings update banner from disappearing between snapshots.
 - This keeps `latestVersion` and `updateAvailable` visible in Settings and update toasts when the Gateway does not yet expose the registry fields, without changing the primary Gateway-first control flow for the rest of the snapshot.
 
 ## Provider Factory And SDK Extension Point

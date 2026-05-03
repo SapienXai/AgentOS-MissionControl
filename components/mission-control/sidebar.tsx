@@ -190,6 +190,7 @@ export function MissionSidebar({
   const gatewayAddress = snapshot.diagnostics.gatewayUrl
     .replace(/^wss?:\/\//, "")
     .replace(/\/$/, "");
+  const visibleDiagnosticIssue = resolveSidebarDiagnosticIssue(snapshot.diagnostics.issues);
   const [isEditAgentOpen, setIsEditAgentOpen] = useState(false);
   const [isEditAgentAdvancedOpen, setIsEditAgentAdvancedOpen] = useState(false);
   const [isSavingAgent, setIsSavingAgent] = useState(false);
@@ -774,9 +775,9 @@ export function MissionSidebar({
                     </div>
                   </div>
 
-                {snapshot.diagnostics.issues.length > 0 ? (
+                {visibleDiagnosticIssue ? (
                   <div className="mt-2.5 rounded-[14px] border border-amber-400/15 bg-amber-400/[0.08] px-2.5 py-1.5 text-[11px] text-amber-100">
-                    {snapshot.diagnostics.issues[0]}
+                    {visibleDiagnosticIssue}
                   </div>
                 ) : null}
 
@@ -2304,6 +2305,19 @@ function sidebarPathLabel(value: string) {
 
 function isUuidSegment(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function resolveSidebarDiagnosticIssue(issues: string[]) {
+  return issues.find((issue) => !isLowPrioritySidebarDiagnosticIssue(issue)) ?? null;
+}
+
+function isLowPrioritySidebarDiagnosticIssue(issue: string) {
+  return (
+    /Reusing the last successful payload while a slow OpenClaw command refreshes in the background\./.test(issue) ||
+    /Reusing the last successful gateway status after a transient OpenClaw check failure\./.test(issue) ||
+    /^gateway\.[^:]+: Gateway-first request fell back to CLI \(unsupported\):/.test(issue) ||
+    /^gateway\.[^:]+: Gateway-first request fell back to CLI \([^)]*\): .*unknown method:/i.test(issue)
+  );
 }
 
 function AgentActionMenu({

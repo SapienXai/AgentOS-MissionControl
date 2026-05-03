@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { CliOpenClawGatewayClient } from "@/lib/openclaw/client/cli-gateway-client";
 import type { CommandResult } from "@/lib/openclaw/cli";
+import { compareVersionStrings } from "@/lib/openclaw/domains/control-plane-normalization";
 import type {
   GatewayProbePayload,
   GatewayStatusPayload,
@@ -129,6 +130,7 @@ type OpenClawGatewayClientErrorKind =
   | "malformed-response"
   | "scope-limited"
   | "timeout"
+  | "unsupported"
   | "unreachable"
   | "unknown";
 
@@ -156,12 +158,15 @@ export type OpenClawGatewayFallbackDiagnostic = {
 const recentGatewayFallbackDiagnostics: OpenClawGatewayFallbackDiagnostic[] = [];
 const maxGatewayFallbackDiagnostics = 20;
 
+type StatusUpdateRegistry = NonNullable<NonNullable<StatusPayload["update"]>["registry"]>;
+
 export function getRecentOpenClawGatewayFallbackDiagnostics() {
   return [...recentGatewayFallbackDiagnostics];
 }
 
 export function clearOpenClawGatewayFallbackDiagnosticsForTesting() {
   recentGatewayFallbackDiagnostics.length = 0;
+  cachedStatusUpdateRegistry = null;
 }
 
 function recordGatewayFallbackDiagnostic(operation: string, error: unknown) {
@@ -199,6 +204,10 @@ function normalizeClientError(error: unknown) {
 }
 
 function classifyGatewayError(message: string): OpenClawGatewayClientErrorKind {
+  if (/unknown method|method not found|unsupported method/i.test(message)) {
+    return "unsupported";
+  }
+
   if (/auth|token|password|unauthorized|forbidden/i.test(message)) {
     return "auth";
   }
@@ -435,29 +444,66 @@ function hasNativeStatusUpdateRegistry(status: StatusPayload) {
   return Boolean(status.update?.registry?.latestVersion || status.update?.registry?.error);
 }
 
-function mergeStatusPayload(status: StatusPayload, fallbackStatus: StatusPayload | null) {
-  if (!fallbackStatus) {
+function rememberStatusUpdateRegistry(registry: StatusUpdateRegistry | undefined) {
+  if (!registry?.latestVersion && !registry?.error) {
+    return;
+  }
+
+  cachedStatusUpdateRegistry = { ...registry };
+}
+
+function getCachedStatusUpdateRegistry(status: StatusPayload): StatusUpdateRegistry | undefined {
+  const currentVersion = normalizeStatusVersion(status);
+  const cachedLatestVersion = cachedStatusUpdateRegistry?.latestVersion?.trim();
+
+  if (!cachedStatusUpdateRegistry) {
+    return undefined;
+  }
+
+  if (currentVersion && cachedLatestVersion && compareVersionStrings(currentVersion, cachedLatestVersion) > 0) {
+    cachedStatusUpdateRegistry = null;
+    return undefined;
+  }
+
+  return cachedStatusUpdateRegistry ?? undefined;
+}
+
+function normalizeStatusVersion(status: StatusPayload) {
+  return (status.runtimeVersion || status.overview?.version || status.version || "").trim().replace(/^v/i, "") || null;
+}
+
+function mergeStatusPayload(status: StatusPayload, fallbackStatus: StatusPayload | null): StatusPayload {
+  const nativeUpdate = status.update ?? {};
+  const fallbackUpdate = fallbackStatus?.update ?? {};
+  const cachedRegistry = getCachedStatusUpdateRegistry(status);
+  const registry = nativeUpdate.registry ?? fallbackUpdate.registry;
+  const resolvedRegistry = registry ?? cachedRegistry ?? undefined;
+
+  if (resolvedRegistry) {
+    rememberStatusUpdateRegistry(resolvedRegistry);
+  }
+
+  if (!fallbackStatus && !resolvedRegistry) {
     return status;
   }
 
-  const nativeUpdate = status.update ?? {};
-  const fallbackUpdate = fallbackStatus.update ?? {};
-  const registry = nativeUpdate.registry ?? fallbackUpdate.registry;
+  const update: NonNullable<StatusPayload["update"]> = {
+    ...fallbackUpdate,
+    ...nativeUpdate
+  };
 
-  if (registry === nativeUpdate.registry) {
-    return status;
+  if (resolvedRegistry) {
+    update.registry = resolvedRegistry;
   }
 
   return {
     ...fallbackStatus,
     ...status,
-    update: {
-      ...fallbackUpdate,
-      ...nativeUpdate,
-      registry
-    }
+    update
   };
 }
+
+let cachedStatusUpdateRegistry: StatusUpdateRegistry | null = null;
 
 function normalizeEnvFlag(value: string | undefined) {
   return value?.trim().toLowerCase();
@@ -1160,7 +1206,13 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         clearGatewayFallbackDiagnostic("status");
 
         if (hasNativeStatusUpdateRegistry(status)) {
+          rememberStatusUpdateRegistry(status.update?.registry);
           return status;
+        }
+
+        const cachedStatus = mergeStatusPayload(status, null);
+        if (hasNativeStatusUpdateRegistry(cachedStatus)) {
+          return cachedStatus;
         }
 
         const fallbackStatus = await this.fallback.getStatus(options).catch(() => null);

@@ -183,6 +183,16 @@ test("mission shell persists sidebar open state across navigation", () => {
   assert.match(source, /globalThis\.localStorage\?\.setItem\(sidebarOpenStorageKey, String\(isSidebarOpen\)\);/);
 });
 
+test("sidebar keeps transient compatibility diagnostics out of the health card", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/sidebar.tsx"), "utf8");
+
+  assert.match(source, /const visibleDiagnosticIssue = resolveSidebarDiagnosticIssue\(snapshot\.diagnostics\.issues\);/);
+  assert.match(source, /Reusing the last successful payload while a slow OpenClaw command refreshes in the background/);
+  assert.match(source, /Gateway-first request fell back to CLI/);
+  assert.match(source, /unsupported/);
+  assert.match(source, /unknown method:/);
+});
+
 test("settings control center renders a single hash-selected section", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/settings-control-center.tsx"), "utf8");
 

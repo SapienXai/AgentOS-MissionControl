@@ -327,6 +327,47 @@ test("native WS gateway client backfills missing update registry details from CL
   assert.deepEqual(fallback.calls.map((call) => call.method), ["getStatus"]);
 });
 
+test("native WS gateway client reuses cached update registry details without repeated CLI status", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  fallback.statusPayload = {
+    version: "9.9.9",
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    }
+  };
+  const { WebSocketImpl } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect" ? { protocol: 3 } : { version: "9.9.9" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.getStatus();
+
+  assert.deepEqual(await client.getStatus(), {
+    version: "9.9.9",
+    update: {
+      registry: {
+        latestVersion: "10.0.0"
+      }
+    }
+  });
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["getStatus"]);
+});
+
 test("native WS gateway client discovers configured Gateway auth for handshakes", async () => {
   const fallback = new FallbackGatewayClient();
   fallback.config.set("gateway.remote.token", "remote-token");
@@ -830,6 +871,34 @@ test("native WS gateway client falls back to CLI client on timeout", async () =>
 
   assert.deepEqual(result, { fallback: true, method: "health", params: { probe: true } });
   assert.equal(fallback.calls.length, 1);
+});
+
+test("native WS gateway client classifies unknown Gateway methods as unsupported", async () => {
+  clearOpenClawGatewayFallbackDiagnosticsForTesting();
+  const fallback = new FallbackGatewayClient();
+  const { WebSocketImpl } = createFakeWebSocket((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: frame.method === "connect",
+        payload: frame.method === "connect" ? { protocol: 3 } : undefined,
+        error: frame.method === "connect" ? undefined : { message: "INVALID_REQUEST: unknown method: models.status" }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    webSocketFactory: WebSocketImpl,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  await client.getModelStatus();
+
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["getModelStatus"]);
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.operation, "models.status");
+  assert.equal(getRecentOpenClawGatewayFallbackDiagnostics()[0]?.kind, "unsupported");
 });
 
 test("native WS gateway client keeps unsupported critical workflows on CLI fallback", async () => {
