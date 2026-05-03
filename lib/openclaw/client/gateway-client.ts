@@ -10,6 +10,8 @@ export type {
   ModelsStatusPayload,
   OpenClawModelScanPayload,
   OpenClawAgentListPayload,
+  OpenClawChannelStatusInput,
+  OpenClawChannelStatusPayload,
   OpenClawPluginListPayload,
   OpenClawSkillListPayload,
   OpenClawAddAgentInput,

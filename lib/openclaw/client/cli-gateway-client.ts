@@ -14,6 +14,8 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawChannelStatusInput,
+  OpenClawChannelStatusPayload,
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
@@ -84,6 +86,10 @@ export class CliOpenClawGatewayClient implements OpenClawGatewayClient {
 
   listSessions(input: OpenClawListSessionsInput = {}, options: OpenClawCommandOptions = {}) {
     return this.call<OpenClawSessionsPayload>("sessions.list", { ...input }, options);
+  }
+
+  getChannelStatus(input: OpenClawChannelStatusInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.call<OpenClawChannelStatusPayload>("channels.status", { ...input }, options);
   }
 
   listSkills(options: OpenClawCommandOptions & { eligible?: boolean } = {}) {

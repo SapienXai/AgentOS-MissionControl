@@ -203,6 +203,7 @@ Final verification from this pass:
 - `pnpm build`: sandboxed run failed with the known Turbopack worker/port `Operation not permitted` error; rerun outside the sandbox passed.
 - `node scripts/openclaw-runtime-smoke.mjs`: sandboxed localhost fetch failed; rerun outside the sandbox passed all checks.
 - Real agent chat stream through `/api/agents/main/chat`: passed and the resulting session was visible in `/api/snapshot?force=true`.
+- Critical CLI-backed migration review added a `channels.status` Gateway-first adapter/client path and expanded the runtime smoke script with channel/provider status and fallback diagnostic checks.
 
 ## Remaining Risks
 

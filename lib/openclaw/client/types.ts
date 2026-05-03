@@ -214,6 +214,38 @@ export type OpenClawSessionsPayload = {
   }>;
 };
 
+export type OpenClawChannelStatusPayload = {
+  ts: number;
+  channelOrder: string[];
+  channelLabels: Record<string, string>;
+  channelDetailLabels?: Record<string, string>;
+  channelSystemImages?: Record<string, string>;
+  channelMeta?: Array<{
+    id: string;
+    label: string;
+    detailLabel: string;
+    systemImage?: string;
+  }>;
+  channels: Record<string, unknown>;
+  channelAccounts: Record<string, Array<Record<string, unknown> & {
+    accountId: string;
+    name?: string;
+    enabled?: boolean;
+    configured?: boolean;
+    linked?: boolean;
+    running?: boolean;
+    connected?: boolean;
+    lastError?: string;
+    healthState?: string;
+  }>>;
+  channelDefaultAccountId: Record<string, string>;
+};
+
+export interface OpenClawChannelStatusInput {
+  probe?: boolean;
+  timeoutMs?: number;
+}
+
 export type ModelsStatusPayload = {
   defaultModel?: string | null;
   resolvedDefault?: string | null;
@@ -291,6 +323,10 @@ export interface OpenClawGatewayClient {
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
   listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
   listSessions(input?: OpenClawListSessionsInput, options?: OpenClawCommandOptions): Promise<OpenClawSessionsPayload>;
+  getChannelStatus(
+    input?: OpenClawChannelStatusInput,
+    options?: OpenClawCommandOptions
+  ): Promise<OpenClawChannelStatusPayload>;
   listSkills(options?: OpenClawCommandOptions & { eligible?: boolean }): Promise<OpenClawSkillListPayload>;
   listPlugins(options?: OpenClawCommandOptions): Promise<OpenClawPluginListPayload>;
   listModels(input?: OpenClawListModelsInput, options?: OpenClawCommandOptions): Promise<ModelsPayload>;

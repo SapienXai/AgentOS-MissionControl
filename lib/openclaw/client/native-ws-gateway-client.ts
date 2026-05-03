@@ -10,6 +10,8 @@ import type {
   ModelsPayload,
   ModelsStatusPayload,
   OpenClawAddAgentInput,
+  OpenClawChannelStatusInput,
+  OpenClawChannelStatusPayload,
   OpenClawAgentListPayload,
   OpenClawAgentTurnInput,
   OpenClawCommandOptions,
@@ -273,6 +275,46 @@ const agentListPayloadSchema = z
 const sessionsPayloadSchema = z
   .object({
     sessions: z.array(z.object({}).passthrough())
+  })
+  .passthrough();
+
+const channelStatusPayloadSchema = z
+  .object({
+    ts: z.number(),
+    channelOrder: z.array(z.string()),
+    channelLabels: z.record(z.string(), z.string()),
+    channelDetailLabels: z.record(z.string(), z.string()).optional(),
+    channelSystemImages: z.record(z.string(), z.string()).optional(),
+    channelMeta: z.array(
+      z
+        .object({
+          id: z.string(),
+          label: z.string(),
+          detailLabel: z.string(),
+          systemImage: z.string().optional()
+        })
+        .passthrough()
+    ).optional(),
+    channels: z.record(z.string(), z.unknown()),
+    channelAccounts: z.record(
+      z.string(),
+      z.array(
+        z
+          .object({
+            accountId: z.string(),
+            name: z.string().optional(),
+            enabled: z.boolean().optional(),
+            configured: z.boolean().optional(),
+            linked: z.boolean().optional(),
+            running: z.boolean().optional(),
+            connected: z.boolean().optional(),
+            lastError: z.string().optional(),
+            healthState: z.string().optional()
+          })
+          .passthrough()
+      )
+    ),
+    channelDefaultAccountId: z.record(z.string(), z.string())
   })
   .passthrough();
 
@@ -876,6 +918,20 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       options,
       (payload) => parseGatewayPayload<OpenClawSessionsPayload>("sessions.list", sessionsPayloadSchema, payload),
       () => this.fallback.listSessions(input, options)
+    );
+  }
+
+  getChannelStatus(input: OpenClawChannelStatusInput = {}, options: OpenClawCommandOptions = {}) {
+    return this.gatewayFirst(
+      "channels.status",
+      { ...input },
+      options,
+      (payload) => parseGatewayPayload<OpenClawChannelStatusPayload>(
+        "channels.status",
+        channelStatusPayloadSchema,
+        payload
+      ),
+      () => this.fallback.getChannelStatus(input, options)
     );
   }
 

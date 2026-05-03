@@ -47,6 +47,17 @@ function createMockGatewayClient(overrides: Partial<OpenClawGatewayClient> = {})
       calls.push({ method: "listSessions", options });
       return { sessions: [] };
     },
+    async getChannelStatus(_input, options?: OpenClawCommandOptions) {
+      calls.push({ method: "getChannelStatus", options });
+      return {
+        ts: 0,
+        channelOrder: [],
+        channelLabels: {},
+        channels: {},
+        channelAccounts: {},
+        channelDefaultAccountId: {}
+      };
+    },
     async controlGateway(action: "start" | "stop" | "restart", options?: OpenClawCommandOptions) {
       calls.push({ method: "controlGateway", action, options });
       return { ok: true, action };
@@ -184,6 +195,7 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
   await adapter.scanModels({ yes: true, noInput: true, timeoutMs: 4 });
   await adapter.listAgents({ timeoutMs: 4 });
   await adapter.listSessions({ limit: 1 }, { timeoutMs: 4 });
+  await adapter.getChannelStatus({ probe: true }, { timeoutMs: 4 });
   assert.deepEqual(await adapter.getConfig("gateway", { timeoutMs: 5 }), { path: "gateway" });
   assert.equal(await adapter.hasConfig("gateway.remote.url", { timeoutMs: 6 }), true);
   await adapter.setConfig("gateway.remote.url", "ws://127.0.0.1:18789", { strictJson: true, timeoutMs: 7 });
@@ -207,6 +219,7 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "scanModels", options: { yes: true, noInput: true, timeoutMs: 4 } },
     { method: "listAgents", options: { timeoutMs: 4 } },
     { method: "listSessions", options: { timeoutMs: 4 } },
+    { method: "getChannelStatus", options: { timeoutMs: 4 } },
     { method: "getConfig", action: "gateway", options: { timeoutMs: 5 } },
     { method: "hasConfig", action: "gateway.remote.url", options: { timeoutMs: 6 } },
     { method: "setConfig", action: "gateway.remote.url", options: { strictJson: true, timeoutMs: 7 } },

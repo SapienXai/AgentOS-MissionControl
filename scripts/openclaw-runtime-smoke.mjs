@@ -105,11 +105,51 @@ record(
     : snapshot.body?.error ?? "snapshot failed"
 );
 
+const fallbackIssues = Array.isArray(snapshot.body?.diagnostics?.issues)
+  ? snapshot.body.diagnostics.issues.filter((issue) => typeof issue === "string" && issue.includes("Gateway-first request fell back to CLI"))
+  : [];
+record(
+  "gateway fallback diagnostics",
+  snapshot.ok && fallbackIssues.length > 0 ? "PASS" : "BLOCKED",
+  snapshot.ok
+    ? fallbackIssues.length > 0
+      ? `${fallbackIssues.length} fallback diagnostic(s)`
+      : "no Gateway fallback diagnostics present in current snapshot"
+    : snapshot.body?.error ?? "snapshot failed"
+);
+
 const readyAgent = agents.find((agent) => agent?.id && agent?.workspaceId && agent?.workspacePath);
 record(
   "agent preflight",
   readyAgent ? "PASS" : "BLOCKED",
   readyAgent ? `agent=${readyAgent.id}; workspace=${readyAgent.workspaceId}` : "no workspace-backed agent available"
+);
+
+const channelStatus = await runNodeEval(
+  `const {getOpenClawAdapter}=require("./lib/openclaw/adapter/openclaw-adapter.ts");
+getOpenClawAdapter().getChannelStatus({probe:false}, {timeoutMs:5000}).then((status)=> {
+  console.log(JSON.stringify({
+    channels: Array.isArray(status.channelOrder) ? status.channelOrder.length : 0,
+    accounts: status.channelAccounts && typeof status.channelAccounts === "object"
+      ? Object.values(status.channelAccounts).reduce((sum, entries)=> sum + (Array.isArray(entries) ? entries.length : 0), 0)
+      : 0
+  }));
+}).catch((error)=> {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});`
+);
+const channelStatusDetail = channelStatus.code === 0
+  ? channelStatus.stdout.trim()
+  : channelStatus.stderr.trim() || `exit=${channelStatus.code}`;
+record(
+  "channel/provider status",
+  channelStatus.code === 0
+    ? "PASS"
+    : /pairing|required|auth|gateway/i.test(channelStatusDetail)
+      ? "BLOCKED"
+      : "FAIL",
+  channelStatusDetail
 );
 
 const fallback = await runNodeEval(

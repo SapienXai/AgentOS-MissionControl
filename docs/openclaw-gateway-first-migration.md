@@ -178,6 +178,12 @@ Latest verification:
 - Real agent chat stream completed successfully through the AgentOS API and was visible in the refreshed runtime/session snapshot.
 - `pnpm typecheck`, `pnpm lint`, `pnpm test`, and sandbox-external `pnpm build` passed.
 
+Critical CLI-backed migration review:
+
+- See `docs/openclaw-critical-cli-backed-migration.md` for the detailed agent mutation, agent run/streaming, and channel/provider provisioning matrix.
+- `channels.status` is now Gateway-first behind `OpenClawGatewayClient` and `OpenClawAdapter`.
+- Agent create/update/delete and agent run/streaming remain CLI fallback required because the confirmed Gateway schemas do not preserve AgentOS' current inputs and transcript/session side effects.
+
 ## Remaining Risks
 
 - Successful real agent/mission completion still depends on available model/provider quota.
