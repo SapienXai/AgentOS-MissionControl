@@ -783,7 +783,7 @@ test("mission control snapshot does not call Gateway config.get for remote url",
     "utf8"
   );
 
-  assert.match(source, /readFile\(path\.join\(openClawStateRootPath, "openclaw\.json"\), "utf8"\)/);
+  assert.match(source, /const stateRoot = getOpenClawStateRootPath\(\);[\s\S]*readFile\(path\.join\(stateRoot, "openclaw\.json"\), "utf8"\)/);
   assert.match(source, /readNestedConfigValue\(config, gatewayRemoteUrlConfigKey\)/);
   assert.doesNotMatch(source, /call<unknown>\("config\.get", \{\}, \{ timeoutMs: 5_000 \}\)/);
 });

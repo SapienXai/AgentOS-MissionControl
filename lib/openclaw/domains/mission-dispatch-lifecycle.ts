@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { resolveOpenClawBin } from "@/lib/openclaw/cli";
 import { matchesMissionText } from "@/lib/openclaw/runtime-matching";
 import {
@@ -23,6 +24,7 @@ import {
   extractTranscriptTurns as extractTranscriptTurnsFromTranscript,
   filterTranscriptTurnsForRuntime as filterTranscriptTurnsForRuntimeFromTranscript,
   parseRuntimeOutput as parseRuntimeOutputFromTranscript,
+  parseRuntimeOutputFromSessionHistory,
   resolveRuntimeTranscriptPath as resolveRuntimeTranscriptPathFromTranscript
 } from "@/lib/openclaw/domains/runtime-transcript";
 import type { MissionDispatchRecordLike } from "@/lib/openclaw/domains/mission-dispatch-model";
@@ -82,8 +84,6 @@ export type MissionDispatchRecord = Omit<MissionDispatchRecordLike, "status" | "
   observation: MissionDispatchObservation;
 };
 
-const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd(), ".mission-control");
-const missionDispatchesRootPath = path.join(missionControlRootPath, "dispatches");
 const missionDispatchRunnerPath = path.join(
   /*turbopackIgnore: true*/ process.cwd(),
   "scripts",
@@ -390,10 +390,9 @@ async function backfillCompletedMissionDispatchResultFromRuntime(
 
   const finishedAt = output.finalTimestamp ?? timestampFromUnix(runtime.updatedAt) ?? latestRecord.updatedAt;
 
-  const nextResult =
-    latestRecord.result && resolveMissionDispatchResultText(latestRecord)
-      ? mergeMissionDispatchResultMeta(latestRecord.result, result)
-      : result;
+  const nextResult = latestRecord.result
+    ? mergeMissionDispatchResult(latestRecord.result, result)
+    : result;
 
   const nextRecord = {
     ...latestRecord,
@@ -415,26 +414,32 @@ function hasMeaningfulMissionDispatchTokenUsage(record: MissionDispatchRecordLik
   return Boolean(tokenUsage && tokenUsage.total > 0);
 }
 
-function mergeMissionDispatchResultMeta(
+function mergeMissionDispatchResult(
   current: NonNullable<MissionDispatchRecordLike["result"]>,
   next: NonNullable<MissionDispatchRecordLike["result"]>
 ): NonNullable<MissionDispatchRecordLike["result"]> {
   return {
     ...current,
+    ...next,
+    runId: current.runId ?? next.runId,
+    sessionKey: current.sessionKey ?? next.sessionKey,
+    sessionId: current.sessionId ?? next.sessionId,
     meta: {
       ...(current.meta ?? {}),
       ...(next.meta ?? {})
     },
-    result: current.result
+    payloads: next.payloads ?? current.payloads,
+    result: current.result || next.result
       ? {
-          ...current.result,
+          ...(current.result ?? {}),
+          ...(next.result ?? {}),
           meta: {
-            ...(current.result.meta ?? {}),
-            ...(next.result?.meta ?? {}),
-            ...(next.meta ?? {})
-          }
+            ...(current.result?.meta ?? {}),
+            ...(next.result?.meta ?? {})
+          },
+          payloads: next.result?.payloads ?? current.result?.payloads
         }
-      : next.result
+      : undefined
   };
 }
 
@@ -512,7 +517,7 @@ async function readRuntimeOutputForMissionDispatchRecord(
   );
 
   if (!transcriptPath) {
-    return null;
+    return readRuntimeOutputFromGatewaySessionHistory(record, runtime);
   }
 
   try {
@@ -538,6 +543,48 @@ async function readRuntimeOutputForMissionDispatchRecord(
 
     const rolloutTokenUsage = await readCodexRolloutTokenUsageForMissionDispatchRecord(record, raw);
     return rolloutTokenUsage ? { ...output, tokenUsage: rolloutTokenUsage } : output;
+  } catch {
+    return null;
+  }
+}
+
+async function readRuntimeOutputFromGatewaySessionHistory(
+  record: MissionDispatchRecordLike,
+  runtime: RuntimeRecord
+) {
+  const result = record.result && typeof record.result === "object" ? record.result as Record<string, unknown> : null;
+  const sessionKey =
+    (typeof result?.sessionKey === "string" && result.sessionKey.trim() ? result.sessionKey.trim() : null) ??
+    (typeof runtime.metadata.sessionKey === "string" && runtime.metadata.sessionKey.trim() ? runtime.metadata.sessionKey.trim() : null) ??
+    (runtime.key.startsWith("agent:") ? runtime.key : null);
+
+  if (!sessionKey) {
+    return null;
+  }
+
+  try {
+    const payload = await getOpenClawAdapter().getSessionHistory(
+      { sessionKey, limit: 200 },
+      { timeoutMs: 8_000 }
+    );
+    const historyRuntime = {
+      ...runtime,
+      sessionId: runtime.sessionId ?? extractMissionDispatchSessionId(record) ?? undefined,
+      metadata: {
+        ...runtime.metadata,
+        mission: typeof runtime.metadata.mission === "string" ? runtime.metadata.mission : record.mission,
+        routedMission:
+          typeof runtime.metadata.routedMission === "string" ? runtime.metadata.routedMission : record.routedMission,
+        dispatchSubmittedAt:
+          typeof runtime.metadata.dispatchSubmittedAt === "string"
+            ? runtime.metadata.dispatchSubmittedAt
+            : record.submittedAt,
+        sessionKey
+      }
+    } satisfies RuntimeRecord;
+    const output = parseRuntimeOutputFromSessionHistory(historyRuntime, payload, record.workspacePath ?? undefined);
+
+    return output.items.length > 0 ? output : null;
   } catch {
     return null;
   }
@@ -886,13 +933,14 @@ export async function buildObservedMissionDispatchRuntime(record: MissionDispatc
 
 export async function readMissionDispatchRecords(): Promise<MissionDispatchRecord[]> {
   try {
-    const entries = await readdir(missionDispatchesRootPath, { withFileTypes: true });
+    const dispatchesRoot = missionDispatchesRootPath();
+    const entries = await readdir(dispatchesRoot, { withFileTypes: true });
     const nowMs = Date.now();
     const records = (await Promise.all(
       entries
         .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
         .map(async (entry) => {
-          const filePath = path.join(missionDispatchesRootPath, entry.name);
+          const filePath = path.join(dispatchesRoot, entry.name);
           const record = await readMissionDispatchRecord(filePath);
 
           if (!record) {
@@ -990,11 +1038,20 @@ export function normalizeMissionAbortReason(reason?: string | null) {
 }
 
 function missionDispatchRecordPath(dispatchId: string) {
-  return path.join(missionDispatchesRootPath, `${dispatchId}.json`);
+  return path.join(missionDispatchesRootPath(), `${dispatchId}.json`);
 }
 
 function missionDispatchRunnerLogPath(dispatchId: string) {
-  return path.join(missionDispatchesRootPath, `${dispatchId}.log.jsonl`);
+  return path.join(missionDispatchesRootPath(), `${dispatchId}.log.jsonl`);
+}
+
+function missionControlRootPath() {
+  const configuredRoot = process.env.AGENTOS_MISSION_CONTROL_ROOT?.trim();
+  return path.resolve(configuredRoot || path.join(process.cwd(), ".mission-control"));
+}
+
+function missionDispatchesRootPath() {
+  return path.join(missionControlRootPath(), "dispatches");
 }
 
 function maxIsoTimestamp(left: string | null | undefined, right: string | null | undefined): string {

@@ -13,6 +13,18 @@ export type OpenClawRuntimeProviderFixture = {
   close: () => Promise<void>;
 };
 
+type FixtureToolCall = {
+  id: string;
+  name: "write" | "sessions_spawn";
+  arguments: Record<string, unknown>;
+};
+
+type FixtureResponse = {
+  content?: string;
+  toolCall?: FixtureToolCall;
+  delayMs?: number;
+};
+
 export async function createOpenClawRuntimeProviderFixture(input: {
   modelId?: string;
 } = {}): Promise<OpenClawRuntimeProviderFixture> {
@@ -80,12 +92,16 @@ async function handleRequest(
     const payload = JSON.parse(await readBody(request)) as { stream?: boolean; messages?: unknown };
     const stream = payload.stream === true;
     const prompt = readLastUserMessage(payload.messages);
-    const content = resolveFixtureResponse(prompt);
+    const fixtureResponse = resolveFixtureResponse(prompt, payload.messages);
     stats.completionCount += 1;
     if (stream) stats.streamingCompletionCount += 1;
 
+    if (fixtureResponse.delayMs) {
+      await wait(fixtureResponse.delayMs);
+    }
+
     if (stream) {
-      writeStreamingResponse(response, modelId, content);
+      writeStreamingResponse(response, modelId, fixtureResponse);
       return;
     }
 
@@ -94,18 +110,83 @@ async function handleRequest(
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model: modelId,
-      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 1, completion_tokens: content.length, total_tokens: content.length + 1 }
+      choices: [{
+        index: 0,
+        message: fixtureResponse.toolCall
+          ? {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                index: 0,
+                id: fixtureResponse.toolCall.id,
+                type: "function",
+                function: {
+                  name: fixtureResponse.toolCall.name,
+                  arguments: JSON.stringify(fixtureResponse.toolCall.arguments)
+                }
+              }]
+            }
+          : { role: "assistant", content: fixtureResponse.content ?? "" },
+        finish_reason: fixtureResponse.toolCall ? "tool_calls" : "stop"
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: (fixtureResponse.content ?? "").length, total_tokens: (fixtureResponse.content ?? "").length + 1 }
     });
   } catch {
     writeJson(response, 400, { error: { message: "Invalid JSON request", type: "invalid_request_error" } });
   }
 }
 
-function resolveFixtureResponse(prompt: string) {
-  if (/CRON/i.test(prompt)) return "AGENTOS_FIXTURE_CRON_REPLY";
-  if (/SECOND|CONTINUITY/i.test(prompt)) return "AGENTOS_FIXTURE_SECOND_REPLY";
-  return "AGENTOS_FIXTURE_FIRST_REPLY";
+function resolveFixtureResponse(prompt: string, messages: unknown): FixtureResponse {
+  const hasToolResult = Array.isArray(messages) && messages.some((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    const role = (entry as { role?: unknown }).role;
+    return role === "tool" || role === "toolResult";
+  });
+
+  if (/WORKFORCE_ACCEPTANCE_ARTIFACT/i.test(prompt) && !hasToolResult) {
+    return {
+      toolCall: {
+        id: "agentos-acceptance-write",
+        name: "write",
+        arguments: {
+          path: "deliverables/acceptance-result.txt",
+          content: "AgentOS Workforce 2026.9.2 artifact acceptance.\n"
+        }
+      }
+    };
+  }
+
+  if (/WORKFORCE_ACCEPTANCE_DELEGATION/i.test(prompt) && !hasToolResult) {
+    return {
+      toolCall: {
+        id: "agentos-acceptance-spawn",
+        name: "sessions_spawn",
+        arguments: {
+          task: "WORKFORCE_ACCEPTANCE_CHILD",
+          taskName: "acceptance-child",
+          label: "Acceptance child",
+          runtime: "subagent",
+          agentId: "main",
+          mode: "run",
+          cleanup: "keep",
+          expectsCompletionMessage: true
+        }
+      }
+    };
+  }
+
+  if (/WORKFORCE_ACCEPTANCE_CHILD/i.test(prompt)) {
+    return {
+      content: "AGENTOS_FIXTURE_CHILD_REPLY",
+      delayMs: 3_000
+    };
+  }
+
+  if (/CRON/i.test(prompt)) return { content: "AGENTOS_FIXTURE_CRON_REPLY" };
+  if (/SECOND|CONTINUITY/i.test(prompt)) return { content: "AGENTOS_FIXTURE_SECOND_REPLY" };
+  if (/WORKFORCE_ACCEPTANCE_ARTIFACT/i.test(prompt)) return { content: "AGENTOS_FIXTURE_ARTIFACT_REPLY" };
+  if (/WORKFORCE_ACCEPTANCE_DELEGATION/i.test(prompt)) return { content: "AGENTOS_FIXTURE_DELEGATION_REPLY" };
+  return { content: "AGENTOS_FIXTURE_FIRST_REPLY" };
 }
 
 function readLastUserMessage(messages: unknown): string {
@@ -118,19 +199,29 @@ function readLastUserMessage(messages: unknown): string {
   return typeof content === "string" ? content : "";
 }
 
-function writeStreamingResponse(response: ServerResponse, modelId: string, content: string) {
+function writeStreamingResponse(response: ServerResponse, modelId: string, fixtureResponse: FixtureResponse) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive"
   });
   const id = `agentos-fixture-stream-${Date.now()}`;
-  const splitAt = Math.max(1, Math.floor(content.length / 2));
-  const chunks = [content.slice(0, splitAt), content.slice(splitAt)];
-  response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: { role: "assistant", content: chunks[0] }, finish_reason: null }] })}\n\n`);
-  response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: { content: chunks[1] }, finish_reason: null }] })}\n\n`);
-  response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+  if (fixtureResponse.toolCall) {
+    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: { role: "assistant", content: null, tool_calls: [{ index: 0, id: fixtureResponse.toolCall.id, type: "function", function: { name: fixtureResponse.toolCall.name, arguments: JSON.stringify(fixtureResponse.toolCall.arguments) } }] }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] })}\n\n`);
+  } else {
+    const content = fixtureResponse.content ?? "";
+    const splitAt = Math.max(1, Math.floor(content.length / 2));
+    const chunks = [content.slice(0, splitAt), content.slice(splitAt)];
+    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: { role: "assistant", content: chunks[0] }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: { content: chunks[1] }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: modelId, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
+  }
   response.end("data: [DONE]\n\n");
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function writeJson(response: ServerResponse, statusCode: number, payload: unknown) {

@@ -7,15 +7,17 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { buildMissionProjection, buildMissionSeeds } from "@/lib/agentos/application/workforce-service";
-import type { MissionControlSnapshot, RuntimeRecord, TaskRecord } from "@/lib/agentos/contracts";
+import { getWorkforceMissionDetail, getWorkforceMissionList } from "@/lib/agentos/application/workforce-service";
+import { clearMissionControlCaches, getMissionControlSnapshot, submitMission } from "@/lib/agentos/control-plane";
+import { setOpenClawAdapterForTesting } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { resetOpenClawGatewayClient, setOpenClawGatewayClientForTesting } from "@/lib/openclaw/client/gateway-client-factory";
+import { readMissionDispatchRecordById, readMissionDispatchRecords } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
+import type { MissionDispatchRecord } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
+import { resolveMissionDispatchResultText } from "@/lib/openclaw/domains/mission-dispatch-model";
 import { buildTaskRecords } from "@/lib/openclaw/domains/task-records";
 import { mapOpenClawTaskListToRuntimes } from "@/lib/openclaw/application/runtime-state-service";
-import { createMissionDispatchRecord } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
 import { projectApprovalRecords, projectQuestionRecords } from "@/lib/openclaw/application/human-control-inbox-service";
 import { createOfficialBackedOpenClawGatewayClient } from "@/lib/openclaw/client/official-gateway-factory";
-import { normalizeGatewayTurnEvent } from "@/lib/openclaw/client/native-ws-gateway-mappers";
-import type { GatewayEventFrame } from "@/lib/openclaw/client/native-ws-gateway-types";
 import { OPENCLAW_IDENTITY_CONTRACT_BUILD, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 import { createOpenClawRuntimeProviderFixture } from "@/scripts/openclaw-runtime-provider-fixture";
 
@@ -48,6 +50,16 @@ async function main() {
   let gateway: ChildProcess | null = null;
   let client: GatewayClient | null = null;
   let sessionKey: string | null = null;
+  const parentEnvironment = captureEnvironment([
+    "AGENTOS_MISSION_CONTROL_ROOT",
+    "AGENTOS_OPENCLAW_GATEWAY_URL",
+    "AGENTOS_OPENCLAW_GATEWAY_TOKEN",
+    "OPENCLAW_GATEWAY_URL",
+    "OPENCLAW_GATEWAY_TOKEN",
+    "OPENCLAW_CONFIG_PATH",
+    "OPENCLAW_STATE_DIR",
+    "OPENAI_API_KEY"
+  ]);
   const cleanupRefs = { questionIds: [] as string[], approvalId: null as string | null };
   const evidence = createEvidence(identity, await readGitHead());
 
@@ -57,6 +69,17 @@ async function main() {
     await writeConfig(configPath, workspaceDir, fixture.baseUrl, fixture.modelId, token);
     gateway = await startGateway({ packageRoot, stateDir, workspaceDir, configPath, port, token });
     client = createClient(port, token, "0.1.0-agentos-workforce-acceptance");
+    process.env.AGENTOS_MISSION_CONTROL_ROOT = path.join(disposableRoot, "mission-control");
+    process.env.AGENTOS_OPENCLAW_GATEWAY_URL = `ws://127.0.0.1:${port}`;
+    process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN = token;
+    process.env.OPENCLAW_GATEWAY_URL = `ws://127.0.0.1:${port}`;
+    process.env.OPENCLAW_GATEWAY_TOKEN = token;
+    process.env.OPENCLAW_CONFIG_PATH = configPath;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    process.env.OPENAI_API_KEY = "agentos-workforce-fixture";
+    setOpenClawGatewayClientForTesting(client);
+    setOpenClawAdapterForTesting(null);
+    clearMissionControlCaches();
 
     const handshake = await client.probeNativeHandshake({ timeoutMs: TIMEOUT_MS }) as Record<string, unknown>;
     const server = asRecord(handshake.server);
@@ -75,82 +98,169 @@ async function main() {
     };
     evidence.checks["runtime-identity"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2" };
 
-    sessionKey = `agent:main:workforce-acceptance-${Date.now()}`;
-    await client.callNative("sessions.create", { key: sessionKey, agentId: "main" }, mutationOptions());
-    const firstTurn = await runTurn(client, sessionKey, "WORKFORCE_ACCEPTANCE_FIRST", "AGENTOS_FIXTURE_FIRST_REPLY");
-    const sessionList = await client.listSessions({ search: sessionKey }, { timeoutMs: TIMEOUT_MS });
-    const nativeSession = sessionList.sessions.find((entry) => entry.key === sessionKey);
-    assert.ok(nativeSession);
-    evidence.checks["mission-basic"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Native session, turn, result, and exact session identity observed." };
+    const requestId = `workforce-product-path-${Date.now()}`;
+    const productMission = await submitMission({
+      mission: "WORKFORCE_ACCEPTANCE_FIRST",
+      requestId,
+      agentId: "main",
+      thinking: "off"
+    }, mutationOptions());
+    assert.ok(productMission.dispatchId);
+    let dispatchRecord = await readMissionDispatchRecordById(productMission.dispatchId);
+    assert.ok(dispatchRecord);
+    assert.equal(dispatchRecord.clientRequestId, requestId);
+    assert.equal(dispatchRecord.agentId, "main");
+    assert.ok(dispatchRecord.result?.sessionKey, JSON.stringify({ status: dispatchRecord.status, result: dispatchRecord.result, error: dispatchRecord.error }));
+    assert.ok(dispatchRecord.result?.runId);
+    sessionKey = dispatchRecord.result.sessionKey ?? null;
+    assert.ok(sessionKey);
+    let productSnapshot = await getMissionControlSnapshot({ force: true });
+    dispatchRecord = await waitForDispatchTerminal(productMission.dispatchId, async () => {
+      productSnapshot = await getMissionControlSnapshot({ force: true });
+    });
+    const missionList = await getWorkforceMissionList({ snapshot: productSnapshot });
+    const listedMission = missionList.missions.find((mission) => mission.id === productMission.dispatchId);
+    assert.ok(listedMission);
+    const missionDetail = await getWorkforceMissionDetail(productMission.dispatchId, { snapshot: productSnapshot });
+    assert.ok(missionDetail);
+    assert.equal(missionDetail.id, productMission.dispatchId);
+    const finalResult = resolveMissionDispatchResultText(dispatchRecord);
+    assert.equal(finalResult, "AGENTOS_FIXTURE_FIRST_REPLY");
+    assert.equal(missionDetail.result, finalResult);
+    assert.equal(listedMission.state, missionDetail.state);
+    assert.equal(dispatchRecord.status, "completed");
+    evidence.productPath = {
+      dispatchCreatedBy: "submitMission",
+      workflow: "submitMission -> submitMissionDispatch -> writeMissionDispatchRecord -> OpenClaw Gateway -> Workforce projection",
+      manualDispatchInjection: false,
+      persistedSidecar: true,
+      missionListFromPersistedSidecar: true,
+      missionDetailFromPersistedSidecar: true,
+      requestId,
+      dispatchId: productMission.dispatchId,
+      agentId: dispatchRecord.agentId,
+      workspaceId: dispatchRecord.workspaceId,
+      sessionKey: dispatchRecord.result?.sessionKey ?? null,
+      runId: dispatchRecord.result?.runId ?? null
+    };
+    evidence.checks["product-path-mission-create"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Canonical submitMission created and persisted the dispatch; the native Gateway populated runtime identity." };
+    evidence.checks["product-path-api-list"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission list discovered the persisted dispatch and matched detail state from the same snapshot." };
+    evidence.checks["product-path-api-detail"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission detail resolved by dispatch id from persisted sidecar plus current native snapshot." };
+    evidence.checks["mission-basic"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Real AgentOS submission reached one native session/run and completed with authoritative output." };
 
-    const taskPayload = await client.listTasks({ sessionKey }, { timeoutMs: TIMEOUT_MS });
-    const taskRuntimes = mapOpenClawTaskListToRuntimes(taskPayload, {
+    const completionCountBeforeReplay = fixture.stats.completionCount;
+    const replay = await submitMission({ mission: "WORKFORCE_ACCEPTANCE_FIRST", requestId, agentId: "main", thinking: "off" }, mutationOptions());
+    assert.equal(replay.dispatchId, productMission.dispatchId);
+    assert.equal(fixture.stats.completionCount, completionCountBeforeReplay);
+    await assert.rejects(
+      submitMission({ mission: "WORKFORCE_ACCEPTANCE_DIFFERENT", requestId, agentId: "main", thinking: "off" }, mutationOptions()),
+      /request identity is already in use/i
+    );
+    const persistedRecords = await readMissionDispatchRecords();
+    assert.equal(persistedRecords.filter((record) => record.clientRequestId === requestId).length, 1);
+    evidence.checks["product-path-idempotency"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Replay returned the same persisted dispatch without a second native model completion; altered request identity failed closed." };
+    evidence.checks["result-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Final output came from the native Gateway result persisted by the canonical Mission workflow and reconstructed in Mission detail." };
+
+    const artifactRequestId = `workforce-artifact-${Date.now()}`;
+    const artifactMission = await submitMission({
+      mission: "WORKFORCE_ACCEPTANCE_ARTIFACT",
+      requestId: artifactRequestId,
+      agentId: "main",
+      thinking: "off"
+    }, mutationOptions());
+    assert.ok(artifactMission.dispatchId);
+    const artifactDispatchId = artifactMission.dispatchId;
+    const artifactRecord = await waitForDispatchTerminal(artifactDispatchId, async () => {
+      await getMissionControlSnapshot({ force: true });
+    });
+    const artifactSnapshot = await getMissionControlSnapshot({ force: true });
+    const artifactDetail = await getWorkforceMissionDetail(artifactDispatchId, { snapshot: artifactSnapshot });
+    assert.ok(artifactDetail);
+    assert.equal(artifactRecord.status, "completed");
+    assert.equal(resolveMissionDispatchResultText(artifactRecord), "AGENTOS_FIXTURE_ARTIFACT_REPLY");
+    const artifactPaths = artifactDetail.artifacts.map((artifact) => artifact.path || artifact.displayPath).filter(Boolean);
+    evidence.checks.artifacts = artifactPaths.includes("deliverables/acceptance-result.txt")
+      ? { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "OpenClaw executed the native write tool and Workforce projected the bounded runtime-created artifact." }
+      : { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The product-path mission completed, but no bounded runtime-created artifact was exposed by the native task/session projection." };
+
+    const delegationRequestId = `workforce-delegation-${Date.now()}`;
+    const delegationPromise = submitMission({
+      mission: "WORKFORCE_ACCEPTANCE_DELEGATION",
+      requestId: delegationRequestId,
+      agentId: "main",
+      thinking: "off"
+    }, mutationOptions());
+    let observedWaitingWorker = false;
+    const delegationObservationDeadline = Date.now() + 20_000;
+    while (Date.now() < delegationObservationDeadline) {
+      const delegationRecord = (await readMissionDispatchRecords()).find((record) => record.clientRequestId === delegationRequestId);
+      if (delegationRecord) {
+        const delegationSnapshot = await getMissionControlSnapshot({ force: true });
+        const delegationList = await getWorkforceMissionList({ snapshot: delegationSnapshot });
+        const delegationDetail = await getWorkforceMissionDetail(delegationRecord.id, { snapshot: delegationSnapshot });
+        observedWaitingWorker ||= delegationList.missions.find((mission) => mission.id === delegationRecord.id)?.state === "waiting-worker";
+        observedWaitingWorker ||= delegationDetail?.state === "waiting-worker";
+        if (["completed", "stalled", "cancelled"].includes(delegationRecord.status)) break;
+      }
+      await wait(150);
+    }
+    const delegationMission = await delegationPromise;
+    assert.ok(delegationMission.dispatchId);
+    const delegationRecord = await readMissionDispatchRecordById(delegationMission.dispatchId);
+    assert.ok(delegationRecord);
+    const delegationTaskPayload = await client.listTasks({ sessionKey }, { timeoutMs: TIMEOUT_MS });
+    const delegationTaskRuntimes = mapOpenClawTaskListToRuntimes(delegationTaskPayload, {
       agentConfig: [{ id: "main", workspace: workspaceDir }],
       agentsList: [{ id: "main", workspace: workspaceDir }],
       resolveWorkspaceId: () => "disposable-workspace"
     });
-    const nativeTasks = buildTaskRecords(taskRuntimes, []);
-    const nativeChildren = taskRuntimes.filter((runtime) => typeof runtime.metadata.parentTaskId === "string" && runtime.metadata.parentTaskId.length > 0);
+    const delegationChildRuntimes = delegationTaskRuntimes.filter((runtime) => typeof runtime.metadata.parentTaskId === "string" && runtime.metadata.parentTaskId.length > 0);
+    if (delegationChildRuntimes.length > 0) {
+      evidence.checks.delegation = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Native sessions_spawn produced a task row with exact parentTaskId evidence through the AgentOS Mission path." };
+      evidence.checks["waiting-worker"] = observedWaitingWorker
+        ? { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission list and detail both observed the parent-idle/child-running state as waiting-worker." }
+        : { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Native child evidence was present, but the bounded observation did not capture a stable parent-idle/child-running interval." };
+    } else {
+      evidence.checks.delegation = { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The deterministic sessions_spawn attempt completed without an exposed native task/child row; no synthetic delegation was created." };
+      evidence.checks["waiting-worker"] = { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The exact runtime exposed no native child task to drive this state." };
+    }
+
+    const nativeTasks = buildTaskRecords(delegationTaskRuntimes, []);
+    const nativeChildren = delegationChildRuntimes;
     evidence.runtimeTaskLedger = {
       taskListRead: true,
       taskCount: nativeTasks.length,
-      taskIds: taskRuntimes.map((runtime) => runtime.taskId).filter(Boolean),
+      taskIds: delegationTaskRuntimes.map((runtime) => runtime.taskId).filter(Boolean),
       childCount: nativeChildren.length
     };
-    evidence.checks.delegation = nativeChildren.length > 0
-      ? { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Native parentTaskId evidence observed." }
-      : { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "The deterministic loopback turn exposed no native task/child row; no synthetic delegation was created." };
-    evidence.checks["waiting-worker"] = nativeChildren.length > 0
-      ? { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "No stable parent-idle/child-running transition was required after the native task row was observed." }
-      : { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "The exact runtime exposed no native child task to drive this state." };
-
-    const dispatchRecord = createMissionDispatchRecord({
-      clientRequestId: `workforce-acceptance-${Date.now()}`,
-      agentId: "main",
-      mission: "Workforce acceptance mission",
-      routedMission: "Workforce acceptance mission",
-      thinking: "medium",
-      requestedModelId: `agentos-fixture/${fixture.modelId}`,
-      workspaceId: "disposable-workspace",
-      workspacePath: workspaceDir,
-      outputDir: path.join(workspaceDir, "output"),
-      outputDirRelative: "output",
-      notesDirRelative: null
-    });
-    const completedRecord = {
-      ...dispatchRecord,
-      status: "completed" as const,
-      sessionId: nativeSession.sessionId ?? null,
-      updatedAt: new Date().toISOString(),
-      runner: { ...dispatchRecord.runner, startedAt: dispatchRecord.submittedAt, finishedAt: new Date().toISOString(), lastHeartbeatAt: new Date().toISOString() },
-      observation: { runtimeId: firstTurn.runId ? `runtime:gateway:${firstTurn.runId}` : null, observedAt: new Date().toISOString() },
-      result: { runId: firstTurn.runId ?? undefined, sessionKey, sessionId: nativeSession.sessionId, status: "completed", summary: firstTurn.result, payloads: [{ text: firstTurn.result, mediaUrl: null }] }
-    };
-    const projectionSnapshot = createProjectionSnapshot(nativeTasks, workspaceDir, sessionKey, firstTurn.runId);
-    const projectionSeed = buildMissionSeeds(projectionSnapshot.tasks, [completedRecord], projectionSnapshot)[0];
-    assert.ok(projectionSeed);
-    const completedProjection = buildMissionProjection({ snapshot: projectionSnapshot, seed: projectionSeed, humanControlItems: [], detail: null });
-    assert.equal(completedProjection.state, "completed");
-    assert.equal(completedProjection.result, firstTurn.result);
-    assert.equal(completedProjection.runtime.sessionIds.includes(sessionKey), true);
-    evidence.checks["result-projection"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Final output came from the native loopback turn and reconstructed as a terminal Workforce projection." };
 
     await runHumanControlJourneys(client, evidence, cleanupRefs);
+    evidence.checks["human-control-product-path"] = {
+      status: "SKIPPED",
+      evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"],
+      detail: "Native Human Control projection and resolution passed, but the safe fixture did not expose a mission-linked task/session request for the AgentOS mutation path. No unrelated approval was relabelled as Mission-linked evidence."
+    };
 
     client.close("workforce acceptance reconnect");
     client = null;
     await stopProcess(gateway);
     gateway = await startGateway({ packageRoot, stateDir, workspaceDir, configPath, port, token });
     client = createClient(port, token, "0.1.0-agentos-workforce-acceptance-reconnect");
+    setOpenClawGatewayClientForTesting(client);
+    setOpenClawAdapterForTesting(null);
+    clearMissionControlCaches();
     const sessionsAfterRestart = await client.listSessions({ search: sessionKey }, { timeoutMs: TIMEOUT_MS });
     const recovered = sessionsAfterRestart.sessions.filter((entry) => entry.key === sessionKey);
     assert.equal(recovered.length, 1);
     const postRestartHistory = await readHistory(client, sessionKey, 1);
     assert.ok(postRestartHistory.some((message) => message.includes("AGENTOS_FIXTURE_FIRST_REPLY")));
-    evidence.checks["gateway-reconnect"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Same exact session key and history survived disposable Gateway restart; no new mission/session was created." };
-    evidence.checks["agentos-restart-projection"] = { status: "PASS", evidence: "DETERMINISTIC_NATIVE_FIXTURE", detail: "Projection was rebuilt from the durable dispatch correlation and re-read native session evidence." };
+    evidence.checks["gateway-reconnect"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The product-path Mission retained the same exact session key and history across disposable Gateway restart." };
+    const rebuiltSnapshot = await getMissionControlSnapshot({ force: true });
+    const rebuiltDetail = await getWorkforceMissionDetail(productMission.dispatchId, { snapshot: rebuiltSnapshot });
+    assert.equal(rebuiltDetail?.state, "completed");
+    assert.equal(rebuiltDetail?.result, finalResult);
+    evidence.checks["agentos-restart-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Workforce projection rebuilt from the persisted product-path dispatch and native session after Gateway restart." };
 
-    evidence.checks["artifacts"] = { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "The deterministic model produced no runtime-created file; no artifact record was fabricated." };
     evidence.checks["cancellation"] = { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "No native task identity was exposed by this turn, so no unrelated session was cancelled." };
     evidence.checks["child-failure"] = { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "No native child task was exposed by the safe deterministic turn." };
   } finally {
@@ -160,10 +270,20 @@ async function main() {
       if (sessionKey) await client.callNative("sessions.delete", { key: sessionKey, deleteTranscript: true }, mutationOptions()).catch(() => {});
       client.close("workforce acceptance cleanup");
     }
+    setOpenClawAdapterForTesting(null);
+    resetOpenClawGatewayClient("workforce acceptance cleanup");
+    restoreEnvironment(parentEnvironment);
     await stopProcess(gateway).catch(() => {});
     await fixture.close().catch(() => {});
     await rm(disposableRoot, { recursive: true, force: true }).catch(() => {});
     evidence.cleanup = { disposableRootRemoved: !(await pathExists(disposableRoot)), gatewayStopped: gateway?.exitCode !== null, productionGatewayTouched: false };
+    const upstreamGapChecks = ["delegation", "waiting-worker", "cancellation", "child-failure", "human-control-product-path"]
+      .filter((id) => evidence.checks[id]?.status === "SKIPPED");
+    evidence.certification = {
+      status: upstreamGapChecks.length > 0 ? "PRODUCT_PATH_CERTIFIED_WITH_UPSTREAM_TASK_GAPS" : "FULLY_CERTIFIED",
+      capabilityRoutingReady: upstreamGapChecks.length > 0,
+      skippedLiveChecks: upstreamGapChecks
+    };
     evidence.summary = summarizeChecks(evidence.checks);
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
@@ -218,33 +338,13 @@ function createEvidence(identity: { version: string; sourceCommit: string; build
     generatedAt: new Date().toISOString(),
     provenance: { repository: "SapienXai/AgentOS", agentosCommit, openClaw: identity, evidenceClasses: ["LIVE_DISPOSABLE_9_2", "DETERMINISTIC_NATIVE_FIXTURE"] },
     runtime: null as Record<string, unknown> | null,
-    checks: {} as Record<string, { status: CheckStatus; evidence: string; detail?: string }>,
+    productPath: null as Record<string, unknown> | null,
+    checks: {} as Record<string, { status: CheckStatus; evidence: string | string[]; detail?: string }>,
     runtimeTaskLedger: null as Record<string, unknown> | null,
     cleanup: null as Record<string, unknown> | null,
+    certification: null as Record<string, unknown> | null,
     summary: { passed: 0, skipped: 0, failed: 0 }
   };
-}
-
-function createProjectionSnapshot(tasks: TaskRecord[], workspaceDir: string, sessionKey: string, runId: string | null): MissionControlSnapshot {
-  const runtime: RuntimeRecord = { id: runId ? `runtime:gateway:${runId}` : "runtime:gateway:accepted", source: "turn", key: sessionKey, title: "Workforce acceptance", subtitle: "completed", status: "completed", updatedAt: Date.now(), ageMs: 0, agentId: "main", workspaceId: "disposable-workspace", sessionId: sessionKey, runId: runId ?? undefined, metadata: { dispatchId: "dispatch-projection" } };
-  return { generatedAt: new Date().toISOString(), revision: 1, mode: "live", diagnostics: { health: "healthy", rpcOk: true, runtimeIssues: [] } as never, presence: [], channelAccounts: [], workspaces: [{ id: "disposable-workspace", name: "Disposable", path: workspaceDir, agentIds: ["main"] } as never], agents: [{ id: "main", name: "Disposable Agent", workspaceId: "disposable-workspace", workspacePath: workspaceDir } as never], models: [], runtimes: [runtime], tasks, agentInbox: [], nativeWork: { suggestions: [] } as never, relationships: [], missionPresets: [], channelRegistry: {} as never, surfaceRuntime: {} as never, surfaceDrift: {} as never };
-}
-
-async function runTurn(client: GatewayClient, sessionKey: string, prompt: string, expected: string) {
-  const frames: GatewayEventFrame[] = [];
-  const subscription = await client.subscribeNativeEvents({ subscribeSessions: true, sessionKeys: [sessionKey] }, { onEvent: (frame) => frames.push(frame) }, readOptions());
-  try {
-    const dispatched = await client.callNative<Record<string, unknown>>("chat.send", { sessionKey, message: prompt, idempotencyKey: `workforce-${Date.now()}` }, mutationOptions());
-    const runId = readString(dispatched.runId);
-    const deadline = Date.now() + 45_000;
-    while (Date.now() < deadline && !frames.some((frame) => normalizeGatewayTurnEvent(frame, sessionKey, runId)?.done)) await wait(100);
-    assert.ok(frames.some((frame) => normalizeGatewayTurnEvent(frame, sessionKey, runId)?.done));
-    const history = await readHistory(client, sessionKey, 1);
-    assert.ok(history.some((message) => message.includes(expected)));
-    return { runId, result: history.find((message) => message.includes(expected)) ?? expected };
-  } finally {
-    subscription.close();
-  }
 }
 
 async function readHistory(client: GatewayClient, sessionKey: string, minimum: number) {
@@ -263,6 +363,26 @@ async function readHistory(client: GatewayClient, sessionKey: string, minimum: n
   return [];
 }
 
+async function waitForDispatchTerminal(
+  dispatchId: string,
+  refreshProjection: () => Promise<void>,
+  timeoutMs = 30_000
+): Promise<MissionDispatchRecord> {
+  const deadline = Date.now() + timeoutMs;
+  let record: MissionDispatchRecord | null = null;
+
+  while (Date.now() < deadline) {
+    record = await readMissionDispatchRecordById(dispatchId);
+    if (record && ["completed", "stalled", "cancelled"].includes(record.status)) {
+      return record;
+    }
+    await refreshProjection();
+    await wait(250);
+  }
+
+  throw new Error(`Mission dispatch ${dispatchId} did not reach a terminal state before the acceptance timeout.`);
+}
+
 async function startGateway(input: { packageRoot: string; stateDir: string; workspaceDir: string; configPath: string; port: number; token: string }) {
   const child = spawn(process.execPath, [path.join(input.packageRoot, "openclaw.mjs"), "gateway", "run", "--port", String(input.port), "--bind", "loopback", "--allow-unconfigured", "--auth", "token", "--token", input.token, "--ws-log", "compact"], { cwd: input.workspaceDir, env: { ...process.env, OPENCLAW_STATE_DIR: input.stateDir, OPENCLAW_CONFIG_PATH: input.configPath, OPENCLAW_GATEWAY_TOKEN: input.token }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
@@ -279,7 +399,7 @@ async function startGateway(input: { packageRoot: string; stateDir: string; work
 }
 
 async function writeConfig(configPath: string, workspaceDir: string, fixtureBaseUrl: string, fixtureModelId: string, token: string) {
-  await writeFile(configPath, `${JSON.stringify({ gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } }, tools: { sessions: { visibility: "tree" }, agentToAgent: { enabled: false, allow: [] } }, agents: { defaults: { workspace: workspaceDir, model: { primary: `agentos-fixture/${fixtureModelId}` } }, list: [{ id: "main", workspace: workspaceDir }] }, models: { mode: "merge", providers: { "agentos-fixture": { baseUrl: fixtureBaseUrl, api: "openai-completions", apiKey: "agentos-workforce-fixture", timeoutSeconds: 30, models: [{ id: fixtureModelId, name: "AgentOS Workforce Fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32_768, maxTokens: 128 }] } } }, cron: { enabled: false } }, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(configPath, `${JSON.stringify({ gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token } }, tools: { sessions: { visibility: "tree" }, agentToAgent: { enabled: false, allow: [] } }, agents: { defaults: { workspace: workspaceDir, model: { primary: `openai/${fixtureModelId}` } }, list: [{ id: "main", workspace: workspaceDir }] }, models: { mode: "merge", providers: { openai: { baseUrl: fixtureBaseUrl, api: "openai-completions", apiKey: "agentos-workforce-fixture", timeoutSeconds: 30, models: [{ id: fixtureModelId, name: "AgentOS Workforce Fixture", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32_768, maxTokens: 128 }] } } }, cron: { enabled: false } }, null, 2)}\n`, { mode: 0o600 });
 }
 
 function createClient(port: number, token: string, clientVersion: string) { return createOfficialBackedOpenClawGatewayClient({ url: `ws://127.0.0.1:${port}`, token, role: "operator", scopes: ["operator.admin", "operator.read", "operator.write", "operator.approvals", "operator.questions"], timeoutMs: TIMEOUT_MS, clientName: "gateway-client", clientVersion, sharedStateMode: "read-only" }); }
@@ -293,6 +413,15 @@ async function pathExists(candidate: string) { try { await readFile(candidate); 
 async function readGitHead() { return (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: process.cwd() })).stdout.trim(); }
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function readString(value: unknown) { return typeof value === "string" && value.trim() ? value.trim() : null; }
+function captureEnvironment(names: string[]) {
+  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
+}
+function restoreEnvironment(values: Record<string, string | undefined>) {
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
 function wait(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function sanitizeText(value: string) { return value.replace(/agentos-workforce-[A-Za-z0-9._-]+/g, "[REDACTED_TOKEN]").replace(/\/Users\/[^\s"']+/g, "[LOCAL_PATH]").replace(/\/tmp\/[^\s"']+/g, "[DISPOSABLE_PATH]").slice(0, 320); }
 function sanitizeEvidence(value: unknown): unknown { if (typeof value === "string") return sanitizeText(value); if (Array.isArray(value)) return value.map(sanitizeEvidence); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, sanitizeEvidence(nested)])); return value; }

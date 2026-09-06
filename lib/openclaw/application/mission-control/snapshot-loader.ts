@@ -14,9 +14,7 @@ import {
 } from "@/lib/openclaw/adapter/gateway-payloads";
 import { GatewayStatusCache } from "@/lib/openclaw/client/gateway-status-cache";
 import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
-import {
-  openClawStateRootPath
-} from "@/lib/openclaw/state/paths";
+import { getOpenClawStateRootPath } from "@/lib/openclaw/state/paths";
 import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
 import { RuntimeDiagnosticsStateCache } from "@/lib/openclaw/state/runtime-diagnostics-cache";
 import type {
@@ -139,7 +137,7 @@ const runtimeDiagnosticsStateCache = new RuntimeDiagnosticsStateCache({
   ttlMs: MISSION_CONTROL_RUNTIME_DIAGNOSTICS_TTL_MS,
   getGeneration: () => missionControlCacheService.getGeneration(),
   loadState: (agentIds, agentDirs) =>
-    inspectOpenClawRuntimeState(openClawStateRootPath, agentIds, {
+    inspectOpenClawRuntimeState(getOpenClawStateRootPath(), agentIds, {
       agentDirs
     })
 });
@@ -197,6 +195,7 @@ async function loadMissionControlSnapshots({
   profile?: SnapshotLoadProfile;
   generation?: number;
 } = {}): Promise<SnapshotPair<MissionControlSnapshot>> {
+  const stateRoot = getOpenClawStateRootPath();
   const localGatewayStatus = await probeLocalGatewayStatus();
   const openclawCliInstalled = await detectOpenClaw();
   const openclawInstalled = openclawCliInstalled || Boolean(localGatewayStatus?.rpc?.ok);
@@ -264,7 +263,7 @@ async function loadMissionControlSnapshots({
       const statusPromise = shouldHydrateStatus
         ? settleStatusPayloadFromOpenClaw(15_000)
         : Promise.resolve(createDeferredPayloadResult<StatusPayload>());
-      const agentConfigPromise = settleAgentConfigFromStateFile(openClawStateRootPath);
+      const agentConfigPromise = settleAgentConfigFromStateFile(stateRoot);
       const configuredModelIdsPromise = readOpenClawConfiguredModelIds().then(
         (configuredModelIds) => ({
           status: "fulfilled",
@@ -315,7 +314,7 @@ async function loadMissionControlSnapshots({
       ] = await Promise.all([
         settleStatusPayloadFromOpenClaw(45_000),
         settleGatewayStatusPayloadFromOpenClaw(45_000),
-        settleAgentConfigFromStateFile(openClawStateRootPath),
+        settleAgentConfigFromStateFile(stateRoot),
         readOpenClawConfiguredModelIds().then(
           (configuredModelIds) => ({
             status: "fulfilled",
@@ -421,7 +420,7 @@ async function loadMissionControlSnapshots({
     const resolvedUpdateStatus = statusHasUpdateRegistry
       ? { value: undefined, reusedCachedValue: false, failed: false }
       : updateStatusPayloadCache.resolve(updateStatusResult);
-    const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, openClawStateRootPath);
+    const agentsList = resolvedAgents.value ?? buildAgentPayloadsFromConfig(agentConfig, stateRoot);
     const modelStatus = mergeModelStatusWithGatewayCredentials(
       mergeModelStatusWithAgentConfigDefaults(resolvedModelStatus.value, agentConfig, agentsList),
       credentialProviderIds

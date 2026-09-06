@@ -2153,7 +2153,15 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         return payload;
       }
 
-      return await this.waitForAgentTurnNative(input, payload, options) ?? payload;
+      const waitedPayload = await this.waitForAgentTurnNative(input, payload, options);
+      return waitedPayload
+        ? {
+            ...payload,
+            ...waitedPayload,
+            sessionKey: waitedPayload.sessionKey ?? payload.sessionKey,
+            sessionId: waitedPayload.sessionId ?? payload.sessionId
+          }
+        : payload;
     } catch (error) {
       this.options.onNativeFailure?.(error, "chat.send");
       const method = error instanceof NativeGatewayRequestError ? error.method : "chat.send";

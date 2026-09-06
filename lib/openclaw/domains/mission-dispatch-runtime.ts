@@ -278,6 +278,7 @@ export function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, recor
   const outputFile = resolveMissionDispatchOutputFile(record);
   const tokenUsage = runtime.tokenUsage ?? extractMissionDispatchTokenUsage(record);
   const modelId = runtime.modelId ?? extractMissionDispatchModelId(record) ?? undefined;
+  const sessionKey = readMissionDispatchSessionKey(record);
   const nextStatus =
     isMissionDispatchTerminalStatus(record.status)
       ? record.status
@@ -319,6 +320,7 @@ export function annotateRuntimeWithMissionDispatch(runtime: RuntimeRecord, recor
       dispatchHeartbeatAt: record.runner.lastHeartbeatAt,
       dispatchObservedAt: record.observation.observedAt,
       dispatchError: record.error,
+      sessionKey: sessionKey ?? runtime.metadata.sessionKey ?? null,
       browserAccountId: record.browserBinding?.accountId ?? null,
       browserProfileName: record.browserBinding?.profileName ?? null,
       browserBindingStatus: record.browserBinding?.status ?? null,
@@ -340,6 +342,7 @@ export function buildMissionDispatchTranscriptRuntime(
   const nowMs = Date.now();
   const runtimeStatus = resolveMissionDispatchRuntimeStatus(record, nowMs);
   const resolvedSessionId = sessionId ?? extractMissionDispatchSessionId(record) ?? hashValue(record.id);
+  const sessionKey = readMissionDispatchSessionKey(record);
   const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
 
   return {
@@ -372,6 +375,7 @@ export function buildMissionDispatchTranscriptRuntime(
       notesDirRelative: record.notesDirRelative,
       error: record.error,
       sessionId: resolvedSessionId,
+      sessionKey,
       pendingCreation: runtimeStatus === "queued" || runtimeStatus === "running",
       bootstrapStage: resolveMissionDispatchBootstrapStage(record, runtimeStatus),
       dispatchStatus: record.status,
@@ -390,6 +394,13 @@ export function buildMissionDispatchTranscriptRuntime(
   };
 }
 
+function readMissionDispatchSessionKey(record: MissionDispatchRecordLike) {
+  const value = record.result && typeof record.result === "object"
+    ? (record.result as Record<string, unknown>).sessionKey
+    : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export function createMissionDispatchRuntime(
   record: MissionDispatchRecordLike,
   nowMs: number
@@ -399,6 +410,7 @@ export function createMissionDispatchRuntime(
   const bootstrapStage = resolveMissionDispatchBootstrapStage(record, runtimeStatus);
   const subtitle = resolveMissionDispatchSubtitle(record, runtimeStatus);
   const sessionId = extractMissionDispatchSessionId(record);
+  const sessionKey = readMissionDispatchSessionKey(record);
   const modelId = extractMissionDispatchModelId(record);
   const tokenUsage = extractMissionDispatchTokenUsage(record);
   const integrityWarning = resolveMissionDispatchIntegrityWarning(record);
@@ -428,6 +440,7 @@ export function createMissionDispatchRuntime(
       notesDirRelative: record.notesDirRelative,
       error: record.error,
       sessionId,
+      sessionKey,
       pendingCreation: runtimeStatus === "queued" || runtimeStatus === "running",
       bootstrapStage,
       dispatchStatus: record.status,

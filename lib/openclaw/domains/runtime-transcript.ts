@@ -1,9 +1,10 @@
 import { access, readFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
+import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { compactMissionText } from "@/lib/openclaw/presenters";
 import { matchesMissionText } from "@/lib/openclaw/runtime-matching";
+import { getOpenClawStateRootPath } from "@/lib/openclaw/state/paths";
 import type {
   MissionControlSnapshot,
   RuntimeCreatedFile,
@@ -164,9 +165,28 @@ export async function getRuntimeOutputForResolvedRuntime(
   const transcriptPath = await resolveRuntimeTranscriptPath(runtime.agentId, runtime.sessionId, agent?.workspacePath);
 
   if (!transcriptPath) {
+    const sessionKey = resolveSessionHistoryKey(runtime);
+
+    if (sessionKey) {
+      try {
+        const payload = await getOpenClawAdapter().getSessionHistory(
+          { sessionKey, limit: 200 },
+          { timeoutMs: 8_000 }
+        );
+        const output = parseRuntimeOutputFromSessionHistory(runtime, payload, agent?.workspacePath);
+
+        if (output.items.length > 0) {
+          return output;
+        }
+      } catch {
+        // A missing native history capability must not replace the honest
+        // missing-output state with an invented result.
+      }
+    }
+
     return createMissingRuntimeOutput(
       runtime,
-      resolveMissingRuntimeOutputMessage(runtime, "No transcript file was found for this runtime session.")
+      resolveMissingRuntimeOutputMessage(runtime, "No transcript file or native session history was found for this runtime session.")
     );
   }
 
@@ -191,13 +211,67 @@ export async function getRuntimeOutputForResolvedRuntime(
   }
 }
 
+/**
+ * OpenClaw 2026.9.x persists session transcripts in its native store and
+ * exposes them through chat.history. Keep the same output parser used for
+ * legacy JSONL transcripts by normalizing that authoritative Gateway payload
+ * in memory. This is read-only: OpenClaw remains the owner of transcript
+ * persistence and completion truth.
+ */
+export function parseRuntimeOutputFromSessionHistory(
+  runtime: RuntimeRecord,
+  payload: unknown,
+  workspacePath?: string
+): RuntimeOutputRecord {
+  const messages = readSessionHistoryMessages(payload);
+
+  if (messages.length === 0) {
+    return createMissingRuntimeOutput(
+      runtime,
+      resolveMissingRuntimeOutputMessage(runtime, "OpenClaw returned no session history for this runtime.")
+    );
+  }
+
+  const normalizedTranscript = messages
+    .map((message, index) => {
+      const record = isRecord(message.message) ? message.message : message;
+      const role = normalizeSessionHistoryRole(record.role);
+
+      if (!role) {
+        return null;
+      }
+
+      const timestamp = readSessionHistoryTimestamp(message) ?? readSessionHistoryTimestamp(record);
+      return JSON.stringify({
+        type: "message",
+        id: readSessionHistoryString(message.id) ?? readSessionHistoryString(record.id) ?? `history:${index}`,
+        ...(timestamp ? { timestamp } : {}),
+        message: {
+          ...record,
+          role
+        }
+      });
+    })
+    .filter((entry): entry is string => Boolean(entry));
+
+  if (normalizedTranscript.length === 0) {
+    return createMissingRuntimeOutput(
+      runtime,
+      resolveMissingRuntimeOutputMessage(runtime, "OpenClaw returned no readable messages for this runtime.")
+    );
+  }
+
+  return parseRuntimeOutput(runtime, normalizedTranscript.join("\n"), workspacePath);
+}
+
 export async function resolveRuntimeTranscriptPath(
   agentId: string,
   sessionId: string,
   workspacePath?: string
 ) {
+  const stateRoot = getOpenClawStateRootPath();
   const candidates = [
-    path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`),
+    path.join(stateRoot, "agents", agentId, "sessions", `${sessionId}.jsonl`),
     workspacePath ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`) : null
   ].filter(Boolean) as string[];
 
@@ -217,6 +291,71 @@ export async function resolveRuntimeTranscriptPath(
   }
 
   return null;
+}
+
+function readSessionHistoryMessages(payload: unknown) {
+  if (!isRecord(payload)) {
+    return [] as Array<Record<string, unknown>>;
+  }
+
+  return [
+    ...readSessionHistoryRecordArray(payload.messages),
+    ...readSessionHistoryRecordArray(payload.turns),
+    ...readSessionHistoryRecordArray(payload.items)
+  ];
+}
+
+function readSessionHistoryRecordArray(value: unknown) {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function normalizeSessionHistoryRole(value: unknown) {
+  if (value === "user" || value === "assistant" || value === "toolResult") {
+    return value;
+  }
+
+  if (value === "tool") {
+    return "toolResult" as const;
+  }
+
+  return null;
+}
+
+function readSessionHistoryString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readSessionHistoryTimestamp(value: unknown) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const timestamp = value.timestamp ?? value.createdAt ?? value.updatedAt ?? value.ts;
+
+  if (typeof timestamp === "string" && timestamp.trim()) {
+    return timestamp.trim();
+  }
+
+  return typeof timestamp === "number" && Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
+}
+
+function resolveSessionHistoryKey(runtime: RuntimeRecord) {
+  const metadataKeyCandidates = [
+    runtime.metadata.sessionKey,
+    runtime.metadata.openClawSessionKey,
+    runtime.metadata.gatewaySessionKey
+  ];
+  const metadataKey = metadataKeyCandidates.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  if (metadataKey) {
+    return metadataKey.trim();
+  }
+
+  return runtime.key.startsWith("agent:") ? runtime.key : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function extractTranscriptTurns(raw: string, runtime: RuntimeRecord, workspacePath?: string) {
@@ -764,8 +903,9 @@ async function resolveRuntimeTranscriptPathFromSessionCatalog(
   workspacePath?: string
 ) {
   const expectedSessionKey = `agent:${agentId}:explicit:${sessionId}`;
+  const stateRoot = getOpenClawStateRootPath();
   const catalogCandidates = [
-    path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", "sessions.json"),
+    path.join(stateRoot, "agents", agentId, "sessions", "sessions.json"),
     workspacePath ? path.join(workspacePath, ".openclaw", "agents", agentId, "sessions", "sessions.json") : null
   ].filter(Boolean) as string[];
 

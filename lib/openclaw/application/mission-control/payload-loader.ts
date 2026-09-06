@@ -14,13 +14,14 @@ import {
   settleSessionsPayloadFromSessionCatalogs,
   type SessionsPayload
 } from "@/lib/openclaw/domains/session-catalog";
-import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
+import { getOpenClawStateRootPath } from "@/lib/openclaw/state/paths";
 
 const gatewayRemoteUrlConfigKey = "gateway.remote.url";
 
 export async function readGatewayRemoteUrlConfig(): Promise<PromiseSettledResult<unknown>> {
   try {
-    const rawConfig = await readFile(path.join(openClawStateRootPath, "openclaw.json"), "utf8");
+    const stateRoot = getOpenClawStateRootPath();
+    const rawConfig = await readFile(path.join(stateRoot, "openclaw.json"), "utf8");
     const config = JSON.parse(rawConfig) as unknown;
 
     return {
@@ -52,7 +53,7 @@ export async function settleAgentPayloadFromOpenClaw(
 
     return {
       status: "fulfilled",
-      value: buildAgentPayloadsFromGatewayList(payload, agentConfig, openClawStateRootPath)
+      value: buildAgentPayloadsFromGatewayList(payload, agentConfig, getOpenClawStateRootPath())
     };
   } catch (reason) {
     return {
@@ -83,7 +84,7 @@ export async function settleSessionsPayloadFromOpenClaw(
       }
     };
   } catch {
-    return settleSessionsPayloadFromSessionCatalogs(agentConfig, openClawStateRootPath);
+    return settleSessionsPayloadFromSessionCatalogs(agentConfig, getOpenClawStateRootPath());
   }
 }
 

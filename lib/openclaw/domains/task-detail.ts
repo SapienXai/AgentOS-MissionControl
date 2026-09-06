@@ -41,7 +41,8 @@ export async function buildTaskDetailFromTaskRecord(
   const directRuns = task.runtimeIds
     .map((runtimeId) => snapshot.runtimes.find((runtime) => runtime.id === runtimeId))
     .filter((runtime): runtime is RuntimeRecord => Boolean(runtime));
-  const runs = collectTaskDetailRuns(task, directRuns, snapshot.runtimes)
+  const collectedRuns = collectTaskDetailRuns(task, directRuns, snapshot.runtimes);
+  const runs = (dispatchRecord ? scopeRunsToDispatch(collectedRuns, dispatchRecord) : collectedRuns)
     .sort(sortRuntimesByUpdatedAtDesc);
 
   return buildTaskDetailFromResolvedRuns(task, runs, snapshot, dispatchRecord);
@@ -52,9 +53,8 @@ export async function buildTaskDetailFromDispatchRecord(
   snapshot: MissionControlSnapshot
 ): Promise<TaskDetailRecord> {
   const agentNameById = new Map(snapshot.agents.map((agent) => [agent.id, formatAgentDisplayName(agent)]));
-  const dispatchRuntimes = snapshot.runtimes
-    .filter((runtime) => matchesDispatchRecordRuntime(runtime, dispatchRecord))
-    .sort(sortRuntimesByUpdatedAtDesc);
+  const dispatchRuntimes = scopeRunsToDispatch(snapshot.runtimes, dispatchRecord);
+  dispatchRuntimes.sort(sortRuntimesByUpdatedAtDesc);
   const fallbackRuntime =
     dispatchRuntimes[0] ??
     (await buildObservedMissionDispatchRuntime(dispatchRecord)) ??
@@ -63,6 +63,34 @@ export async function buildTaskDetailFromDispatchRecord(
   const task = buildTaskRecord(`dispatch:${dispatchRecord.id}`, runs, agentNameById);
 
   return buildTaskDetailFromResolvedRuns(task, runs, snapshot, dispatchRecord);
+}
+
+function matchesExactDispatchRuntime(runtime: RuntimeRecord, dispatchRecord: MissionDispatchRecord) {
+  const runtimeDispatchId = typeof runtime.metadata.dispatchId === "string" ? runtime.metadata.dispatchId.trim() : "";
+  const runtimeObservationId = dispatchRecord.observation.runtimeId?.trim() || "";
+  return runtimeDispatchId === dispatchRecord.id || runtime.runId === dispatchRecord.id || runtime.id === runtimeObservationId;
+}
+
+function scopeRunsToDispatch(runtimes: RuntimeRecord[], dispatchRecord: MissionDispatchRecord) {
+  const exactDispatchRuntimes = runtimes.filter((runtime) => matchesExactDispatchRuntime(runtime, dispatchRecord));
+  const selected = exactDispatchRuntimes.length > 0
+    ? exactDispatchRuntimes
+    : runtimes.filter((runtime) => matchesDispatchRecordRuntime(runtime, dispatchRecord));
+
+  return selected.map((runtime) => ({
+    ...runtime,
+    metadata: {
+      ...runtime.metadata,
+      dispatchId: dispatchRecord.id,
+      mission: dispatchRecord.mission,
+      routedMission: dispatchRecord.routedMission,
+      dispatchSubmittedAt: dispatchRecord.submittedAt,
+      sessionKey:
+        typeof dispatchRecord.result?.sessionKey === "string"
+          ? dispatchRecord.result.sessionKey
+          : runtime.metadata.sessionKey
+    }
+  }));
 }
 
 async function buildTaskDetailFromResolvedRuns(

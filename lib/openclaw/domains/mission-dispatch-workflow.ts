@@ -14,6 +14,7 @@ import {
   normalizeMissionAbortReason,
   readMissionDispatchRecords,
   readMissionDispatchRecordById,
+  reconcileMissionDispatchRuntimeState,
   stopMissionDispatchChildProcess,
   writeMissionDispatchRecord
 } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
@@ -31,6 +32,7 @@ import type {
   MissionResponse,
   MissionSubmission
 } from "@/lib/openclaw/types";
+import type { RuntimeRecord } from "@/lib/openclaw/types";
 import {
   finalizeBrowserTaskBinding,
   prepareBrowserTaskBinding
@@ -319,10 +321,64 @@ async function submitMissionDispatchOnce(
           runtimeId: payload.runId ? `runtime:gateway:${payload.runId}` : dispatchRecord.observation.runtimeId,
           observedAt: now
         },
-        result: payload,
+        // The Gateway's bounded agent.wait response may omit the session key
+        // even though the native turn was addressed to this exact key. Keep
+        // the immutable request identity alongside the authoritative Gateway
+        // payload; never synthesize a session id that OpenClaw did not return.
+        result: {
+          ...payload,
+          sessionKey: payload.sessionKey ?? sessionKey
+        },
         error: nextStatus === "stalled" ? resolveGatewayMissionDispatchError(payload) : null
       };
       await writeMissionDispatchRecord(dispatchRecord);
+
+      if (dispatchRecord.sessionId) {
+        // OpenClaw 2026.9.x stores the authoritative transcript in its native
+        // session store. Reuse the normal reconciliation path immediately
+        // after admission so a fast native completion is persisted before the
+        // product mutation returns, without creating a second execution path.
+        // The native history commit can trail the bounded agent.wait response
+        // by a few milliseconds, so repeat only the read/reconcile operation;
+        // never submit another turn.
+        const observedRuntime = {
+          id: dispatchRecord.observation.runtimeId ?? `runtime:gateway:${dispatchRecord.id}`,
+          source: "turn",
+          key: sessionKey,
+          title: dispatchRecord.mission.slice(0, 80) || "Mission runtime",
+          subtitle: "OpenClaw Gateway mission runtime",
+          status: "running",
+          updatedAt: Date.parse(dispatchRecord.updatedAt),
+          ageMs: 0,
+          agentId: dispatchRecord.agentId,
+          workspaceId: dispatchRecord.workspaceId ?? undefined,
+          workspacePath: dispatchRecord.workspacePath ?? undefined,
+          sessionId: dispatchRecord.sessionId,
+          runId: payload.runId,
+          metadata: {
+            dispatchId: dispatchRecord.id,
+            mission: dispatchRecord.mission,
+            routedMission: dispatchRecord.routedMission,
+            dispatchSubmittedAt: dispatchRecord.submittedAt,
+            sessionKey
+          }
+        } satisfies RuntimeRecord;
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          await reconcileMissionDispatchRuntimeState(dispatchRecord, observedRuntime);
+          dispatchRecord = (await readMissionDispatchRecordById(dispatchRecord.id)) ?? dispatchRecord;
+
+          if (
+            dispatchRecord.status !== "completed" ||
+            extractMissionCommandPayloads(dispatchRecord.result).length > 0
+          ) {
+            break;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+
       if (isMissionDispatchTerminalStatus(dispatchRecord.status) && dispatchRecord.browserBinding) {
         dispatchRecord = await finalizeDispatchBrowserBinding(dispatchRecord);
       }

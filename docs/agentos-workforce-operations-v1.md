@@ -21,6 +21,11 @@ source of truth.
 - A repeated client request id converges to the existing dispatch record before
   a new sidecar or native turn is created. The dispatch id is never silently
   relinked to another runtime.
+- The product-path acceptance harness calls `submitMission` with the real
+  dispatch sidecar and Gateway client. It does not construct a
+  `MissionDispatchRecord` for product-path proof. Evidence is labelled
+  `APPLICATION_PATH`, `LIVE_DISPOSABLE_9_2`, `DETERMINISTIC_NATIVE_FIXTURE`,
+  or `BROWSER` rather than collapsed into one test status.
 
 ## Presentation state
 
@@ -48,6 +53,14 @@ Native root `completed` and `cancelled` evidence wins over stale sidecar,
 attention, or reconnecting evidence. Child runtime statuses are never fed into
 the root-active slot: `activeRuntimeStatuses` is root-only and child activity
 comes from exact `parentTaskId`/owner/session linkage.
+
+OpenClaw 2026.9.x stores authoritative session history in its native session
+store rather than the legacy JSONL transcript path. AgentOS therefore reads
+`chat.history` through the existing Gateway adapter and normalizes that payload
+in memory with the same output parser used for legacy transcripts. This is a
+read-only compatibility path; OpenClaw still owns history, completion, and
+runtime identity. A bounded retry handles the small interval in which
+`agent.wait` has returned but the native history commit is not yet visible.
 
 ## Delegation and handoff
 
@@ -90,6 +103,12 @@ plain text does not become an invented artifact record. Absolute artifact paths
 are reduced to a safe path relative to the mission output/workspace root, and
 paths outside those roots or containing traversal are omitted.
 
+The exact disposable 2026.9.2 fixture can execute the native `write` tool and
+the product-path harness records a real bounded artifact when OpenClaw exposes
+it. The same fixture can request native `sessions_spawn`; if OpenClaw does not
+expose a task row with `parentTaskId`, delegation and waiting-worker remain
+explicitly skipped rather than being represented by an AgentOS-created child.
+
 ## Reconnect, reload, and actions
 
 The shared Mission Control event stream invalidates/reloads the projection.
@@ -122,3 +141,19 @@ The legacy `/tasks` surface remains available as advanced runtime/task
 diagnostics. Workforce/Missions is the canonical human-level operations home;
 Dashboard and Agent pages may link into it but do not create parallel mission
 queues.
+
+## Certification boundary
+
+The checked-in evidence artifact records the exact disposable OpenClaw 2026.9.2
+identity, the real `submitMission` product path, persisted sidecar discovery,
+native result reconciliation, idempotent replay, artifact projection, Gateway
+restart, and AgentOS projection reconstruction. The fixture also attempts
+native `sessions_spawn`, but the certified runtime exposes no task row or
+`parentTaskId` for that safe turn; delegation, waiting-worker, cancellation, and
+child-failure therefore remain explicitly skipped. Native Human Control
+projection/resolution is certified separately; a mission-linked product-path
+approval remains skipped when the fixture cannot provide the required native
+task/session linkage. The resulting status is
+`PRODUCT_PATH_CERTIFIED_WITH_UPSTREAM_TASK_GAPS`, with Capability Routing +
+Workforce Planning v1 ready to begin once those upstream task fixtures are
+available.

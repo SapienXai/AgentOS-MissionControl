@@ -5,7 +5,7 @@ import { getRecentOpenClawCommandDiagnostics, getResolvedOpenClawBin } from "@/l
 import { settleGatewayStatusPayloadFromOpenClaw } from "@/lib/openclaw/adapter/gateway-payloads";
 import { GatewayStatusCache } from "@/lib/openclaw/client/gateway-status-cache";
 import { settleAgentConfigFromStateFile } from "@/lib/openclaw/state/agent-config-payload";
-import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
+import { getOpenClawStateRootPath } from "@/lib/openclaw/state/paths";
 import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
 import { buildRuntimeDiagnosticsFromState } from "@/lib/openclaw/adapter/runtime-diagnostics-adapter";
 import {
@@ -51,10 +51,11 @@ export async function buildSystemReadinessSnapshot({
 }): Promise<MissionControlSnapshot> {
   const gatewayStatusResult = await settleGatewayStatusPayloadFromOpenClaw(3_000);
   const gatewayStatus = gatewayStatusCache.resolve(gatewayStatusResult).value ?? localGatewayStatus;
-  const agentConfigResult = await settleAgentConfigFromStateFile(openClawStateRootPath);
+  const stateRoot = getOpenClawStateRootPath();
+  const agentConfigResult = await settleAgentConfigFromStateFile(stateRoot);
   const agentConfig = agentConfigResult.status === "fulfilled" ? agentConfigResult.value : [];
   const runtimeState = await inspectOpenClawRuntimeState(
-    openClawStateRootPath,
+    stateRoot,
     agentConfig.map((agent) => agent.id).filter(Boolean),
     {
       agentDirs: Object.fromEntries(

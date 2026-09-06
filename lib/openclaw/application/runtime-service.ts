@@ -27,7 +27,7 @@ import {
   resolveOpenAiAuthRecoveryMessage
 } from "@/lib/openclaw/model-auth-errors";
 import { resolveOpenClawBin } from "@/lib/openclaw/cli";
-import { openClawStateRootPath } from "@/lib/openclaw/state/paths";
+import { getOpenClawStateRootPath } from "@/lib/openclaw/state/paths";
 import { inspectOpenClawRuntimeState } from "@/lib/openclaw/state/runtime-state";
 import { resolveOpenClawModelReadinessIssue } from "@/lib/openclaw/readiness";
 import type {
@@ -62,7 +62,7 @@ async function assertOpenClawRuntimeStateAccess(
   agentId: string | null,
   agentDir?: string | null
 ) {
-  const runtimeState = await inspectOpenClawRuntimeState(openClawStateRootPath, agentId ? [agentId] : [], {
+  const runtimeState = await inspectOpenClawRuntimeState(getOpenClawStateRootPath(), agentId ? [agentId] : [], {
     agentDirs: agentId
       ? {
           [agentId]: agentDir

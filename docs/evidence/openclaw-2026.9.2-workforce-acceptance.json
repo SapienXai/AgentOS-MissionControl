@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "artifactType": "openclaw-workforce-acceptance",
-  "generatedAt": "2026-09-06T16:31:40.559Z",
+  "generatedAt": "2026-09-06T18:09:38.643Z",
   "provenance": {
     "repository": "SapienXai/AgentOS",
-    "agentosCommit": "b6eee5a819c35417d5d7f1b5e1b245bc8603b262",
+    "agentosCommit": "dda41c68100ab0e414e5c9423d9cf3c1e47d7e1b",
     "openClaw": {
       "version": "2026.9.2",
       "sourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
@@ -31,30 +31,96 @@
     "isolatedState": true,
     "securityDefaults": "tools.sessions.visibility=tree; tools.agentToAgent.enabled=false; tools.agentToAgent.allow=[]"
   },
+  "productPath": {
+    "dispatchCreatedBy": "submitMission",
+    "workflow": "submitMission -> submitMissionDispatch -> writeMissionDispatchRecord -> OpenClaw Gateway -> Workforce projection",
+    "manualDispatchInjection": false,
+    "persistedSidecar": true,
+    "missionListFromPersistedSidecar": true,
+    "missionDetailFromPersistedSidecar": true,
+    "requestId": "workforce-product-path-1788718183016",
+    "dispatchId": "dispatch-db4814ff-db38-41d7-a89a-c0c51e0b1824",
+    "agentId": "main",
+    "workspaceId": "workspace",
+    "sessionKey": "agent:main:main",
+    "runId": "dispatch-db4814ff-db38-41d7-a89a-c0c51e0b1824"
+  },
   "checks": {
     "runtime-identity": {
       "status": "PASS",
       "evidence": "LIVE_DISPOSABLE_9_2"
     },
+    "product-path-mission-create": {
+      "status": "PASS",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Canonical submitMission created and persisted the dispatch; the native Gateway populated runtime identity."
+    },
+    "product-path-api-list": {
+      "status": "PASS",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Mission list discovered the persisted dispatch and matched detail state from the same snapshot."
+    },
+    "product-path-api-detail": {
+      "status": "PASS",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Mission detail resolved by dispatch id from persisted sidecar plus current native snapshot."
+    },
     "mission-basic": {
       "status": "PASS",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "Native session, turn, result, and exact session identity observed."
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Real AgentOS submission reached one native session/run and completed with authoritative output."
     },
-    "delegation": {
-      "status": "SKIPPED",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "The deterministic loopback turn exposed no native task/child row; no synthetic delegation was created."
-    },
-    "waiting-worker": {
-      "status": "SKIPPED",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "The exact runtime exposed no native child task to drive this state."
+    "product-path-idempotency": {
+      "status": "PASS",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Replay returned the same persisted dispatch without a second native model completion; altered request identity failed closed."
     },
     "result-projection": {
       "status": "PASS",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "Final output came from the native loopback turn and reconstructed as a terminal Workforce projection."
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Final output came from the native Gateway result persisted by the canonical Mission workflow and reconstructed in Mission detail."
+    },
+    "artifacts": {
+      "status": "PASS",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "OpenClaw executed the native write tool and Workforce projected the bounded runtime-created artifact."
+    },
+    "delegation": {
+      "status": "SKIPPED",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "The deterministic sessions_spawn attempt completed without an exposed native task/child row; no synthetic delegation was created."
+    },
+    "waiting-worker": {
+      "status": "SKIPPED",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "The exact runtime exposed no native child task to drive this state."
     },
     "multiple-human-control": {
       "status": "PASS",
@@ -66,20 +132,29 @@
       "evidence": "LIVE_DISPOSABLE_9_2",
       "detail": "Native approval was projected, denied safely, and disappeared from the pending inventory."
     },
+    "human-control-product-path": {
+      "status": "SKIPPED",
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Native Human Control projection and resolution passed, but the safe fixture did not expose a mission-linked task/session request for the AgentOS mutation path. No unrelated approval was relabelled as Mission-linked evidence."
+    },
     "gateway-reconnect": {
       "status": "PASS",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "Same exact session key and history survived disposable Gateway restart; no new mission/session was created."
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "The product-path Mission retained the same exact session key and history across disposable Gateway restart."
     },
     "agentos-restart-projection": {
       "status": "PASS",
-      "evidence": "DETERMINISTIC_NATIVE_FIXTURE",
-      "detail": "Projection was rebuilt from the durable dispatch correlation and re-read native session evidence."
-    },
-    "artifacts": {
-      "status": "SKIPPED",
-      "evidence": "LIVE_DISPOSABLE_9_2",
-      "detail": "The deterministic model produced no runtime-created file; no artifact record was fabricated."
+      "evidence": [
+        "APPLICATION_PATH",
+        "LIVE_DISPOSABLE_9_2"
+      ],
+      "detail": "Workforce projection rebuilt from the persisted product-path dispatch and native session after Gateway restart."
     },
     "cancellation": {
       "status": "SKIPPED",
@@ -103,8 +178,19 @@
     "gatewayStopped": true,
     "productionGatewayTouched": false
   },
+  "certification": {
+    "status": "PRODUCT_PATH_CERTIFIED_WITH_UPSTREAM_TASK_GAPS",
+    "capabilityRoutingReady": true,
+    "skippedLiveChecks": [
+      "delegation",
+      "waiting-worker",
+      "cancellation",
+      "child-failure",
+      "human-control-product-path"
+    ]
+  },
   "summary": {
-    "passed": 7,
+    "passed": 12,
     "skipped": 5,
     "failed": 0
   }

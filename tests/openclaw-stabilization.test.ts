@@ -55,7 +55,8 @@ import {
 } from "@/lib/openclaw/domains/runtime-history";
 import {
   mapSessionToRuntimes,
-  parseRuntimeOutput
+  parseRuntimeOutput,
+  parseRuntimeOutputFromSessionHistory
 } from "@/lib/openclaw/domains/runtime-transcript";
 import { mapSessionCatalogEntryToRuntime } from "@/lib/openclaw/domains/runtime-normalizer";
 import { resolveModelReadiness } from "@/lib/openclaw/domains/control-plane-normalization";
@@ -2847,6 +2848,53 @@ test("runtime transcript parser reads OpenClaw session content strings and tool 
       displayPath: "deliverables/faros.md"
     }
   ]);
+});
+
+test("runtime transcript parser reads authoritative OpenClaw native session history", () => {
+  const runtime = {
+    id: "runtime:gateway:native-history-1",
+    source: "turn",
+    key: "agent:main:main",
+    title: "Native Gateway runtime",
+    subtitle: "completed",
+    status: "completed",
+    updatedAt: Date.parse("2026-04-13T00:01:00.000Z"),
+    ageMs: 0,
+    agentId: "main",
+    sessionId: "session-native-1",
+    runId: "dispatch-native-1",
+    metadata: {
+      mission: "Prepare the launch brief",
+      dispatchSubmittedAt: "2026-04-13T00:00:00.000Z"
+    }
+  } as unknown as RuntimeRecord;
+  const output = parseRuntimeOutputFromSessionHistory(runtime, {
+    messages: [
+      {
+        role: "user",
+        content: "Prepare the launch brief",
+        timestamp: Date.parse("2026-04-13T00:00:01.000Z")
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Launch brief is ready." }],
+        stopReason: "stop",
+        timestamp: Date.parse("2026-04-13T00:00:04.000Z"),
+        usage: { input: 10, output: 8, totalTokens: 18 }
+      }
+    ]
+  });
+
+  assert.equal(output.status, "available");
+  assert.equal(output.finalText, "Launch brief is ready.");
+  assert.equal(output.stopReason, "stop");
+  assert.equal(output.finalTimestamp, "2026-04-13T00:00:04.000Z");
+  assert.deepEqual(output.tokenUsage, {
+    input: 10,
+    output: 8,
+    total: 18,
+    cacheRead: 0
+  });
 });
 
 test("runtime transcript parser recovers follow-up turns from the stored turn prompt", () => {
