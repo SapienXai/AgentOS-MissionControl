@@ -8,7 +8,8 @@ import {
   getNativeDoctorSnapshot,
   normalizeNativeUpdateRunOutcome,
   reconcileNativeDoctorMutation,
-  verifyFreshRestartState
+  verifyFreshRestartState,
+  verifyFreshUpdateState
 } from "@/lib/openclaw/application/native-doctor-service";
 import type { OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import type { OpenClawGatewayClient } from "@/lib/openclaw/client/types";
@@ -75,6 +76,7 @@ test("native Doctor keeps config application and runtime health truthful", async
 
 test("native Doctor keeps status separate and sends probe only when requested", async () => {
   let probe: boolean | undefined;
+  let refreshCheckout: boolean | undefined;
   const snapshot = await getNativeDoctorSnapshot({
     adapter: createAdapter({
       async getNativeHealth(options) {
@@ -83,15 +85,21 @@ test("native Doctor keeps status separate and sends probe only when requested", 
       },
       async getNativeStatus() {
         return { runtimeVersion: "2026.9.1", gateway: { reachable: true, mode: "local" } };
+      },
+      async getNativeUpdateStatus(options) {
+        refreshCheckout = options?.refreshCheckout;
+        return { sentinel: null, updateAvailable: null, effectiveChannel: "stable" as const };
       }
     }),
-    probe: true
+    probe: true,
+    refreshCheckout: true
   });
 
   assert.equal(probe, true);
   assert.equal(snapshot.status.runtimeVersion, "2026.9.1");
   assert.equal(snapshot.status.gatewayReachable, true);
   assert.equal(snapshot.status.gatewayMode, "local");
+  assert.equal(refreshCheckout, true);
 });
 
 test("config revision mismatch is restart-required, not silently applied", async () => {
@@ -335,16 +343,62 @@ test("ambiguous native mutations are surfaced without a blind retry", async () =
 test("confirmation is tied to the current native connection and channel", () => {
   assert.equal(
     confirmationMatches(
-      { connectionId: "connection-1", effectiveChannel: "stable" },
-      { connectionId: "connection-1", effectiveChannel: "stable" }
+      { connectionId: "connection-1", effectiveChannel: "stable", availableVersion: "2026.9.2" },
+      { connectionId: "connection-1", effectiveChannel: "stable", availableVersion: "2026.9.2" }
     ),
     true
   );
   assert.equal(
     confirmationMatches(
-      { connectionId: "connection-1", effectiveChannel: "stable" },
-      { connectionId: "connection-2", effectiveChannel: "stable" }
+      { connectionId: "connection-1", effectiveChannel: "stable", availableVersion: "2026.9.2" },
+      { connectionId: "connection-2", effectiveChannel: "stable", availableVersion: "2026.9.2" }
     ),
     false
   );
+  assert.equal(
+    confirmationMatches(
+      { connectionId: "connection-1", effectiveChannel: "stable", availableVersion: "2026.9.2" },
+      { connectionId: "connection-1", effectiveChannel: "stable", availableVersion: "2026.9.3" }
+    ),
+    false
+  );
+});
+
+test("fresh native update verification rejects a version mismatch", async () => {
+  const before = await getNativeDoctorSnapshot({
+    adapter: createAdapter({
+      async getNativeStatus() {
+        return { runtimeVersion: "2026.9.1" };
+      },
+      async getNativeUpdateStatus() {
+        return {
+          sentinel: null,
+          updateAvailable: {
+            currentVersion: "2026.9.1",
+            latestVersion: "2026.9.2",
+            channel: "stable"
+          },
+          effectiveChannel: "stable" as const
+        };
+      }
+    })
+  });
+  const after = await getNativeDoctorSnapshot({
+    adapter: createAdapter({
+      async getNativeStatus() {
+        return { runtimeVersion: "2026.9.1" };
+      }
+    })
+  });
+
+  assert.equal(verifyFreshUpdateState(before, after).status, "unknown");
+
+  const verifiedAfter = await getNativeDoctorSnapshot({
+    adapter: createAdapter({
+      async getNativeStatus() {
+        return { runtimeVersion: "2026.9.2" };
+      }
+    })
+  });
+  assert.equal(verifyFreshUpdateState(before, verifiedAfter).status, "verified");
 });

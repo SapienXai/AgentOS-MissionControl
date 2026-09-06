@@ -18,6 +18,21 @@ test("canonical Updates page reads native status and runs native update.run", ()
   assert.doesNotMatch(source, /isitstable\.iclaw\.digital[\s\S]{0,800}(?:update|install|run)/i);
 });
 
+test("normal native update endpoint enforces the shared server policy and target confirmation", () => {
+  const route = read("app/api/openclaw/native-doctor/route.ts");
+  const presentation = read("lib/openclaw/update-presentation.ts");
+  const policyService = read("lib/openclaw/application/normal-update-policy-service.ts");
+
+  assert.match(route, /getNormalOpenClawUpdatePolicy/);
+  assert.match(route, /guardNormalOpenClawUpdate/);
+  assert.match(route, /refreshCheckout:\s*true/);
+  assert.match(route, /action:\s*z\.literal\("update\.run"\)/);
+  assert.match(route, /availableVersion:\s*z\.string\(\)\.nullable\(\)/);
+  assert.match(presentation, /resolveOpenClawUpdateDecision/);
+  assert.doesNotMatch(presentation, /compareVersionStrings/);
+  assert.match(policyService, /readOpenClawCompatibilityManifestOverride/);
+});
+
 test("Settings and Native Doctor link to Updates without duplicate normal update actions", () => {
   const settings = read("components/mission-control/mission-control-shell.settings.tsx");
   const controlCenter = read("components/mission-control/settings-control-center.tsx");

@@ -9,17 +9,20 @@ import {
   getNativeDoctorSnapshot,
   reconcileNativeDoctorMutation
 } from "@/lib/openclaw/application/native-doctor-service";
+import { getNormalOpenClawUpdatePolicy } from "@/lib/openclaw/application/normal-update-policy-service";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { requireAgentOsProductPermission } from "@/lib/security/agentos-product-authorization";
 import { recordAgentOsAuditEvent } from "@/lib/security/agentos-audit";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
+import { guardNormalOpenClawUpdate } from "@/lib/openclaw/update-presentation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const confirmationSchema = z.object({
   connectionId: z.string().nullable(),
-  effectiveChannel: z.string().nullable()
+  effectiveChannel: z.string().nullable(),
+  availableVersion: z.string().nullable()
 }).strict();
 
 const actionSchema = z.discriminatedUnion("action", [
@@ -60,10 +63,12 @@ export async function GET(request: Request) {
   if ("response" in permission) return permission.response;
 
   const probe = new URL(request.url).searchParams.get("probe") === "1";
-  const snapshot = await getNativeDoctorSnapshot(probe ? { probe: true } : {});
+  const snapshot = await getNativeDoctorSnapshot(probe ? { probe: true, refreshCheckout: true } : {});
+  const policy = await getNormalOpenClawUpdatePolicy(snapshot);
   return NextResponse.json(redactSecrets({
     snapshot,
-    confirmation: buildNativeDoctorConfirmation(snapshot)
+    confirmation: buildNativeDoctorConfirmation(snapshot),
+    policy
   }), {
     headers: { "Cache-Control": "no-store" }
   });
@@ -83,11 +88,71 @@ export async function POST(request: Request) {
 
   try {
     const adapter = getOpenClawAdapter();
-    const current = await getNativeDoctorSnapshot({ adapter });
+    const current = await getNativeDoctorSnapshot({
+      adapter,
+      ...(input.action.startsWith("update.") ? { refreshCheckout: true } : {})
+    });
+    const policy = input.action === "update.run" || input.action === "update.hold"
+      ? await getNormalOpenClawUpdatePolicy(current)
+      : null;
+    const confirmationMatchesCurrent = input.action === "gateway.suspend.status"
+      ? true
+      : confirmationMatches(input.confirmation, buildNativeDoctorConfirmation(current));
+    const recordRejectedMutation = () => recordAgentOsAuditEvent({
+      actor: permission.actor,
+      operation: `openclaw.${input.action}`,
+      targetKind: "gateway",
+      targetId: current.identity.connectionId ?? "current-gateway",
+      result: "failed"
+    }).catch(() => {});
+
+    if (input.action === "update.run" && policy) {
+      const gate = guardNormalOpenClawUpdate({
+        policy,
+        confirmationMatches: confirmationMatchesCurrent
+      });
+      if (!gate.allowed) {
+        await recordRejectedMutation();
+        return NextResponse.json(redactSecrets({
+          error: gate.error,
+          code: gate.code,
+          policy
+        }), {
+          status: gate.status,
+          headers: { "Cache-Control": "no-store" }
+        });
+      }
+    }
+
+    if (input.action === "update.hold" && policy && !confirmationMatchesCurrent) {
+      await recordRejectedMutation();
+      return NextResponse.json(
+        redactSecrets({
+          error: "The OpenClaw Gateway identity, update channel, or available target changed. Refresh before retrying.",
+          code: "UPDATE_CONFIRMATION_STALE",
+          policy
+        }),
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    if (input.action === "update.hold" && policy && !policy.canHoldUpdate) {
+      await recordRejectedMutation();
+      return NextResponse.json(
+        redactSecrets({
+          error: "OpenClaw does not report an active automatic update campaign that can be held.",
+          code: "UPDATE_HOLD_NOT_AVAILABLE",
+          policy
+        }),
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     if (input.action !== "gateway.suspend.status") {
-      if (!confirmationMatches(input.confirmation, buildNativeDoctorConfirmation(current))) {
+      if (!confirmationMatchesCurrent) {
+        await recordRejectedMutation();
         return NextResponse.json(
-          { error: "The OpenClaw Gateway identity or update channel changed. Refresh before retrying." },
+          { error: "The OpenClaw Gateway identity, update channel, or available target changed. Refresh before retrying.", code: "UPDATE_CONFIRMATION_STALE" },
           { status: 409 }
         );
       }

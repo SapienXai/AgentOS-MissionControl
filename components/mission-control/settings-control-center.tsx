@@ -1202,7 +1202,7 @@ export function SettingsControlCenter(
                   <SummaryTile
                     label="OpenClaw"
                     value={snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Unknown"}
-                    detail={recommendedVersion ? `AgentOS certified through ${formatVersionValue(recommendedVersion)}` : "AgentOS certification unavailable"}
+                    detail={recommendedVersion ? `AgentOS certified version ${formatVersionValue(recommendedVersion)}` : "AgentOS certification unavailable"}
                     surfaceTheme={surfaceTheme}
                     accent
                     compact
@@ -1272,7 +1272,7 @@ export function SettingsControlCenter(
                     <Metric
                       label="Current version"
                       value={snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Unknown"}
-                      badge={recommendedVersion ? `Certified through ${formatVersionValue(recommendedVersion)}` : "Certification unavailable"}
+                      badge={recommendedVersion ? `Certified version ${formatVersionValue(recommendedVersion)}` : "Certification unavailable"}
                       surfaceTheme={surfaceTheme}
                     />
                     <SettingsInlineLink href="/settings#openclaw" label="Open settings" surfaceTheme={surfaceTheme} onActivate={() => setActiveSection("openclaw")} />

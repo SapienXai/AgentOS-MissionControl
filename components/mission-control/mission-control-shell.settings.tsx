@@ -184,7 +184,7 @@ export function MissionControlShellSettingsPanel({
             <p className="mt-1 truncate text-[13px]">{updateSummary}</p>
             <p className={cn("mt-1 text-[11px] leading-4", mutedTextClassName(surfaceTheme))}>
               {snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Version unknown"}
-              {certifiedVersion ? ` · AgentOS certified through v${certifiedVersion}` : " · AgentOS certification unavailable"}
+              {certifiedVersion ? ` · AgentOS certified version v${certifiedVersion}` : " · AgentOS certification unavailable"}
             </p>
             <div className="mt-2">
               <Button asChild type="button" size="sm" variant="secondary" className={cn("w-full px-2 text-[10px]", quickButtonClassName(surfaceTheme))}>

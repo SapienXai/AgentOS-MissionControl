@@ -79,16 +79,34 @@ Updates page
 ```
 
 The page displays the installed version, the effective native channel, native
-availability, and the AgentOS certification policy separately. A certified
+availability, and the AgentOS certification policy separately. The normal
+decision is calculated from the exact native target and exact manifest entry;
+version ordering is never used as a substitute for certification. A certified
 native target exposes one `Update & restart` action. An uncertified target is
-shown as available but remains behind advanced compatibility tools. A successful
-RPC is not presented as a completed update until the post-reconnect native
-verification succeeds; supervisor handoff, skipped, failed, and unknown results
-remain distinct.
+shown as available but remains behind advanced compatibility tools. The server
+independently repeats this decision before `update.run`, so hiding a button in
+the UI is not the security boundary. A successful RPC is not presented as a
+completed update until the post-reconnect native verification succeeds;
+supervisor handoff, skipped, failed, and unknown results remain distinct.
 
-`update.hold` remains part of the native Doctor contract. Native campaign or
-rollout hold state is projected as `Update held` on the Updates page; AgentOS
-does not create a parallel hold lifecycle or silently clear an OpenClaw hold.
+The normal policy flow is:
+
+```text
+update.status
+  → exact native available version
+  → exact AgentOS compatibility decision
+  → server policy gate
+  → update.run
+```
+
+`update.hold` is the pinned native contract's empty-parameter operation for
+deferring an active automatic update campaign. AgentOS exposes `Hold this
+update` only when `update.status` reports an automatic campaign in the native
+`waiting-for-idle` or `countdown` state and no hold is already active. Native
+campaign or rollout hold state is projected as `Update held`; AgentOS does not
+create a parallel hold lifecycle or silently clear an OpenClaw hold. No fixed
+duration is shown because the 2026.9.1 contract does not define one in the
+request; OpenClaw owns the resulting `holdUntilMs`.
 
 ## Advanced compatibility path
 
@@ -107,13 +125,22 @@ These version concepts are intentionally separate:
 | Concept | Authority | Meaning |
 | --- | --- | --- |
 | OpenClaw available update and effective channel | Native `update.status` | What the installed OpenClaw channel reports as available |
-| AgentOS certified version | AgentOS compatibility manifest | The highest OpenClaw version verified by this AgentOS build |
+| AgentOS certified version | AgentOS compatibility manifest | The exact OpenClaw versions verified by this AgentOS build |
 | Community release intelligence | Optional `isitstable.iclaw.digital` advisory snapshot | An external confidence signal only |
 
 Community release intelligence is progressively disclosed on the Updates page
 and can fail or become stale without blocking native status or native update
 execution. It never supplies installed-version truth, channel truth, update
 availability, or an update target.
+
+The pinned 2026.9.1 `update.status` response exposes bounded availability,
+channel, automatic schedule, and in-memory campaign state. It does not expose
+an `activeRun`, `lastRun`, durable run ID, or phase history. AgentOS therefore
+does not invent a durable run model or persist a competing update job. During a
+native campaign's `applying` state, the Updates page projects `Updating
+OpenClaw`; after a page reload or Gateway reconnect the next native status read
+restores that state. Once the campaign leaves that state, final success still
+requires the existing fresh health/status/update reconciliation.
 
 Settings → OpenClaw is a runtime/configuration summary with a `Manage updates`
 link. Native Doctor and Diagnostics report update health and recovery evidence,
@@ -128,10 +155,11 @@ Compatibility Lab rollback tools.
 
 The normal Doctor read uses native `health`, `status`, `diagnostics.stability`,
 `config.get`, and `update.status` in parallel. A user-requested refresh sends
-`health({ probe: true })`; normal reads do not force a probe. Runtime health,
-native status/version, update availability, and recovery state remain separate
-projections. Recovery recommendations are deterministic and evidence-based;
-AgentOS does not diagnose independently or run an automatic repair loop.
+`health({ probe: true })` and `update.status({ refreshCheckout: true })`; normal
+reads do not force either refresh. Runtime health, native status/version, update
+availability, and recovery state remain separate projections. Recovery
+recommendations are deterministic and evidence-based; AgentOS does not
+diagnose independently or run an automatic repair loop.
 
 ## Recovery actions
 

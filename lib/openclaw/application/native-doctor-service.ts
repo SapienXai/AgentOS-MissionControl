@@ -81,6 +81,7 @@ export type NativeDoctorSnapshot = {
 export type NativeDoctorConfirmation = {
   connectionId: string | null;
   effectiveChannel: string | null;
+  availableVersion: string | null;
 };
 
 export type NativeDoctorMutationOutcome = {
@@ -101,7 +102,7 @@ export type NativeDoctorVerification = {
 const NATIVE_READ_TIMEOUT_MS = 12_000;
 
 export async function getNativeDoctorSnapshot(
-  options: { adapter?: OpenClawAdapter; commandOptions?: OpenClawCommandOptions; probe?: boolean } = {}
+  options: { adapter?: OpenClawAdapter; commandOptions?: OpenClawCommandOptions; probe?: boolean; refreshCheckout?: boolean } = {}
 ): Promise<NativeDoctorSnapshot> {
   const adapter = options.adapter ?? getOpenClawAdapter();
   const commandOptions = {
@@ -127,7 +128,10 @@ export async function getNativeDoctorSnapshot(
   const update = identity.status === "available" && identity.value?.grantedScopesKnown === true
     && !openClawScopesAllow(identity.value.grantedScopes, ["operator.admin"])
     ? { status: "forbidden" as const, value: null }
-    : await readNative(() => adapter.getNativeUpdateStatus?.(commandOptions));
+    : await readNative(() => adapter.getNativeUpdateStatus?.({
+      ...commandOptions,
+      ...(options.refreshCheckout === undefined ? {} : { refreshCheckout: options.refreshCheckout })
+    }));
 
   const healthPayload = health.value;
   const healthStatus: NativeHealthStatus = health.status === "unavailable"
@@ -329,7 +333,8 @@ export async function executeNativeDoctorMutation(
 export function buildNativeDoctorConfirmation(snapshot: NativeDoctorSnapshot): NativeDoctorConfirmation {
   return {
     connectionId: snapshot.identity.connectionId,
-    effectiveChannel: snapshot.update.effectiveChannel
+    effectiveChannel: snapshot.update.effectiveChannel,
+    availableVersion: snapshot.update.latestVersion
   };
 }
 
@@ -415,6 +420,18 @@ export function verifyFreshUpdateState(
   if (after.update.status !== "current") {
     return unknownVerification("OpenClaw returned fresh state, but the update is not confirmed current.", generation);
   }
+  const expectedVersion = normalizeVersion(before.update.latestVersion);
+  const installedVersion = normalizeVersion(
+    after.update.currentVersion || after.status.runtimeVersion || after.status.version
+  );
+  if (expectedVersion && installedVersion !== expectedVersion) {
+    return unknownVerification(
+      installedVersion
+        ? `OpenClaw returned a current runtime at v${installedVersion}, but the confirmed native target was v${expectedVersion}.`
+        : `OpenClaw returned current status, but AgentOS could not verify that the native target v${expectedVersion} is installed.`,
+      generation
+    );
+  }
   return verifiedVerification("OpenClaw returned fresh healthy status and confirmed the update state.", generation);
 }
 
@@ -491,7 +508,8 @@ export function confirmationMatches(
   return expected.connectionId !== null
     && actual.connectionId !== null
     && expected.connectionId === actual.connectionId
-    && expected.effectiveChannel === actual.effectiveChannel;
+    && expected.effectiveChannel === actual.effectiveChannel
+    && expected.availableVersion === actual.availableVersion;
 }
 
 type NativeReadResult<T> = {
@@ -622,6 +640,11 @@ function readSuspendOutcome(result: Record<string, unknown>): NativeDoctorMutati
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeVersion(value: string | null | undefined) {
+  const normalized = value?.trim().replace(/^v/i, "");
+  return normalized || null;
 }
 
 function projectStability(value: Record<string, unknown>) {
