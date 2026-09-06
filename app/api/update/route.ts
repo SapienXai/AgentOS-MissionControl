@@ -35,7 +35,7 @@ import {
   buildOpenClawRuntimeSmokeTestRecoveryCommand,
   classifyOpenClawRuntimeSmokeTestFailure
 } from "@/lib/openclaw/runtime-compatibility";
-import { OPENCLAW_RECOMMENDED_VERSION, OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
+import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 import { resolveOpenClawUpdateDecision } from "@/lib/openclaw/update-compatibility";
 import {
   createOpenClawRollbackSnapshot,
@@ -287,48 +287,6 @@ export async function POST(request: Request) {
     }
 
     const existingRollbackSnapshot = await readOpenClawRollbackSnapshot();
-
-    if (
-      (updateRequest.action === "update" || updateRequest.action === "certify-round-trip") &&
-      isInstalledOpenClawBelowRequiredBaseline(snapshot)
-    ) {
-      const preflightReport = buildOpenClawUpdatePreflightReport({
-        snapshot,
-        targetVersion,
-        decision: updateDecision,
-        rollbackSnapshotAvailable: Boolean(existingRollbackSnapshot)
-      });
-      const message = `AgentOS requires OpenClaw ${OPENCLAW_SUPPORTED_BASELINE_VERSION} or newer.`;
-
-      await recordUpdateRuntimeIssue({
-        type: "openclaw_update_failed",
-        title: "OpenClaw baseline unsupported",
-        message,
-        targetVersion,
-        severity: "blocked"
-      });
-      await send({
-        type: "done",
-        ok: false,
-        message,
-        exitCode: null,
-        stdout,
-        stderr,
-        snapshot,
-        certificationScorecard: buildOpenClawUpdateCertificationScorecard({
-          baselineSnapshot: snapshot,
-          targetVersion,
-          decision: updateDecision,
-          preflightReport,
-          updateAttempted: false,
-          updateCompleted: false,
-          rollbackSnapshotCreated: Boolean(existingRollbackSnapshot),
-          failureMessage: message
-        })
-      });
-      await closeWriter();
-      return;
-    }
 
     if (updateRequest.action === "certify-round-trip") {
       if (updateRequest.mode !== "advanced") {
@@ -1946,12 +1904,6 @@ async function runOpenClawUpdateDryRun(
   return runRecoveryCommand(openClawBin, ["update", "--dry-run", "--json"], send, {
     timeoutMs: 2 * 60 * 1000
   });
-}
-
-function isInstalledOpenClawBelowRequiredBaseline(snapshot: MissionControlSnapshot) {
-  const version = normalizeVersion(snapshot.diagnostics.version);
-
-  return Boolean(version && compareVersionStrings(version, OPENCLAW_SUPPORTED_BASELINE_VERSION) < 0);
 }
 
 async function runOpenClawUpdatePreflight(input: {

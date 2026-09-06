@@ -271,6 +271,30 @@ test("preflight report blocks update when Gateway is not ready", () => {
   assert.match(report.recommendedNextAction, /Do not update yet/);
 });
 
+test("preflight allows updating an older installed version to the supported baseline", () => {
+  const decision = resolveOpenClawUpdateDecision({
+    manifest,
+    agentOsVersion: "0.7.2",
+    targetVersion: "2026.9.1",
+    mode: "recommended"
+  });
+  const report = buildOpenClawUpdatePreflightReport({
+    snapshot: createUpdateSafetySnapshot({ version: "2026.8.2" }),
+    targetVersion: "2026.9.1",
+    decision,
+    rollbackSnapshotAvailable: false,
+    generatedAt: new Date("2026-06-14T10:00:00.000Z")
+  });
+
+  assert.equal(report.canAttemptUpdate, true);
+  assert.equal(report.blockers.some((check) => check.id === "installed-version"), false);
+  assert.equal(report.warnings.some((check) => check.id === "installed-version"), true);
+  assert.match(
+    report.warnings.find((check) => check.id === "installed-version")?.message ?? "",
+    /updating to v2026\.9\.1 will bring the runtime to the supported baseline/i
+  );
+});
+
 test("preflight blocks a target with incompatible Gateway server-method evidence", () => {
   const decision = resolveOpenClawUpdateDecision({
     manifest,
@@ -535,7 +559,7 @@ test("update route uses OpenClaw 2026.9.1+ JSON updater commands", () => {
   assert.match(routeSource, /\["update", "--tag", targetVersion, "--yes", "--json"\]/);
   assert.match(routeSource, /\["doctor", "--lint", "--json"\]/);
   assert.match(routeSource, /\["gateway", "status", "--deep", "--json"\]/);
-  assert.match(routeSource, /isInstalledOpenClawBelowRequiredBaseline/);
+  assert.doesNotMatch(routeSource, /isInstalledOpenClawBelowRequiredBaseline/);
 });
 
 test("update route treats installed target with down Gateway as unhealthy", () => {

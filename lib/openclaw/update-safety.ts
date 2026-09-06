@@ -78,12 +78,12 @@ export function buildOpenClawUpdatePreflightReport(
       label: "Installed OpenClaw version",
       status: diagnostics.version
         ? installedBelowRequiredBaseline
-          ? "blocker"
+          ? "warning"
           : "safe"
         : "blocker",
       message: diagnostics.version
         ? installedBelowRequiredBaseline
-          ? `AgentOS requires OpenClaw ${OPENCLAW_SUPPORTED_BASELINE_VERSION} or newer.`
+          ? `Current OpenClaw version is v${diagnostics.version}, below the AgentOS required baseline. Updating to v${input.targetVersion} will bring the runtime to the supported baseline.`
           : `Current OpenClaw version is v${diagnostics.version}.`
         : "AgentOS could not detect the installed OpenClaw version."
     }),
