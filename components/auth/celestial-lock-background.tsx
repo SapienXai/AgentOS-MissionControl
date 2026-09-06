@@ -47,7 +47,7 @@ export function CelestialLockBackground() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden" data-sky-phase={sky.label}>
       <div
-        className="absolute inset-0 transition-[background] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute inset-0 transition-[background] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ background: `linear-gradient(180deg, ${sky.top} 0%, ${sky.middle} 46%, ${sky.bottom} 76%, ${sky.horizon} 100%)` }}
       />
 
@@ -65,7 +65,7 @@ export function CelestialLockBackground() {
       />
 
       <div
-        className="absolute inset-0 transition-opacity duration-[4000ms] motion-reduce:transition-none"
+        className="absolute inset-0 transition-opacity [transition-duration:4000ms] motion-reduce:transition-none"
         style={{ opacity: sky.starOpacity }}
       >
         <motion.div
@@ -93,14 +93,14 @@ export function CelestialLockBackground() {
       </div>
 
       <div
-        className="absolute inset-0 mix-blend-screen transition-[background,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute inset-0 mix-blend-screen transition-[background,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{
           background: `radial-gradient(circle at ${sky.sunX}% ${sky.sunY}%, rgba(255,247,207,.34) 0%, rgba(255,201,112,.16) 10%, rgba(255,148,76,.07) 25%, transparent 48%)`,
           opacity: sky.sunOpacity
         }}
       />
       <div
-        className="absolute transition-[left,top,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute transition-[left,top,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ left: `${sky.sunX}%`, top: `${sky.sunY}%`, opacity: sky.sunOpacity }}
       >
         <motion.div
@@ -115,21 +115,21 @@ export function CelestialLockBackground() {
         />
       </div>
       <motion.div
-        className="absolute h-[clamp(54px,6vw,86px)] w-[clamp(54px,6vw,86px)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle_at_34%_28%,#fffff4_0%,#fff1ad_22%,#ffc467_58%,#f58b4a_100%)] shadow-[0_0_24px_8px_rgba(255,248,199,.68),0_0_68px_28px_rgba(255,200,112,.38),0_0_150px_72px_rgba(255,141,76,.2)] transition-[left,top,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute h-[clamp(54px,6vw,86px)] w-[clamp(54px,6vw,86px)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle_at_34%_28%,#fffff4_0%,#fff1ad_22%,#ffc467_58%,#f58b4a_100%)] shadow-[0_0_24px_8px_rgba(255,248,199,.68),0_0_68px_28px_rgba(255,200,112,.38),0_0_150px_72px_rgba(255,141,76,.2)] transition-[left,top,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ left: `${sky.sunX}%`, top: `${sky.sunY}%`, opacity: sky.sunOpacity }}
         animate={reduceMotion ? undefined : { filter: ["brightness(1)", "brightness(1.09)", "brightness(1.025)", "brightness(1)"], scale: [1, 1.045, 1.015, 1] }}
         transition={{ duration: 8.5, ease: "easeInOut", repeat: Infinity }}
       />
 
       <div
-        className="absolute inset-0 mix-blend-screen transition-[background,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute inset-0 mix-blend-screen transition-[background,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{
           background: `radial-gradient(circle at ${sky.moonX}% ${sky.moonY}%, rgba(242,247,255,.34) 0%, rgba(188,209,250,.15) 13%, rgba(116,150,224,.055) 31%, transparent 48%)`,
           opacity: sky.moonOpacity
         }}
       />
       <div
-        className="absolute transition-[left,top,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute transition-[left,top,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ left: `${sky.moonX}%`, top: `${sky.moonY}%`, opacity: sky.moonOpacity }}
       >
         <motion.div
@@ -140,7 +140,7 @@ export function CelestialLockBackground() {
       </div>
       <motion.div
         data-celestial-body="moon"
-        className="absolute h-[clamp(50px,5.3vw,78px)] w-[clamp(50px,5.3vw,78px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full bg-[radial-gradient(circle_at_32%_26%,#ffffff_0%,#fbfdff_28%,#e8effc_62%,#b6c7e5_100%)] shadow-[0_0_20px_8px_rgba(246,249,255,.82),0_0_62px_28px_rgba(190,213,255,.4),0_0_150px_65px_rgba(113,151,226,.2)] transition-[left,top,opacity] duration-[4000ms] ease-linear motion-reduce:transition-none"
+        className="absolute h-[clamp(50px,5.3vw,78px)] w-[clamp(50px,5.3vw,78px)] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-full bg-[radial-gradient(circle_at_32%_26%,#ffffff_0%,#fbfdff_28%,#e8effc_62%,#b6c7e5_100%)] shadow-[0_0_20px_8px_rgba(246,249,255,.82),0_0_62px_28px_rgba(190,213,255,.4),0_0_150px_65px_rgba(113,151,226,.2)] transition-[left,top,opacity] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ left: `${sky.moonX}%`, top: `${sky.moonY}%`, opacity: sky.moonOpacity }}
         animate={reduceMotion ? undefined : { filter: ["brightness(1)", "brightness(1.08)", "brightness(1.025)", "brightness(1)"], scale: [1, 1.025, 1.008, 1] }}
         transition={{ duration: 10.5, ease: "easeInOut", repeat: Infinity }}
