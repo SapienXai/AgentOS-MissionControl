@@ -254,7 +254,7 @@ export function projectApprovalRecord(
       taskId: task?.id ?? null
     },
     worker: { id: agentId, label: workerLabel },
-    ...(task?.mission ? { mission: { id: null, title: task.mission } } : {}),
+    ...(task ? { mission: projectTaskMission(task) } : {}),
     severity: kind === "plugin" && request.severity === "critical" ? "critical" : "high",
     title: kind === "plugin" ? "Plugin approval required" : "Approval required",
     summary,
@@ -308,7 +308,7 @@ export function projectQuestionRecord(
       taskId: task?.id ?? null
     },
     worker: { id: agentId, label: workerLabel },
-    ...(task?.mission ? { mission: { id: null, title: task.mission } } : {}),
+    ...(task ? { mission: projectTaskMission(task) } : {}),
     severity: task && isBlockingTask(task) ? "high" : "normal",
     title: record.questions[0]?.header || "Question",
     summary: truncate(record.questions[0]?.question ?? "This worker needs a decision.", 260),
@@ -448,7 +448,7 @@ export function projectRuntimeIssue(issue: RuntimeIssue, agents: OpenClawAgent[]
       taskId: task?.id ?? null
     },
     worker: { id: task?.primaryAgentId ?? null, label: task?.primaryAgentName ?? resolveWorkerLabel(task?.primaryAgentId, agents) },
-    ...(task?.mission ? { mission: { id: null, title: task.mission } } : {}),
+    ...(task ? { mission: projectTaskMission(task) } : {}),
     severity: issue.severity === "blocked" ? "critical" : "high",
     title: issue.title,
     summary: truncate(issue.message, 280),
@@ -472,7 +472,7 @@ export function projectRuntimeTask(task: TaskRecord): AttentionItem {
       taskId: task.id
     },
     worker: { id: task.primaryAgentId ?? null, label: task.primaryAgentName ?? null },
-    ...(task.mission ? { mission: { id: null, title: task.mission } } : {}),
+    mission: projectTaskMission(task),
     severity: "high",
     title: "Execution needs review",
     summary: truncate(task.subtitle || `${task.title} stopped unexpectedly.`, 280),
@@ -663,6 +663,13 @@ function readQuestionRecords(result: PromiseSettledResult<OpenClawQuestionListPa
 
 function resolveWorkerLabel(agentId: string | null | undefined, agents: OpenClawAgent[]) {
   return agentId ? agents.find((agent) => agent.id === agentId)?.name ?? null : null;
+}
+
+function projectTaskMission(task: TaskRecord) {
+  return {
+    id: task.dispatchId ?? `task:${task.id}`,
+    title: task.mission ?? task.title ?? null
+  };
 }
 
 function findTaskForSession(tasks: TaskRecord[], sessionKey: string | null) {

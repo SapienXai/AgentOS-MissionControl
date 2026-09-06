@@ -578,7 +578,8 @@ test("sidebar exposes config-driven mission and admin navigation routes", () => 
   assert.match(source, /const sidebarItems: SidebarItem\[] = \[/);
   assert.match(source, /\{ label: "Mission Control", href: "\/", icon: Gauge, section: "overview" \}/);
   assert.match(source, /\{ label: "Agents", href: "\/agents", icon: Bot, section: "operations" \}/);
-  assert.match(source, /\{ label: "Tasks", href: "\/tasks", icon: ClipboardList, section: "operations" \}/);
+  assert.match(source, /\{ label: "Missions", href: "\/missions", icon: ClipboardList, section: "operations" \}/);
+  assert.match(source, /\{ label: "Human Control", href: "\/human-control", icon: ShieldAlert, section: "operations" \}/);
   assert.match(source, /\{ label: "Files", href: "\/files", icon: FileText, section: "operations" \}/);
   assert.match(source, /\{ label: "Models", href: "\/models", icon: Cpu, section: "operations" \}/);
   assert.match(source, /\{ label: "Integrations", href: "\/integrations", icon: Plug, section: "operations" \}/);

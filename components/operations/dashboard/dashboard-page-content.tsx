@@ -263,6 +263,7 @@ export function DashboardPageContent({
         </StatGrid>
 
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
+          <QuickAction icon={Workflow} label="Missions" href="/missions" />
           <QuickAction icon={Bot} label="Add Agent" href="/agents" />
           <QuickAction icon={KeyRound} label="Connect Account" href="/accounts" />
           <QuickAction icon={BrainCircuit} label="Manage Models" href="/models" />
@@ -273,7 +274,7 @@ export function DashboardPageContent({
         <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12">
           <SectionCard
             title="Mission Control"
-            action={<PanelLink href="/agents" label="View agents" />}
+            action={<PanelLink href="/missions" label="View missions" />}
             className={cn(dashboardPanelClassName, "xl:col-span-7")}
           >
             <div className="space-y-3 p-3">
@@ -352,8 +353,8 @@ export function DashboardPageContent({
           </div>
 
           <SectionCard
-            title="Recent Task Activity"
-            action={<PanelLink href="/tasks" label="View all activity" />}
+            title="Recent Runtime Activity"
+            action={<PanelLink href="/missions" label="View missions" />}
             className={cn(dashboardPanelClassName, "xl:col-span-7")}
           >
             {tasks.length === 0 ? (

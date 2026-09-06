@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
+import Link from "next/link";
 import { Activity, ArrowLeft, Bot, CircleCheck, Clock3, Chrome, Filter, Folder, Globe2, Import, MessageSquare, Play, Plus, Plug, ShieldCheck, SlidersHorizontal, Sparkles, Terminal } from "lucide-react";
 
 import { AddModelsDialog } from "@/components/mission-control/add-models/add-models-dialog";
@@ -842,7 +843,7 @@ function RecentAgentActivity({ snapshot, agents }: { snapshot: MissionControlSna
   });
 
   return (
-    <SectionCard title="Recent Activity">
+    <SectionCard title="Recent Activity" action={<Button asChild variant="ghost" size="sm" className="h-7 rounded-lg px-2 text-[0.68rem]"><Link href="/missions">View missions</Link></Button>}>
       {rows.length === 0 ? (
         <EmptyState title="No runtime activity" description="No agent runtime events were reported in the current AgentOS snapshot." />
       ) : (
