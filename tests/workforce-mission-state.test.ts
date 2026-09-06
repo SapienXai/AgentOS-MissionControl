@@ -20,6 +20,9 @@ test("human control takes precedence over running presentation", () => {
 
 test("a parent waiting on an active child is waiting-worker, not failed", () => {
   assert.equal(resolveWorkforceMissionState({ rootStatus: "idle", childStatuses: ["running"], connection: "live" }), "waiting-worker");
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "idle", childStatuses: ["running"], activeRuntimeStatuses: [], connection: "live" }), "waiting-worker");
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "running", childStatuses: ["running"], connection: "live" }), "running");
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "idle", childStatuses: ["running", "running"], connection: "live" }), "waiting-worker");
   assert.equal(resolveWorkforceMissionState({ rootStatus: "idle", childStatuses: ["completed"], connection: "live" }), "queued");
 });
 
@@ -31,6 +34,12 @@ test("child completion does not complete the parent mission", () => {
 test("temporary Gateway loss is reconnecting, not failed", () => {
   assert.equal(resolveWorkforceMissionState({ rootStatus: "running", connection: "reconnecting" }), "reconnecting");
   assert.equal(resolveWorkforceMissionState({ dispatchStatus: "stalled", connection: "reconnecting" }), "failed");
+});
+
+test("native terminal root truth stays terminal over stale sidecar and reconnect evidence", () => {
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "completed", dispatchStatus: "stalled", pendingHumanControl: ["approval"], connection: "reconnecting" }), "completed");
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "cancelled", dispatchStatus: "running", connection: "reconnecting" }), "cancelled");
+  assert.equal(resolveWorkforceMissionState({ rootStatus: "idle", dispatchStatus: "cancelled", connection: "live" }), "cancelled");
 });
 
 test("terminal failure and cancellation remain explicit", () => {

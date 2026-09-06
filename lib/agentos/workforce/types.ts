@@ -46,6 +46,7 @@ export type WorkforceWorkItem = {
   taskId: string | null;
   runtimeId: string | null;
   source: "openclaw-task" | "agentos-dispatch";
+  startedAt: string | null;
   updatedAt: string | null;
 };
 

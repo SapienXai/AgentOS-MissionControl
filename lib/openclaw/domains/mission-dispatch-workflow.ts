@@ -12,10 +12,12 @@ import {
   isMissionDispatchTerminalStatus,
   launchMissionDispatchRunner,
   normalizeMissionAbortReason,
+  readMissionDispatchRecords,
   readMissionDispatchRecordById,
   stopMissionDispatchChildProcess,
   writeMissionDispatchRecord
 } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
+import type { MissionDispatchRecord } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
 import {
   extractMissionCommandPayloads,
   resolveMissionDispatchCompletionDetail
@@ -47,10 +49,22 @@ export type MissionDispatchWorkflowDependencies = {
   invalidateMissionControlCaches: () => void;
 };
 
+let missionSubmissionQueue: Promise<void> = Promise.resolve();
+
 export async function submitMissionDispatch(
   input: MissionSubmission,
   deps: MissionDispatchWorkflowDependencies,
   gatewayOptions: OpenClawCommandOptions = {}
+): Promise<MissionResponse> {
+  const run = missionSubmissionQueue.then(() => submitMissionDispatchOnce(input, deps, gatewayOptions));
+  missionSubmissionQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function submitMissionDispatchOnce(
+  input: MissionSubmission,
+  deps: MissionDispatchWorkflowDependencies,
+  gatewayOptions: OpenClawCommandOptions
 ): Promise<MissionResponse> {
   const mission = input.mission.trim();
   const executionMode: NativeWorkExecutionMode = input.executionMode ?? "standard";
@@ -60,6 +74,21 @@ export async function submitMissionDispatch(
   }
 
   const snapshot = await deps.getMissionControlSnapshot({ includeHidden: true });
+  const requestId = input.requestId?.trim() || null;
+  if (requestId) {
+    const existing = (await readMissionDispatchRecords()).find((record) => record.clientRequestId === requestId) ?? null;
+    if (existing) {
+      const visibleSnapshot = await deps.getMissionControlSnapshot({ includeHidden: false });
+      const visible = Boolean(
+        visibleSnapshot.agents.some((agent) => agent.id === existing.agentId) ||
+        (existing.workspaceId && visibleSnapshot.workspaces.some((workspace) => workspace.id === existing.workspaceId))
+      );
+      if (!visible || (input.workspaceId && input.workspaceId !== existing.workspaceId) || (input.agentId && input.agentId !== existing.agentId) || existing.mission !== mission) {
+        throw new Error("This mission request identity is already in use.");
+      }
+      return missionResponseFromDispatchRecord(existing);
+    }
+  }
   const agentId = input.agentId || deps.resolveAgentForMission(snapshot, input.workspaceId);
 
   if (!agentId) {
@@ -116,7 +145,7 @@ export async function submitMissionDispatch(
   );
 
   let dispatchRecord = createMissionDispatchRecord({
-    clientRequestId: input.requestId?.trim() || null,
+    clientRequestId: requestId,
     agentId,
     mission,
     routedMission,
@@ -343,6 +372,29 @@ export async function submitMissionDispatch(
       outputDir: outputPlan?.absoluteOutputDir,
       outputDirRelative: outputPlan?.relativeOutputDir,
       notesDirRelative: outputPlan?.notesDirRelative
+    }
+  };
+}
+
+function missionResponseFromDispatchRecord(dispatchRecord: MissionDispatchRecord): MissionResponse {
+  const payloads = extractMissionCommandPayloads(dispatchRecord.result);
+  const summary = dispatchRecord.status === "completed" || dispatchRecord.status === "stalled" || dispatchRecord.status === "cancelled"
+    ? resolveMissionDispatchCompletionDetail(dispatchRecord)
+    : dispatchRecord.result?.summary || "Mission accepted and queued for OpenClaw execution.";
+  return {
+    dispatchId: dispatchRecord.id,
+    runId: dispatchRecord.result?.runId ?? null,
+    agentId: dispatchRecord.agentId,
+    status: dispatchRecord.status,
+    summary,
+    payloads,
+    meta: {
+      executionMode: dispatchRecord.executionMode,
+      sessionKey: dispatchRecord.result?.sessionKey ?? null,
+      outputDir: dispatchRecord.outputDir,
+      outputDirRelative: dispatchRecord.outputDirRelative,
+      notesDirRelative: dispatchRecord.notesDirRelative,
+      idempotentReplay: true
     }
   };
 }

@@ -103,12 +103,36 @@ test("projects native approvals and questions into stable attention items", () =
     agentId: "worker-1",
     sessionKey: "session-1",
     createdAtMs: 1_700_000_000_000,
-    expiresAtMs: 1_700_000_100_000,
+    expiresAtMs: Date.now() + 100_000,
     status: "pending"
   }, [agent], [task]);
   assert.equal(question?.id, "question:question-1");
   assert.deepEqual(question?.question?.[0]?.options, [{ label: "US" }, { label: "EU" }]);
   assert.equal(question?.availableActions[0]?.id, "answer");
+});
+
+test("expired or terminal Human Control records are not actionable", () => {
+  assert.equal(projectApprovalRecord({ id: "expired", expiresAtMs: Date.now() - 1 }, "exec"), null);
+  assert.equal(projectApprovalRecord({ id: "resolved", status: "approved" }, "exec"), null);
+  assert.equal(projectQuestionRecord({
+    id: "expired-question",
+    questions: [{ questionId: "scope", header: "Scope", question: "Choose", options: [{ label: "A" }] }],
+    createdAtMs: Date.now() - 2_000,
+    expiresAtMs: Date.now() - 1,
+    status: "pending"
+  }, [], []), null);
+});
+
+test("Gateway-wide Human Control records are filtered to visible workers", async () => {
+  const inbox = await getHumanControlInbox({
+    snapshot: snapshot(),
+    adapter: {
+      listNativeExecApprovals: async () => ({ approvals: [{ id: "hidden", request: { agentId: "hidden-worker" } }] }),
+      listNativePluginApprovals: async () => ({ approvals: [] }),
+      listQuestions: async () => ({ questions: [] })
+    } as never
+  });
+  assert.equal(inbox.items.some((item) => item.id === "approval:exec:hidden"), false);
 });
 
 test("composes suggested work and only promotes actionable capability blockers", () => {
@@ -381,7 +405,7 @@ test("approval and question deduplication uses task/session identity without hid
     questions: [{ questionId: "decision", header: "Decision", question: "Choose", options: [{ label: "A" }] }],
     sessionKey: "session-1",
     createdAtMs: 1_700_000_000_000,
-    expiresAtMs: 1_700_000_100_000,
+    expiresAtMs: Date.now() + 100_000,
     status: "pending"
   }, [agent], [task]);
   assert.equal(dedupeAttentionItems([question!, runtimeSameTask]).some((item) => item.type === "runtime-issue"), false);
@@ -392,7 +416,7 @@ test("approval and question deduplication uses task/session identity without hid
     questions: [{ questionId: "decision", header: "Decision", question: "Choose", options: [{ label: "A" }] }],
     agentId: "worker-1",
     createdAtMs: 1_700_000_000_000,
-    expiresAtMs: 1_700_000_100_000,
+    expiresAtMs: Date.now() + 100_000,
     status: "pending"
   }, [agent], []);
   assert.equal(dedupeAttentionItems([questionWithoutLink!, unrelatedRuntime]).length, 2);
@@ -540,7 +564,7 @@ test("open Human Control reuses the existing live refresh signal and preserves d
     id: "question-draft",
     questions: [{ questionId: "scope", header: "Scope", question: "Choose scope", options: [{ label: "US" }] }],
     createdAtMs: 1_700_000_000_000,
-    expiresAtMs: 1_700_000_100_000,
+    expiresAtMs: Date.now() + 100_000,
     status: "pending"
   }, [], []);
   assert.deepEqual(preserveQuestionAnswers([question!], { scope: ["US"], resolved: ["old"] }), { scope: ["US"] });

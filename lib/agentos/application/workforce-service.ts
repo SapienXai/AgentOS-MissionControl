@@ -1,5 +1,7 @@
 import "server-only";
 
+import path from "node:path";
+
 import { getHumanControlInbox } from "@/lib/openclaw/application/human-control-inbox-service";
 import { getMissionControlSnapshot } from "@/lib/openclaw/application/mission-control-service";
 import { getTaskDetail } from "@/lib/openclaw/application/runtime-service";
@@ -17,6 +19,7 @@ import type {
   MissionControlSnapshot,
   RuntimeRecord,
   RuntimeStatus,
+  RuntimeCreatedFile,
   TaskDetailRecord,
   TaskFeedEvent,
   TaskRecord
@@ -24,6 +27,7 @@ import type {
 import { redactSecretText } from "@/lib/security/redaction";
 import {
   deriveMissionTitle,
+  isMissionStateCriticalHumanControlType,
   resolveWorkforceMissionState,
   workforceMissionStateLabel
 } from "@/lib/agentos/workforce/mission-state";
@@ -56,11 +60,11 @@ export async function getWorkforceMissionList(
 ): Promise<WorkforceMissionListResponse> {
   const snapshot = input.snapshot ?? await getMissionControlSnapshot();
   const records = await readMissionDispatchRecords();
-  // The list needs native approvals/questions and runtime blockers, but does
-  // not need a per-worker capability sweep. Human Control performs that
-  // bounded sweep on its own page where those blockers are the primary task.
-  const inbox = await getHumanControlInbox({ snapshot, capabilities: [] });
-  const seeds = buildMissionSeeds(snapshot.tasks, records);
+  // List and detail must use the same state-critical evidence. The inbox
+  // service bounds capability resolution; skipping it here creates a
+  // correctness contradiction between the two pages.
+  const inbox = await getHumanControlInbox({ snapshot });
+  const seeds = buildMissionSeeds(snapshot.tasks, records, snapshot);
   const missions = seeds
     .map((seed) => buildMissionProjection({ snapshot, seed, humanControlItems: missionAttention(seed, inbox.items), detail: null }))
     .filter((mission) => matchesMissionFilter(mission, input))
@@ -87,7 +91,7 @@ export async function getWorkforceMissionDetail(
   const snapshot = input.snapshot ?? await getMissionControlSnapshot();
   const records = await readMissionDispatchRecords();
   const inbox = await getHumanControlInbox({ snapshot });
-  const seed = buildMissionSeeds(snapshot.tasks, records).find((candidate) => candidate.id === missionId) ?? null;
+  const seed = buildMissionSeeds(snapshot.tasks, records, snapshot).find((candidate) => candidate.id === missionId) ?? null;
 
   if (!seed) return null;
 
@@ -113,7 +117,7 @@ export async function getWorkforceMissionDetail(
   });
 }
 
-export function buildMissionSeeds(tasks: TaskRecord[], records: MissionDispatchRecord[]): MissionSeed[] {
+export function buildMissionSeeds(tasks: TaskRecord[], records: MissionDispatchRecord[], visibleSnapshot?: MissionControlSnapshot): MissionSeed[] {
   const byDispatchId = new Map<string, MissionSeed>();
   for (const record of records) {
     byDispatchId.set(record.id, {
@@ -150,13 +154,28 @@ export function buildMissionSeeds(tasks: TaskRecord[], records: MissionDispatchR
   for (const task of tasks) {
     if (missionTaskIds.has(task.id)) continue;
     const owner = [...byDispatchId.values()].find((seed) => {
-      const root = findRootTask(seed);
-      return Boolean(root && hasNativeParentLink(task, root));
+      return hasNativeAncestor(task, seed, tasks);
     });
     if (owner) owner.tasks.push(task);
   }
 
-  return [...byDispatchId.values()];
+  return [...byDispatchId.values()].filter((seed) => !visibleSnapshot || isMissionSeedVisible(seed, visibleSnapshot));
+}
+
+/** A durable dispatch sidecar is not an authorization source. */
+export function isMissionSeedVisible(seed: MissionSeed, snapshot: MissionControlSnapshot) {
+  const visibleTaskIds = new Set(snapshot.tasks.map((task) => task.id));
+  if (seed.tasks.some((task) => visibleTaskIds.has(task.id))) return true;
+  if (!seed.record) return false;
+
+  const visibleWorkspaceIds = new Set(snapshot.workspaces.map((workspace) => workspace.id));
+  const visibleAgentIds = new Set(snapshot.agents.map((agent) => agent.id));
+  const visibleRuntimeIds = new Set(snapshot.runtimes.map((runtime) => runtime.id));
+  if (seed.record.workspaceId) return visibleWorkspaceIds.has(seed.record.workspaceId);
+  return Boolean(
+    visibleAgentIds.has(seed.record.agentId) ||
+    (seed.record.observation.runtimeId && visibleRuntimeIds.has(seed.record.observation.runtimeId))
+  );
 }
 
 export function isMissionTask(task: TaskRecord) {
@@ -176,7 +195,9 @@ export function buildMissionProjection(context: MissionBuildContext): WorkforceM
   const rootTask = findRootTask(seed);
   const runtimeStatuses = relatedRuntimes(snapshot.runtimes, seed);
   const dispatchRuntimeStatus = seed.record ? resolveMissionDispatchRuntimeStatus(seed.record, Date.now()) : null;
-  const childTasks = seed.tasks.filter((task) => task.id !== rootTask?.id && hasNativeParentLink(task, rootTask));
+  const childTasks = seed.tasks.filter((task) => task.id !== rootTask?.id && hasNativeAncestor(task, seed, seed.tasks));
+  const childTaskIds = new Set(childTasks.flatMap((task) => [task.id, readString(task.metadata.openClawTaskId)]).filter((value): value is string => Boolean(value)));
+  const rootRuntimeStatuses = runtimeStatuses.filter((runtime) => !runtime.taskId || !childTaskIds.has(runtime.taskId));
   const connection = resolveConnection(snapshot);
   const derivedRootStatus = rootTask?.status ?? (
     seed.record && (seed.record.observation.runtimeId || seed.record.runner.lastHeartbeatAt)
@@ -188,10 +209,11 @@ export function buildMissionProjection(context: MissionBuildContext): WorkforceM
     runnerStarted: Boolean(seed.record?.runner.startedAt || seed.record?.runner.pid),
     rootStatus: derivedRootStatus,
     childStatuses: childTasks.map((task) => task.status),
-    activeRuntimeStatuses: runtimeStatuses.map((runtime) => runtime.status),
-    pendingHumanControl: humanControlItems
-      .map((item) => item.type)
-      .filter((type): type is "approval" | "question" | "blocked" | "runtime-issue" | "needs-setup" => type !== "suggested-work"),
+    // Child activity is represented by childStatuses. Feeding child runtimes
+    // into this field makes waiting-worker unreachable whenever only a child
+    // is active.
+    activeRuntimeStatuses: rootRuntimeStatuses.map((runtime) => runtime.status),
+    pendingHumanControl: humanControlItems.map((item) => item.type).filter(isMissionStateCriticalHumanControlType),
     connection,
     authoritativeFailure: Boolean(seed.record?.status === "stalled" || rootTask?.status === "stalled"),
     authoritativeCompletion: Boolean(seed.record?.status === "completed" || rootTask?.status === "completed")
@@ -254,6 +276,7 @@ export function buildMissionProjection(context: MissionBuildContext): WorkforceM
 function buildMissionAttention(seed: MissionSeed, items: AttentionItem[]) {
   return items.filter((item) => {
     if (item.status !== "pending") return false;
+    if (!isMissionStateCriticalHumanControlType(item.type)) return false;
     if (item.mission?.id === seed.id) return true;
     const taskId = item.source.taskId;
     return Boolean(taskId && seed.tasks.some((task) => task.id === taskId));
@@ -269,7 +292,7 @@ function buildWorkTree(seed: MissionSeed, snapshot: MissionControlSnapshot, stat
   const sortedTasks = [...seed.tasks].sort((left, right) => (left.updatedAt ?? 0) - (right.updatedAt ?? 0) || left.id.localeCompare(right.id));
   const workItems: WorkforceWorkItem[] = [];
   if (rootTask) {
-    workItems.push(taskToWorkItem(rootTask, snapshot, "primary", null, state, primaryAgentName));
+    workItems.push(taskToWorkItem(rootTask, snapshot, "primary", null, primaryAgentName));
   } else if (seed.record) {
     workItems.push({
       id: `dispatch:${seed.record.id}`,
@@ -282,6 +305,7 @@ function buildWorkTree(seed: MissionSeed, snapshot: MissionControlSnapshot, stat
       taskId: null,
       runtimeId: seed.record.observation.runtimeId,
       source: "agentos-dispatch",
+      startedAt: seed.record.runner.startedAt,
       updatedAt: seed.record.updatedAt
     });
   }
@@ -289,13 +313,16 @@ function buildWorkTree(seed: MissionSeed, snapshot: MissionControlSnapshot, stat
     if (task.id === rootTask?.id) continue;
     const parentId = resolveParentId(task, rootTask, seed.tasks);
     if (!parentId) continue;
-    workItems.push(taskToWorkItem(task, snapshot, "delegated", parentId, null, null));
+    workItems.push(taskToWorkItem(task, snapshot, "delegated", parentId, null));
   }
   return workItems;
 }
 
-function taskToWorkItem(task: TaskRecord, snapshot: MissionControlSnapshot, relationship: "primary" | "delegated", parentId: string | null, fallbackState: WorkforceMissionProjection["state"] | null, fallbackAgentName: string | null): WorkforceWorkItem {
-  const state = fallbackState && task.status === "idle" ? fallbackState : resolveTaskState(task.status);
+function taskToWorkItem(task: TaskRecord, snapshot: MissionControlSnapshot, relationship: "primary" | "delegated", parentId: string | null, fallbackAgentName: string | null): WorkforceWorkItem {
+  // An idle parent waiting on a child is not itself an active worker. The
+  // mission state carries the waiting-worker presentation; the work item must
+  // preserve the native idle evidence so activeWorkers remains truthful.
+  const state = task.status === "idle" ? "idle" : resolveTaskState(task.status);
   return {
     id: task.id,
     title: task.title || task.mission || "OpenClaw work item",
@@ -307,6 +334,7 @@ function taskToWorkItem(task: TaskRecord, snapshot: MissionControlSnapshot, rela
     taskId: task.id,
     runtimeId: task.primaryRuntimeId ?? task.runtimeIds[0] ?? null,
     source: "openclaw-task",
+    startedAt: readTaskStartTimestamp(task),
     updatedAt: toIso(task.updatedAt)
   };
 }
@@ -323,8 +351,10 @@ function buildActiveWorkers(workTree: WorkforceWorkItem[], seed: MissionSeed, mi
       parentTaskId: item.parentId,
       taskId: item.taskId,
       runtimeId: item.runtimeId,
-      startedAt,
-      elapsedMs: startedAt ? Math.max(0, Date.now() - Date.parse(startedAt)) : null
+      startedAt: item.startedAt ?? (item.relationship === "primary" ? startedAt : null),
+      elapsedMs: item.startedAt || (item.relationship === "primary" ? startedAt : null)
+        ? Math.max(0, Date.now() - Date.parse(item.startedAt ?? startedAt!))
+        : null
     }));
   }
   if (seed.record && ["queued", "starting", "running", "waiting-worker", "reconnecting"].includes(missionState)) {
@@ -384,7 +414,14 @@ function buildArtifacts(detail: TaskDetailRecord | null, seed: MissionSeed): Wor
     ...(detail?.outputs.flatMap((output) => output.createdFiles) ?? [])
   ];
   const seen = new Set<string>();
-  return sourceFiles.filter((file) => {
+  const allowedRoots = [
+    seed.record?.outputDir,
+    seed.record?.workspacePath,
+    ...seed.tasks.flatMap((task) => [task.metadata.outputDir, task.metadata.workspacePath])
+  ]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => path.resolve(value));
+  return sourceFiles.map((file) => projectSafeArtifactFile(file, allowedRoots)).filter((file): file is NonNullable<typeof file> => Boolean(file)).filter((file) => {
     const key = file.path || file.displayPath;
     if (!key || seen.has(key)) return false;
     seen.add(key);
@@ -397,6 +434,25 @@ function buildArtifacts(detail: TaskDetailRecord | null, seed: MissionSeed): Wor
     taskId: detail?.task.id ?? seed.tasks[0]?.id ?? null,
     runtimeId: detail?.outputs[0]?.runtimeId ?? seed.record?.observation.runtimeId ?? null
   }));
+}
+
+function projectSafeArtifactFile(file: RuntimeCreatedFile, allowedRoots: string[]): RuntimeCreatedFile | null {
+  const rawPath = file.path?.trim();
+  const displayPath = file.displayPath?.trim() || rawPath;
+  if (!rawPath && !displayPath) return null;
+  const candidate = rawPath || displayPath!;
+  if (/^https?:\/\//i.test(candidate)) return { ...file, path: candidate, displayPath: candidate };
+  if (path.isAbsolute(candidate)) {
+    const resolved = path.resolve(candidate);
+    const root = allowedRoots.find((allowedRoot) => resolved === allowedRoot || resolved.startsWith(`${allowedRoot}${path.sep}`));
+    if (!root) return null;
+    const relative = path.relative(root, resolved).split(path.sep).join("/");
+    if (!relative || relative === ".." || relative.startsWith("../")) return null;
+    return { ...file, path: relative, displayPath: relative };
+  }
+  const relative = candidate.replaceAll("\\", "/");
+  if (relative.startsWith("/") || relative.split("/").some((part) => part === "..")) return null;
+  return { ...file, path: relative, displayPath: relative };
 }
 
 function buildRuntimeReference(seed: MissionSeed, detail: TaskDetailRecord | null, runtimes: RuntimeRecord[]) {
@@ -437,7 +493,7 @@ function relatedRuntimes(runtimes: RuntimeRecord[], seed: MissionSeed) {
   return runtimes.filter((runtime) => Boolean(
     runtime.taskId && taskIds.has(runtime.taskId) ||
     runtimeIds.has(runtime.id) ||
-    (seed.record?.agentId && runtime.agentId === seed.record.agentId && seed.record.mission && runtime.title.includes(seed.record.mission.slice(0, 24)))
+    (seed.record?.id && runtime.metadata.dispatchId === seed.record.id)
   ));
 }
 
@@ -445,8 +501,22 @@ function findRootTask(seed: MissionSeed) {
   return seed.tasks.find((task) => task.dispatchId === seed.record?.id) ?? seed.tasks.find((task) => !resolveParentId(task, null, seed.tasks)) ?? seed.tasks[0] ?? null;
 }
 
-function hasNativeParentLink(task: TaskRecord, rootTask: TaskRecord | null) {
-  return Boolean(rootTask && resolveParentId(task, rootTask, [task, rootTask]));
+function hasNativeAncestor(task: TaskRecord, seed: MissionSeed, allTasks: TaskRecord[]) {
+  const seedTaskIds = new Set(seed.tasks.map((candidate) => candidate.id));
+  let current: TaskRecord | undefined = task;
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    const parentId = resolveParentId(current, null, allTasks);
+    if (!parentId) return false;
+    if (seedTaskIds.has(parentId)) return true;
+    current = allTasks.find((candidate) => candidate.id === parentId);
+  }
+  return false;
+}
+
+function readTaskStartTimestamp(task: TaskRecord) {
+  return readTaskTimestamp(task, "startedAt") || readTaskTimestamp(task, "dispatchRunnerStartedAt") || readTaskTimestamp(task, "createdAt");
 }
 
 function resolveParentId(task: TaskRecord, rootTask: TaskRecord | null, tasks: TaskRecord[]) {

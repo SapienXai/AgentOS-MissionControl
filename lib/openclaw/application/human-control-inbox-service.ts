@@ -69,6 +69,7 @@ type NativeApprovalRecord = {
   request?: Record<string, unknown>;
   createdAtMs?: number;
   expiresAtMs?: number;
+  status?: string;
 };
 
 type QuestionRecord = NonNullable<OpenClawQuestionListPayload["questions"]>[number];
@@ -104,7 +105,10 @@ export async function getHumanControlInbox(options: HumanControlInboxOptions = {
     ...nativeItems,
     ...projectCapabilityAttention(capabilityResolution.candidates)
   ];
-  const filtered = filterAttentionItems(dedupeAttentionItems(items), options);
+  const filtered = filterAttentionItems(
+    dedupeAttentionItems(items.filter((item) => isAttentionItemVisibleToSnapshot(item, snapshot))),
+    options
+  );
   const issues = [
     ...(execResult.status === "rejected" ? ["Execution approvals could not be verified from OpenClaw."] : []),
     ...(pluginResult.status === "rejected" ? ["Plugin approvals could not be verified from OpenClaw."] : []),
@@ -220,7 +224,7 @@ export function projectApprovalRecord(
   agents: OpenClawAgent[] = [],
   tasks: TaskRecord[] = []
 ): AttentionItem | null {
-  if (!record.id) return null;
+  if (!record.id || !isActionableApprovalRecord(record)) return null;
   const request = record.request ?? {};
   const agentId = readString(request.agentId);
   const workerLabel = resolveWorkerLabel(agentId, agents);
@@ -275,7 +279,7 @@ export function projectQuestionRecords(
   tasks: TaskRecord[]
 ): AttentionItem[] {
   return records
-    .filter((record) => record.status === "pending")
+    .filter((record) => isActionableQuestionRecord(record))
     .map((record) => projectQuestionRecord(record, agents, tasks))
     .filter((item): item is AttentionItem => Boolean(item));
 }
@@ -285,7 +289,7 @@ export function projectQuestionRecord(
   agents: OpenClawAgent[] = [],
   tasks: TaskRecord[] = []
 ): AttentionItem | null {
-  if (!record.id || record.status !== "pending" || record.questions.length === 0) return null;
+  if (!record.id || !isActionableQuestionRecord(record) || record.questions.length === 0) return null;
   const agentId = record.agentId ?? null;
   const workerLabel = resolveWorkerLabel(agentId, agents);
   const task = findTaskForSession(tasks, record.sessionKey ?? null);
@@ -500,6 +504,28 @@ export function dedupeAttentionItems(items: AttentionItem[]): AttentionItem[] {
   });
 }
 
+/**
+ * Native approval/question lists are Gateway-wide. Their worker/session/task
+ * references must be reconciled against the already visible snapshot before
+ * they enter a user-facing inbox.
+ */
+export function isAttentionItemVisibleToSnapshot(item: AttentionItem, snapshot: MissionControlSnapshot) {
+  const visibleTaskIds = new Set(snapshot.tasks.map((task) => task.id));
+  const visibleAgentIds = new Set(snapshot.agents.map((agent) => agent.id));
+  const visibleSessionKeys = new Set(snapshot.tasks.flatMap((task) => [task.key, ...task.sessionIds, resolveTaskSessionKeyForAttention(task)].filter((value): value is string => Boolean(value))));
+  const taskVisible = Boolean(item.source.taskId && visibleTaskIds.has(item.source.taskId));
+  const sessionVisible = Boolean(item.source.sessionKey && visibleSessionKeys.has(item.source.sessionKey));
+  const agentVisible = Boolean(item.worker.id && visibleAgentIds.has(item.worker.id));
+  const missionVisible = Boolean(item.mission && snapshot.tasks.some((task) => (task.dispatchId ?? `task:${task.id}`) === item.mission?.id));
+  const globalRuntimeIssue = item.type === "runtime-issue" && item.source.system === "agentos" &&
+    !item.source.taskId && !item.source.sessionKey && !item.worker.id && !item.mission;
+  if (item.source.taskId && !taskVisible) return false;
+  if (item.source.sessionKey && !sessionVisible) return false;
+  if (item.mission && !missionVisible) return false;
+  if (item.source.taskId || item.source.sessionKey || item.mission) return taskVisible || sessionVisible || missionVisible;
+  return taskVisible || sessionVisible || agentVisible || missionVisible || globalRuntimeIssue;
+}
+
 export function sortAttentionItems(items: AttentionItem[]): AttentionItem[] {
   return [...items].sort((left, right) => {
     const severityDelta = severityRank(right.severity) - severityRank(left.severity);
@@ -566,7 +592,7 @@ export async function resolveAttentionItem(
       throw new Error("A structured answer is required for this question.");
     }
     const before = await adapter.listQuestions({ ...commandOptions, timeoutMs: 8_000 });
-    if (!before.questions.some((question) => question.id === parsed.nativeId && question.status === "pending")) {
+    if (!before.questions.some((question) => question.id === parsed.nativeId && isActionableQuestionRecord(question))) {
       return { reconciled: true, status: "resolved" };
     }
     try {
@@ -583,7 +609,7 @@ export async function resolveAttentionItem(
     const list = parsed.kind === "exec" ? adapter.listNativeExecApprovals : adapter.listNativePluginApprovals;
     if (!list) throw new Error("Native approval actions are unavailable.");
     const before = await list({}, { ...commandOptions, timeoutMs: 8_000 });
-    if (!readApprovalRecords({ status: "fulfilled", value: before }).some((approval) => approval.id === parsed.nativeId)) {
+    if (!readApprovalRecords({ status: "fulfilled", value: before }).some((approval) => approval.id === parsed.nativeId && isActionableApprovalRecord(approval))) {
       return { reconciled: true, status: "resolved" };
     }
     try {
@@ -619,7 +645,7 @@ async function reconcilePendingApproval(
   if (!isAmbiguousMutationError(error)) throw error;
   try {
     const result = await list({}, { ...commandOptions, timeoutMs: 8_000 });
-    if (!readApprovalRecords({ status: "fulfilled", value: result }).some((approval) => approval.id === id)) return true;
+    if (!readApprovalRecords({ status: "fulfilled", value: result }).some((approval) => approval.id === id && isActionableApprovalRecord(approval))) return true;
   } catch {
     throw new AttentionMutationUncertainError();
   }
@@ -630,7 +656,7 @@ async function reconcilePendingQuestion(adapter: OpenClawAdapter, id: string, er
   if (!isAmbiguousMutationError(error)) throw error;
   try {
     const result = await adapter.listQuestions?.({ ...commandOptions, timeoutMs: 8_000 });
-    if (result && !result.questions.some((question) => question.id === id && question.status === "pending")) return true;
+    if (result && !result.questions.some((question) => question.id === id && isActionableQuestionRecord(question))) return true;
   } catch {
     throw new AttentionMutationUncertainError();
   }
@@ -652,9 +678,19 @@ function readApprovalRecords(result: PromiseSettledResult<OpenClawExecApprovalLi
       ...(record.approvalKind === "exec" || record.approvalKind === "plugin" ? { approvalKind: record.approvalKind } : {}),
       ...(isRecord(record.request) ? { request: record.request } : {}),
       ...(typeof record.createdAtMs === "number" ? { createdAtMs: record.createdAtMs } : {}),
-      ...(typeof record.expiresAtMs === "number" ? { expiresAtMs: record.expiresAtMs } : {})
+      ...(typeof record.expiresAtMs === "number" ? { expiresAtMs: record.expiresAtMs } : {}),
+      ...(typeof record.status === "string" ? { status: record.status } : {})
     };
   });
+}
+
+function isActionableApprovalRecord(record: NativeApprovalRecord, now = Date.now()) {
+  if (typeof record.expiresAtMs === "number" && record.expiresAtMs <= now) return false;
+  return !record.status || ["pending", "requested", "queued", "waiting"].includes(record.status.toLowerCase());
+}
+
+function isActionableQuestionRecord(record: QuestionRecord, now = Date.now()) {
+  return record.status === "pending" && (!record.expiresAtMs || record.expiresAtMs > now);
 }
 
 function readQuestionRecords(result: PromiseSettledResult<OpenClawQuestionListPayload> | undefined): QuestionRecord[] {

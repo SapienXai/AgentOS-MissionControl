@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { abortMissionTask } from "@/lib/agentos/control-plane";
+import { getMissionControlSnapshot } from "@/lib/openclaw/application/mission-control-service";
+import { readMissionDispatchRecordById } from "@/lib/openclaw/domains/mission-dispatch-lifecycle";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import { requireAgentOsOpenClawPreflight } from "@/lib/security/agentos-openclaw-request";
 
@@ -49,6 +51,18 @@ export async function POST(
     productPermission: "tasks.use"
   });
   if ("response" in authorization) return authorization.response;
+
+  const visibleSnapshot = await getMissionControlSnapshot();
+  const visibleTask = visibleSnapshot.tasks.some((task) => task.id === taskId);
+  const dispatchCandidate = await readMissionDispatchRecordById(parseResult.data.dispatchId ?? taskId);
+  const visibleDispatch = Boolean(dispatchCandidate && (
+    dispatchCandidate.workspaceId
+      ? visibleSnapshot.workspaces.some((workspace) => workspace.id === dispatchCandidate.workspaceId)
+      : visibleSnapshot.agents.some((agent) => agent.id === dispatchCandidate.agentId)
+  ));
+  if (!visibleTask && !visibleDispatch) {
+    return NextResponse.json({ error: "Task was not found." }, { status: 404 });
+  }
 
   try {
     const result = await abortMissionTask(

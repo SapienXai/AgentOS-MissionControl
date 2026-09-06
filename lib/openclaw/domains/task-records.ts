@@ -136,6 +136,13 @@ export function buildTaskRecord(
       openClawSessionId: sessionId,
       openClawSessionKey: sessionKey,
       openClawRunId: runIds[0] ?? null,
+      parentTaskId: firstMetadataString(sortedRuntimes, "parentTaskId"),
+      parentId: firstMetadataString(sortedRuntimes, "parentId"),
+      ownerKey: firstMetadataString(sortedRuntimes, "ownerKey"),
+      requesterSessionKey: firstMetadataString(sortedRuntimes, "requesterSessionKey"),
+      childSessionKey: firstMetadataString(sortedRuntimes, "childSessionKey"),
+      flowId: firstMetadataString(sortedRuntimes, "flowId"),
+      sourceId: firstMetadataString(sortedRuntimes, "sourceId"),
       executionIdentity,
       identityProvenance: executionIdentity.provenance,
       sourceOfTruth: nativeTaskRuntime ? "openclaw-tasks.list" : "agentos-dispatch-or-runtime",
@@ -192,6 +199,12 @@ export function buildTaskRecord(
           : null
     }
   };
+}
+
+function firstMetadataString(runtimes: RuntimeRecord[], key: string) {
+  return runtimes
+    .map((runtime) => runtime.metadata[key])
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0) ?? null;
 }
 
 function attachDerivedFollowUps(task: TaskRecord, runtimes: RuntimeRecord[]): TaskRecord {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { controlRunningTaskSession } from "@/lib/agentos/control-plane";
+import { getMissionControlSnapshot } from "@/lib/openclaw/application/mission-control-service";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
 import { requireAgentOsOpenClawPreflight } from "@/lib/security/agentos-openclaw-request";
 
@@ -57,6 +58,11 @@ export async function POST(
     productPermission: "tasks.use"
   });
   if ("response" in authorization) return authorization.response;
+
+  const visibleSnapshot = await getMissionControlSnapshot();
+  if (!visibleSnapshot.tasks.some((task) => task.id === taskId)) {
+    return NextResponse.json({ error: "Task was not found." }, { status: 404 });
+  }
 
   try {
     const result = await controlRunningTaskSession(taskId, parseResult.data, {}, authorization.commandOptions);

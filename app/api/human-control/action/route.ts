@@ -3,11 +3,12 @@ import { z } from "zod";
 
 import {
   AttentionMutationUncertainError,
+  getHumanControlInbox,
   parseAttentionId,
   resolveAttentionItem
 } from "@/lib/openclaw/application/human-control-inbox-service";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
-import { invalidateMissionControlSnapshotCache } from "@/lib/openclaw/application/mission-control-service";
+import { getMissionControlSnapshot, invalidateMissionControlSnapshotCache } from "@/lib/openclaw/application/mission-control-service";
 import { requireAgentOsOpenClawPreflight } from "@/lib/security/agentos-openclaw-request";
 import { requireAgentOsProductPermission } from "@/lib/security/agentos-product-authorization";
 import { recordAgentOsAuditEvent } from "@/lib/security/agentos-audit";
@@ -41,6 +42,18 @@ export async function POST(request: Request) {
   const permissionName = parsed.kind === "suggestion" ? "tasks.use" : "runtime.use";
   const permission = await requireAgentOsProductPermission(request, permissionName);
   if ("response" in permission) return permission.response;
+
+  // Native approval/question collections are Gateway-wide. Confirm the item
+  // is present in the actor-visible projection before allowing a mutation.
+  try {
+    const snapshot = await getMissionControlSnapshot();
+    const inbox = await getHumanControlInbox({ snapshot });
+    if (!inbox.items.some((item) => item.id === input.itemId && item.status === "pending")) {
+      return NextResponse.json({ error: "Human Control item was not found." }, { status: 404 });
+    }
+  } catch {
+    return NextResponse.json({ error: "Human Control item could not be verified." }, { status: 503 });
+  }
 
   const method = resolveNativeMethod(parsed.kind, input.action);
   if (!method) return NextResponse.json({ error: "This action is not available for the selected item." }, { status: 400 });

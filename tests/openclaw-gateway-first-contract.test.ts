@@ -327,6 +327,28 @@ test("mission dispatch keeps running when only the Gateway observation wait expi
   assert.match(response.summary, /accepted and queued/i);
 });
 
+test("mission dispatch converges duplicate client request identities", async () => {
+  let calls = 0;
+  setOpenClawCapabilityMatrixNativeCallerForTesting(async () => ({ protocolVersion: 4, methods: ["chat.send"] }));
+  setOpenClawAdapterForTesting(createContractAdapter({
+    async runAgentTurn() {
+      calls += 1;
+      return { runId: "run-idempotent-1", status: "running", summary: "Accepted once" };
+    }
+  }));
+  const deps = {
+    getMissionControlSnapshot: async () => createSnapshot(),
+    resolveAgentForMission: () => "agent-1",
+    invalidateMissionControlCaches: () => {}
+  };
+  const first = await submitMissionDispatch({ mission: "Idempotent mission", workspaceId: "workspace-1", requestId: "same-request" }, deps);
+  const replay = await submitMissionDispatch({ mission: "Idempotent mission", workspaceId: "workspace-1", requestId: "same-request" }, deps);
+  trackMissionDispatch(first.dispatchId);
+  assert.equal(calls, 1);
+  assert.equal(replay.dispatchId, first.dispatchId);
+  assert.equal(replay.meta?.idempotentReplay, true);
+});
+
 test("mission dispatch still attempts Gateway-first path when capabilities are unknown", async () => {
   const calls: string[] = [];
   setOpenClawCapabilityMatrixNativeCallerForTesting(async () => ({
