@@ -819,7 +819,7 @@ export async function POST(request: Request) {
       return;
     }
 
-    const updateArgs = buildOpenClawUpdateArgs(targetVersion, updateRequest.mode);
+    const updateArgs = buildOpenClawUpdateArgs(targetVersion);
     const child = spawn(openClawBin, updateArgs, {
       cwd: process.cwd(),
       env: process.env
@@ -833,9 +833,7 @@ export async function POST(request: Request) {
     await send({
       type: "status",
       phase: "starting",
-      message: updateRequest.mode === "recommended" && targetVersion === OPENCLAW_RECOMMENDED_VERSION
-        ? "Running openclaw update --channel stable --yes --json..."
-        : `Running openclaw update --tag ${targetVersion} --yes --json...`
+      message: `Running openclaw update --tag ${targetVersion} --yes --json...`
     });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
@@ -1116,7 +1114,7 @@ export async function POST(request: Request) {
 
           if (!verification.ok) {
             const recoveryCommand = buildOpenClawRollbackManualCommand(openClawBin, rollbackSnapshot);
-            const message = `${verification.message} OpenClaw v${targetVersion} remains installed because automatic rollback is disabled.`;
+            const message = `${verification.message}${buildRetainedOpenClawVersionMessage(verifiedSnapshot)}`;
             await recordUpdateRuntimeIssue({
               type: "openclaw_postflight_failed",
               title: "OpenClaw postflight needs review",
@@ -1165,7 +1163,7 @@ export async function POST(request: Request) {
           if (!compatibilityVerification.ok) {
             if (updateRequest.rollbackPolicy === "manual") {
               const recoveryCommand = buildOpenClawRollbackManualCommand(openClawBin, rollbackSnapshot);
-              const message = `${compatibilityVerification.message} OpenClaw v${targetVersion} remains installed because automatic rollback is disabled.`;
+              const message = `${compatibilityVerification.message}${buildRetainedOpenClawVersionMessage(verifiedSnapshot)}`;
               await recordUpdateRuntimeIssue({
                 type: "openclaw_postflight_failed",
                 title: "OpenClaw compatibility postflight needs review",
@@ -1296,7 +1294,7 @@ export async function POST(request: Request) {
                 smokeTestOutput
               );
               const targetRetentionMessage = updateRequest.rollbackPolicy === "manual"
-                ? ` OpenClaw v${targetVersion} remains installed because automatic rollback is disabled.`
+                ? buildRetainedOpenClawVersionMessage(finalSnapshot)
                 : "";
               stdout = stdout
                 ? `${stdout}\n${smokeFailureMessage}`
@@ -1783,6 +1781,14 @@ function verifyOpenClawUpdate(
   };
 }
 
+function buildRetainedOpenClawVersionMessage(snapshot: MissionControlSnapshot) {
+  const installedVersion = normalizeVersion(snapshot.diagnostics.version);
+
+  return installedVersion
+    ? ` OpenClaw v${installedVersion} remains installed because automatic rollback is disabled.`
+    : " The installed OpenClaw version could not be verified; automatic rollback is disabled.";
+}
+
 function verifyOpenClawPostUpdateCompatibility(
   snapshot: MissionControlSnapshot,
   input: { certifiedTarget?: boolean } = {}
@@ -1865,14 +1871,7 @@ function isOpenClawSnapshotGatewayReady(snapshot: MissionControlSnapshot) {
   return Boolean(snapshot.diagnostics.installed && snapshot.diagnostics.loaded && snapshot.diagnostics.rpcOk);
 }
 
-function buildOpenClawUpdateArgs(
-  targetVersion: string,
-  mode: "recommended" | "candidate" | "advanced" = "advanced"
-) {
-  if (mode === "recommended" && normalizeVersion(targetVersion) === OPENCLAW_RECOMMENDED_VERSION) {
-    return ["update", "--channel", "stable", "--yes", "--json"];
-  }
-
+function buildOpenClawUpdateArgs(targetVersion: string) {
   return ["update", "--tag", targetVersion, "--yes", "--json"];
 }
 

@@ -205,7 +205,9 @@ test("failed post-update verification keeps the target installed by default", ()
   const routeSource = readFileSync(path.join(process.cwd(), "app/api/update/route.ts"), "utf8");
 
   assert.match(routeSource, /rollbackPolicy:\s*z\.enum\(\["automatic", "manual"\]\)\.default\("manual"\)/);
-  assert.match(routeSource, /OpenClaw v\$\{targetVersion\} remains installed because automatic rollback is disabled/);
+  assert.match(routeSource, /buildRetainedOpenClawVersionMessage\(verifiedSnapshot\)/);
+  assert.match(routeSource, /buildRetainedOpenClawVersionMessage\(finalSnapshot\)/);
+  assert.match(routeSource, /OpenClaw v\$\{installedVersion\} remains installed because automatic rollback is disabled/);
   assert.match(routeSource, /if \(smokeTest\.status === "failed"\)/);
   assert.match(routeSource, /if \(certifiedTarget \|\| updateRequest\.rollbackPolicy === "manual"\) \{/);
   assert.match(routeSource, /rollbackToCertifiedBaseline:\s*"not-run"/);
@@ -555,8 +557,8 @@ test("update route uses OpenClaw 2026.9.1+ JSON updater commands", () => {
 
   assert.match(routeSource, /\["update", "status", "--json"\]/);
   assert.match(routeSource, /\["update", "--dry-run", "--json"\]/);
-  assert.match(routeSource, /\["update", "--channel", "stable", "--yes", "--json"\]/);
   assert.match(routeSource, /\["update", "--tag", targetVersion, "--yes", "--json"\]/);
+  assert.doesNotMatch(routeSource, /\["update", "--channel", "stable", "--yes", "--json"\]/);
   assert.match(routeSource, /\["doctor", "--lint", "--json"\]/);
   assert.match(routeSource, /\["gateway", "status", "--deep", "--json"\]/);
   assert.doesNotMatch(routeSource, /isInstalledOpenClawBelowRequiredBaseline/);
