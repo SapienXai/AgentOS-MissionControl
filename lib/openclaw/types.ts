@@ -513,6 +513,7 @@ export interface OpenClawServerMethodContractDiffReport {
   targetMethodCount: number | null;
   currentRegisteredMethodCount: number | null;
   targetRegisteredMethodCount: number | null;
+  changedFiles: string[];
   changedServerMethodFiles: string[];
   changedProtocolFiles: string[];
   changes: OpenClawServerMethodContractChange[];

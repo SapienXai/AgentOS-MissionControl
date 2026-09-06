@@ -319,6 +319,7 @@ test("preflight blocks a target with incompatible Gateway server-method evidence
       targetMethodCount: 9,
       currentRegisteredMethodCount: 10,
       targetRegisteredMethodCount: 9,
+      changedFiles: ["src/gateway/server-methods/models.ts"],
       changedServerMethodFiles: ["src/gateway/server-methods/models.ts"],
       changedProtocolFiles: [],
       changes: [],

@@ -191,6 +191,7 @@ function createStaticReport(input: {
     targetMethodCount: null,
     currentRegisteredMethodCount: null,
     targetRegisteredMethodCount: null,
+    changedFiles: [],
     changedServerMethodFiles: [],
     changedProtocolFiles: [],
     changes: input.changes.map((change) => ({

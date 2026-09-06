@@ -3,6 +3,7 @@
 /node_modules
 /.next
 /.mission-control
+/.openclaw-release-intake
 /packages/agentos/bundle
 /packages/agentos/*.tgz
 /deliverables

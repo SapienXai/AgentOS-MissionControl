@@ -353,6 +353,8 @@ AGENTOS_RUNTIME_SMOKE=1 pnpm smoke:runtime-golden
 
 The runtime golden-path smoke dispatches real OpenClaw work. Run it only on a trusted operator machine with Gateway authentication, scopes, model credentials, and writable runtime state ready.
 
+Official OpenClaw releases are detected by the engineering Release Watcher and queued for compatibility review; certification and version promotion remain explicit human decisions.
+
 ### Safe OpenClaw updates
 
 AgentOS does not assume that the newest detected OpenClaw build is automatically safe.
