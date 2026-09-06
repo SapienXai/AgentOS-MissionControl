@@ -11,8 +11,8 @@ import { createOfficialBackedOpenClawGatewayClient } from "@/lib/openclaw/client
 import { OPENCLAW_STATIC_METHOD_SCOPES, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 import { resolveRequiredScopes } from "@/lib/openclaw/identity/authorization";
 
-const PACKAGE_ROOT = path.resolve(process.env.OPENCLAW_HUMAN_CONTROL_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos");
-const OUTPUT_PATH = path.resolve(process.env.OPENCLAW_HUMAN_CONTROL_OUTPUT?.trim() || "docs/evidence/openclaw-2026.9.1-human-control-inbox.json");
+const PACKAGE_ROOT = path.resolve(process.env.OPENCLAW_HUMAN_CONTROL_PACKAGE?.trim() || `/tmp/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-source-agentos`);
+const OUTPUT_PATH = path.resolve(process.env.OPENCLAW_HUMAN_CONTROL_OUTPUT?.trim() || `docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-human-control-inbox.json`);
 const TIMEOUT_MS = 10_000;
 const execFileAsync = promisify(execFile);
 type Result = "PASS" | "SKIPPED" | "EXPECTED-DENIAL" | "FAIL";
@@ -137,7 +137,7 @@ async function main() {
   }
 
   if (evidence.result === "FAIL") throw new Error(`Human Control certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("OPENCLAW 9.1 HUMAN CONTROL INBOX GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} HUMAN CONTROL INBOX GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 
@@ -147,7 +147,7 @@ function createEvidence(identity: { version: string; sourceCommit: string | null
     artifactType: "openclaw-human-control-inbox-certification",
     generatedAt: new Date().toISOString(),
     certifiedCodeHead,
-    openClaw: { release: identity.version, source: identity.sourceCommit, gatewayProtocol: 4, gatewayClient: "2026.9.1", gatewayProtocolPackage: "2026.9.1", packageHash: identity.packageHash },
+    openClaw: { release: identity.version, source: identity.sourceCommit, gatewayProtocol: 4, gatewayClient: identity.version, gatewayProtocolPackage: identity.version, packageHash: identity.packageHash },
     runtime: { isolated: true, gatewayPlacement: "disposable-loopback", handshake: "SKIPPED" as Result, userGatewayUntouched: true, realCredentialsAccessed: false },
     attentionProjection: { schema: "AttentionItem", sourceFamilies: ["exec approvals", "plugin approvals", "questions", "task suggestions", "effective capability blockers", "runtime issues"], stableIdentity: true, sourceOfTruth: "OpenClaw native lifecycle; AgentOS projection" },
     execApproval: { pendingRead: "SKIPPED" as Result, create: "SKIPPED" as Result, projection: "SKIPPED" as Result, resolve: "SKIPPED" as Result, event: "SKIPPED" as Result, skipReason: null as string | null },

@@ -160,11 +160,65 @@ export type OpenClawConfigSnapshotPayload = Record<string, unknown> & {
   resolved?: unknown;
 };
 
+export type OpenClawUpdateRunStep = {
+  step: string;
+  status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
+  startedAtMs?: number;
+  endedAtMs?: number;
+  detail?: string;
+};
+
+export type OpenClawUpdateRunVerification = {
+  booted?: boolean;
+  runningVersion?: string | null;
+  runningBuildId?: string | null;
+  serviceRunning?: boolean;
+  versionMatch?: boolean;
+  channelsReady?: boolean;
+  inferenceProbe?: "passed" | "failed" | "skipped";
+  noticeDelivered?: boolean;
+  doctorHint?: string | null;
+};
+
+export type OpenClawUpdateRunRecord = {
+  runId: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  trigger: "chat" | "control-ui" | "cli" | "campaign" | "mac-app" | "api";
+  phase: "requested" | "staging" | "validating" | "repairing" | "activating" | "restarting" | "verifying" | "finished";
+  status: "running" | "succeeded" | "failed" | "rolled-back" | "skipped";
+  reason: string | null;
+  target?: {
+    channel?: string;
+    tag?: string;
+    kind?: "package" | "git";
+    version?: string;
+    sha?: string;
+  };
+  before?: { version?: string | null; sha?: string | null; buildId?: string | null };
+  after?: { version?: string | null; sha?: string | null; buildId?: string | null };
+  steps?: OpenClawUpdateRunStep[];
+  verification?: OpenClawUpdateRunVerification;
+  repair?: Array<{
+    attempt: number;
+    status: "succeeded" | "failed" | "skipped";
+    startedAtMs?: number;
+    endedAtMs?: number;
+    summary?: string;
+    reason?: string;
+  }>;
+  confirmedAtMs?: number | null;
+  finishedAtMs?: number | null;
+  downtimeMs?: number | null;
+};
+
 export type OpenClawUpdateStatusNativePayload = Record<string, unknown> & {
   sentinel?: unknown;
   updateAvailable?: Record<string, unknown> | null;
   effectiveChannel?: "stable" | "extended-stable" | "beta" | "dev";
   schedule?: Record<string, unknown>;
+  activeRun?: OpenClawUpdateRunRecord | null;
+  lastRun?: OpenClawUpdateRunRecord | null;
 };
 
 export type OpenClawUpdateRunInput = {

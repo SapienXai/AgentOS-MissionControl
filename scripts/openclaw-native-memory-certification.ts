@@ -14,8 +14,8 @@ import type {
 import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_ROOT = process.env.OPENCLAW_MEMORY_CERT_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos";
-const OUTPUT_PATH = process.env.OPENCLAW_MEMORY_CERT_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-native-memory.json");
+const PACKAGE_ROOT = process.env.OPENCLAW_MEMORY_CERT_PACKAGE?.trim() || `/tmp/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-source-agentos`;
+const OUTPUT_PATH = process.env.OPENCLAW_MEMORY_CERT_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-native-memory.json`);
 const REQUEST_TIMEOUT_MS = 10_000;
 const agentId = "main";
 
@@ -24,7 +24,7 @@ type CertStatus = "PASS" | "SKIPPED" | "EXPECTED-DENIAL" | "FAIL";
 async function main() {
   const packageIdentity = await readPackageIdentity(PACKAGE_ROOT);
   if (packageIdentity.version !== OPENCLAW_IDENTITY_CONTRACT_VERSION || packageIdentity.sourceCommit !== OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT) {
-    throw new Error("The supplied OpenClaw package does not match the pinned 2026.9.1 source build.");
+    throw new Error(`The supplied OpenClaw package does not match the pinned ${OPENCLAW_IDENTITY_CONTRACT_VERSION} source build.`);
   }
 
   const disposableRoot = await mkdtemp(path.join(os.tmpdir(), "agentos-openclaw-memory-"));
@@ -53,8 +53,8 @@ async function main() {
         packageRoot: "[DISPOSABLE_EXACT_PACKAGE]"
       },
       gatewayProtocol: 4,
-      gatewayClient: "2026.9.1",
-      gatewayProtocolPackage: "2026.9.1"
+      gatewayClient: packageIdentity.version,
+      gatewayProtocolPackage: packageIdentity.version
     },
     runtime: {
       packageMode: "exact-openclaw-package-fixture",
@@ -177,7 +177,7 @@ async function main() {
     && evidence.observations.noCliFallback !== "FAIL";
   await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
-  console.log(`OPENCLAW 9.1 NATIVE MEMORY GATE: ${evidence.success ? "PASS" : "FAIL"}`);
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} NATIVE MEMORY GATE: ${evidence.success ? "PASS" : "FAIL"}`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
   if (!evidence.success) process.exitCode = 1;
 }

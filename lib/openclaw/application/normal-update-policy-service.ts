@@ -6,7 +6,7 @@ import type { NativeDoctorSnapshot } from "@/lib/openclaw/application/native-doc
 import {
   resolveNormalOpenClawUpdatePolicy,
   type NormalOpenClawUpdatePolicy
-} from "@/lib/openclaw/update-presentation";
+} from "@/lib/openclaw/domains/normal-update-policy";
 import { LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST } from "@/lib/openclaw/update-compatibility";
 
 export async function getNormalOpenClawUpdatePolicy(

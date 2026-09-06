@@ -9,15 +9,17 @@ import {
 import type { HelloOk } from "@openclaw/gateway-protocol/frame-guards";
 import { normalizeClientError } from "@/lib/openclaw/client/native-ws-gateway-errors";
 import { redactGatewayUrl } from "@/lib/openclaw/compat/targets";
+import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT } from "@/lib/openclaw/identity/contract";
+import { OPENCLAW_NATIVE_CONTRACT_VERSION } from "@/lib/openclaw/versions";
 
-const TARGET_VERSION = process.env.OPENCLAW_OFFICIAL_CERT_TARGET?.trim() || "2026.9.1";
+const TARGET_VERSION = process.env.OPENCLAW_OFFICIAL_CERT_TARGET?.trim() || OPENCLAW_NATIVE_CONTRACT_VERSION;
 const TARGET_COMMIT = process.env.OPENCLAW_OFFICIAL_CERT_TARGET_COMMIT?.trim() ||
-  "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
+  OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 const GATEWAY_URL = process.env.OPENCLAW_OFFICIAL_CERT_GATEWAY_URL?.trim() || "ws://127.0.0.1:18789";
 const TOKEN = process.env.OPENCLAW_OFFICIAL_CERT_TOKEN?.trim() || null;
 const STATE_DIR = process.env.OPENCLAW_OFFICIAL_CERT_STATE_DIR?.trim();
 const OUTPUT_PATH = process.env.OPENCLAW_OFFICIAL_CERT_OUTPUT?.trim() ||
-  path.resolve("docs/evidence/openclaw-2026.9.1-official-transport-certification.json");
+  path.resolve(`docs/evidence/openclaw-${TARGET_VERSION}-official-transport-certification.json`);
 const REQUEST_TIMEOUT_MS = 8_000;
 
 async function main() {

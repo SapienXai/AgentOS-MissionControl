@@ -268,17 +268,17 @@ export function UpdatesPageContent({ refresh }: UpdatesPageContentProps) {
     }
   };
 
-  const nativeOperationRunning = actionState === "running" || userState === "running";
+  const durableUpdateRunning = native?.update.activeRun?.status === "running";
 
   return (
     <>
       <PikoLoader
-        open={nativeOperationRunning || isRefreshing}
-        title={nativeOperationRunning ? "Updating OpenClaw" : "Checking OpenClaw updates"}
+        open={actionState === "running" || isRefreshing}
+        title={actionState === "running" ? "Updating OpenClaw" : "Checking OpenClaw updates"}
         description={
-          nativeOperationRunning
-            ? userState === "running"
-              ? "OpenClaw is applying its native update campaign. Return here after the Gateway reconnects to verify the result."
+          actionState === "running"
+            ? durableUpdateRunning
+              ? "OpenClaw is applying its native update run. This state is owned by OpenClaw and survives reconnects."
               : "OpenClaw may restart. AgentOS will verify the reconnect and final runtime state."
             : "Reading the authoritative native update status."
         }
@@ -455,6 +455,9 @@ function PrimaryUpdateCard({
           </div>
         ) : null}
 
+        {native?.update.activeRun ? <ActiveUpdateRun run={native.update.activeRun} /> : null}
+        {!native?.update.activeRun && native?.update.lastRun ? <LastUpdateRun run={native.update.lastRun} /> : null}
+
         {state === "available-uncertified" ? (
           <div className="mt-4 rounded-lg border border-[hsl(var(--status-warning)/0.25)] bg-[hsl(var(--status-warning)/0.08)] p-3 text-sm">
             <div className="flex items-start gap-2">
@@ -552,6 +555,64 @@ function CommunityDisclosure({
       </div>
     </details>
   );
+}
+
+function ActiveUpdateRun({ run }: { run: NonNullable<NativeDoctorSnapshot["update"]["activeRun"]> }) {
+  const target = run.targetVersion ? ` · v${run.targetVersion}` : "";
+  return (
+    <div className="mt-4 rounded-lg border border-[hsl(var(--status-warning)/0.25)] bg-[hsl(var(--status-warning)/0.08)] p-3" role="status">
+      <div className="flex items-start gap-2">
+        <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[hsl(var(--status-warning-foreground))]" />
+        <div className="min-w-0">
+          <p className="font-medium text-foreground">OpenClaw update in progress{target}</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {formatNativeUpdateRunPhase(run.phase)} Gateway state is owned by OpenClaw. AgentOS will re-read it after reconnect.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LastUpdateRun({ run }: { run: NonNullable<NativeDoctorSnapshot["update"]["lastRun"]> }) {
+  const outcome = run.status === "succeeded" ? "Completed" : run.status === "failed" || run.status === "rolled-back" ? "Needs attention" : "Skipped";
+  return (
+    <details className="group mt-4 rounded-lg border border-border bg-muted/20">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+        <span>
+          <span className="font-medium text-foreground">Last update</span>
+          <span className="ml-2 text-xs text-muted-foreground">{outcome} · {formatTimestampMs(run.finishedAtMs ?? run.updatedAtMs)}</span>
+        </span>
+        <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-border px-3 py-3 text-xs leading-5 text-muted-foreground">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <StatusFact label="From" value={run.beforeVersion ? `v${run.beforeVersion}` : "Unknown"} />
+          <StatusFact label="To" value={run.afterVersion || run.targetVersion ? `v${run.afterVersion || run.targetVersion}` : "Unknown"} />
+          <StatusFact label="Verification" value={run.verification?.versionMatch === true ? "Verified" : run.verification?.versionMatch === false ? "Mismatch" : "Not reported"} />
+        </div>
+        {run.reason ? <p className="mt-3">{run.reason}</p> : null}
+      </div>
+    </details>
+  );
+}
+
+function formatNativeUpdateRunPhase(phase: NonNullable<NativeDoctorSnapshot["update"]["activeRun"]>["phase"]) {
+  switch (phase) {
+    case "requested":
+      return "Preparing the update…";
+    case "staging":
+    case "validating":
+    case "repairing":
+      return "Updating OpenClaw…";
+    case "activating":
+    case "restarting":
+      return "Restarting the Gateway…";
+    case "verifying":
+      return "Verifying the runtime…";
+    case "finished":
+      return "Finishing the update…";
+  }
 }
 
 function StatusLine({ label, value }: { label: string; value: string }) {
@@ -673,4 +734,8 @@ function findCommunityRelease(snapshot: OpenClawStabilitySnapshot | null, versio
 function formatTimestamp(value: string) {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? "Unknown" : new Date(timestamp).toLocaleString();
+}
+
+function formatTimestampMs(value: number | null) {
+  return value === null ? "Unknown" : formatTimestamp(new Date(value).toISOString());
 }

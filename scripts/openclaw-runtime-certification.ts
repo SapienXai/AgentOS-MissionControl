@@ -16,6 +16,8 @@ import { runOpenClawRuntimeCertification } from "@/lib/openclaw/runtime-certific
 import { evaluateOpenClawRuntimeMigrationReadiness } from "@/lib/openclaw/runtime-certification/readiness-gate";
 import { serializeOpenClawRuntimeCertificationArtifact } from "@/lib/openclaw/runtime-certification/serialization";
 import { createOpenClawRuntimeProviderFixture, OPENCLAW_RUNTIME_FIXTURE_MODEL_ID } from "@/scripts/openclaw-runtime-provider-fixture";
+import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT } from "@/lib/openclaw/identity/contract";
+import { OPENCLAW_NATIVE_CONTRACT_VERSION } from "@/lib/openclaw/versions";
 import type {
   OpenClawRuntimeCertificationContext,
   OpenClawRuntimeCertificationProbe,
@@ -26,8 +28,8 @@ import type {
 
 type OfficialBackedGatewayClient = ReturnType<typeof createOfficialBackedOpenClawGatewayClient>;
 
-const TARGET_VERSION = process.env.OPENCLAW_RUNTIME_CERT_TARGET?.trim() || "2026.9.1";
-const TARGET_COMMIT = process.env.OPENCLAW_RUNTIME_CERT_TARGET_COMMIT?.trim() || "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
+const TARGET_VERSION = process.env.OPENCLAW_RUNTIME_CERT_TARGET?.trim() || OPENCLAW_NATIVE_CONTRACT_VERSION;
+const TARGET_COMMIT = process.env.OPENCLAW_RUNTIME_CERT_TARGET_COMMIT?.trim() || OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 const STATIC_COMPARISON_SOURCE_VERSION = process.env.OPENCLAW_RUNTIME_CERT_STATIC_CURRENT_VERSION?.trim() || "2026.6.11";
 const GATEWAY_URL = process.env.OPENCLAW_RUNTIME_CERT_GATEWAY_URL?.trim() || "ws://127.0.0.1:18789";
 const TOKEN =
@@ -35,7 +37,7 @@ const TOKEN =
   process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN?.trim() ||
   null;
 const OUTPUT_PATH = process.env.OPENCLAW_RUNTIME_CERT_OUTPUT?.trim() ||
-  path.resolve("docs/evidence/openclaw-2026.9.1-runtime-certification.json");
+  path.resolve(`docs/evidence/openclaw-${TARGET_VERSION}-runtime-certification.json`);
 const STATE_DIR = process.env.OPENCLAW_RUNTIME_CERT_STATE_DIR?.trim() || null;
 const OPENCLAW_CLI = process.env.OPENCLAW_RUNTIME_CERT_CLI?.trim() || null;
 const USE_FIXTURE = process.env.OPENCLAW_RUNTIME_CERT_USE_FIXTURE !== "0";

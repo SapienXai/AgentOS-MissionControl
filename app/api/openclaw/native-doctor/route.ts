@@ -14,7 +14,8 @@ import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { requireAgentOsProductPermission } from "@/lib/security/agentos-product-authorization";
 import { recordAgentOsAuditEvent } from "@/lib/security/agentos-audit";
 import { redactErrorMessage, redactSecrets } from "@/lib/security/redaction";
-import { guardNormalOpenClawUpdate } from "@/lib/openclaw/update-presentation";
+import { guardNormalOpenClawUpdate } from "@/lib/openclaw/domains/normal-update-policy";
+import { reconcileAgentOsSessionSecurityDefaults } from "@/lib/openclaw/domains/session-security-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,6 +89,25 @@ export async function POST(request: Request) {
 
   try {
     const adapter = getOpenClawAdapter();
+    const securityMigration = input.action === "update.run"
+      ? await reconcileAgentOsSessionSecurityDefaults({ adapter })
+      : null;
+    if (securityMigration?.status === "blocked-external-runtime" || securityMigration?.status === "blocked-unsafe-policy") {
+      return NextResponse.json(redactSecrets({
+        error: securityMigration.status === "blocked-unsafe-policy"
+          ? "OpenClaw explicitly enables cross-agent access but omits its allowlist. Configure an explicit allowlist before using the normal update path."
+          : "OpenClaw session-security settings are omitted, and AgentOS cannot safely change configuration on this externally managed Gateway.",
+        code: "UPDATE_SECURITY_POLICY_REQUIRED",
+        migration: securityMigration
+      }), { status: 409, headers: { "Cache-Control": "no-store" } });
+    }
+    if (securityMigration?.status === "failed") {
+      return NextResponse.json(redactSecrets({
+        error: "AgentOS could not make the OpenClaw session-security defaults explicit. Refresh and retry after reviewing Gateway configuration.",
+        code: "UPDATE_SECURITY_POLICY_REQUIRED",
+        migration: securityMigration
+      }), { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
     const current = await getNativeDoctorSnapshot({
       adapter,
       ...(input.action.startsWith("update.") ? { refreshCheckout: true } : {})

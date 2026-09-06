@@ -10,14 +10,14 @@ import {
   OPENCLAW_SUPPORTED_BASELINE_VERSION
 } from "@/lib/openclaw/versions";
 
-test("OpenClaw 2026.9.1 is the recommended and supported fresh baseline", () => {
-  assert.equal(OPENCLAW_RECOMMENDED_VERSION, "2026.9.1");
+test("OpenClaw 2026.9.2 is the recommended fresh baseline while 9.1 remains supported", () => {
+  assert.equal(OPENCLAW_RECOMMENDED_VERSION, "2026.9.2");
   assert.equal(OPENCLAW_SUPPORTED_BASELINE_VERSION, "2026.9.1");
-  assert.equal(LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST.recommendedVersion, "2026.9.1");
+  assert.equal(LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST.recommendedVersion, "2026.9.2");
   assert.deepEqual(
-    LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST.versions.find((entry) => entry.version === "2026.9.1"),
+    LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST.versions.find((entry) => entry.version === "2026.9.2"),
     {
-      version: "2026.9.1",
+      version: "2026.9.2",
       status: "certified",
       minRequiredAgentOsVersion: "0.7.2",
       notes: "Recommended stable OpenClaw version for AgentOS Gateway-first operation.",
@@ -48,7 +48,7 @@ test("the historical 6.11 runtime is below the promoted normal-support baseline"
 test("fresh baseline certification does not invoke the historical migration engine", () => {
   const source = readFileSync(path.join(process.cwd(), "scripts/openclaw-fresh-baseline-e2e.ts"), "utf8");
   const evidence = JSON.parse(readFileSync(
-    path.join(process.cwd(), "docs/evidence/openclaw-2026.9.1-fresh-baseline.json"),
+    path.join(process.cwd(), "docs/evidence/openclaw-2026.9.2-fresh-baseline.json"),
     "utf8"
   )) as {
     success?: boolean;
@@ -62,7 +62,7 @@ test("fresh baseline certification does not invoke the historical migration engi
   assert.match(source, /sourceStateProvided: false/);
   assert.match(source, /noHistoricalMigrationFixture: true/);
   assert.match(source, /migrationEngineInvoked: false/);
-  assert.match(source, /OPENCLAW 9\.1 FRESH BASELINE: PASS/);
+  assert.match(source, /OPENCLAW \$\{TARGET_LABEL\} FRESH BASELINE: PASS/);
   assert.equal(evidence.success, true);
   assert.equal(evidence.freshState?.sourceStateProvided, false);
   assert.equal(evidence.freshState?.historicalMigrationFixtureUsed, false);

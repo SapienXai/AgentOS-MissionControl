@@ -1,7 +1,7 @@
 # OpenClaw Native Doctor, Update, and Recovery
 
 AgentOS presents operational OpenClaw state without becoming a second runtime or
-repair engine. OpenClaw 2026.9.1 remains authoritative for health, configuration
+repair engine. OpenClaw 2026.9.2 remains authoritative for health, configuration
 application, updates, restart coordination, suspension, authorization, and
 reconnect behavior. AgentOS normalizes those native facts for the existing
 Settings, Diagnostics, Gateway, and Updates surfaces.
@@ -9,7 +9,7 @@ Settings, Diagnostics, Gateway, and Updates surfaces.
 ## Native contract
 
 The online operational projection uses the official Gateway transport and these
-2026.9.1 methods:
+2026.9.2 methods:
 
 | Surface | Native methods | AgentOS use |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ authorization remains final.
 
 ### Phase 6.1 — Truthfulness and recovery reconciliation
 
-The exact OpenClaw 2026.9.1 descriptor protects `update.status` with
+The exact OpenClaw 2026.9.2 descriptor protects `update.status` with
 `operator.admin`, even though the method is read-shaped. AgentOS therefore
 keeps the health, status, diagnostics, and config portions of Doctor usable for
 read-capable operators while projecting update status as forbidden/unavailable
@@ -105,7 +105,7 @@ update` only when `update.status` reports an automatic campaign in the native
 `waiting-for-idle` or `countdown` state and no hold is already active. Native
 campaign or rollout hold state is projected as `Update held`; AgentOS does not
 create a parallel hold lifecycle or silently clear an OpenClaw hold. No fixed
-duration is shown because the 2026.9.1 contract does not define one in the
+duration is shown because the 2026.9.2 contract does not define one in the
 request; OpenClaw owns the resulting `holdUntilMs`.
 
 ## Advanced compatibility path
@@ -133,21 +133,23 @@ and can fail or become stale without blocking native status or native update
 execution. It never supplies installed-version truth, channel truth, update
 availability, or an update target.
 
-The pinned 2026.9.1 `update.status` response exposes bounded availability,
-channel, automatic schedule, and in-memory campaign state. It does not expose
-an `activeRun`, `lastRun`, durable run ID, or phase history. AgentOS therefore
-does not invent a durable run model or persist a competing update job. During a
-native campaign's `applying` state, the Updates page projects `Updating
-OpenClaw`; after a page reload or Gateway reconnect the next native status read
-restores that state. Once the campaign leaves that state, final success still
-requires the existing fresh health/status/update reconciliation.
+The pinned 2026.9.2 `update.status` response exposes bounded availability,
+channel, automatic schedule, and durable `activeRun`/`lastRun` records. AgentOS
+projects only the run ID, phase/status, target/before/after versions, bounded
+steps, verification facts, and timing. Origin session identifiers, process
+metadata, install paths, and raw output are excluded. The Updates page derives
+an active progress state from the native record even when React state is idle,
+so page reload, navigation, Gateway restart, and an update started elsewhere
+remain recoverable. Final success still requires the existing fresh
+health/status/update reconciliation; a native last-run success alone is not
+proof that AgentOS observed the expected runtime.
 
 Settings → OpenClaw is a runtime/configuration summary with a `Manage updates`
 link. Native Doctor and Diagnostics report update health and recovery evidence,
 but link to the canonical Updates page instead of exposing a second normal
 update action. Rollback remains a recovery operation for advanced operators.
 
-The pinned OpenClaw 2026.9.1 Gateway contract does not expose an
+The pinned OpenClaw 2026.9.2 Gateway contract does not expose an
 `update.repair` method, so AgentOS does not invent a Repair button or guess CLI
 flags. Unknown or failed native outcomes remain recoverable through the
 existing supervisor/reconnect evidence, Runtime Inbox guidance, and advanced
@@ -189,8 +191,9 @@ claim verification that the reconnecting Gateway has not provided.
 
 ## Phase 6 certification note
 
-Phase 6 was certified against the exact OpenClaw 2026.9.1 source contract pinned
-by AgentOS. Disposable live mutation proof remains explicitly marked skipped or
-expected-denial when an isolated authenticated Gateway cannot safely provide the
-required fixture. Contract tests and native-only transport tests cover the same
-method boundaries without touching user Gateway state.
+The 2026.9.2 certification is recorded in
+[`openclaw-2026.9.2-compatibility-audit.md`](./openclaw-2026.9.2-compatibility-audit.md).
+The disposable npm-package update mutation is intentionally recorded as native
+`skipped` (`not-git-install`); no destructive mutation was run against a user
+Gateway. Contract tests, runtime certification, multi-user security evidence,
+and native-only reconciliation tests cover the supported method boundaries.

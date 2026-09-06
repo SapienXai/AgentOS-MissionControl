@@ -47,6 +47,13 @@ import type {
 } from "@/lib/openclaw/gateway-auth";
 import { OPENCLAW_DEFAULT_GATEWAY_BIND_MODE } from "@/lib/openclaw/gateway-defaults";
 import { redactErrorMessage } from "@/lib/security/redaction";
+import {
+  OPENCLAW_SESSION_SECURITY_CONFIG_PATHS,
+  normalizeAgentToAgentAllow,
+  readAgentOsSessionSecurityPosture,
+  type AgentOsSessionSecurityPosture,
+  type OpenClawSessionToolsVisibility
+} from "@/lib/openclaw/domains/session-security-policy";
 
 const GATEWAY_REMOTE_URL_CONFIG_KEY = "gateway.remote.url";
 const GATEWAY_BIND_CONFIG_KEY = "gateway.bind";
@@ -61,9 +68,9 @@ const GATEWAY_AUTH_TOKEN_CONFIG_KEY = "gateway.auth.token";
 const GATEWAY_AUTH_RESTART_SETTLE_MS = 1_250;
 const GATEWAY_AUTH_RESTART_VERIFY_DELAYS_MS = [0, 500, 1_000, 1_500, 2_500, 3_500];
 const GATEWAY_DEVICE_ACCESS_REPAIR_TIMEOUT_MS = 10_000;
-const SESSION_TOOLS_VISIBILITY_CONFIG_KEY = "tools.sessions.visibility";
-const AGENT_TO_AGENT_ENABLED_CONFIG_KEY = "tools.agentToAgent.enabled";
-const AGENT_TO_AGENT_ALLOW_CONFIG_KEY = "tools.agentToAgent.allow";
+const SESSION_TOOLS_VISIBILITY_CONFIG_KEY = OPENCLAW_SESSION_SECURITY_CONFIG_PATHS.sessionsVisibility;
+const AGENT_TO_AGENT_ENABLED_CONFIG_KEY = OPENCLAW_SESSION_SECURITY_CONFIG_PATHS.agentToAgentEnabled;
+const AGENT_TO_AGENT_ALLOW_CONFIG_KEY = OPENCLAW_SESSION_SECURITY_CONFIG_PATHS.agentToAgentAllow;
 const GATEWAY_DEVICE_ACCESS_REQUIRED_SCOPES = [
   "operator.admin",
   "operator.read",
@@ -123,10 +130,11 @@ type GatewayConfigCommandResult = {
 
 export type CrossAgentMessageSettings = {
   enabled: boolean;
-  sessionsVisibility: "self" | "tree" | "agent" | "all";
+  sessionsVisibility: OpenClawSessionToolsVisibility;
   agentToAgentEnabled: boolean;
   allow: string[];
   source: "openclaw-config";
+  securityPosture: AgentOsSessionSecurityPosture;
 };
 
 type CrossAgentMessageSettingsUpdateInput = {
@@ -178,25 +186,21 @@ export async function updateWorkspaceRoot(input: { workspaceRoot?: string | null
 
 export async function getCrossAgentMessageSettings(): Promise<CrossAgentMessageSettings> {
   const adapter = getOpenClawAdapter();
-  const [
-    sessionsVisibility,
-    agentToAgentEnabled,
-    allow
-  ] = await Promise.all([
-    adapter.getConfig<unknown>(SESSION_TOOLS_VISIBILITY_CONFIG_KEY, { timeoutMs: 5_000 }),
-    adapter.getConfig<unknown>(AGENT_TO_AGENT_ENABLED_CONFIG_KEY, { timeoutMs: 5_000 }),
-    adapter.getConfig<unknown>(AGENT_TO_AGENT_ALLOW_CONFIG_KEY, { timeoutMs: 5_000 })
-  ]);
-  const normalizedVisibility = normalizeSessionToolsVisibility(sessionsVisibility);
-  const normalizedAgentToAgentEnabled = agentToAgentEnabled === true;
-  const normalizedAllow = normalizeAgentToAgentAllow(allow);
+  const securityPosture = await readAgentOsSessionSecurityPosture({
+    adapter,
+    commandOptions: { timeoutMs: 5_000 }
+  });
+  const normalizedVisibility = securityPosture.sessionsVisibility ?? "tree";
+  const normalizedAgentToAgentEnabled = securityPosture.agentToAgentEnabled === true;
+  const normalizedAllow = securityPosture.allow;
 
   return {
-    enabled: normalizedVisibility === "all" && normalizedAgentToAgentEnabled && normalizedAllow.length > 0,
+    enabled: securityPosture.crossAgentAccess === "explicit-allowlist" || securityPosture.crossAgentAccess === "broad-allow",
     sessionsVisibility: normalizedVisibility,
     agentToAgentEnabled: normalizedAgentToAgentEnabled,
     allow: normalizedAllow,
-    source: "openclaw-config"
+    source: "openclaw-config",
+    securityPosture
   };
 }
 
@@ -212,7 +216,7 @@ export async function updateCrossAgentMessageSettings(input: CrossAgentMessageSe
       enabled: input.enabled,
       knownTargetAgentIds,
       targetAgentId,
-      wildcardActive: current.agentToAgentEnabled && current.sessionsVisibility === "all"
+      wildcardActive: false
     });
 
     if (nextAllow.length > 0) {
@@ -231,11 +235,10 @@ export async function updateCrossAgentMessageSettings(input: CrossAgentMessageSe
   }
 
   if (input.enabled) {
-    await adapter.setConfig(SESSION_TOOLS_VISIBILITY_CONFIG_KEY, "all", { timeoutMs: 10_000 });
-    await adapter.setConfig(AGENT_TO_AGENT_ALLOW_CONFIG_KEY, ["*"], { strictJson: true, timeoutMs: 10_000 });
-    await adapter.setConfig(AGENT_TO_AGENT_ENABLED_CONFIG_KEY, true, { strictJson: true, timeoutMs: 10_000 });
+    throw new Error("An explicit target agent is required before enabling cross-agent messaging.");
   } else {
     await adapter.setConfig(AGENT_TO_AGENT_ENABLED_CONFIG_KEY, false, { strictJson: true, timeoutMs: 10_000 });
+    await adapter.setConfig(AGENT_TO_AGENT_ALLOW_CONFIG_KEY, [], { strictJson: true, timeoutMs: 10_000 });
     await adapter.setConfig(SESSION_TOOLS_VISIBILITY_CONFIG_KEY, "tree", { timeoutMs: 10_000 });
   }
 
@@ -1189,14 +1192,6 @@ function hasGatewayDeviceAccessRequiredScopes(scopes: string[], requiredScopes =
 
 function readOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function normalizeSessionToolsVisibility(value: unknown): CrossAgentMessageSettings["sessionsVisibility"] {
-  return value === "self" || value === "agent" || value === "all" ? value : "tree";
-}
-
-function normalizeAgentToAgentAllow(value: unknown) {
-  return Array.from(new Set(readStringArray(value).map((entry) => entry.trim()).filter(Boolean)));
 }
 
 function resolveTargetAgentAllowList(input: {

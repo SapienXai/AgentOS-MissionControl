@@ -38,6 +38,7 @@ import {
   updateGatewayRemoteUrl,
   updateWorkspaceRoot
 } from "@/lib/openclaw/application/settings-service";
+import { reconcileAgentOsSessionSecurityDefaults } from "@/lib/openclaw/domains/session-security-policy";
 import {
   bindWorkspaceChannelAgent,
   createManagedSurfaceAccount,
@@ -106,6 +107,7 @@ export {
   submitMission,
   updateAgent,
   updateCrossAgentMessageSettings,
+  reconcileAgentOsSessionSecurityDefaults,
   updateGatewayRemoteUrl,
   updateWorkspaceProject,
   updateWorkspaceRoot,

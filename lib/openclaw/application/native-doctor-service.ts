@@ -11,6 +11,7 @@ import type {
   OpenClawGatewaySuspendPrepareInput,
   OpenClawGatewaySuspendResumeInput,
   OpenClawGatewaySuspendStatusInput,
+  OpenClawUpdateRunRecord,
   OpenClawUpdateRunInput
 } from "@/lib/openclaw/client/types";
 import { openClawScopesAllow } from "@/lib/openclaw/identity/types";
@@ -21,6 +22,34 @@ export type NativeHealthStatus = "healthy" | "degraded" | "unavailable" | "unkno
 export type NativeConfigApplicationStatus = "applied" | "restart-required" | "unknown";
 export type NativeUpdateStatus = "available" | "current" | "unavailable" | "unknown";
 export type NativeRecoveryStatus = "healthy" | "needs-attention" | "restart-required" | "unavailable" | "unknown";
+
+export type NativeUpdateRunProjection = {
+  runId: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  trigger: OpenClawUpdateRunRecord["trigger"];
+  phase: OpenClawUpdateRunRecord["phase"];
+  status: OpenClawUpdateRunRecord["status"];
+  reason: string | null;
+  targetVersion: string | null;
+  beforeVersion: string | null;
+  afterVersion: string | null;
+  steps: Array<{ step: string; status: string; startedAtMs?: number; endedAtMs?: number; detail?: string }>;
+  verification: {
+    booted?: boolean;
+    runningVersion?: string | null;
+    serviceRunning?: boolean;
+    versionMatch?: boolean;
+    channelsReady?: boolean;
+    inferenceProbe?: string;
+    noticeDelivered?: boolean;
+    doctorHint?: string | null;
+  } | null;
+  repair: Array<{ attempt: number; status: string; startedAtMs?: number; endedAtMs?: number; summary?: string; reason?: string }>;
+  confirmedAtMs: number | null;
+  finishedAtMs: number | null;
+  downtimeMs: number | null;
+};
 
 export type NativeDoctorSnapshot = {
   generatedAt: string;
@@ -59,6 +88,8 @@ export type NativeDoctorSnapshot = {
     latestVersion: string | null;
     effectiveChannel: string | null;
     schedule: Record<string, unknown> | null;
+    activeRun?: NativeUpdateRunProjection | null;
+    lastRun?: NativeUpdateRunProjection | null;
     explanation: string;
   };
   recovery: {
@@ -230,6 +261,8 @@ export async function getNativeDoctorSnapshot(
       latestVersion: readNonEmptyString(updateAvailableRecord?.latestVersion),
       effectiveChannel: readNonEmptyString(updatePayload?.effectiveChannel),
       schedule: projectUpdateSchedule(updatePayload?.schedule),
+      activeRun: projectUpdateRun(updatePayload?.activeRun),
+      lastRun: projectUpdateRun(updatePayload?.lastRun),
       explanation: update.status === "available"
         ? updateAvailable
           ? "OpenClaw reports an update is available."
@@ -512,6 +545,43 @@ export function confirmationMatches(
     && expected.availableVersion === actual.availableVersion;
 }
 
+export function projectUpdateRun(value: unknown): NativeUpdateRunProjection | null {
+  if (!isRecord(value)) return null;
+  const runId = readNonEmptyString(value.runId);
+  const createdAtMs = readNonNegativeInteger(value.createdAtMs);
+  const updatedAtMs = readNonNegativeInteger(value.updatedAtMs);
+  const trigger = readUpdateRunTrigger(value.trigger);
+  const phase = readUpdateRunPhase(value.phase);
+  const status = readUpdateRunStatus(value.status);
+  if (!runId || createdAtMs === null || updatedAtMs === null || !trigger || !phase || !status) return null;
+
+  const target = isRecord(value.target) ? value.target : null;
+  const before = isRecord(value.before) ? value.before : null;
+  const after = isRecord(value.after) ? value.after : null;
+  const verification = isRecord(value.verification) ? projectUpdateRunVerification(value.verification) : null;
+  const steps = Array.isArray(value.steps) ? value.steps.slice(0, 128).flatMap((step) => projectUpdateRunStep(step)) : [];
+  const repair = Array.isArray(value.repair) ? value.repair.slice(0, 16).flatMap((attempt) => projectUpdateRepairAttempt(attempt)) : [];
+
+  return {
+    runId,
+    createdAtMs,
+    updatedAtMs,
+    trigger,
+    phase,
+    status,
+    reason: redactOptionalText(value.reason),
+    targetVersion: readNonEmptyString(target?.version) || readNonEmptyString(target?.tag),
+    beforeVersion: readNonEmptyString(before?.version),
+    afterVersion: readNonEmptyString(after?.version),
+    steps,
+    verification,
+    repair,
+    confirmedAtMs: readNullableNonNegativeInteger(value.confirmedAtMs),
+    finishedAtMs: readNullableNonNegativeInteger(value.finishedAtMs),
+    downtimeMs: readNullableNonNegativeInteger(value.downtimeMs)
+  };
+}
+
 type NativeReadResult<T> = {
   status: NativeReadStatus;
   value: T | null;
@@ -640,6 +710,73 @@ function readSuspendOutcome(result: Record<string, unknown>): NativeDoctorMutati
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function readNullableNonNegativeInteger(value: unknown): number | null {
+  return value === null || value === undefined ? null : readNonNegativeInteger(value);
+}
+
+function redactOptionalText(value: unknown) {
+  const text = readNonEmptyString(value);
+  return text ? redactSecretText(text).slice(0, 512) : null;
+}
+
+function readUpdateRunTrigger(value: unknown): OpenClawUpdateRunRecord["trigger"] | null {
+  return value === "chat" || value === "control-ui" || value === "cli" || value === "campaign" || value === "mac-app" || value === "api" ? value : null;
+}
+
+function readUpdateRunPhase(value: unknown): OpenClawUpdateRunRecord["phase"] | null {
+  return value === "requested" || value === "staging" || value === "validating" || value === "repairing" || value === "activating" || value === "restarting" || value === "verifying" || value === "finished" ? value : null;
+}
+
+function readUpdateRunStatus(value: unknown): OpenClawUpdateRunRecord["status"] | null {
+  return value === "running" || value === "succeeded" || value === "failed" || value === "rolled-back" || value === "skipped" ? value : null;
+}
+
+function projectUpdateRunStep(value: unknown) {
+  if (!isRecord(value)) return [];
+  const step = readNonEmptyString(value.step);
+  const status = readNonEmptyString(value.status);
+  if (!step || !status) return [];
+  return [{
+    step: step.slice(0, 128),
+    status: status.slice(0, 64),
+    ...(readNonNegativeInteger(value.startedAtMs) === null ? {} : { startedAtMs: readNonNegativeInteger(value.startedAtMs)! }),
+    ...(readNonNegativeInteger(value.endedAtMs) === null ? {} : { endedAtMs: readNonNegativeInteger(value.endedAtMs)! }),
+    ...(redactOptionalText(value.detail) ? { detail: redactOptionalText(value.detail)! } : {})
+  }];
+}
+
+function projectUpdateRunVerification(value: Record<string, unknown>) {
+  return {
+    ...(typeof value.booted === "boolean" ? { booted: value.booted } : {}),
+    ...(value.runningVersion === null || typeof value.runningVersion === "string" ? { runningVersion: value.runningVersion as string | null } : {}),
+    ...(typeof value.serviceRunning === "boolean" ? { serviceRunning: value.serviceRunning } : {}),
+    ...(typeof value.versionMatch === "boolean" ? { versionMatch: value.versionMatch } : {}),
+    ...(typeof value.channelsReady === "boolean" ? { channelsReady: value.channelsReady } : {}),
+    ...(typeof value.inferenceProbe === "string" ? { inferenceProbe: value.inferenceProbe.slice(0, 32) } : {}),
+    ...(typeof value.noticeDelivered === "boolean" ? { noticeDelivered: value.noticeDelivered } : {}),
+    ...(value.doctorHint === null || typeof value.doctorHint === "string" ? { doctorHint: redactOptionalText(value.doctorHint) } : {})
+  };
+}
+
+function projectUpdateRepairAttempt(value: unknown) {
+  if (!isRecord(value)) return [];
+  const attempt = readNonNegativeInteger(value.attempt);
+  const status = readNonEmptyString(value.status);
+  if (attempt === null || !status) return [];
+  return [{
+    attempt,
+    status: status.slice(0, 32),
+    ...(readNonNegativeInteger(value.startedAtMs) === null ? {} : { startedAtMs: readNonNegativeInteger(value.startedAtMs)! }),
+    ...(readNonNegativeInteger(value.endedAtMs) === null ? {} : { endedAtMs: readNonNegativeInteger(value.endedAtMs)! }),
+    ...(redactOptionalText(value.summary) ? { summary: redactOptionalText(value.summary)! } : {}),
+    ...(redactOptionalText(value.reason) ? { reason: redactOptionalText(value.reason)! } : {})
+  }];
 }
 
 function normalizeVersion(value: string | null | undefined) {

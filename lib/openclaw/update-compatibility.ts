@@ -33,7 +33,7 @@ export const LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST: OpenClawCompatibilityManifes
   recommendedVersion: OPENCLAW_RECOMMENDED_VERSION,
   minRequiredAgentOsVersion: "0.7.2",
   versions: [
-    ...(OPENCLAW_SUPPORTED_BASELINE_VERSION === OPENCLAW_RECOMMENDED_VERSION ? [] : [{
+    ...(String(OPENCLAW_SUPPORTED_BASELINE_VERSION) === String(OPENCLAW_RECOMMENDED_VERSION) ? [] : [{
       version: OPENCLAW_SUPPORTED_BASELINE_VERSION,
       status: "certified" as const,
       minRequiredAgentOsVersion: "0.7.2",

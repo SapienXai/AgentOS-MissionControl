@@ -39,6 +39,13 @@ const CORE_GATEWAY_METHOD_SPECS = [
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
 `;
 
+const upstreamSharedPolicyDescriptor = `
+const CONTROL_PLANE_WRITE = { controlPlaneWrite: true };
+const CORE_GATEWAY_METHOD_SPECS = [
+  ["config.apply", "config", "operator.admin", "<=2026.7", CONTROL_PLANE_WRITE],
+] as const;
+`;
+
 test("core Gateway descriptors are parsed without executing OpenClaw source", () => {
   const methods = parseOpenClawCoreMethodSpecs(currentDescriptor);
 
@@ -62,6 +69,13 @@ test("v8 tuple descriptors preserve scopes and policy metadata", () => {
   assert.equal(methods[1]?.compatibilityRestored, true);
   assert.equal(methods[2]?.scope, "dynamic");
   assert.equal(methods[3]?.scope, "operator.questions");
+});
+
+test("tuple descriptors accept the pinned OpenClaw shared mutation policy constant", () => {
+  const methods = parseOpenClawCoreMethodSpecs(upstreamSharedPolicyDescriptor);
+
+  assert.equal(methods[0]?.name, "config.apply");
+  assert.equal(methods[0]?.controlPlaneWrite, true);
 });
 
 test("malformed or unsupported descriptor rows fail closed", () => {

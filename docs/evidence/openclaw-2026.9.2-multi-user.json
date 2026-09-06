@@ -1,0 +1,408 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-06T11:01:48.037Z",
+  "provenance": {
+    "repository": "SapienXai/AgentOS",
+    "branch": "main",
+    "codeCommitUnderTest": "e4d80c088ffcc4e04c63a6d0cdc6722e0ea7521b",
+    "evidenceCommit": null,
+    "openClawPackageVersion": "2026.9.2",
+    "openClawSourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
+    "openClawBuild": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
+    "openClawPackageHash": "3c9e76fa80d355c579a3a8827cac4158f8f968aeac36f92d5046d71b98eb5360"
+  },
+  "agentOsAccountModel": {
+    "instanceBoundary": "one trusted AgentOS instance equals one trusted team",
+    "storeVersion": 1,
+    "roles": [
+      "owner",
+      "member"
+    ],
+    "stableActorIds": true,
+    "signedPerUserSessions": true,
+    "perUserSessionVersion": true,
+    "disabledUsersRevoked": true,
+    "lastOwnerProtected": true
+  },
+  "roles": {
+    "owner": [
+      "runtime.use",
+      "sessions.use",
+      "sessions.collaborate",
+      "sessions.place",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "workspace.manage",
+      "profile.manage",
+      "users.manage",
+      "automations.manage",
+      "gateway.manage",
+      "lifecycle.manage",
+      "updates.manage",
+      "migrations.manage",
+      "security.manage",
+      "secrets.manage",
+      "models.manage",
+      "openclaw.roles.manage"
+    ],
+    "member": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "profile.manage"
+    ],
+    "service": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "automations.manage",
+      "gateway.manage",
+      "updates.manage",
+      "migrations.manage"
+    ],
+    "internalService": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "automations.manage",
+      "workspace.manage",
+      "gateway.manage",
+      "lifecycle.manage",
+      "updates.manage",
+      "migrations.manage",
+      "security.manage",
+      "secrets.manage",
+      "models.manage",
+      "openclaw.roles.manage"
+    ]
+  },
+  "productPermissionMatrix": {
+    "owner": [
+      "runtime.use",
+      "sessions.use",
+      "sessions.collaborate",
+      "sessions.place",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "workspace.manage",
+      "profile.manage",
+      "users.manage",
+      "automations.manage",
+      "gateway.manage",
+      "lifecycle.manage",
+      "updates.manage",
+      "migrations.manage",
+      "security.manage",
+      "secrets.manage",
+      "models.manage",
+      "openclaw.roles.manage"
+    ],
+    "member": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "profile.manage"
+    ],
+    "service": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "automations.manage",
+      "gateway.manage",
+      "updates.manage",
+      "migrations.manage"
+    ],
+    "internalService": [
+      "runtime.use",
+      "sessions.use",
+      "tasks.use",
+      "missions.use",
+      "agents.read",
+      "agents.manage",
+      "automations.manage",
+      "workspace.manage",
+      "gateway.manage",
+      "lifecycle.manage",
+      "updates.manage",
+      "migrations.manage",
+      "security.manage",
+      "secrets.manage",
+      "models.manage",
+      "openclaw.roles.manage"
+    ]
+  },
+  "openClawProfileProvisioning": {
+    "usersCreateMethod": "not-exposed-in-9.2",
+    "verifiedProfileCreation": "trusted-proxy or Tailscale verified identity creates/resolves a durable profile",
+    "sharedTokenProfileCreation": "not available; shared token/password does not establish a human profile",
+    "AgentOsLocalPasswordDelegation": "blocked/deferred",
+    "mappingSemantics": "optional metadata linkage only; not an authentication credential",
+    "observedSharedServiceProfiles": 0
+  },
+  "userMappings": [
+    {
+      "label": "Owner A",
+      "actorIdClassification": "stable-uuid",
+      "actorId": "df5d1a77-ca56-4364-b997-2c4cdad0c4ae",
+      "openClawProfileId": null,
+      "linkageState": "unlinked",
+      "role": "owner"
+    },
+    {
+      "label": "Member B",
+      "actorIdClassification": "stable-uuid",
+      "actorId": "172b73df-ec13-464a-ad76-f30f2730accd",
+      "openClawProfileId": null,
+      "linkageState": "unlinked",
+      "role": "member"
+    }
+  ],
+  "connectionStrategy": {
+    "kind": "shared-trusted-service",
+    "nativeGateway": true,
+    "perHumanCredential": false,
+    "fallbackBoundedByProductPolicy": true,
+    "OpenClawAttribution": "shared service Gateway operator"
+  },
+  "roleMappings": [
+    {
+      "connection": "shared-service",
+      "identity": {
+        "requestedRole": "operator",
+        "role": "operator",
+        "requestedScopes": [
+          "operator.admin",
+          "operator.read",
+          "operator.write",
+          "operator.questions",
+          "operator.approvals",
+          "operator.pairing",
+          "operator.talk",
+          "operator.talk.secrets"
+        ],
+        "grantedScopes": [
+          "operator.admin",
+          "operator.read",
+          "operator.write",
+          "operator.questions",
+          "operator.approvals",
+          "operator.pairing",
+          "operator.talk",
+          "operator.talk.secrets"
+        ],
+        "grantedScopesKnown": true,
+        "deviceId": null,
+        "connectionId": "a3d8406f-813a-4ee4-ad87-044d2966d07e",
+        "authenticated": true,
+        "source": "native-handshake"
+      },
+      "humanProfileDelegation": "not-proven"
+    }
+  ],
+  "sessionIdentityChecks": [
+    {
+      "scenario": "Member B creates session through shared service",
+      "result": "created",
+      "createdActor": "not-exposed",
+      "owner": "not-exposed",
+      "visibility": "shared",
+      "attributionLimitation": "shared token does not prove Member B to OpenClaw"
+    },
+    {
+      "scenario": "Disable Member B",
+      "disabledSession": "revoked",
+      "ownerSession": "unaffected"
+    },
+    {
+      "scenario": "Re-enable Member B",
+      "result": "new-login-accepted",
+      "actorIdStable": true
+    },
+    {
+      "scenario": "Member B password reset",
+      "result": "old-member-session-revoked",
+      "ownerSession": "unaffected"
+    }
+  ],
+  "crossUserChecks": [
+    {
+      "scenario": "Member B read session",
+      "expected": "Gateway policy-dependent",
+      "result": "visible-to-shared-service"
+    },
+    {
+      "scenario": "Member B mutate Owner A session",
+      "expected": "not tested as per-human OC identity is unavailable",
+      "result": "deferred-to-native-delegation"
+    },
+    {
+      "scenario": "explicit share",
+      "expected": "not used; no AgentOS duplicate ACL",
+      "result": "deferred-to-OpenClaw-sharing-surface"
+    }
+  ],
+  "agentAccessChecks": [
+    {
+      "result": "shared-team-resource",
+      "evidence": "AgentOS does not invent per-user agent ACLs; OpenClaw role policy remains authoritative."
+    }
+  ],
+  "controlPlaneChecks": [
+    {
+      "actor": "Owner A",
+      "permission": "gateway.manage",
+      "result": "allowed"
+    },
+    {
+      "actor": "Owner A",
+      "operation": "demote-final-owner",
+      "result": "expected-denial"
+    },
+    {
+      "actor": "Owner A",
+      "operation": "disable-protection-with-multiple-users",
+      "result": "expected-denial",
+      "code": "multi-user-protection-required"
+    },
+    {
+      "actor": "single-owner",
+      "operation": "disable-and-reenable",
+      "result": "PASS",
+      "actorRotated": true
+    }
+  ],
+  "sharedServiceChecks": [
+    {
+      "actor": "Member B",
+      "operation": "gateway.restart",
+      "productPolicy": "denied",
+      "sharedTransportCallsAfterAttempt": 1
+    },
+    {
+      "actor": "Member B",
+      "operation": "workspace.manage",
+      "productPolicy": "denied",
+      "sharedTransportCallsAfterAttempt": 1
+    },
+    {
+      "actor": "Member B",
+      "operation": "security.manage",
+      "productPolicy": "denied",
+      "sharedTransportCallsAfterAttempt": 1
+    },
+    {
+      "actor": "Member B",
+      "operation": "users.manage",
+      "productPolicy": "denied",
+      "sharedTransportCallsAfterAttempt": 1
+    },
+    {
+      "actor": "Member B",
+      "operation": "updates.manage",
+      "productPolicy": "denied",
+      "sharedTransportCallsAfterAttempt": 1
+    },
+    {
+      "actor": "Member B",
+      "operation": "runtime.status",
+      "productPolicy": "allowed",
+      "sharedTransportCallsAfterAttempt": 2,
+      "OpenClawAttribution": "shared-service"
+    }
+  ],
+  "auditChecks": [
+    {
+      "operation": "member.profile.update",
+      "actor": "Member B",
+      "result": "succeeded",
+      "ownerProfileUnchanged": true
+    },
+    {
+      "distinctHumanActorIds": true,
+      "ownerActorIdPresent": true,
+      "memberActorIdPresent": true,
+      "secretsRecorded": false
+    }
+  ],
+  "hardening": {
+    "accountStoreConsistency": "PASS",
+    "sessionValidation": "PASS",
+    "protectionLifecycle": "PASS",
+    "concurrency": "PASS",
+    "lastOwnerConcurrency": "PASS",
+    "selfProfileIsolation": "PASS",
+    "workspaceBoundary": "PASS",
+    "permissionMatrixConsistency": "PASS",
+    "linkageConsistency": "PASS",
+    "sessionSecurityDefaults": "PASS"
+  },
+  "securityChecks": [
+    {
+      "check": "explicit 9.2 session-security defaults",
+      "result": "PASS",
+      "visibility": "tree",
+      "agentToAgentEnabled": false,
+      "allow": [],
+      "humanUserIsolation": "not-guaranteed-by-shared-Gateway; separate Gateway required for mutually untrusted tenants"
+    },
+    {
+      "check": "actor spoofing",
+      "result": "PASS",
+      "detail": "Actors came from signed cookies and server account lookup."
+    },
+    {
+      "check": "role spoofing",
+      "result": "PASS",
+      "detail": "Product role came from the persisted user record."
+    },
+    {
+      "check": "profile spoofing",
+      "result": "PASS",
+      "detail": "No browser profile ID was accepted for runtime delegation."
+    },
+    {
+      "check": "scope escalation",
+      "result": "PASS",
+      "detail": "Granted scopes came from native handshake only."
+    },
+    {
+      "check": "shared backend escalation",
+      "result": "PASS",
+      "detail": "Member control denial left shared transport call count unchanged."
+    },
+    {
+      "check": "session isolation",
+      "result": "PASS",
+      "detail": "Member disable revoked only the member session; owner remained valid."
+    },
+    {
+      "check": "last owner",
+      "result": "PASS",
+      "detail": "Account store enforces an active owner."
+    }
+  ],
+  "cleanup": {
+    "status": "complete",
+    "disposableRootRemoved": true,
+    "gatewayProcessStopped": true
+  },
+  "gate": "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: PASS",
+  "success": true
+}

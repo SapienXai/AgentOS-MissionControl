@@ -1,10 +1,10 @@
 import type { OpenClawCapability } from "@/lib/openclaw/identity/types";
-import { OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
+import { OPENCLAW_NATIVE_CONTRACT_VERSION } from "@/lib/openclaw/versions";
 
 export const OPENCLAW_IDENTITY_CONTRACT_SCHEMA_VERSION = 1;
-export const OPENCLAW_IDENTITY_CONTRACT_VERSION = OPENCLAW_SUPPORTED_BASELINE_VERSION;
-export const OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT = "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
-export const OPENCLAW_IDENTITY_CONTRACT_BUILD = "2026.9.1-ad6fe23aecb9-2026-09-04T10-30-53.753Z";
+export const OPENCLAW_IDENTITY_CONTRACT_VERSION = OPENCLAW_NATIVE_CONTRACT_VERSION;
+export const OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT = "3928bad9badfcb6c7d140530435e806fb8092190";
+export const OPENCLAW_IDENTITY_CONTRACT_BUILD = "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z";
 
 export const OPENCLAW_OPERATOR_ROLES = ["operator", "node"] as const;
 
@@ -355,6 +355,8 @@ export const OPENCLAW_STATIC_METHOD_SCOPES: Record<string, readonly string[]> = 
   "update.status": ["operator.admin"],
   "update.run": ["operator.admin"],
   "update.hold": ["operator.admin"],
+  "update.runs.get": ["operator.admin"],
+  "update.runs.list": ["operator.admin"],
   "gateway.restart.preflight": ["operator.read"],
   "gateway.restart.request": ["operator.admin"],
   "gateway.suspend.prepare": ["operator.admin"],

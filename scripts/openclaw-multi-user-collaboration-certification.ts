@@ -17,8 +17,8 @@ import {
 import { OPENCLAW_STATIC_METHOD_SCOPES, OPENCLAW_IDENTITY_CONTRACT_BUILD, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_INPUT = process.env.OPENCLAW_MULTI_USER_COLLABORATION_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos";
-const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_COLLABORATION_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-multi-user-identity-collaboration.json");
+const PACKAGE_INPUT = process.env.OPENCLAW_MULTI_USER_COLLABORATION_PACKAGE?.trim() || `/tmp/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-source-agentos`;
+const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_COLLABORATION_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-multi-user-identity-collaboration.json`);
 const REQUEST_TIMEOUT_MS = 10_000;
 
 type RuntimeResources = {
@@ -38,7 +38,7 @@ async function main() {
   assert.equal(packageIdentity.sourceCommit, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT);
   assert.equal(packageIdentity.buildId, OPENCLAW_IDENTITY_CONTRACT_BUILD);
 
-  const upstreamDescriptorSource = await readFile(path.join("/tmp/openclaw-2026.9.1-source-agentos", "src/gateway/methods/core-descriptors.ts"), "utf8");
+  const upstreamDescriptorSource = await readFile(path.join(packageRoot, "src/gateway/methods/core-descriptors.ts"), "utf8");
   const upstreamDescriptorHash = createHash("sha256").update(upstreamDescriptorSource).digest("hex");
   const upstreamScopes = parsePinnedCoreDescriptorScopes(upstreamDescriptorSource, PHASE_7_NATIVE_METHODS);
   assert.equal(comparePinnedMethodScopes(OPENCLAW_STATIC_METHOD_SCOPES, upstreamScopes, PHASE_7_NATIVE_METHODS), true);
@@ -59,7 +59,7 @@ async function main() {
 
   const evidence = {
     schemaVersion: 1,
-    artifactType: "openclaw-2026.9.1-multi-user-identity-collaboration-certification",
+    artifactType: `openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-multi-user-identity-collaboration-certification`,
     generatedAt: new Date().toISOString(),
     certifiedCodeHead: await readGitHead(),
     provenance: {

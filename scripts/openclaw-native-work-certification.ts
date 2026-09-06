@@ -18,8 +18,8 @@ import { OPENCLAW_IDENTITY_CONTRACT_BUILD, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COM
 import type { OpenClawCapabilityMatrix } from "@/lib/openclaw/types";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_INPUT = process.env.OPENCLAW_NATIVE_WORK_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos";
-const OUTPUT_PATH = process.env.OPENCLAW_NATIVE_WORK_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-native-work-hardening.json");
+const PACKAGE_INPUT = process.env.OPENCLAW_NATIVE_WORK_PACKAGE?.trim() || `/tmp/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-source-agentos`;
+const OUTPUT_PATH = process.env.OPENCLAW_NATIVE_WORK_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-native-work-hardening.json`);
 const TARGET_VERSION = OPENCLAW_IDENTITY_CONTRACT_VERSION;
 const TARGET_COMMIT = OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -174,7 +174,7 @@ async function main() {
       fallbackTotal: null as number | null
     },
     cleanup: { status: "pending", gatewayProcessStopped: false, disposableRootRemoved: false },
-    gate: "OPENCLAW 9.1 NATIVE WORK HARDENING GATE: FAIL",
+    gate: `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} NATIVE WORK HARDENING GATE: FAIL`,
     success: false
   };
 
@@ -400,15 +400,15 @@ async function main() {
     evidence.cleanup.disposableRootRemoved = !(await pathExists(resources.disposableRoot));
     evidence.checks.cleanup = evidence.cleanup.gatewayProcessStopped && evidence.cleanup.disposableRootRemoved;
     evidence.gate = Object.values(evidence.checks).every((value) => value === true || value === "PASS" || value === "EXPECTED-DENIAL")
-      ? "OPENCLAW 9.1 NATIVE WORK HARDENING GATE: PASS"
-      : "OPENCLAW 9.1 NATIVE WORK HARDENING GATE: FAIL";
+      ? `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} NATIVE WORK HARDENING GATE: PASS`
+      : `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} NATIVE WORK HARDENING GATE: FAIL`;
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
   }
 
   if (!evidence.success) throw new Error(`Native work certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("OPENCLAW 9.1 NATIVE WORK HARDENING GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} NATIVE WORK HARDENING GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

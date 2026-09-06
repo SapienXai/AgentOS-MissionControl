@@ -1,6 +1,6 @@
 # Deploy AgentOS on Railway
 
-The Railway deployment runs AgentOS and OpenClaw `2026.9.1` in the public
+The Railway deployment runs AgentOS and OpenClaw `2026.9.2` in the public
 application service and runs interactive Chromium in a separate private browser
 worker service. OpenClaw remains the runtime and source of truth; AgentOS
 connects to its native Gateway over `ws://127.0.0.1:18789`. Only AgentOS is

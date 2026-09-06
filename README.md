@@ -325,10 +325,12 @@ Several operations spawn local processes, inspect transcript files, or write to 
 
 ## Compatibility
 
-The current `0.7.7` package uses OpenClaw `2026.9.1` as its supported baseline:
+The current `0.7.7` package recommends OpenClaw `2026.9.2`; existing `2026.9.1`
+installations remain supported when their security-sensitive session settings
+are explicit:
 
 - Node.js 24 or newer;
-- OpenClaw 2026.9.1 or newer;
+- OpenClaw 2026.9.2 or newer;
 - a reachable Gateway with valid local authentication;
 - at least one ready model for real mission execution.
 

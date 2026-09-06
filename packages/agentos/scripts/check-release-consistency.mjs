@@ -21,7 +21,7 @@ const WINDOWS_INSTALL_COMMAND = "iwr https://raw.githubusercontent.com/SapienXai
 const REQUIRED_NODE_ENGINE = ">=24.0.0";
 const REQUIRED_NODE_MAJOR = "24";
 const OPENCLAW_VERSIONS_FILE = "lib/openclaw/versions.ts";
-const OPENCLAW_BASELINE_COPY = "OpenClaw 2026.9.1 or newer";
+const OPENCLAW_BASELINE_COPY = "OpenClaw 2026.9.2 or newer";
 const RELEASE_ASSETS = [
   "agentos-darwin-arm64.tgz",
   "agentos-darwin-x64.tgz",

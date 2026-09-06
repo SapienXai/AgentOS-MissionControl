@@ -19,8 +19,8 @@ import {
 } from "@/lib/openclaw/identity/contract";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_INPUT = process.env.OPENCLAW_SKILLS_EFFECTIVE_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos";
-const OUTPUT_PATH = process.env.OPENCLAW_SKILLS_EFFECTIVE_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-skills-effective-capabilities.json");
+const PACKAGE_INPUT = process.env.OPENCLAW_SKILLS_EFFECTIVE_PACKAGE?.trim() || `/tmp/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-source-agentos`;
+const OUTPUT_PATH = process.env.OPENCLAW_SKILLS_EFFECTIVE_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-skills-effective-capabilities.json`);
 const SEED_DISPOSABLE_SKILL = process.env.OPENCLAW_SKILLS_EFFECTIVE_SEED === "1";
 const TARGET_VERSION = OPENCLAW_IDENTITY_CONTRACT_VERSION;
 const TARGET_COMMIT = OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
@@ -91,8 +91,8 @@ async function main() {
         packageRoot: "[DISPOSABLE_EXACT_PACKAGE]"
       },
       gatewayProtocol: 4,
-      gatewayClient: "2026.9.1",
-      gatewayProtocolPackage: "2026.9.1"
+      gatewayClient: packageIdentity.version,
+      gatewayProtocolPackage: packageIdentity.version
     },
     runtime: {
       packageMode: "exact-openclaw-package-fixture",
@@ -246,7 +246,7 @@ async function main() {
       "Approval, account-missing, explicit-policy-block, and runtime-missing fixtures are covered by deterministic tests; the exact disposable runtime did not naturally expose each state.",
       "Exact session revision comparison is skipped because the disposable library was empty."
     ],
-    gate: "OPENCLAW 9.1 SKILLS + EFFECTIVE CAPABILITIES GATE: FAIL",
+    gate: `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SKILLS + EFFECTIVE CAPABILITIES GATE: FAIL`,
     success: false
   };
 
@@ -547,15 +547,15 @@ async function main() {
     evidence.checks.cleanup = evidence.cleanup.gatewayProcessStopped && evidence.cleanup.disposableRootRemoved;
     evidence.events.observed = [...eventNames];
     evidence.gate = Object.values(evidence.checks).every((value) => value === true || value === "PASS" || value === "SKIPPED" || value === "EXPECTED-DENIAL")
-      ? "OPENCLAW 9.1 SKILLS + EFFECTIVE CAPABILITIES GATE: PASS"
-      : "OPENCLAW 9.1 SKILLS + EFFECTIVE CAPABILITIES GATE: FAIL";
+      ? `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SKILLS + EFFECTIVE CAPABILITIES GATE: PASS`
+      : `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SKILLS + EFFECTIVE CAPABILITIES GATE: FAIL`;
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
   }
 
   if (!evidence.success) throw new Error(`Skills and effective capabilities certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("OPENCLAW 9.1 SKILLS + EFFECTIVE CAPABILITIES GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SKILLS + EFFECTIVE CAPABILITIES GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

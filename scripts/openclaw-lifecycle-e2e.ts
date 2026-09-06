@@ -10,6 +10,7 @@ import path from "node:path";
 import { createOfficialBackedOpenClawGatewayClient } from "@/lib/openclaw/client/official-gateway-factory";
 import type { GatewayEventFrame } from "@/lib/openclaw/client/native-ws-gateway-types";
 import { normalizeGatewayTurnEvent } from "@/lib/openclaw/client/native-ws-gateway-mappers";
+import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 import { createOpenClawRuntimeProviderFixture } from "@/scripts/openclaw-runtime-provider-fixture";
 import { OpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
@@ -19,8 +20,8 @@ type OfficialBackedGatewayClient = ReturnType<typeof createOfficialBackedOpenCla
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_LIFECYCLE_PACKAGE?.trim();
-const OUTPUT_PATH = process.env.OPENCLAW_LIFECYCLE_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-lifecycle-certification.json");
-const TARGET_COMMIT = "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
+const OUTPUT_PATH = process.env.OPENCLAW_LIFECYCLE_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-lifecycle-certification.json`);
+const TARGET_COMMIT = OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 
 type LifecycleProbe = {
   canonicalRuntime: boolean;
@@ -45,7 +46,7 @@ const LIFECYCLE_SCHEMA = {
 };
 
 async function main() {
-  if (!PACKAGE_INPUT) throw new Error("Set OPENCLAW_LIFECYCLE_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+  if (!PACKAGE_INPUT) throw new Error(`Set OPENCLAW_LIFECYCLE_PACKAGE to an exact OpenClaw ${OPENCLAW_IDENTITY_CONTRACT_VERSION} package root.`);
   const packageRoot = path.resolve(PACKAGE_INPUT);
   const identity = await readPackageIdentity(packageRoot);
   assert.equal(identity.version, OPENCLAW_RECOMMENDED_VERSION);
@@ -106,7 +107,7 @@ async function main() {
       externalNoDirectProcessControl: external.checks.externalNoDirectProcessControl
     };
     evidence.success = Object.values(evidence.checks).every(Boolean);
-    evidence.gate = evidence.success ? "OPENCLAW 9.1 LIFECYCLE GATE: PASS" : "OPENCLAW 9.1 LIFECYCLE GATE: FAIL";
+    evidence.gate = evidence.success ? `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} LIFECYCLE GATE: PASS` : `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} LIFECYCLE GATE: FAIL`;
     evidence.cleanup.status = "complete";
   } finally {
     await fixture.close().catch(() => {});
@@ -118,7 +119,7 @@ async function main() {
   }
 
   if (!evidence.success || !evidence.cleanup.disposableRootRemoved) throw new Error(`Lifecycle certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("OPENCLAW 9.1 LIFECYCLE GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} LIFECYCLE GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

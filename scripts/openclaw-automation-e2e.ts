@@ -19,11 +19,11 @@ type OfficialBackedGatewayClient = ReturnType<typeof createOfficialBackedOpenCla
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_AUTOMATION_E2E_PACKAGE?.trim() || process.env.OPENCLAW_SESSION_TASK_E2E_PACKAGE?.trim();
-const OUTPUT_PATH = process.env.OPENCLAW_AUTOMATION_E2E_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-automation-cron-alignment.json");
+const OUTPUT_PATH = process.env.OPENCLAW_AUTOMATION_E2E_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-automation-cron-alignment.json`);
 const REQUEST_TIMEOUT_MS = 10_000;
 
 async function main() {
-  if (!PACKAGE_INPUT) throw new Error("Set OPENCLAW_AUTOMATION_E2E_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+  if (!PACKAGE_INPUT) throw new Error(`Set OPENCLAW_AUTOMATION_E2E_PACKAGE to an exact OpenClaw ${OPENCLAW_IDENTITY_CONTRACT_VERSION} package root.`);
   const packageRoot = path.resolve(PACKAGE_INPUT);
   const packageIdentity = await readPackageIdentity(packageRoot);
   assert.equal(packageIdentity.version, OPENCLAW_IDENTITY_CONTRACT_VERSION);
@@ -104,7 +104,7 @@ async function main() {
     },
     runChecks: [] as Array<Record<string, unknown>>,
     cleanup: { status: "pending", disposableRootRemoved: false, gatewayProcessStopped: false },
-    gate: "OPENCLAW 9.1 AUTOMATION/CRON ALIGNMENT GATE: FAIL",
+    gate: `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} AUTOMATION/CRON ALIGNMENT GATE: FAIL`,
     success: false
   };
 
@@ -205,14 +205,14 @@ async function main() {
     evidence.cleanup.disposableRootRemoved = !(await pathExists(disposableRoot));
     evidence.cleanup.gatewayProcessStopped = !gateway || gateway.exitCode !== null;
     evidence.gate = success && evidence.cleanup.disposableRootRemoved && evidence.cleanup.gatewayProcessStopped
-      ? "OPENCLAW 9.1 AUTOMATION/CRON ALIGNMENT GATE: PASS"
-      : "OPENCLAW 9.1 AUTOMATION/CRON ALIGNMENT GATE: FAIL";
+      ? `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} AUTOMATION/CRON ALIGNMENT GATE: PASS`
+      : `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} AUTOMATION/CRON ALIGNMENT GATE: FAIL`;
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
   }
   if (!evidence.success) throw new Error(`Automation/cron alignment certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("OPENCLAW 9.1 AUTOMATION/CRON ALIGNMENT GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} AUTOMATION/CRON ALIGNMENT GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

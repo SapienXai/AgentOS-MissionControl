@@ -233,6 +233,9 @@ function parseTupleCoreMethodRow(row: string, rowNumber: number): OpenClawCoreMe
 
 function parsePolicyObject(value: string, rowNumber: number) {
   const trimmed = value.trim();
+  if (trimmed === "CONTROL_PLANE_WRITE") {
+    return new Map([["controlPlaneWrite", "true"]]);
+  }
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
     throw new Error(`OpenClaw core Gateway method descriptor row ${rowNumber} has an invalid policy object.`);
   }

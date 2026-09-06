@@ -7,6 +7,7 @@ import {
   executeNativeDoctorMutation,
   getNativeDoctorSnapshot,
   normalizeNativeUpdateRunOutcome,
+  projectUpdateRun,
   reconcileNativeDoctorMutation,
   verifyFreshRestartState,
   verifyFreshUpdateState
@@ -72,6 +73,71 @@ test("native Doctor keeps config application and runtime health truthful", async
   assert.equal(snapshot.update.status, "current");
   assert.equal(snapshot.identity.connectionId, "connection-1");
   assert.equal(snapshot.diagnostics.stability?.privatePath, undefined);
+});
+
+test("native Doctor projects bounded durable update runs without origin or runtime-sensitive fields", () => {
+  const projected = projectUpdateRun({
+    runId: "run-9-2",
+    createdAtMs: 1,
+    updatedAtMs: 2,
+    trigger: "control-ui",
+    phase: "restarting",
+    status: "running",
+    reason: "token=do-not-leak",
+    origin: { sessionKey: "private-session", requester: { accountId: "private-user" } },
+    target: { version: "2026.9.2", sha: "target-sha" },
+    before: { version: "2026.9.1", buildId: "old-build" },
+    steps: [{ step: "restart", status: "in_progress", detail: "Authorization token=secret" }],
+    verification: { runningVersion: "2026.9.1", pid: 1234, port: 18789, versionMatch: false },
+    finishedAtMs: null
+  });
+
+  assert.equal(projected?.runId, "run-9-2");
+  assert.equal(projected?.phase, "restarting");
+  assert.equal(projected?.targetVersion, "2026.9.2");
+  assert.equal(projected?.beforeVersion, "2026.9.1");
+  assert.equal(projected?.verification?.versionMatch, false);
+  assert.equal("origin" in (projected ?? {}), false);
+  assert.equal("pid" in (projected?.verification ?? {}), false);
+  assert.doesNotMatch(projected?.reason ?? "", /token=do-not-leak/);
+});
+
+test("native Doctor exposes active and last durable update runs from update.status", async () => {
+  const snapshot = await getNativeDoctorSnapshot({
+    adapter: createAdapter({
+      async getNativeUpdateStatus() {
+        return {
+          sentinel: null,
+          updateAvailable: { currentVersion: "2026.9.1", latestVersion: "2026.9.2" },
+          effectiveChannel: "stable" as const,
+          activeRun: {
+            runId: "active",
+            createdAtMs: 1,
+            updatedAtMs: 2,
+            trigger: "control-ui",
+            phase: "verifying",
+            status: "running",
+            reason: null
+          },
+          lastRun: {
+            runId: "last",
+            createdAtMs: 1,
+            updatedAtMs: 3,
+            trigger: "cli",
+            phase: "finished",
+            status: "succeeded",
+            reason: null,
+            finishedAtMs: 3
+          }
+        };
+      }
+    })
+  });
+
+  assert.equal(snapshot.update.activeRun?.runId, "active");
+  assert.equal(snapshot.update.activeRun?.phase, "verifying");
+  assert.equal(snapshot.update.lastRun?.runId, "last");
+  assert.equal(snapshot.update.lastRun?.status, "succeeded");
 });
 
 test("native Doctor keeps status separate and sends probe only when requested", async () => {

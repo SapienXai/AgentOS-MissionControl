@@ -21,12 +21,12 @@ type OfficialBackedGatewayClient = ReturnType<typeof createOfficialBackedOpenCla
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_SESSION_TASK_E2E_PACKAGE?.trim();
-const OUTPUT_PATH = process.env.OPENCLAW_SESSION_TASK_E2E_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-session-task-alignment.json");
+const OUTPUT_PATH = process.env.OPENCLAW_SESSION_TASK_E2E_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-session-task-alignment.json`);
 const REQUEST_TIMEOUT_MS = 10_000;
 
 async function main() {
   if (!PACKAGE_INPUT) {
-    throw new Error("Set OPENCLAW_SESSION_TASK_E2E_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+    throw new Error(`Set OPENCLAW_SESSION_TASK_E2E_PACKAGE to an exact OpenClaw ${OPENCLAW_IDENTITY_CONTRACT_VERSION} package root.`);
   }
 
   const packageRoot = path.resolve(PACKAGE_INPUT);
@@ -97,7 +97,7 @@ async function main() {
       list: "tasks.list",
       get: "tasks.get",
       cancel: "tasks.cancel",
-      assignment: "unsupported in exact 2026.9.1",
+      assignment: `unsupported in exact ${OPENCLAW_IDENTITY_CONTRACT_VERSION}`,
       taskSummaryFields: ["id", "status", "agentId", "sessionKey", "runId", "parentTaskId", "sourceId"]
     },
     sourceOfTruthMatrix: [
@@ -169,7 +169,7 @@ async function main() {
       taskAssign: "unsupported/no call"
     },
     cleanup: { status: "pending", disposableRootRemoved: false, gatewayProcessStopped: false },
-    gate: "OPENCLAW 9.1 SESSION/TASK ALIGNMENT GATE: FAIL",
+    gate: `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SESSION/TASK ALIGNMENT GATE: FAIL`,
     success: false
   };
 
@@ -273,7 +273,7 @@ async function main() {
     const taskIds = taskRuntimes.map((runtime) => runtime.taskId).filter((value): value is string => Boolean(value));
     evidence.nativeTaskIntegration.taskIds = taskIds;
     if (taskIds.length === 0) {
-      evidence.nativeTaskIntegration.emptyLedgerExplanation = "The exact 9.1 runtime completed the loopback model turn but exposed no task ledger row for this session; no task ID was fabricated.";
+      evidence.nativeTaskIntegration.emptyLedgerExplanation = `The exact ${OPENCLAW_IDENTITY_CONTRACT_VERSION} runtime completed the loopback model turn but exposed no task ledger row for this session; no task ID was fabricated.`;
     }
     evidence.taskProjection = taskRecords.map((task) => ({
       taskIdPresent: Boolean(task.metadata.openClawTaskId),
@@ -389,8 +389,8 @@ async function main() {
     evidence.cleanup.disposableRootRemoved = !(await pathExists(disposableRoot));
     evidence.cleanup.gatewayProcessStopped = gateway.exitCode !== null;
     evidence.gate = success && evidence.cleanup.disposableRootRemoved && evidence.cleanup.gatewayProcessStopped
-      ? "OPENCLAW 9.1 SESSION/TASK ALIGNMENT GATE: PASS"
-      : "OPENCLAW 9.1 SESSION/TASK ALIGNMENT GATE: FAIL";
+      ? `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SESSION/TASK ALIGNMENT GATE: PASS`
+      : `OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SESSION/TASK ALIGNMENT GATE: FAIL`;
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
@@ -399,7 +399,7 @@ async function main() {
   if (!evidence.success) {
     throw new Error(`Session/task alignment certification failed. Evidence: ${OUTPUT_PATH}`);
   }
-  console.log("OPENCLAW 9.1 SESSION/TASK ALIGNMENT GATE: PASS");
+  console.log(`OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} SESSION/TASK ALIGNMENT GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

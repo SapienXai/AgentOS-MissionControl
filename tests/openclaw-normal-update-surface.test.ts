@@ -15,12 +15,13 @@ test("canonical Updates page reads native status and runs native update.run", ()
   assert.match(source, /OpenClaw update\.status/);
   assert.doesNotMatch(source, /\/api\/update/);
   assert.doesNotMatch(source, /--tag/);
-  assert.doesNotMatch(source, /isitstable\.iclaw\.digital[\s\S]{0,800}(?:update|install|run)/i);
+  assert.match(source, /Community release intelligence is advisory/);
+  assert.match(source, /Community confidence never decides whether OpenClaw is up to date or whether an update runs/);
 });
 
 test("normal native update endpoint enforces the shared server policy and target confirmation", () => {
   const route = read("app/api/openclaw/native-doctor/route.ts");
-  const presentation = read("lib/openclaw/update-presentation.ts");
+  const policyDomain = read("lib/openclaw/domains/normal-update-policy.ts");
   const policyService = read("lib/openclaw/application/normal-update-policy-service.ts");
 
   assert.match(route, /getNormalOpenClawUpdatePolicy/);
@@ -28,8 +29,11 @@ test("normal native update endpoint enforces the shared server policy and target
   assert.match(route, /refreshCheckout:\s*true/);
   assert.match(route, /action:\s*z\.literal\("update\.run"\)/);
   assert.match(route, /availableVersion:\s*z\.string\(\)\.nullable\(\)/);
-  assert.match(presentation, /resolveOpenClawUpdateDecision/);
-  assert.doesNotMatch(presentation, /compareVersionStrings/);
+  assert.match(route, /reconcileAgentOsSessionSecurityDefaults/);
+  assert.match(route, /UPDATE_SECURITY_POLICY_REQUIRED/);
+  assert.doesNotMatch(route, /override\s*:/);
+  assert.match(policyDomain, /resolveOpenClawUpdateDecision/);
+  assert.doesNotMatch(policyDomain, /compareVersionStrings/);
   assert.match(policyService, /readOpenClawCompatibilityManifestOverride/);
 });
 

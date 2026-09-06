@@ -424,7 +424,7 @@ test("official device auth verifies the v3 challenge signature and persists rota
       deviceFamily: null
     });
 
-    assert.deepEqual(params.auth, { token: "old-device-token", deviceToken: "old-device-token" });
+    assert.deepEqual(params.auth, { deviceToken: "old-device-token" });
     assert.equal(device.id, "device-phase3");
     assert.equal(device.signedAt, challengeTimestamp);
     assert.equal(device.nonce, "phase3-challenge-1");

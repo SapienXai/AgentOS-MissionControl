@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   getCrossAgentMessageSettings,
+  reconcileAgentOsSessionSecurityDefaults,
   updateCrossAgentMessageSettings
 } from "@/lib/agentos/control-plane";
 import { redactErrorMessage } from "@/lib/security/redaction";
@@ -17,7 +18,13 @@ const crossAgentMessageSettingsSchema = z.object({
   knownTargetAgentIds: z.array(z.string().min(1)).optional()
 });
 
-export async function GET() {
+const migrationSchema = z.object({
+  action: z.literal("migrate-defaults")
+}).strict();
+
+export async function GET(request: Request) {
+  const permission = await requireAgentOsProductPermission(request, "runtime.use");
+  if ("response" in permission) return permission.response;
   try {
     return NextResponse.json({
       settings: await getCrossAgentMessageSettings()
@@ -46,6 +53,23 @@ export async function PATCH(request: Request) {
       {
         error: redactErrorMessage(error, "Unable to update cross-agent message settings.")
       },
+      { status: 400 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  const permission = await requireAgentOsProductPermission(request, "gateway.manage");
+  if ("response" in permission) return permission.response;
+  try {
+    migrationSchema.parse(await request.json());
+    return NextResponse.json({
+      migration: await reconcileAgentOsSessionSecurityDefaults(),
+      settings: await getCrossAgentMessageSettings()
+    }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json(
+      { error: redactErrorMessage(error, "Unable to reconcile OpenClaw session-security defaults.") },
       { status: 400 }
     );
   }

@@ -16,12 +16,13 @@ import type {
 } from "@/lib/openclaw/client/types";
 import { publicKeyRawBase64UrlFromPem } from "@/lib/openclaw/client/gateway-device-auth";
 import { serializeOpenClawRuntimeCertificationArtifact } from "@/lib/openclaw/runtime-certification/serialization";
+import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, OPENCLAW_IDENTITY_CONTRACT_VERSION } from "@/lib/openclaw/identity/contract";
 
-const TARGET_VERSION = "2026.9.1";
-const TARGET_COMMIT = "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
+const TARGET_VERSION = OPENCLAW_IDENTITY_CONTRACT_VERSION;
+const TARGET_COMMIT = OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 const PACKAGE_INPUT = process.env.OPENCLAW_OFFICIAL_PRODUCTION_PACKAGE?.trim();
 const OUTPUT_PATH = process.env.OPENCLAW_OFFICIAL_PRODUCTION_OUTPUT?.trim() ||
-  path.resolve("docs/evidence/openclaw-2026.9.1-final-official-runtime-certification.json");
+  path.resolve(`docs/evidence/openclaw-${TARGET_VERSION}-final-official-runtime-certification.json`);
 const REQUEST_TIMEOUT_MS = 8_000;
 const FORCE_CLI_KEYS = [
   "AGENTOS_OPENCLAW_GATEWAY_CLIENT",
@@ -56,7 +57,7 @@ async function main() {
   }
 
   if (!PACKAGE_INPUT) {
-    throw new Error("Set OPENCLAW_OFFICIAL_PRODUCTION_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+    throw new Error(`Set OPENCLAW_OFFICIAL_PRODUCTION_PACKAGE to an exact OpenClaw ${TARGET_VERSION} package root.`);
   }
 
   const packageRoot = path.resolve(PACKAGE_INPUT);
@@ -187,8 +188,8 @@ async function main() {
 
   try {
     if (packageIdentity.version !== TARGET_VERSION || packageIdentity.sourceCommit !== TARGET_COMMIT) {
-      addRow(evidence, "provenance", "exact OpenClaw package", null, "FAIL", "The supplied package is not the pinned 2026.9.1 source build.");
-      throw new Error("The supplied OpenClaw package does not match the pinned 2026.9.1 source build.");
+      addRow(evidence, "provenance", "exact OpenClaw package", null, "FAIL", `The supplied package is not the pinned ${TARGET_VERSION} source build.`);
+      throw new Error(`The supplied OpenClaw package does not match the pinned ${TARGET_VERSION} source build.`);
     }
     addRow(evidence, "provenance", "exact OpenClaw package", null, "PASS", "Pinned version and source commit match.");
 
@@ -328,9 +329,9 @@ async function main() {
   }
 
   if (!evidence.success) {
-    throw new Error(`OpenClaw 2026.9.1 production certification failed. Evidence: ${OUTPUT_PATH}`);
+    throw new Error(`OpenClaw ${TARGET_VERSION} production certification failed. Evidence: ${OUTPUT_PATH}`);
   }
-  console.log("OPENCLAW 9.1 OFFICIAL PRODUCTION CUTOVER GATE: PASS");
+  console.log(`OPENCLAW ${TARGET_VERSION} OFFICIAL PRODUCTION CUTOVER GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

@@ -58,6 +58,37 @@ test("native available target with an exact certified decision is eligible for n
   );
 });
 
+test("durable active native run wins over a temporary unavailable availability probe", () => {
+  const state = resolveNativeUpdateUserState({
+    update: {
+      ...update({ currentVersion: "2026.9.1" }),
+      readStatus: "unknown",
+      status: "unknown",
+      updateAvailable: null,
+      activeRun: {
+        runId: "run-1",
+        createdAtMs: 1,
+        updatedAtMs: 2,
+        trigger: "control-ui",
+        phase: "restarting",
+        status: "running",
+        reason: null,
+        targetVersion: "2026.9.2",
+        beforeVersion: "2026.9.1",
+        afterVersion: null,
+        steps: [],
+        verification: null,
+        repair: [],
+        confirmedAtMs: null,
+        finishedAtMs: null,
+        downtimeMs: null
+      }
+    }
+  });
+
+  assert.equal(state, "running");
+});
+
 test("native available target newer than certification stays behind advanced options", () => {
   assert.equal(
     resolveNativeUpdateUserState({

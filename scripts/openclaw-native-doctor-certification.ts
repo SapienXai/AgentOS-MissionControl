@@ -17,8 +17,8 @@ import { OPENCLAW_STATIC_METHOD_SCOPES, OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT
 import { resolveRequiredScopes } from "@/lib/openclaw/identity/authorization";
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_ROOT = process.env.OPENCLAW_NATIVE_DOCTOR_PACKAGE?.trim() || "/tmp/openclaw-2026.9.1-source-agentos";
-const OUTPUT_PATH = process.env.OPENCLAW_NATIVE_DOCTOR_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-doctor-update-recovery.json");
+const PACKAGE_ROOT = process.env.OPENCLAW_NATIVE_DOCTOR_PACKAGE?.trim() || "/tmp/openclaw-2026.9.2-source-agentos";
+const OUTPUT_PATH = process.env.OPENCLAW_NATIVE_DOCTOR_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.2-doctor-update-recovery.json");
 const HARDENING_CERTIFICATION = process.env.OPENCLAW_NATIVE_DOCTOR_HARDENING === "1";
 const REQUEST_TIMEOUT_MS = 10_000;
 type CertificationStatus = "PASS" | "SKIPPED" | "EXPECTED-DENIAL" | "FAIL";
@@ -35,7 +35,7 @@ type MethodEvidence = {
 async function main() {
   const packageIdentity = await readPackageIdentity(PACKAGE_ROOT);
   if (packageIdentity.version !== OPENCLAW_IDENTITY_CONTRACT_VERSION || packageIdentity.sourceCommit !== OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT) {
-    throw new Error("The supplied OpenClaw package does not match the pinned 2026.9.1 source build.");
+    throw new Error("The supplied OpenClaw package does not match the pinned 2026.9.2 source build.");
   }
 
   const disposableRoot = await mkdtemp(path.join(os.tmpdir(), "agentos-openclaw-native-doctor-"));
@@ -145,7 +145,7 @@ async function main() {
     && evidence.cleanup.disposableRootRemoved;
   await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
   await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
-  console.log(`OPENCLAW 9.1 NATIVE DOCTOR GATE: ${evidence.success ? "PASS" : "FAIL"}`);
+  console.log(`OPENCLAW 9.2 NATIVE DOCTOR GATE: ${evidence.success ? "PASS" : "FAIL"}`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
   if (!evidence.success) process.exitCode = 1;
 }
@@ -210,8 +210,8 @@ function createEvidence(identity: { version: string; sourceCommit: string | null
       release: identity.version,
       source: identity.sourceCommit,
       gatewayProtocol: 4,
-      gatewayClient: "2026.9.1",
-      gatewayProtocolPackage: "2026.9.1",
+      gatewayClient: "2026.9.2",
+      gatewayProtocolPackage: "2026.9.2",
       buildId: identity.buildId,
       packageHash: identity.packageHash,
       packageRoot: "[DISPOSABLE_EXACT_PACKAGE]"

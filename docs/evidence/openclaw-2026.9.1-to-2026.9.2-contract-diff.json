@@ -1,0 +1,112 @@
+{
+  "artifactType": "openclaw-contract-diff",
+  "status": "certified-with-trusted-gateway-boundary",
+  "from": {
+    "openclawVersion": "2026.9.1",
+    "gatewayProtocolPackage": "@openclaw/gateway-protocol@2026.9.1",
+    "gatewayClientPackage": "@openclaw/gateway-client@2026.9.1"
+  },
+  "to": {
+    "openclawVersion": "2026.9.2",
+    "sourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
+    "buildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
+    "gatewayProtocolPackage": "@openclaw/gateway-protocol@2026.9.2",
+    "gatewayClientPackage": "@openclaw/gateway-client@2026.9.2",
+    "openclawPackageIntegrity": "sha512-M6C7UsnX815nv26qBJFYGe6aGzv+ftZLRzV6S9oRXUtXg2Yn67eVntpssT94kgkquKVSeUxerUg0j1ONp4WYQg==",
+    "gatewayProtocolIntegrity": "sha512-zq4rFrTnmzjIHD2Pq/cxUqT3nzYjYxXizRKO7IqtHwnHQP0MaJA+Uthlt4f5Y/FLatAqpoI81SzN7mfQ0sifWQ==",
+    "gatewayClientIntegrity": "sha512-mjV9uIEGCd4+Rvwp37B72cG/12xf+AxEUsyVWGmQz4ttwK1JFFEwVJ6HjzxFfnBGeFJGwgPAjnTwkByyrwnrPQ=="
+  },
+  "gatewayMethods": {
+    "added": ["update.runs.get", "update.runs.list"],
+    "removed": [],
+    "scopeChanges": [],
+    "unchangedRelevantMethods": ["update.status", "update.run", "update.hold", "health", "status", "config.get", "config.set", "sessions.list", "sessions.history", "sessions.search", "sessions.send"]
+  },
+  "schemaChanges": [
+    {
+      "type": "request-field-added",
+      "method": "update.status",
+      "field": "refreshCheckout",
+      "shape": "boolean"
+    },
+    {
+      "type": "response-field-added",
+      "method": "update.status",
+      "field": "activeRun",
+      "shape": "UpdateRunRecord|null"
+    },
+    {
+      "type": "response-field-added",
+      "method": "update.status",
+      "field": "lastRun",
+      "shape": "UpdateRunRecord|null"
+    },
+    {
+      "type": "event-added",
+      "event": "update.run.changed",
+      "shape": "{runId, phase, status, updatedAtMs}"
+    }
+  ],
+  "updateRunRecord": {
+    "phases": ["requested", "staging", "validating", "repairing", "activating", "restarting", "verifying", "finished"],
+    "statuses": ["running", "succeeded", "failed", "rolled-back", "skipped"],
+    "boundedProjectionFields": ["runId", "createdAtMs", "updatedAtMs", "trigger", "phase", "status", "reason", "target.version", "before.version", "after.version", "steps", "verification", "repair", "confirmedAtMs", "finishedAtMs", "downtimeMs"],
+    "intentionallyExcludedFields": ["origin.sessionKey", "origin.requester", "origin.deliveryContext", "verification.pid", "verification.port", "raw stdout", "raw stderr"]
+  },
+  "securityBehaviorChanges": [
+    {
+      "setting": "tools.sessions.visibility",
+      "2026.9.1-omitted": "narrower legacy behavior",
+      "2026.9.2-omitted": "all",
+      "agentosPolicy": "explicit tree default for AgentOS-managed Gateway; preserve explicit operator values"
+    },
+    {
+      "setting": "tools.agentToAgent.enabled",
+      "2026.9.1-omitted": "disabled",
+      "2026.9.2-omitted": "enabled",
+      "agentosPolicy": "explicit false default; collaboration requires an explicit allowlist"
+    },
+    {
+      "setting": "tools.agentToAgent.allow",
+      "2026.9.2-empty-or-omitted": "broad matching when agent-to-agent access is enabled",
+      "agentosPolicy": "always write an explicit bounded list; never create a wildcard from the normal UI"
+    },
+    {
+      "behavior": "incognito sessions",
+      "2026.9.2": "hidden from session tools",
+      "agentosPolicy": "preserve native behavior; do not project private transcripts"
+    }
+  ],
+  "certificationGates": {
+    "contract": "pass",
+    "runtime": "pass",
+    "security": "pass-with-shared-gateway-limitation",
+    "update": "pass-with-disposable-npm-install-skip",
+    "migration": "pass",
+    "promotion": "certified"
+  },
+  "evidence": {
+    "runtimeCertification": {
+      "artifact": "docs/evidence/openclaw-2026.9.2-runtime-certification.json",
+      "passed": 60,
+      "failed": 0,
+      "environmentalSkips": 12,
+      "expectedDenials": 13,
+      "unknown": 0
+    },
+    "freshBaseline": "docs/evidence/openclaw-2026.9.2-fresh-baseline.json",
+    "multiUser": "docs/evidence/openclaw-2026.9.2-multi-user.json",
+    "nativeUpdateLedger": {
+      "status": "pass",
+      "activeAndLastRunProjection": true,
+      "disposableOutcome": "skipped",
+      "reason": "not-git-install",
+      "realVersionReplacement": "not-run"
+    },
+    "securityAudit": {
+      "critical": 0,
+      "warnings": 2,
+      "notes": "OpenClaw's shared Gateway trust boundary and loopback trusted-proxy warning are documented; this is not hostile multi-tenant isolation."
+    }
+  }
+}

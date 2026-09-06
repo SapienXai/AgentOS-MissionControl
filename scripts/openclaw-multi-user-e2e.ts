@@ -38,7 +38,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_MULTI_USER_E2E_PACKAGE?.trim();
-const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_E2E_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.1-multi-user.json");
+const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_E2E_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.2-multi-user.json");
 const REQUEST_TIMEOUT_MS = 10_000;
 
 type IdentitySummary = {
@@ -54,7 +54,7 @@ type IdentitySummary = {
 };
 
 async function main() {
-  if (!PACKAGE_INPUT) throw new Error("Set OPENCLAW_MULTI_USER_E2E_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+  if (!PACKAGE_INPUT) throw new Error("Set OPENCLAW_MULTI_USER_E2E_PACKAGE to an exact OpenClaw 2026.9.2 package root.");
   const packageRoot = path.resolve(PACKAGE_INPUT);
   const packageIdentity = await readPackageIdentity(packageRoot);
   assert.equal(packageIdentity.version, OPENCLAW_IDENTITY_CONTRACT_VERSION);
@@ -107,7 +107,7 @@ async function main() {
     roles: getAgentOsProductPermissionMatrix(),
     productPermissionMatrix: getAgentOsProductPermissionMatrix(),
     openClawProfileProvisioning: {
-      usersCreateMethod: "not-exposed-in-9.1",
+      usersCreateMethod: "not-exposed-in-9.2",
       verifiedProfileCreation: "trusted-proxy or Tailscale verified identity creates/resolves a durable profile",
       sharedTokenProfileCreation: "not available; shared token/password does not establish a human profile",
       AgentOsLocalPasswordDelegation: "blocked/deferred",
@@ -138,11 +138,12 @@ async function main() {
       selfProfileIsolation: "PASS",
       workspaceBoundary: "PASS",
       permissionMatrixConsistency: "PASS",
-      linkageConsistency: "PASS"
+      linkageConsistency: "PASS",
+      sessionSecurityDefaults: "PENDING"
     },
     securityChecks: [] as Array<Record<string, unknown>>,
     cleanup: { status: "pending", disposableRootRemoved: false, gatewayProcessStopped: false },
-    gate: "AGENTOS / OPENCLAW 9.1 MULTI-USER GATE: FAIL",
+    gate: "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: FAIL",
     success: false
   };
 
@@ -183,6 +184,21 @@ async function main() {
     evidence.roleMappings.push({ connection: "shared-service", identity: summarizeIdentity(identity), humanProfileDelegation: "not-proven" });
     const profiles = client.listUsers ? await client.listUsers({ timeoutMs: REQUEST_TIMEOUT_MS }) : { profiles: [] };
     evidence.openClawProfileProvisioning.observedSharedServiceProfiles = profiles.profiles.length;
+    const sessionVisibility = await client.getConfig?.("tools.sessions.visibility", { timeoutMs: REQUEST_TIMEOUT_MS });
+    const agentToAgentEnabled = await client.getConfig?.("tools.agentToAgent.enabled", { timeoutMs: REQUEST_TIMEOUT_MS });
+    const agentToAgentAllow = await client.getConfig?.("tools.agentToAgent.allow", { timeoutMs: REQUEST_TIMEOUT_MS });
+    assert.equal(sessionVisibility, "tree");
+    assert.equal(agentToAgentEnabled, false);
+    assert.deepEqual(agentToAgentAllow, []);
+    evidence.hardening.sessionSecurityDefaults = "PASS";
+    evidence.securityChecks.push({
+      check: "explicit 9.2 session-security defaults",
+      result: "PASS",
+      visibility: sessionVisibility,
+      agentToAgentEnabled,
+      allow: agentToAgentAllow,
+      humanUserIsolation: "not-guaranteed-by-shared-Gateway; separate Gateway required for mutually untrusted tenants"
+    });
 
     const sharedTransport = { calls: 0 };
     const ownerControlAllowed = canAgentOsActorUseProductPermission(ownerActor, "gateway.manage");
@@ -295,15 +311,15 @@ async function main() {
     evidence.cleanup.disposableRootRemoved = !(await pathExists(disposableRoot));
     evidence.cleanup.gatewayProcessStopped = gateway.exitCode !== null;
     evidence.gate = success && evidence.cleanup.status === "complete" && evidence.cleanup.disposableRootRemoved && evidence.cleanup.gatewayProcessStopped
-      ? "AGENTOS / OPENCLAW 9.1 MULTI-USER GATE: PASS"
-      : "AGENTOS / OPENCLAW 9.1 MULTI-USER GATE: FAIL";
+      ? "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: PASS"
+      : "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: FAIL";
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
   }
 
   if (!evidence.success) throw new Error(`Multi-user authorization certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("AGENTOS / OPENCLAW 9.1 MULTI-USER GATE: PASS");
+  console.log("AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: PASS");
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 
@@ -322,7 +338,7 @@ function requestWithCookie(session: string) {
 async function startGateway(input: { packageRoot: string; stateDir: string; workspaceDir: string; configPath: string; port: number; token: string }) {
   await mkdir(input.workspaceDir, { recursive: true, mode: 0o700 });
   await mkdir(input.stateDir, { recursive: true, mode: 0o700 });
-  await writeFile(input.configPath, `${JSON.stringify({ gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token: input.token } }, agents: { defaults: { workspace: input.workspaceDir }, list: [{ id: "main", workspace: input.workspaceDir }] }, cron: { enabled: false } }, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(input.configPath, `${JSON.stringify({ gateway: { mode: "local", bind: "loopback", auth: { mode: "token", token: input.token } }, agents: { defaults: { workspace: input.workspaceDir }, list: [{ id: "main", workspace: input.workspaceDir }] }, tools: { sessions: { visibility: "tree" }, agentToAgent: { enabled: false, allow: [] } }, cron: { enabled: false } }, null, 2)}\n`, { mode: 0o600 });
   const child = spawn(process.execPath, [path.join(input.packageRoot, "openclaw.mjs"), "gateway", "run", "--port", String(input.port), "--bind", "loopback", "--allow-unconfigured", "--auth", "token", "--token", input.token, "--ws-log", "compact"], { cwd: input.workspaceDir, env: { ...process.env, OPENCLAW_STATE_DIR: input.stateDir, OPENCLAW_CONFIG_PATH: input.configPath, OPENCLAW_GATEWAY_TOKEN: input.token }, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout?.on("data", (chunk: Buffer | string) => { output = `${output}${chunk.toString()}`.slice(-8_000); });

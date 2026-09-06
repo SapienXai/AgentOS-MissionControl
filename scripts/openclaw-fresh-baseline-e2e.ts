@@ -8,16 +8,18 @@ import path from "node:path";
 import { getOpenClawInstallCommand } from "@/lib/openclaw/install";
 import { redactGatewayUrl } from "@/lib/openclaw/compat/targets";
 import { OPENCLAW_RECOMMENDED_VERSION, OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
+import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT } from "@/lib/openclaw/identity/contract";
 import { serializeOpenClawRuntimeCertificationArtifact } from "@/lib/openclaw/runtime-certification/serialization";
 import { redactSecretText } from "@/lib/security/redaction";
 
-const TARGET_VERSION = "2026.9.1";
-const TARGET_COMMIT = "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1";
+const TARGET_VERSION = OPENCLAW_RECOMMENDED_VERSION;
+const TARGET_LABEL = TARGET_VERSION.split(".").slice(1).join(".");
+const TARGET_COMMIT = OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT;
 const TARGET_PACKAGE_INPUT = process.env.OPENCLAW_FRESH_BASELINE_PACKAGE?.trim();
 const OUTPUT_PATH = process.env.OPENCLAW_FRESH_BASELINE_OUTPUT?.trim() ||
-  path.resolve("docs/evidence/openclaw-2026.9.1-fresh-baseline.json");
+  path.resolve(`docs/evidence/openclaw-${TARGET_VERSION}-fresh-baseline.json`);
 const RUNTIME_CERTIFICATION_OUTPUT_PATH = process.env.OPENCLAW_FRESH_BASELINE_RUNTIME_OUTPUT?.trim() ||
-  path.resolve("docs/evidence/openclaw-2026.9.1-runtime-certification.json");
+  path.resolve(`docs/evidence/openclaw-${TARGET_VERSION}-runtime-certification.json`);
 const REQUIRED_PROBE_IDS = [
   "gateway-health",
   "sessions-create",
@@ -42,7 +44,7 @@ type ExactPackageIdentity = {
 
 async function main() {
   if (!TARGET_PACKAGE_INPUT) {
-    throw new Error("Set OPENCLAW_FRESH_BASELINE_PACKAGE to an exact OpenClaw 2026.9.1 package root.");
+    throw new Error(`Set OPENCLAW_FRESH_BASELINE_PACKAGE to an exact OpenClaw ${TARGET_VERSION} package root.`);
   }
 
   const inputPackage = path.resolve(TARGET_PACKAGE_INPUT);
@@ -80,6 +82,10 @@ async function main() {
       agents: {
         defaults: { workspace: workspacePath },
         list: [{ id: "dev", workspace: workspacePath }]
+      },
+      tools: {
+        sessions: { visibility: "tree" },
+        agentToAgent: { enabled: false, allow: [] }
       },
       cron: { enabled: true }
     }, null, 2)}\n`, { mode: 0o600 });
@@ -199,7 +205,7 @@ async function main() {
     });
 
     if (!output.success) throw new Error("Fresh OpenClaw baseline gate failed after cleanup.");
-    console.log("OPENCLAW 9.1 FRESH BASELINE: PASS");
+    console.log(`OPENCLAW ${TARGET_LABEL} FRESH BASELINE: PASS`);
     console.log(`Evidence: ${OUTPUT_PATH}`);
     return 0;
   } catch (error) {
@@ -403,6 +409,9 @@ async function runRuntimeCertification(input: {
       OPENCLAW_GATEWAY_TOKEN: input.token,
       OPENCLAW_RUNTIME_CERT_GATEWAY_URL: input.gatewayUrl,
       OPENCLAW_RUNTIME_CERT_TOKEN: input.token,
+      OPENCLAW_RUNTIME_CERT_TARGET: TARGET_VERSION,
+      OPENCLAW_RUNTIME_CERT_TARGET_COMMIT: TARGET_COMMIT,
+      OPENCLAW_RUNTIME_CERT_STATIC_CURRENT_VERSION: OPENCLAW_SUPPORTED_BASELINE_VERSION,
       OPENCLAW_RUNTIME_CERT_STATE_DIR: input.stateDir,
       OPENCLAW_RUNTIME_CERT_CLI: input.binaryPath,
       OPENCLAW_RUNTIME_CERT_WORKSPACE: input.workspace,
@@ -422,7 +431,7 @@ async function runRuntimeCertification(input: {
         .join("; ")
       : "";
     const detail = redactSecretText(`${failures}\n${result.stderr}\n${result.stdout}`).trim().slice(-4_000);
-    throw new Error(`The real 9.1 Gateway certification child process failed.${detail ? ` ${detail}` : ""}`);
+    throw new Error(`The real ${TARGET_LABEL} Gateway certification child process failed.${detail ? ` ${detail}` : ""}`);
   }
   return certification;
 }

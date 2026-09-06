@@ -360,10 +360,72 @@ export const configSnapshotPayloadSchema = z
   })
   .passthrough();
 
+const updateRunStepSchema = z.object({
+  step: z.string().min(1).max(128),
+  status: z.enum(["pending", "in_progress", "completed", "failed", "skipped"]),
+  startedAtMs: z.number().int().nonnegative().optional(),
+  endedAtMs: z.number().int().nonnegative().optional(),
+  detail: z.string().max(512).optional()
+}).passthrough();
+
+const updateRunVerificationSchema = z.object({
+  booted: z.boolean().optional(),
+  runningVersion: z.string().max(128).nullable().optional(),
+  runningBuildId: z.string().max(256).nullable().optional(),
+  serviceRunning: z.boolean().optional(),
+  versionMatch: z.boolean().optional(),
+  channelsReady: z.boolean().optional(),
+  inferenceProbe: z.enum(["passed", "failed", "skipped"]).optional(),
+  noticeDelivered: z.boolean().optional(),
+  doctorHint: z.string().max(512).nullable().optional()
+}).passthrough();
+
+const updateRunRecordSchema = z.object({
+  runId: z.string().min(1).max(128),
+  createdAtMs: z.number().int().nonnegative(),
+  updatedAtMs: z.number().int().nonnegative(),
+  trigger: z.enum(["chat", "control-ui", "cli", "campaign", "mac-app", "api"]),
+  phase: z.enum(["requested", "staging", "validating", "repairing", "activating", "restarting", "verifying", "finished"]),
+  status: z.enum(["running", "succeeded", "failed", "rolled-back", "skipped"]),
+  reason: z.string().max(512).nullable(),
+  target: z.object({
+    channel: z.string().max(64).optional(),
+    tag: z.string().max(128).optional(),
+    kind: z.enum(["package", "git"]).optional(),
+    version: z.string().max(128).optional(),
+    sha: z.string().max(256).optional()
+  }).passthrough().optional(),
+  before: z.object({
+    version: z.string().max(128).nullable().optional(),
+    sha: z.string().max(256).nullable().optional(),
+    buildId: z.string().max(256).nullable().optional()
+  }).passthrough().optional(),
+  after: z.object({
+    version: z.string().max(128).nullable().optional(),
+    sha: z.string().max(256).nullable().optional(),
+    buildId: z.string().max(256).nullable().optional()
+  }).passthrough().optional(),
+  steps: z.array(updateRunStepSchema).max(128).optional(),
+  verification: updateRunVerificationSchema.optional(),
+  repair: z.array(z.object({
+    attempt: z.number().int().nonnegative(),
+    status: z.enum(["succeeded", "failed", "skipped"]),
+    startedAtMs: z.number().int().nonnegative().optional(),
+    endedAtMs: z.number().int().nonnegative().optional(),
+    summary: z.string().max(512).optional(),
+    reason: z.string().max(512).optional()
+  }).passthrough()).max(16).optional(),
+  confirmedAtMs: z.number().int().nonnegative().nullable().optional(),
+  finishedAtMs: z.number().int().nonnegative().nullable().optional(),
+  downtimeMs: z.number().int().nonnegative().nullable().optional()
+}).passthrough();
+
 export const nativeUpdateStatusPayloadSchema = z
   .object({
     sentinel: z.unknown(),
     updateAvailable: z.record(z.string(), z.unknown()).nullable(),
+    activeRun: updateRunRecordSchema.nullable().optional(),
+    lastRun: updateRunRecordSchema.nullable().optional(),
     effectiveChannel: z.enum(["stable", "extended-stable", "beta", "dev"]).optional(),
     schedule: z.record(z.string(), z.unknown()).optional()
   })

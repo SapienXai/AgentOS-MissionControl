@@ -4,7 +4,7 @@
 
 Phase 1 establishes the operator-facing projection for OpenClaw-managed worktrees, task suggestions, and session ownership. The implementation is intentionally additive: Mission remains AgentOS product intent, while OpenClaw remains authoritative for sessions, task suggestions, worktrees, runtime state, ownership, visibility, and collaboration evidence.
 
-The supported baseline is OpenClaw `2026.9.1` with the exact AgentOS package versions pinned in `package.json`. This phase does not upgrade OpenClaw, publish packages, deploy, or push a branch.
+The active recommended contract is OpenClaw `2026.9.2`; existing `2026.9.1` deployments remain the supported minimum when the explicit AgentOS security settings are present. The exact AgentOS package versions are pinned in `package.json`. This phase does not publish packages, deploy, or push a branch.
 
 ## Phase 1.1 hardening
 
@@ -22,7 +22,7 @@ existing ownership route using one `session.members.list` call and one
 become local ownership state.
 
 The AgentOS authorization preflight maps the integrated Native Work methods to
-the exact OpenClaw 2026.9.1 descriptor scopes. OpenClaw remains the final
+the exact OpenClaw 2026.9.2 descriptor scopes. OpenClaw remains the final
 authorization authority for method and target policy.
 
 ## Ownership matrix
@@ -42,7 +42,7 @@ AgentOS does not create a parallel worktree registry, task suggestion store, ses
 
 ## Managed worktrees
 
-The typed client preserves the 2026.9.1 `WorktreeRecord` contract: `id`, bounded `name`, `repoFingerprint`, `repoRoot`, `path`, `branch`, `baseRef`, `ownerKind`, optional `ownerId`, timestamps, and run-end cleanup outcome. The transport-independent projection is `ManagedWorktreeProjection` and is marked `sourceOfTruth: "openclaw"`.
+The typed client preserves the 2026.9.2 `WorktreeRecord` contract: `id`, bounded `name`, `repoFingerprint`, `repoRoot`, `path`, `branch`, `baseRef`, `ownerKind`, optional `ownerId`, timestamps, and run-end cleanup outcome. The transport-independent projection is `ManagedWorktreeProjection` and is marked `sourceOfTruth: "openclaw"`.
 
 The mission execution mode `isolated-worktree` first calls `worktrees.branches` with the selected workspace path and `includeRepositoryStatus: true`. It is eligible only when:
 
@@ -124,15 +124,13 @@ Other OpenClaw methods remain discovery-only or unsupported as defined by the co
 
 ## Validation and certification record
 
-The contract tests cover exact 2026.9.1-shaped worktree, task suggestion, session ownership, evidence, and isolated eligibility payloads. Runtime certification must use the disposable OpenClaw `2026.9.1` source/runtime and an isolated temporary repository. It must prove native method dispatch, expected scope denial, worktree-backed session creation, suggestion lifecycle, ownership projection, and event refresh behavior without touching the user's Gateway checkout.
+The contract tests cover the current 2026.9.2-shaped worktree, task suggestion, session ownership, evidence, and isolated eligibility payloads. Runtime certification must use the disposable OpenClaw `2026.9.2` source/runtime and an isolated temporary repository. It must prove native method dispatch, expected scope denial, worktree-backed session creation, suggestion lifecycle, ownership projection, and event refresh behavior without touching the user's Gateway checkout.
 
-The generated certification evidence is stored at:
-
-`docs/evidence/openclaw-2026.9.1-native-work-hardening.json`
-
-The historical Phase 1 evidence remains unchanged. It contains the documented
-event-name typo `session.evidence`; the correct 2026.9.1 event is
-`session.sharing.evidence`.
+The historical Phase 1 evidence remains at
+`docs/evidence/openclaw-2026.9.1-native-work-hardening.json`. The 2026.9.2
+runtime certification record and contract diff are the current promotion
+evidence; the documented event-name typo `session.evidence` remains historical,
+and the correct current event is `session.sharing.evidence`.
 
 No production readiness claim is made until that evidence records a clean implementation commit and the required certification gates pass.
 
