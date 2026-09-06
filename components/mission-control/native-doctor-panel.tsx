@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderCircle, RefreshCw, RotateCcw, Wrench } from "lucide-react";
 
@@ -17,7 +18,7 @@ export function NativeDoctorPanel({ surfaceTheme }: { surfaceTheme: SurfaceTheme
   const [confirmation, setConfirmation] = useState<NativeDoctorConfirmation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [action, setAction] = useState<"restart" | "update" | null>(null);
+  const [action, setAction] = useState<"restart" | null>(null);
   const [operationNotice, setOperationNotice] = useState<string | null>(null);
 
   const load = useCallback(async (probe = false) => {
@@ -47,12 +48,10 @@ export function NativeDoctorPanel({ surfaceTheme }: { surfaceTheme: SurfaceTheme
     void load();
   }, [load]);
 
-  const runAction = async (kind: "restart" | "update") => {
+  const runAction = async (kind: "restart") => {
     if (!confirmation) return;
     const confirmed = window.confirm(
-      kind === "restart"
-        ? "Request a safe native OpenClaw Gateway restart? Active work may be deferred while the Gateway reconnects."
-        : "Run the native OpenClaw update? The Gateway may restart after the update is accepted."
+      "Request a safe native OpenClaw Gateway restart? Active work may be deferred while the Gateway reconnects."
     );
     if (!confirmed) return;
     setAction(kind);
@@ -64,9 +63,9 @@ export function NativeDoctorPanel({ surfaceTheme }: { surfaceTheme: SurfaceTheme
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
-          action: kind === "restart" ? "gateway.restart.request" : "update.run",
+          action: "gateway.restart.request",
           confirmation,
-          ...(kind === "restart" ? { reason: "AgentOS operator recovery" } : {})
+          reason: "AgentOS operator recovery"
         })
       });
       const payload = (await response.json().catch(() => null)) as {
@@ -160,18 +159,9 @@ export function NativeDoctorPanel({ surfaceTheme }: { surfaceTheme: SurfaceTheme
           {action === "restart" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
           Request safe restart
         </Button>
-        {snapshot?.update.status === "available" ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={() => void runAction("update")}
-            disabled={!confirmation?.connectionId || loading || action !== null}
-          >
-            {action === "update" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
-            Run native update
-          </Button>
-        ) : null}
+        <Button asChild type="button" size="sm" variant="secondary">
+          <Link href="/updates">Open Updates</Link>
+        </Button>
       </div>
 
       {error ? <p className={cn("mt-2 text-xs", surfaceTheme === "light" ? "text-rose-700" : "text-rose-300")}>{error}</p> : null}

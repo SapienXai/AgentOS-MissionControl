@@ -64,6 +64,68 @@ status response. Native `update.run` remains OpenClaw's installer, supervisor
 handoff, restart, and sentinel workflow. AgentOS sends only bounded, explicitly
 confirmed requests and never retries an ambiguous mutation blindly.
 
+## Normal update path
+
+Operations → Updates is the single normal OpenClaw update surface. Its flow is:
+
+```text
+Updates page
+  → AgentOS native Doctor application service
+  → OpenClaw adapter and official Gateway transport
+  → update.status / update.run
+  → OpenClaw updater or external supervisor
+  → existing reconnect owner
+  → fresh native health, status, config, and update verification
+```
+
+The page displays the installed version, the effective native channel, native
+availability, and the AgentOS certification policy separately. A certified
+native target exposes one `Update & restart` action. An uncertified target is
+shown as available but remains behind advanced compatibility tools. A successful
+RPC is not presented as a completed update until the post-reconnect native
+verification succeeds; supervisor handoff, skipped, failed, and unknown results
+remain distinct.
+
+`update.hold` remains part of the native Doctor contract. Native campaign or
+rollout hold state is projected as `Update held` on the Updates page; AgentOS
+does not create a parallel hold lifecycle or silently clear an OpenClaw hold.
+
+## Advanced compatibility path
+
+Settings → Advanced → Compatibility Lab retains the existing AgentOS-owned
+exact-version and certification capabilities. That surface may use the legacy
+`/api/update` orchestration for preflight, shadow probes, exact target
+installation, rollback snapshots, smoke tests, scorecards, certification
+promotion, and streamed diagnostics. It is an internal/advanced compatibility
+path, not the normal consumer updater. Its bounded operation timeout and manual
+rollback policy therefore do not govern native `update.run`.
+
+## Update authorities
+
+These version concepts are intentionally separate:
+
+| Concept | Authority | Meaning |
+| --- | --- | --- |
+| OpenClaw available update and effective channel | Native `update.status` | What the installed OpenClaw channel reports as available |
+| AgentOS certified version | AgentOS compatibility manifest | The highest OpenClaw version verified by this AgentOS build |
+| Community release intelligence | Optional `isitstable.iclaw.digital` advisory snapshot | An external confidence signal only |
+
+Community release intelligence is progressively disclosed on the Updates page
+and can fail or become stale without blocking native status or native update
+execution. It never supplies installed-version truth, channel truth, update
+availability, or an update target.
+
+Settings → OpenClaw is a runtime/configuration summary with a `Manage updates`
+link. Native Doctor and Diagnostics report update health and recovery evidence,
+but link to the canonical Updates page instead of exposing a second normal
+update action. Rollback remains a recovery operation for advanced operators.
+
+The pinned OpenClaw 2026.9.1 Gateway contract does not expose an
+`update.repair` method, so AgentOS does not invent a Repair button or guess CLI
+flags. Unknown or failed native outcomes remain recoverable through the
+existing supervisor/reconnect evidence, Runtime Inbox guidance, and advanced
+Compatibility Lab rollback tools.
+
 The normal Doctor read uses native `health`, `status`, `diagnostics.stability`,
 `config.get`, and `update.status` in parallel. A user-requested refresh sends
 `health({ probe: true })`; normal reads do not force a probe. Runtime health,

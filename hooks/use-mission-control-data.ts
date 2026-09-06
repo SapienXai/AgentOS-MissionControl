@@ -175,7 +175,7 @@ export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
     };
   }, [setSafeSnapshot]);
 
-  const refreshSnapshot = async (options: { force?: boolean } = {}) => {
+  const refreshSnapshot = useCallback(async (options: { force?: boolean } = {}) => {
     const url = options.force ? "/api/snapshot?force=true" : "/api/snapshot";
     const response = await fetch(url, {
       cache: "no-store"
@@ -196,11 +196,11 @@ export function useMissionControlData(initialSnapshot: ControlPlaneSnapshot) {
     });
 
     return nextSnapshot;
-  };
+  }, [setSafeSnapshot]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     await refreshSnapshot();
-  };
+  }, [refreshSnapshot]);
 
   return {
     snapshot,

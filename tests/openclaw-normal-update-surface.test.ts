@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { test } from "node:test";
+
+function read(relativePath: string) {
+  return readFileSync(path.join(process.cwd(), relativePath), "utf8");
+}
+
+test("canonical Updates page reads native status and runs native update.run", () => {
+  const source = read("components/operations/updates/updates-page-content.tsx");
+
+  assert.match(source, /\/api\/openclaw\/native-doctor/);
+  assert.match(source, /action:\s*"update\.run"/);
+  assert.match(source, /OpenClaw update\.status/);
+  assert.doesNotMatch(source, /\/api\/update/);
+  assert.doesNotMatch(source, /--tag/);
+  assert.doesNotMatch(source, /isitstable\.iclaw\.digital[\s\S]{0,800}(?:update|install|run)/i);
+});
+
+test("Settings and Native Doctor link to Updates without duplicate normal update actions", () => {
+  const settings = read("components/mission-control/mission-control-shell.settings.tsx");
+  const controlCenter = read("components/mission-control/settings-control-center.tsx");
+  const doctor = read("components/mission-control/native-doctor-panel.tsx");
+
+  assert.match(settings, /href="\/updates"/);
+  assert.doesNotMatch(settings, /onCheckForUpdates\(\)/);
+  assert.doesNotMatch(settings, /onOpenUpdateDialog\(recommendedVersion/);
+  assert.match(controlCenter, /href="\/updates"/);
+  assert.match(controlCenter, /Compatibility Lab/);
+  assert.match(doctor, /href="\/updates"/);
+  assert.doesNotMatch(doctor, /Run native update/);
+});
+
+test("legacy update API remains available for advanced exact-version workflows", () => {
+  const source = read("app/api/update/route.ts");
+
+  assert.match(source, /buildOpenClawUpdateArgs/);
+  assert.match(source, /rollbackPolicy/);
+  assert.match(source, /certificationScorecard/);
+});

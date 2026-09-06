@@ -22,7 +22,6 @@ import {
   LoaderCircle,
   Microscope,
   OctagonAlert,
-  PackageCheck,
   RefreshCw,
   RotateCcw,
   Save,
@@ -70,7 +69,6 @@ import type {
   GatewayNativeAuthCredentialKind,
   GatewayNativeAuthStatus
 } from "@/lib/openclaw/gateway-auth";
-import { compareVersionStrings } from "@/lib/openclaw/domains/control-plane-normalization";
 import { compactPath } from "@/lib/openclaw/presenters";
 import { OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
 import type {
@@ -200,7 +198,6 @@ export function SettingsControlCenter(
     onSelectedModelIdChange,
     onSaveGatewaySettings,
     onSaveWorkspaceRootSettings,
-    onCheckForUpdates,
     onControlGateway,
     onOpenSetupWizard,
     onRunModelRefresh,
@@ -298,11 +295,6 @@ export function SettingsControlCenter(
     updateCompatibility?.recommendedDecision.allowed &&
       normalizedRecommendedVersion &&
       normalizedRecommendedVersion !== normalizedCurrentVersion
-  );
-  const isCertifiedRollback = Boolean(
-    normalizedCurrentVersion &&
-      normalizedRecommendedVersion &&
-      compareVersionStrings(normalizedRecommendedVersion, normalizedCurrentVersion) < 0
   );
   const hasRegistryUpdateAvailable = Boolean(
     normalizedLatestVersion &&
@@ -1210,7 +1202,7 @@ export function SettingsControlCenter(
                   <SummaryTile
                     label="OpenClaw"
                     value={snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Unknown"}
-                    detail={recommendedVersion ? `Recommended ${formatVersionValue(recommendedVersion)}` : "Recommended release unavailable"}
+                    detail={recommendedVersion ? `AgentOS certified through ${formatVersionValue(recommendedVersion)}` : "AgentOS certification unavailable"}
                     surfaceTheme={surfaceTheme}
                     accent
                     compact
@@ -1280,7 +1272,7 @@ export function SettingsControlCenter(
                     <Metric
                       label="Current version"
                       value={snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Unknown"}
-                      badge={recommendedVersion ? `Recommended ${formatVersionValue(recommendedVersion)}` : "No recommendation"}
+                      badge={recommendedVersion ? `Certified through ${formatVersionValue(recommendedVersion)}` : "Certification unavailable"}
                       surfaceTheme={surfaceTheme}
                     />
                     <SettingsInlineLink href="/settings#openclaw" label="Open settings" surfaceTheme={surfaceTheme} onActivate={() => setActiveSection("openclaw")} />
@@ -1333,7 +1325,6 @@ export function SettingsControlCenter(
                         ["Runtime issues", `${activeRuntimeIssues.length} visible`],
                         ["Native Gateway coverage", compatibilityReport ? `${compatibilityReport.summary.nativeGatewayCoveragePercent}% (${compatibilityReport.summary.nativeGatewayCoverageLabel})` : "Unknown"],
                         ["CLI fallback count", String(transportSummary.fallbackTotal)],
-                        ["Latest detected version", latestVersion ? `v${latestVersion}` : "Unknown"],
                         ["Last health check", lastCheckedAt ? new Date(lastCheckedAt).toLocaleTimeString() : "Not checked"]
                       ]}
                     />
@@ -1453,7 +1444,7 @@ export function SettingsControlCenter(
                       dark={surfaceTheme === "dark"}
                     />
                     <Metric
-                      label="Recommended"
+                      label="AgentOS certified"
                       value={recommendedVersion ? `v${recommendedVersion}` : "Unknown"}
                       badge={updateCompatibility?.recommendedDecision.status ?? (hasRegistryUpdateAvailable ? "Update" : "Stable")}
                       surfaceTheme={surfaceTheme}
@@ -1466,7 +1457,6 @@ export function SettingsControlCenter(
                     <InfoRows
                       surfaceTheme={surfaceTheme}
                       rows={[
-                        ["Latest detected", latestVersion ? `v${latestVersion}` : "Unknown"],
                         ["Gateway reachability", snapshot.diagnostics.loaded && snapshot.diagnostics.rpcOk ? "Reachable" : "Not ready"],
                         ["Native Gateway protocol", transportSummary.protocolLabel],
                         ["Auth/scopes", nativeAuthLabel],
@@ -1479,86 +1469,11 @@ export function SettingsControlCenter(
                   </div>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void runUpdatePreflight(defaultUpdateTargetVersion, defaultUpdateMode)}
-                      disabled={!defaultUpdateTargetVersion || isRunningUpdatePreflight || updateRunState === "running"}
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
-                      {isRunningUpdatePreflight ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
-                      Run preflight
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void runShadowProbe(defaultUpdateTargetVersion, defaultUpdateMode)}
-                      disabled={!defaultUpdateTargetVersion || isRunningShadowProbe || updateRunState === "running"}
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
-                      {isRunningShadowProbe ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-                      Test target safely
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void runCompatibilityLabReport(defaultUpdateTargetVersion)}
-                      disabled={!defaultUpdateTargetVersion || isGeneratingCompatibilityLabReport || updateRunState === "running"}
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
-                      {isGeneratingCompatibilityLabReport ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Microscope className="h-3.5 w-3.5" />}
-                      Generate compatibility report
-                    </Button>
-                    {canVerifyLatestUpdate ? (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => onOpenUpdateDialog(latestVersion ?? undefined, "advanced")}
-                        disabled={updateRunState === "running"}
-                        className={cn(
-                          "h-9 rounded-full border px-4 text-xs",
-                          surfaceTheme === "light"
-                            ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                            : "border-amber-300/25 bg-amber-300/10 text-amber-100 hover:bg-amber-300/15"
-                        )}
-                      >
-                        <Microscope className="h-3.5 w-3.5" />
-                        Install and verify latest
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      onClick={() => onOpenUpdateDialog(recommendedVersion ?? undefined, "recommended")}
-                      disabled={
-                        !hasCertifiedUpdateAvailable ||
-                        updateRunState === "running" ||
-                        Boolean(updateSafetyReport && !updateSafetyReport.canAttemptUpdate)
-                      }
-                      className="h-9 rounded-full bg-primary px-4 text-xs text-primary-foreground hover:bg-primary/90"
-                    >
-                      {updateRunState === "running" ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <PackageCheck className="h-3.5 w-3.5" />}
-                      {isCertifiedRollback ? "Rollback to certified" : "Update to certified"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      asChild
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
+                    <Button type="button" variant="secondary" asChild className={secondaryButtonClassName(surfaceTheme, "px-4")}>
                       <Link href="/updates">
                         <Download className="h-3.5 w-3.5" />
-                        Open Updates page
+                        Manage updates
                       </Link>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void onCheckForUpdates()}
-                      disabled={isCheckingForUpdates || updateRunState === "running"}
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      Check
                     </Button>
                     <Button
                       type="button"
@@ -1568,16 +1483,6 @@ export function SettingsControlCenter(
                     >
                       <Wrench className="h-3.5 w-3.5" />
                       Open wizard
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={onRollbackOpenClaw}
-                      disabled={updateRunState === "running"}
-                      className={secondaryButtonClassName(surfaceTheme, "px-4")}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Rollback to last working OpenClaw
                     </Button>
                     <Button
                       type="button"
@@ -1592,53 +1497,6 @@ export function SettingsControlCenter(
                       Open Runtime Inbox
                     </Button>
                   </div>
-
-                  {updateSafetyError ? (
-                    <p className={cn("mt-3 text-xs leading-5", surfaceTheme === "light" ? "text-rose-700" : "text-rose-200")}>
-                      {updateSafetyError}
-                    </p>
-                  ) : null}
-
-                  <UpdateSafetyPanel
-                    report={updateSafetyReport}
-                    shadowProbeReport={shadowProbeReport}
-                    surfaceTheme={surfaceTheme}
-                  />
-
-                  <CompatibilityLabPanel
-                    report={compatibilityLabReport}
-                    bundle={codexFixBundle}
-                    scorecard={updateCertificationScorecard}
-                    promotion={certificationPromotion}
-                    error={compatibilityLabError}
-                    isGeneratingReport={isGeneratingCompatibilityLabReport}
-                    isGeneratingBundle={isGeneratingCodexFixBundle}
-                    isPromotingCertification={isPromotingCertification}
-                    isUpdateRunning={updateRunState === "running"}
-                    onGenerateReport={() => void runCompatibilityLabReport(defaultUpdateTargetVersion)}
-                    onGenerateBundle={() => void generateCodexFixBundle()}
-                    onRunCertification={(targetVersion) => onOpenUpdateDialog(targetVersion, "advanced")}
-                    onCertifyTarget={() => void certifyCompatibilityTarget()}
-                    surfaceTheme={surfaceTheme}
-                  />
-
-                  <UpdateRegistryPanel
-                    surfaceTheme={surfaceTheme}
-                    isCheckingForUpdates={isCheckingForUpdates}
-                    isUpdateRegistryLoading={isUpdateRegistryLoading}
-                    hasCertifiedUpdateAvailable={hasCertifiedUpdateAvailable}
-                    hasRegistryUpdateAvailable={hasRegistryUpdateAvailable}
-                    currentVersion={currentVersion}
-                    recommendedVersion={recommendedVersion}
-                    latestVersion={latestVersion}
-                    latestDecision={updateCompatibility?.latestDecision ?? null}
-                    updateInfo={updateInfo}
-                    updateError={updateError}
-                    lastCheckedAt={lastCheckedAt}
-                    isUpdateRunning={updateRunState === "running"}
-                    updateCompatibility={updateCompatibility}
-                    onTryPreviewVersion={(version) => onOpenUpdateDialog(version, "candidate")}
-                  />
 
                   <div className={cn("mt-5 grid gap-3 border-t pt-4 sm:grid-cols-2", surfaceTheme === "light" ? "border-border" : "border-white/10")}>
                     <Metric
@@ -2508,6 +2366,117 @@ export function SettingsControlCenter(
                       {isSavingConfigUpdatePacing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                       Save pacing
                     </Button>
+                  </div>
+
+                  <div className={cn("mt-5 border-t pt-5", surfaceTheme === "light" ? "border-border" : "border-white/10")}>
+                    <div className="flex flex-col gap-1">
+                      <p className={cn("text-sm font-medium", surfaceTheme === "light" ? "text-foreground" : "text-slate-100")}>Compatibility Lab</p>
+                      <p className={cn("text-xs leading-5", mutedTextClassName(surfaceTheme))}>
+                        Advanced exact-version testing, certification, preflight, rollback, and native contract evidence. Normal updates stay on Operations → Updates.
+                      </p>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void runUpdatePreflight(defaultUpdateTargetVersion, defaultUpdateMode)}
+                        disabled={!defaultUpdateTargetVersion || isRunningUpdatePreflight || updateRunState === "running"}
+                        className={secondaryButtonClassName(surfaceTheme, "px-4")}
+                      >
+                        {isRunningUpdatePreflight ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
+                        Run preflight
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void runShadowProbe(defaultUpdateTargetVersion, defaultUpdateMode)}
+                        disabled={!defaultUpdateTargetVersion || isRunningShadowProbe || updateRunState === "running"}
+                        className={secondaryButtonClassName(surfaceTheme, "px-4")}
+                      >
+                        {isRunningShadowProbe ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                        Test target safely
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void runCompatibilityLabReport(defaultUpdateTargetVersion)}
+                        disabled={!defaultUpdateTargetVersion || isGeneratingCompatibilityLabReport || updateRunState === "running"}
+                        className={secondaryButtonClassName(surfaceTheme, "px-4")}
+                      >
+                        {isGeneratingCompatibilityLabReport ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Microscope className="h-3.5 w-3.5" />}
+                        Generate report
+                      </Button>
+                      {canVerifyLatestUpdate ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => onOpenUpdateDialog(latestVersion ?? undefined, "advanced")}
+                          disabled={updateRunState === "running"}
+                          className={secondaryButtonClassName(surfaceTheme, "px-4")}
+                        >
+                          <Microscope className="h-3.5 w-3.5" />
+                          Install and verify latest
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={onRollbackOpenClaw}
+                        disabled={updateRunState === "running"}
+                        className={secondaryButtonClassName(surfaceTheme, "px-4")}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Recovery rollback
+                      </Button>
+                    </div>
+
+                    {updateSafetyError ? (
+                      <p className={cn("mt-3 text-xs leading-5", surfaceTheme === "light" ? "text-rose-700" : "text-rose-200")}>
+                        {updateSafetyError}
+                      </p>
+                    ) : null}
+
+                    <UpdateSafetyPanel
+                      report={updateSafetyReport}
+                      shadowProbeReport={shadowProbeReport}
+                      surfaceTheme={surfaceTheme}
+                    />
+
+                    <CompatibilityLabPanel
+                      report={compatibilityLabReport}
+                      bundle={codexFixBundle}
+                      scorecard={updateCertificationScorecard}
+                      promotion={certificationPromotion}
+                      error={compatibilityLabError}
+                      isGeneratingReport={isGeneratingCompatibilityLabReport}
+                      isGeneratingBundle={isGeneratingCodexFixBundle}
+                      isPromotingCertification={isPromotingCertification}
+                      isUpdateRunning={updateRunState === "running"}
+                      onGenerateReport={() => void runCompatibilityLabReport(defaultUpdateTargetVersion)}
+                      onGenerateBundle={() => void generateCodexFixBundle()}
+                      onRunCertification={(targetVersion) => onOpenUpdateDialog(targetVersion, "advanced")}
+                      onCertifyTarget={() => void certifyCompatibilityTarget()}
+                      surfaceTheme={surfaceTheme}
+                    />
+
+                    <UpdateRegistryPanel
+                      surfaceTheme={surfaceTheme}
+                      isCheckingForUpdates={isCheckingForUpdates}
+                      isUpdateRegistryLoading={isUpdateRegistryLoading}
+                      hasCertifiedUpdateAvailable={hasCertifiedUpdateAvailable}
+                      hasRegistryUpdateAvailable={hasRegistryUpdateAvailable}
+                      currentVersion={currentVersion}
+                      recommendedVersion={recommendedVersion}
+                      latestVersion={latestVersion}
+                      latestDecision={updateCompatibility?.latestDecision ?? null}
+                      updateInfo={updateInfo}
+                      updateError={updateError}
+                      lastCheckedAt={lastCheckedAt}
+                      isUpdateRunning={updateRunState === "running"}
+                      updateCompatibility={updateCompatibility}
+                      onTryPreviewVersion={(version) => onOpenUpdateDialog(version, "candidate")}
+                    />
                   </div>
                 </Card>
               </section>

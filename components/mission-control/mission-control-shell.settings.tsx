@@ -3,13 +3,11 @@
 import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowUpRight,
   CheckCircle2,
   Info,
   KeyRound,
   LoaderCircle,
   Plus,
-  RefreshCw,
   Settings2,
   SlidersHorizontal,
 } from "lucide-react";
@@ -28,7 +26,6 @@ import type {
 } from "@/lib/agentos/contracts";
 import type { GatewayNativeAuthStatus } from "@/lib/openclaw/gateway-auth";
 import type { OpenClawCapabilityDiffReport } from "@/lib/openclaw/types";
-import { compareVersionStrings } from "@/lib/openclaw/domains/control-plane-normalization";
 import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
 import { cn } from "@/lib/utils";
 
@@ -80,39 +77,16 @@ export type MissionControlShellSettingsPanelProps = {
 export function MissionControlShellSettingsPanel({
   snapshot,
   surfaceTheme,
-  isCheckingForUpdates,
-  updateRunState,
-  lastCheckedAt,
-  onCheckForUpdates,
   onOpenSetupWizard,
-  onOpenAddModels,
-  onOpenUpdateDialog
+  onOpenAddModels
 }: MissionControlShellSettingsPanelProps) {
   const [gatewayAuthStatus, setGatewayAuthStatus] = useState<GatewayNativeAuthStatus | null>(null);
   const [gatewayAuthError, setGatewayAuthError] = useState<string | null>(null);
   const [isCheckingGatewayAuth, setIsCheckingGatewayAuth] = useState(false);
   const [isRepairingGatewayAccess, setIsRepairingGatewayAccess] = useState(false);
-  const isUpdateRunning = updateRunState === "running";
   const isOpenClawReady = isOpenClawOnboardingModelReady(snapshot);
-  const recommendedVersion = snapshot.diagnostics.updateCompatibility?.recommendedVersion ?? snapshot.diagnostics.latestVersion;
-  const updateDirection = resolveUpdateDirection(snapshot.diagnostics.version, recommendedVersion);
-  const isRecommendedRollback = updateDirection === "rollback";
-  const hasUpdateAvailable = Boolean(snapshot.diagnostics.updateAvailable && recommendedVersion);
-  const isUpdateRegistryLoading = Boolean(
-    snapshot.diagnostics.version && !snapshot.diagnostics.latestVersion && !snapshot.diagnostics.updateError
-  );
-  const updateStatusText = isCheckingForUpdates
-    ? "Checking update registry..."
-    : hasUpdateAvailable
-      ? isRecommendedRollback
-        ? "Rollback available"
-        : "Update available"
-      : snapshot.diagnostics.updateError
-        ? "Check failed"
-        : isUpdateRegistryLoading
-          ? snapshot.diagnostics.updateInfo?.trim() || "Registry status is still loading."
-          : "Up to date";
-  const recommendedUpdateLabel = recommendedVersion ? `Recommended v${recommendedVersion}` : "Recommended unavailable";
+  const certifiedVersion = snapshot.diagnostics.updateCompatibility?.recommendedVersion;
+  const updateSummary = "Native status on Updates";
   const defaultModel =
     snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
     snapshot.diagnostics.modelReadiness.defaultModel ||
@@ -204,60 +178,26 @@ export function MissionControlShellSettingsPanel({
                 Updates
               </p>
               <p className={cn("truncate text-right text-[9px] uppercase tracking-[0.14em]", mutedTextClassName(surfaceTheme))}>
-                {recommendedUpdateLabel}
+                {snapshot.diagnostics.updateChannel || "Channel unknown"}
               </p>
             </div>
-            <p className="mt-1 truncate text-[13px]">{updateStatusText}</p>
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => void onCheckForUpdates()}
-                disabled={isCheckingForUpdates || isUpdateRunning}
-                className={cn("min-w-0 px-2 text-[10px]", quickButtonClassName(surfaceTheme))}
-              >
-                {isCheckingForUpdates ? (
-                  <LoaderCircle className="h-3 w-3 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3 w-3" />
-                )}
-                {isCheckingForUpdates ? "Checking..." : "Check"}
+            <p className="mt-1 truncate text-[13px]">{updateSummary}</p>
+            <p className={cn("mt-1 text-[11px] leading-4", mutedTextClassName(surfaceTheme))}>
+              {snapshot.diagnostics.version ? `v${snapshot.diagnostics.version}` : "Version unknown"}
+              {certifiedVersion ? ` · AgentOS certified through v${certifiedVersion}` : " · AgentOS certification unavailable"}
+            </p>
+            <div className="mt-2">
+              <Button asChild type="button" size="sm" variant="secondary" className={cn("w-full px-2 text-[10px]", quickButtonClassName(surfaceTheme))}>
+                <Link href="/updates">Manage updates <span aria-hidden="true">→</span></Link>
               </Button>
-              {hasUpdateAvailable ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => onOpenUpdateDialog(recommendedVersion, "recommended")}
-                  disabled={isUpdateRunning}
-                  className="min-w-0 rounded-full bg-emerald-600 px-2 text-[10px] text-white shadow-[0_12px_24px_rgba(16,185,129,0.24)] hover:bg-emerald-500"
-                  aria-label={`${isRecommendedRollback ? "Rollback" : "Update"} to ${recommendedUpdateLabel}`}
-                >
-                  <ArrowUpRight className="h-3 w-3" />
-                  {isRecommendedRollback ? "Rollback" : "Update"}
-                </Button>
-              ) : null}
             </div>
           </div>
         </div>
       </div>
 
-      <div
-        className={cn(
-          "mt-2 rounded-[16px] border px-3 py-2",
-          surfaceTheme === "light"
-            ? "border-[#e6d7c9] bg-white text-[#6b5546]"
-            : "border-white/[0.08] bg-[#0f1826] text-slate-300"
-        )}
-      >
-        <p className="text-[10px] uppercase tracking-[0.18em]">{isCheckingForUpdates ? "Checking" : "Registry"}</p>
-        <p className="mt-1 text-[11px] leading-4">
-          {isCheckingForUpdates
-            ? "Refreshing OpenClaw update registry..."
-            : snapshot.diagnostics.updateInfo?.trim() ||
-              (lastCheckedAt ? `Last checked ${new Date(lastCheckedAt).toLocaleTimeString()}.` : "No registry check run yet.")}
-        </p>
-      </div>
+      <p className={cn("mt-2 px-1 text-[10px] leading-4", mutedTextClassName(surfaceTheme))}>
+        Runtime configuration stays here. Updates are managed from the canonical Updates page.
+      </p>
 
       <div className="mt-2.5 grid gap-1.5">
         <QuickRow
@@ -496,14 +436,6 @@ async function fetchGatewayAuthStatus() {
 
   const result = (await response.json()) as { authStatus: GatewayNativeAuthStatus };
   return result.authStatus;
-}
-
-function resolveUpdateDirection(currentVersion: string | undefined, targetVersion: string | undefined) {
-  if (!currentVersion || !targetVersion) {
-    return "update";
-  }
-
-  return compareVersionStrings(targetVersion, currentVersion) < 0 ? "rollback" : "update";
 }
 
 function formatSnapshotHealthLabel(snapshot: MissionControlSnapshot) {

@@ -536,20 +536,25 @@ test("update route exposes non-mutating preflight and probe actions", () => {
   assert.match(routeSource, /redactSecrets\(\{ report \}\)/);
 });
 
-test("Updates page requires confirmation and keeps manually selected targets installed", () => {
+test("advanced exact-version updates keep manually selected targets installed while normal updates use native OpenClaw", () => {
   const routeSource = readFileSync(path.join(process.cwd(), "app/api/update/route.ts"), "utf8");
   const updatesSource = readFileSync(
     path.join(process.cwd(), "components/operations/updates/updates-page-content.tsx"),
+    "utf8"
+  );
+  const settingsSource = readFileSync(
+    path.join(process.cwd(), "components/mission-control/settings-control-center.tsx"),
     "utf8"
   );
 
   assert.match(routeSource, /rollbackPolicy:\s*z\.enum\(\["automatic", "manual"\]\)/);
   assert.match(routeSource, /updateRequest\.rollbackPolicy === "manual"/);
   assert.match(routeSource, /remains installed because automatic rollback is disabled/);
-  assert.match(updatesSource, /rollbackPolicy:\s*"manual"/);
-  assert.match(updatesSource, /const requestInstall[\s\S]*setInstallTarget\(release\)/);
-  assert.doesNotMatch(updatesSource, /const requestInstall[\s\S]{0,800}void runInstall\(release\)/);
-  assert.match(updatesSource, /Rollback policy" value="Manual - keep target on failure/);
+  assert.match(updatesSource, /action:\s*"update\.run"/);
+  assert.doesNotMatch(updatesSource, /\/api\/update/);
+  assert.doesNotMatch(updatesSource, /--tag/);
+  assert.match(settingsSource, /Compatibility Lab/);
+  assert.match(settingsSource, /onOpenUpdateDialog\(latestVersion \?\? undefined, "advanced"\)/);
 });
 
 test("update route uses OpenClaw 2026.9.1+ JSON updater commands", () => {
@@ -613,7 +618,7 @@ test("update dialog keeps OpenClaw output and certification scorecard inside the
   assert.match(dialogSource, /Generate artifact/);
 });
 
-test("opening an update action resets stale failed update dialog state", () => {
+test("normal update entry points link to the canonical Updates page", () => {
   const shellSource = readFileSync(
     path.join(process.cwd(), "components/mission-control/mission-control-shell.tsx"),
     "utf8"
@@ -626,14 +631,20 @@ test("opening an update action resets stale failed update dialog state", () => {
     path.join(process.cwd(), "components/mission-control/settings-control-center.tsx"),
     "utf8"
   );
+  const doctorSource = readFileSync(
+    path.join(process.cwd(), "components/mission-control/native-doctor-panel.tsx"),
+    "utf8"
+  );
 
   assert.match(shellSource, /onOpenUpdateDialog: \(targetVersion, mode = "recommended"\) => \{\s+if \(updateRunState !== "running"\) \{/);
   assert.match(shellSource, /onRollbackOpenClaw: \(\) => \{\s+if \(updateRunState !== "running"\) \{/);
-  assert.match(quickSettingsSource, /compareVersionStrings\(targetVersion, currentVersion\) < 0 \? "rollback" : "update"/);
-  assert.match(quickSettingsSource, /Rollback available/);
-  assert.match(quickSettingsSource, /isRecommendedRollback \? "Rollback" : "Update"/);
-  assert.match(controlCenterSource, /compareVersionStrings\(normalizedRecommendedVersion, normalizedCurrentVersion\) < 0/);
-  assert.match(controlCenterSource, /Rollback to certified/);
+  assert.match(quickSettingsSource, /href="\/updates"/);
+  assert.doesNotMatch(quickSettingsSource, /onCheckForUpdates\(\)/);
+  assert.doesNotMatch(quickSettingsSource, /onOpenUpdateDialog\(recommendedVersion/);
+  assert.match(controlCenterSource, /href="\/updates"/);
+  assert.match(controlCenterSource, /Compatibility Lab/);
+  assert.match(doctorSource, /href="\/updates"/);
+  assert.doesNotMatch(doctorSource, /Run native update/);
 });
 
 test("update dialog surfaces target blockers even when capability modes are unchanged", () => {
