@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "openclaw-workforce-acceptance",
+  "generatedAt": "2026-09-06T16:31:40.559Z",
+  "provenance": {
+    "repository": "SapienXai/AgentOS",
+    "agentosCommit": "b6eee5a819c35417d5d7f1b5e1b245bc8603b262",
+    "openClaw": {
+      "version": "2026.9.2",
+      "sourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
+      "buildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
+      "packageHash": "3c9e76fa80d355c579a3a8827cac4158f8f968aeac36f92d5046d71b98eb5360"
+    },
+    "evidenceClasses": [
+      "LIVE_DISPOSABLE_9_2",
+      "DETERMINISTIC_NATIVE_FIXTURE"
+    ]
+  },
+  "runtime": {
+    "version": "2026.9.2",
+    "protocol": 4,
+    "authenticated": true,
+    "grantedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write",
+      "operator.approvals",
+      "operator.questions"
+    ],
+    "loopback": true,
+    "isolatedState": true,
+    "securityDefaults": "tools.sessions.visibility=tree; tools.agentToAgent.enabled=false; tools.agentToAgent.allow=[]"
+  },
+  "checks": {
+    "runtime-identity": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2"
+    },
+    "mission-basic": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "Native session, turn, result, and exact session identity observed."
+    },
+    "delegation": {
+      "status": "SKIPPED",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "The deterministic loopback turn exposed no native task/child row; no synthetic delegation was created."
+    },
+    "waiting-worker": {
+      "status": "SKIPPED",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "The exact runtime exposed no native child task to drive this state."
+    },
+    "result-projection": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "Final output came from the native loopback turn and reconstructed as a terminal Workforce projection."
+    },
+    "multiple-human-control": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "Two native questions remained independently pending until both were resolved."
+    },
+    "approval-resolution": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "Native approval was projected, denied safely, and disappeared from the pending inventory."
+    },
+    "gateway-reconnect": {
+      "status": "PASS",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "Same exact session key and history survived disposable Gateway restart; no new mission/session was created."
+    },
+    "agentos-restart-projection": {
+      "status": "PASS",
+      "evidence": "DETERMINISTIC_NATIVE_FIXTURE",
+      "detail": "Projection was rebuilt from the durable dispatch correlation and re-read native session evidence."
+    },
+    "artifacts": {
+      "status": "SKIPPED",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "The deterministic model produced no runtime-created file; no artifact record was fabricated."
+    },
+    "cancellation": {
+      "status": "SKIPPED",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "No native task identity was exposed by this turn, so no unrelated session was cancelled."
+    },
+    "child-failure": {
+      "status": "SKIPPED",
+      "evidence": "LIVE_DISPOSABLE_9_2",
+      "detail": "No native child task was exposed by the safe deterministic turn."
+    }
+  },
+  "runtimeTaskLedger": {
+    "taskListRead": true,
+    "taskCount": 0,
+    "taskIds": [],
+    "childCount": 0
+  },
+  "cleanup": {
+    "disposableRootRemoved": true,
+    "gatewayStopped": true,
+    "productionGatewayTouched": false
+  },
+  "summary": {
+    "passed": 7,
+    "skipped": 5,
+    "failed": 0
+  }
+}
