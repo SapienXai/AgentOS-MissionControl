@@ -46,16 +46,20 @@ export function classifyOpenClawReleaseImpact(input: {
   const rationale: string[] = [];
   const changedDomains = new Set(input.contractDiff.domainsChanged);
   const noteSignals = new Set(input.releaseNotes.signals);
+  const identityEvidenceIncomplete = input.identity.status === "incomplete";
+  const contractEvidenceIncomplete = input.contractDiff.status === "unknown" || input.contractDiff.evidenceGaps.length > 0;
 
   if (input.identity.status === "identity-mismatch") {
     classifications.add("IDENTITY_MISMATCH");
     rationale.push("Official npm, GitHub, tag, or build identity evidence disagrees.");
-  } else if (input.identity.status === "incomplete") {
+  }
+
+  if (identityEvidenceIncomplete) {
     classifications.add("DISCOVERY_INCOMPLETE");
     rationale.push("The official release could not provide every supported identity evidence field.");
   }
 
-  if (input.contractDiff.status === "unknown" || input.contractDiff.evidenceGaps.length > 0) {
+  if (contractEvidenceIncomplete) {
     classifications.add("DISCOVERY_INCOMPLETE");
     rationale.push("Contract evidence is incomplete; the release cannot be promoted from static intake alone.");
   }
@@ -106,7 +110,7 @@ export function classifyOpenClawReleaseImpact(input: {
     classifications.add("COMPATIBILITY_REVIEW");
   }
 
-  if (classifications.size === 0) {
+  if (classifications.size === 0 && !identityEvidenceIncomplete && !contractEvidenceIncomplete) {
     classifications.add("NO_KNOWN_AGENTOS_IMPACT");
     classifications.add("LOW_RISK_ADDITIVE");
     rationale.push("No AgentOS-relevant contract or release-note signal was found in the bounded static evidence.");
@@ -118,10 +122,6 @@ export function classifyOpenClawReleaseImpact(input: {
     rationale.push("The target is already a candidate, but candidate status is not certification.");
   } else if (input.manifestStatus === "blocked") {
     rationale.push("The exact target is blocked by the AgentOS compatibility manifest.");
-  }
-
-  if (input.identity.status === "verified" && classifications.has("DISCOVERY_INCOMPLETE")) {
-    classifications.delete("DISCOVERY_INCOMPLETE");
   }
 
   const domains = changedDomains;

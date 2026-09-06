@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -23,12 +26,12 @@ import {
   type GitHubIssueClient
 } from "@/lib/openclaw/upstream/github-issue-client";
 import { classifyOpenClawReleaseImpact } from "@/lib/openclaw/upstream/impact-classifier";
-import { selectOpenClawReleasesForIntake } from "@/scripts/openclaw-release-watch";
+import { runOpenClawReleaseWatch, selectOpenClawReleasesForIntake } from "@/scripts/openclaw-release-watch";
 import {
   LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST,
   resolveOpenClawUpdateDecision
 } from "@/lib/openclaw/update-compatibility";
-import type { OpenClawReleaseIdentity } from "@/lib/openclaw/upstream/types";
+import type { OpenClawReleaseContractDiff, OpenClawReleaseIdentity } from "@/lib/openclaw/upstream/types";
 import type { OpenClawCoreMethodSpec } from "@/lib/openclaw/application/update-contract-diff-service";
 
 const releaseEndpoint = "https://api.github.com/repos/openclaw/openclaw/releases?per_page=50&page=1";
@@ -191,6 +194,160 @@ test("the historical 2026.9.1 to 2026.9.2 fixture detects security, behavior, an
   assert.equal(impact.requiredChecks.some((check) => check.id === "native-update-lifecycle"), true);
 });
 
+test("verified identity does not clear unknown contract evidence", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    contractDiff: contractDiffFixture({ status: "unknown", evidenceGaps: [] })
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.severity, "unknown");
+  assert.equal(impact.requiredChecks.some((check) => check.id === "evidence-completion"), true);
+});
+
+test("verified identity does not override a contract evidence gap", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    contractDiff: contractDiffFixture({
+      status: "safe",
+      evidenceGaps: ["target protocol descriptor unavailable"]
+    })
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.severity, "unknown");
+  assert.equal(impact.requiredChecks.some((check) => check.id === "evidence-completion"), true);
+});
+
+test("complete evidence permits the normal low-risk or no-impact classification", () => {
+  const impact = classifyOpenClawReleaseImpact(impactInput());
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), false);
+  assert.equal(impact.classifications.includes("LOW_RISK_ADDITIVE"), true);
+  assert.equal(impact.classifications.includes("NO_KNOWN_AGENTOS_IMPACT"), true);
+  assert.equal(impact.severity, "low");
+});
+
+test("identity incompleteness remains independent from complete contract evidence", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    identity: {
+      ...identityFor("2026.9.3"),
+      status: "incomplete",
+      missingEvidence: ["npm package integrity"]
+    }
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.severity, "unknown");
+  assert.equal(impact.requiredChecks.some((check) => check.id === "evidence-completion"), true);
+});
+
+test("identity and contract incompleteness remain visible together", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    identity: {
+      ...identityFor("2026.9.3"),
+      status: "incomplete",
+      missingEvidence: ["npm package integrity"]
+    },
+    contractDiff: contractDiffFixture({ status: "unknown", evidenceGaps: [] })
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.severity, "unknown");
+  assert.equal(impact.rationale.some((value) => /identity/i.test(value)), true);
+  assert.equal(impact.rationale.some((value) => /contract evidence/i.test(value)), true);
+});
+
+test("identity mismatch remains a distinct critical fail-closed classification", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    identity: {
+      ...identityFor("2026.9.3"),
+      status: "identity-mismatch",
+      mismatches: ["npm package version is 2026.9.99, expected 2026.9.3."]
+    }
+  });
+
+  assert.equal(impact.classifications.includes("IDENTITY_MISMATCH"), true);
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), false);
+  assert.equal(impact.severity, "critical");
+});
+
+test("incomplete evidence cannot be made low risk by release-note reassurance", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    contractDiff: contractDiffFixture({ status: "unknown", evidenceGaps: [] }),
+    releaseNotes: buildOpenClawReleaseNotesEvidence({
+      body: "No breaking changes are expected.",
+      sourceUrl: "https://github.com/openclaw/openclaw/releases/tag/v2026.9.3"
+    })
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.classifications.includes("LOW_RISK_ADDITIVE"), false);
+  assert.equal(impact.classifications.includes("NO_KNOWN_AGENTOS_IMPACT"), false);
+  assert.equal(impact.severity, "unknown");
+});
+
+test("security-critical evidence remains critical when contract evidence is incomplete", () => {
+  const impact = classifyOpenClawReleaseImpact({
+    ...impactInput(),
+    contractDiff: contractDiffFixture({
+      status: "unknown",
+      evidenceGaps: [],
+      securitySensitiveChanges: ["session visibility default changed"],
+      domainsChanged: ["security"]
+    })
+  });
+
+  assert.equal(impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(impact.classifications.includes("SECURITY_CRITICAL"), true);
+  assert.equal(impact.severity, "critical");
+});
+
+test("intake JSON and issue output agree when identity is verified but contract evidence is incomplete", () => {
+  const intake = buildOpenClawCompatibilityIntake({
+    ...intakeInput(),
+    contractDiff: contractDiffFixture({ status: "unknown", evidenceGaps: [] })
+  });
+  const issue = renderOpenClawCompatibilityIssue(intake);
+
+  assert.equal(intake.identity.status, "verified");
+  assert.equal(intake.contractDiff.status, "unknown");
+  assert.equal(intake.impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(intake.certification.status, "not-certified");
+  assert.equal(intake.certification.normalUpdateAllowed, false);
+  assert.match(issue, /NOT CERTIFIED/);
+  assert.match(issue, /Static evidence incomplete.*certification blocked/i);
+  assert.equal(intake.certification.requiredChecks.some((check) => check.id === "evidence-completion"), true);
+});
+
+test("runner returns intake-blocked and writes incomplete evidence for an authoritative contract failure", async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), "agentos-openclaw-watch-"));
+  const result = await runOpenClawReleaseWatch({
+    mode: "manual",
+    targetVersion: "2026.9.3",
+    dryRun: true,
+    forceRefresh: true,
+    outputDir,
+    agentosCommit: "c".repeat(40),
+    agentosVersion: "0.8.0",
+    now: () => new Date("2026-09-06T00:00:00.000Z"),
+    fetchImpl: releaseWatchIncompleteContractFetch()
+  });
+
+  assert.equal(result.status, "intake-blocked");
+  assert.equal(result.intakes.length, 1);
+  const intake = JSON.parse(readFileSync(result.intakes[0].intakePath!, "utf8")) as ReturnType<typeof buildOpenClawCompatibilityIntake>;
+  assert.equal(intake.identity.status, "verified");
+  assert.equal(intake.contractDiff.status, "unknown");
+  assert.equal(intake.impact.classifications.includes("DISCOVERY_INCOMPLETE"), true);
+  assert.equal(intake.certification.status, "not-certified");
+  assert.equal(intake.certification.normalUpdateAllowed, false);
+});
+
 test("intake fingerprint excludes volatile generation time and leaves the manifest untouched", () => {
   const manifestBefore = structuredClone(LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST);
   const input = intakeInput({ generatedAt: "2026-09-06T00:00:00.000Z" });
@@ -337,6 +494,29 @@ function intakeInput(overrides: { generatedAt?: string } = {}) {
   };
 }
 
+function impactInput(overrides: {
+  identity?: OpenClawReleaseIdentity;
+  contractDiff?: OpenClawReleaseContractDiff;
+} = {}) {
+  return {
+    identity: overrides.identity ?? identityFor("2026.9.3"),
+    contractDiff: overrides.contractDiff ?? contractDiffFixture(),
+    releaseNotes: buildOpenClawReleaseNotesEvidence({ body: "", sourceUrl: null })
+  };
+}
+
+function contractDiffFixture(overrides: Partial<OpenClawReleaseContractDiff> = {}): OpenClawReleaseContractDiff {
+  return {
+    ...buildFixtureContractDiff({
+      fromVersion: "2026.9.2",
+      targetVersion: "2026.9.3",
+      currentSpecs: [method("health")],
+      targetSpecs: [method("health")]
+    }),
+    ...overrides
+  };
+}
+
 function identityFor(version: string): OpenClawReleaseIdentity {
   return {
     status: "verified",
@@ -415,6 +595,29 @@ function identityFetch(input: { packageVersion: string }) {
       commit: sourceCommit
     }
   });
+}
+
+function releaseWatchIncompleteContractFetch() {
+  const verifiedSource = identityFetch({ packageVersion: "2026.9.3" });
+  return async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url === npmDistTagsEndpoint) {
+      return jsonResponse({ latest: "2026.9.3" });
+    }
+    if (url === npmPackumentEndpoint) {
+      return jsonResponse({
+        versions: { "2026.9.2": {}, "2026.9.3": {} },
+        time: { "2026.9.3": "2026-09-03T00:00:00.000Z" }
+      });
+    }
+    if (url === releaseEndpoint) {
+      return jsonResponse([releaseRecord("2026.9.3")]);
+    }
+    if (url.includes("/src/gateway/methods/core-descriptors.ts") || url.includes("/compare/v2026.9.2...v2026.9.3")) {
+      return new Response(null, { status: 404 });
+    }
+    return verifiedSource(input);
+  };
 }
 
 function jsonResponse(value: unknown) {

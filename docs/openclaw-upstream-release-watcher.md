@@ -59,6 +59,11 @@ file changes, update/session contract flags, security-sensitive evidence, and
 changed domains. Release-note signals are preserved separately as advisory
 evidence; they cannot override the contract diff.
 
+Release identity verification and compatibility evidence completeness are
+independent. A verified package/tag identity does not prove that the contract
+diff is complete. Any incomplete identity evidence or contract evidence gap keeps
+`DISCOVERY_INCOMPLETE`, blocks certification, and keeps the intake blocked.
+
 ## Impact and certification plan
 
 The classifier is deterministic and evidence-based. It can emit:

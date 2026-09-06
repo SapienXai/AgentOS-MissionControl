@@ -121,6 +121,14 @@ export function renderOpenClawCompatibilityIssueAutoSection(
         "Do not certify or promote this release until the upstream discrepancy is resolved."
       ].join("\n")
     : "";
+  const evidenceWarning = intake.impact.classifications.includes("DISCOVERY_INCOMPLETE")
+    ? [
+        "## Evidence status",
+        "",
+        "**Static evidence incomplete — certification blocked.**",
+        "A verified release identity does not prove that compatibility contract evidence is complete. Resolve the outstanding identity or contract evidence before certification."
+      ].join("\n")
+    : "";
 
   return [
     "<!-- agentos-intake:auto:start -->",
@@ -161,6 +169,7 @@ export function renderOpenClawCompatibilityIssueAutoSection(
     `- Session contract changed: **${intake.contractDiff.sessionContractChanged ? "yes" : "no"}**`,
     `- Changed files observed: ${intake.contractDiff.changedFiles.length}`,
     ...(intake.contractDiff.evidenceGaps.length > 0 ? ["- Evidence gaps:", ...intake.contractDiff.evidenceGaps.map((value) => `  - ${sanitizeIssueText(value)}`)] : []),
+    evidenceWarning,
     "",
     "## AgentOS impact",
     `- Affected modules: ${formatValues(intake.impact.affectedAgentOsModules)}`,
