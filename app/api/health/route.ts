@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { getOpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
+
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -13,6 +15,14 @@ export async function GET() {
     });
 
     if (!response.ok) {
+      return NextResponse.json(
+        { status: "starting" },
+        { status: 503, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    const gateway = await getOpenClawLifecycleService().inspect().catch(() => null);
+    if (!gateway?.ready) {
       return NextResponse.json(
         { status: "starting" },
         { status: 503, headers: { "Cache-Control": "no-store" } }

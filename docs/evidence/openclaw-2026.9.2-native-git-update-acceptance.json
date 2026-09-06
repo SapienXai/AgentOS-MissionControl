@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-06",
+  "provenance": {
+    "baselineTag": "v2026.9.1",
+    "baselineCommit": "ad6fe23aecb9b833d68139b0ddc9f239b894d2f1",
+    "targetTag": "v2026.9.2",
+    "targetCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
+    "fixture": "disposable-git-checkout",
+    "gateway": "loopback",
+    "productionMutated": false
+  },
+  "directUpdaterRun": {
+    "beforeVersion": "2026.9.1",
+    "targetVersion": "2026.9.2",
+    "checkoutReplacement": true,
+    "checkoutAfterRun": "3928bad9badfcb6c7d140530435e806fb8092190",
+    "runtimeAfterRestart": "2026.9.2",
+    "gatewayHealthyAfterRestart": true,
+    "securityPolicyExplicit": true,
+    "nativeOutcome": "failed",
+    "nativeReason": "doctor-failed",
+    "failureClass": "StateDatabaseCoordinatorContentionError: another OpenClaw process owns gateway-lifecycle",
+    "activeRun": null,
+    "lastRun": null,
+    "agentOsVerification": "runtime-version-and-health-passed; native-terminal-outcome-failed"
+  },
+  "managedHandoffRun": {
+    "beforeVersion": "2026.9.1",
+    "targetVersion": "2026.9.2",
+    "nativeOutcome": "skipped",
+    "nativeReason": "restart-handoff-unavailable",
+    "handoffStarted": true,
+    "realSupervisorPresent": false,
+    "runtimeAfterRun": "2026.9.1",
+    "activeRun": null,
+    "lastRun": null
+  },
+  "decision": {
+    "status": "partial",
+    "fullNativeAcceptance": false,
+    "blocker": "The disposable environment did not provide the real service supervisor required to complete OpenClaw's Doctor/restart handoff lifecycle.",
+    "syntheticSuccessClaimed": false
+  }
+}

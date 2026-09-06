@@ -84,6 +84,30 @@ test("AgentOS release check rejects vague README Node prerequisites", async () =
   assert.match(result.stderr, /README\.md: Expected to find "- Node\.js 24 or newer"/);
 });
 
+test("AgentOS release check keeps recommended and supported OpenClaw versions distinct", async () => {
+  const tempRoot = await copyReleaseCheckFixture();
+  const paths = [
+    "README.md",
+    "packages/agentos/README.md",
+    "docs/agentos-clean-install-smoke-checklist.md"
+  ];
+
+  for (const relativePath of paths) {
+    const filePath = path.join(tempRoot, relativePath);
+    const contents = await readFile(filePath, "utf8");
+    await writeFile(filePath, contents
+      .replaceAll("Recommended OpenClaw: `2026.9.2`", "OpenClaw 2026.9.2 or newer")
+      .replaceAll("Recommended OpenClaw: 2026.9.2", "OpenClaw 2026.9.2 or newer")
+      .replaceAll("recommended OpenClaw 2026.9.2", "OpenClaw 2026.9.2 or newer"), "utf8");
+  }
+
+  const result = runReleaseCheck(tempRoot);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Recommended OpenClaw/);
+  assert.doesNotMatch(result.stderr, /Supported minimum:.*2026\.9\.2/);
+});
+
 function runReleaseCheck(repoRoot: string) {
   return spawnSync(process.execPath, [releaseCheckScript, "--repo-root", repoRoot], {
     cwd: rootDir,

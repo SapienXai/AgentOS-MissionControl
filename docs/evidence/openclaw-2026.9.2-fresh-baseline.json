@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-06T11:10:45.765Z",
+  "generatedAt": "2026-09-06T12:19:40.675Z",
   "provenance": {
-    "agentosCommit": "e4d80c088ffcc4e04c63a6d0cdc6722e0ea7521b",
+    "agentosCommit": "cba8c5887e1be6c0434cd14eceaba692ae502cf5",
     "targetVersion": "2026.9.2",
     "targetCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
     "targetBuildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
@@ -29,8 +29,16 @@
     "migrationJournalAbsentAfterGatewayStop": true,
     "configCreatedFromFreshRoot": true
   },
+  "securityBootstrap": {
+    "path": "OpenClawLifecycleService.inspect -> native readiness -> AgentOS security bootstrap",
+    "status": "ready",
+    "gatewayConfigOwnership": "agentos-managed",
+    "sessionsVisibility": "tree",
+    "agentToAgentEnabled": false,
+    "agentToAgentAllow": []
+  },
   "gateway": {
-    "url": "ws://127.0.0.1:52809/",
+    "url": "ws://127.0.0.1:53765/",
     "protocol": 4,
     "installedVersion": "2026.9.2",
     "buildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z"
@@ -38,9 +46,9 @@
   "runtimeCertification": {
     "runtime": {
       "schemaVersion": 2,
-      "generatedAt": "2026-09-06T11:10:35.102Z",
+      "generatedAt": "2026-09-06T12:19:30.680Z",
       "targetVersion": "2026.9.2",
-      "gatewayUrl": "ws://127.0.0.1:52809/",
+      "gatewayUrl": "ws://127.0.0.1:53765/",
       "installedVersion": "2026.9.2",
       "buildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
       "protocolVersion": 4,
@@ -6617,6 +6625,8 @@
     "noMigrationEngine": true,
     "noSourceStateProvided": true,
     "noHistoricalMigrationFixture": true,
+    "securityBootstrapReady": true,
+    "securityPolicyExplicit": true,
     "noMigrationJournalBeforeCleanup": true
   },
   "cleanup": {

@@ -15,6 +15,7 @@ promote a version by string replacement or by community release metadata.
 - Machine-readable diff: [`docs/evidence/openclaw-2026.9.1-to-2026.9.2-contract-diff.json`](evidence/openclaw-2026.9.1-to-2026.9.2-contract-diff.json)
 - Runtime evidence: [`docs/evidence/openclaw-2026.9.2-runtime-certification.json`](evidence/openclaw-2026.9.2-runtime-certification.json)
 - Multi-user evidence: [`docs/evidence/openclaw-2026.9.2-multi-user.json`](evidence/openclaw-2026.9.2-multi-user.json)
+- Native Git updater acceptance: [`docs/evidence/openclaw-2026.9.2-native-git-update-acceptance.json`](evidence/openclaw-2026.9.2-native-git-update-acceptance.json)
 
 The package and protocol integrity values are recorded in the machine-readable
 diff. The runtime evidence was generated against an isolated loopback Gateway;
@@ -106,6 +107,29 @@ policy explicit. A failed reconciliation also blocks the mutation. Config
 revision, native authorization, restart/hot-reload, redaction, and audit
 boundaries remain owned by the existing adapter/application services.
 
+## Production fresh-install closeout
+
+The managed Gateway security bootstrap is owned by the application lifecycle,
+not by the Updates page and not by a pre-seeded certification fixture. Native
+readiness calls `OpenClawLifecycleService.inspect()`, then the shared
+`bootstrapAgentOsGatewaySecurity` application service. That service uses the
+same idempotent reconciliation domain as the normal update gate, writes only
+omitted values through the native config mutation path, and performs a fresh
+native config read before readiness can become `ready`.
+
+The disposable fresh-baseline gate starts 2026.9.2 with all three security
+values omitted and proves the real lifecycle path produces `tree`, `false`,
+and `[]` while the Gateway remains healthy. A second bootstrap is read-only;
+it does not write again or restart the Gateway. Successful automatic
+reconciliation is recorded as a bounded AgentOS internal audit event.
+
+Process supervision and config ownership are intentionally separate
+capabilities. Railway uses an external supervisor for the Gateway process but
+the AgentOS image owns the provisioned Gateway config, so Railway receives the
+same safe bootstrap. A genuinely external or unknown config owner is never
+patched automatically and remains blocked until the operator makes the policy
+explicit.
+
 ## Normal update architecture
 
 ```text
@@ -149,23 +173,37 @@ The native ledger smoke test verified:
   `lastRun` with reason `not-git-install`, rather than falsely claiming a
   successful upgrade.
 
-The last point is an intentional environment limitation: the disposable npm
-package is not a git installation, so the official updater correctly refused
-to perform a real 2026.9.1-to-2026.9.2 replacement. No destructive update was
-run against a user or production Gateway. The native update contract, no-op
-outcome, reconnect/lifecycle checks, bounded reconciliation tests, and runtime
-certification provide the safe evidence available in this environment; an
-authenticated disposable git-install upgrade remains the final optional live
-proof when such a fixture is provisioned.
+The closeout then made a serious disposable Git-install attempt using the
+official `v2026.9.1` source checkout (`ad6fe23aecb9b833d68139b0ddc9f239b894d2f1`)
+and an isolated local `origin/main` pointing at the official `v2026.9.2`
+release commit (`3928bad9badfcb6c7d140530435e806fb8092190`). The first native
+`update.run` did perform the real checkout replacement: the disposable tree
+ended at 9.2 and a fresh Gateway reported 9.2/current with the explicit
+security policy intact. The official updater nevertheless returned
+`doctor-failed` because the disposable foreground Gateway was still the owner
+of `gateway-lifecycle` while `openclaw doctor --non-interactive --fix` ran.
+After restart, 9.2 was healthy, but the native terminal outcome remained an
+error and no successful durable `lastRun` could be claimed.
+
+A second run used OpenClaw's native managed-service handoff path with a
+disposable supervisor marker. It returned the official
+`managed-service-handoff-started` response, but the handoff could not prove
+ownership of a real launchd service and recorded `restart-handoff-unavailable`;
+the fixture correctly remained on 9.1. This is the remaining live-acceptance
+blocker, not a reason to fake success or mutate a production Gateway. The
+native update contract, official skipped/error outcomes, real version
+replacement evidence, reconnect/lifecycle checks, bounded reconciliation
+tests, fresh managed bootstrap, and runtime certification provide the safe
+evidence available in this environment.
 
 The compatibility manifest now contains an exact `2026.9.2` certified entry
 and AgentOS recommends 2026.9.2 after the repository validation and
 certification evidence completed. AgentOS retains 2026.9.1 as the supported
 minimum for existing installations whose security policy is explicit. The
-native update mutation proof was intentionally limited to a disposable npm
-package, where OpenClaw recorded the official `not-git-install` skipped
-outcome; no destructive upgrade was attempted without a disposable git
-installation.
+native update mutation proof is intentionally reported as partial: the
+official Git updater replaced the disposable checkout, but the final native
+Doctor/handoff lifecycle could not be completed without a real service owner.
+No destructive update was run against a user or production Gateway.
 
 ## Remaining upstream limitation
 

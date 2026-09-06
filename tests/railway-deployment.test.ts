@@ -113,6 +113,7 @@ test("deployment capabilities separate local desktop actions from Railway headle
   assert.deepEqual(railway, {
     platform: "railway",
     gatewayLifecycle: "external-supervisor",
+    gatewayConfigOwnership: "agentos-managed",
     terminalAccess: "unavailable",
     browserAutomation: "server-headless",
     interactiveBrowserLogin: "unavailable",
@@ -122,9 +123,27 @@ test("deployment capabilities separate local desktop actions from Railway headle
 
   const local = resolveAgentOsDeploymentCapabilities({}, "darwin");
   assert.equal(local.gatewayLifecycle, "agentos-managed");
+  assert.equal(local.gatewayConfigOwnership, "agentos-managed");
   assert.equal(local.terminalAccess, "macos");
   assert.equal(local.interactiveBrowserLogin, "supported");
   assert.equal(local.existingBrowserSession, "supported");
+});
+
+test("deployment capabilities separate external process supervision from config ownership", () => {
+  const external = resolveAgentOsDeploymentCapabilities({ OPENCLAW_SUPERVISOR_MODE: "external" }, "linux");
+  assert.equal(external.gatewayLifecycle, "external-supervisor");
+  assert.equal(external.gatewayConfigOwnership, "unknown");
+
+  const explicitlyManaged = resolveAgentOsDeploymentCapabilities({
+    OPENCLAW_SUPERVISOR_MODE: "external",
+    AGENTOS_GATEWAY_CONFIG_OWNERSHIP: "agentos-managed"
+  }, "linux");
+  assert.equal(explicitlyManaged.gatewayConfigOwnership, "agentos-managed");
+
+  const explicitlyExternal = resolveAgentOsDeploymentCapabilities({
+    AGENTOS_GATEWAY_CONFIG_OWNERSHIP: "external"
+  }, "darwin");
+  assert.equal(explicitlyExternal.gatewayConfigOwnership, "external");
 });
 
 test("Railway Gateway control uses supervisor IPC while secure browser login fails closed", async () => {

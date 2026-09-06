@@ -53,6 +53,7 @@ test("fresh baseline certification does not invoke the historical migration engi
   )) as {
     success?: boolean;
     freshState?: Record<string, unknown>;
+    securityBootstrap?: Record<string, unknown>;
     checks?: Record<string, unknown>;
     cleanup?: Record<string, unknown>;
   };
@@ -60,6 +61,9 @@ test("fresh baseline certification does not invoke the historical migration engi
   assert.doesNotMatch(source, /OpenClawMigrationEngine/);
   assert.doesNotMatch(source, /openclaw-migration-e2e/);
   assert.match(source, /sourceStateProvided: false/);
+  assert.match(source, /new OpenClawLifecycleService/);
+  assert.match(source, /OpenClawLifecycleService\.inspect -> native readiness -> AgentOS security bootstrap/);
+  assert.doesNotMatch(source, /tools:\s*\{\s*sessions:\s*\{\s*visibility:\s*["']tree/);
   assert.match(source, /noHistoricalMigrationFixture: true/);
   assert.match(source, /migrationEngineInvoked: false/);
   assert.match(source, /OPENCLAW \$\{TARGET_LABEL\} FRESH BASELINE: PASS/);
@@ -70,6 +74,16 @@ test("fresh baseline certification does not invoke the historical migration engi
   assert.equal(evidence.freshState?.migrationJournalAbsentBeforeCleanup, true);
   assert.equal(evidence.checks?.noHistoricalMigrationFixture, true);
   assert.equal(evidence.checks?.noMigrationJournalBeforeCleanup, true);
+  assert.deepEqual(evidence.securityBootstrap, {
+    path: "OpenClawLifecycleService.inspect -> native readiness -> AgentOS security bootstrap",
+    status: "ready",
+    gatewayConfigOwnership: "agentos-managed",
+    sessionsVisibility: "tree",
+    agentToAgentEnabled: false,
+    agentToAgentAllow: []
+  });
+  assert.equal(evidence.checks?.securityBootstrapReady, true);
+  assert.equal(evidence.checks?.securityPolicyExplicit, true);
   assert.equal(evidence.cleanup?.status, "complete");
 });
 

@@ -3,7 +3,8 @@ import "server-only";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { GatewayBackedOpenClawAdapter, getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { bootstrapAgentOsGatewaySecurity } from "@/lib/openclaw/application/gateway-security-bootstrap-service";
 import {
   createOpenClawGatewayClient,
   resetOpenClawGatewayClient
@@ -258,7 +259,7 @@ export class OpenClawLifecycleService implements GatewayLifecycleService {
   private async probeReadiness(descriptor: GatewayRuntimeDescriptor) {
     return this.options.readinessProbe
       ? this.options.readinessProbe(descriptor)
-      : probeNativeGatewayReadiness(descriptor, this.options.env);
+      : probeNativeGatewayReadiness(descriptor, this.options.env, this.options.platform);
   }
 
   private async waitForReadiness(descriptor: GatewayRuntimeDescriptor, timeoutMs = DEFAULT_READY_TIMEOUT_MS) {
@@ -379,7 +380,8 @@ export function setOpenClawLifecycleServiceForTesting(service: OpenClawLifecycle
 
 async function probeNativeGatewayReadiness(
   descriptor: GatewayRuntimeDescriptor,
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform
 ): Promise<GatewayReadinessResult> {
   const checkedAt = new Date().toISOString();
   const httpOrigin = descriptor.gatewayUrl.replace(/^ws/, "http");
@@ -405,6 +407,26 @@ async function probeNativeGatewayReadiness(
     const version = readGatewayVersion(hello.server?.version, status);
     const protocolVersion = typeof hello.protocol === "number" ? hello.protocol : null;
     const versionReady = Boolean(version && compareVersionStrings(version, OPENCLAW_SUPPORTED_BASELINE_VERSION) >= 0);
+    if (health && readyEndpoint && versionReady) {
+      const security = await bootstrapAgentOsGatewaySecurity({
+        adapter: new GatewayBackedOpenClawAdapter(() => client),
+        env,
+        platform
+      });
+      if (!security.ready) {
+        return {
+          ready: false,
+          authenticated: true,
+          health: health ? "live" : "not-live",
+          protocolVersion,
+          version,
+          sourceCommit: descriptor.sourceCommit,
+          checkedAt,
+          reason: security.reason || "AgentOS Gateway session-security bootstrap did not complete."
+        };
+      }
+    }
+
     return {
       ready: health && readyEndpoint && versionReady,
       authenticated: true,

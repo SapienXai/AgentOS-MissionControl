@@ -49,6 +49,34 @@ OpenClaw source descriptor itself, not only with an AgentOS mirror. The online
 Doctor path remains native-only and uses the existing product permission,
 native scope preflight, request policy, and Gateway authorization layers.
 
+## Managed Gateway security bootstrap
+
+Before a managed Gateway is reported ready, AgentOS runs the single
+application-level `bootstrapAgentOsGatewaySecurity` service from the native
+readiness probe. It delegates to
+`reconcileAgentOsSessionSecurityDefaults`, which reads native config, fills
+only omitted security-sensitive values, and reads native config again:
+
+```text
+Gateway reachable and authenticated
+  -> AgentOS config-ownership check
+  -> native config.get
+  -> explicit tree / false / [] for omitted values
+  -> native config mutation through the existing adapter
+  -> fresh native config.get verification
+  -> readiness
+```
+
+The operation is idempotent and does not create an AgentOS update job or a
+second restart manager. Explicit operator policy is preserved. Invalid,
+ambiguous, externally owned, or unknown-ownership configuration fails closed.
+Railway is an intentional split case: its Gateway process is
+external-supervisor owned, but its AgentOS-provisioned config is AgentOS-owned
+and can be safely reconciled. `/api/health` uses the same lifecycle readiness
+result, so a managed Gateway whose security bootstrap failed is not advertised
+as ready. Successful automatic reconciliation is audit-recorded with bounded
+metadata.
+
 ## Truthful projection
 
 Reachability is not the same as health. A successful health response with
@@ -193,7 +221,13 @@ claim verification that the reconnecting Gateway has not provided.
 
 The 2026.9.2 certification is recorded in
 [`openclaw-2026.9.2-compatibility-audit.md`](./openclaw-2026.9.2-compatibility-audit.md).
-The disposable npm-package update mutation is intentionally recorded as native
-`skipped` (`not-git-install`); no destructive mutation was run against a user
-Gateway. Contract tests, runtime certification, multi-user security evidence,
-and native-only reconciliation tests cover the supported method boundaries.
+The closeout also attempted the official native Git update in an isolated 9.1
+checkout targeting the official 9.2 release. The first run replaced the
+checkout but ended with the official `doctor-failed` outcome because a
+foreground Gateway still owned `gateway-lifecycle`; a second managed-service
+handoff attempt ended with `restart-handoff-unavailable` because a real launchd
+owner was not present. These are recorded as partial live-acceptance evidence,
+not synthetic success. No destructive mutation was run against a user or
+production Gateway. Contract tests, runtime certification, multi-user security
+evidence, and native-only reconciliation tests cover the supported method
+boundaries.

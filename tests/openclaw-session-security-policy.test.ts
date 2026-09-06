@@ -7,6 +7,7 @@ import {
   reconcileAgentOsSessionSecurityDefaults,
   resolveAgentOsSessionSecurityPosture
 } from "@/lib/openclaw/domains/session-security-policy";
+import { bootstrapAgentOsGatewaySecurity } from "@/lib/openclaw/application/gateway-security-bootstrap-service";
 import type { OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 
 test("omitted 9.2 session-security values are treated as migration-required, not permissive", () => {
@@ -64,6 +65,7 @@ test("AgentOS migrates only omitted security values and preserves explicit opera
     deploymentCapabilities: {
       platform: "local",
       gatewayLifecycle: "agentos-managed",
+      gatewayConfigOwnership: "agentos-managed",
       terminalAccess: "unavailable",
       browserAutomation: "unknown",
       interactiveBrowserLogin: "unavailable",
@@ -96,6 +98,7 @@ test("AgentOS does not patch omitted values on an externally managed Gateway", a
     deploymentCapabilities: {
       platform: "railway",
       gatewayLifecycle: "external-supervisor",
+      gatewayConfigOwnership: "external",
       terminalAccess: "unavailable",
       browserAutomation: "server-headless",
       interactiveBrowserLogin: "unavailable",
@@ -126,6 +129,7 @@ test("AgentOS refuses to guess an omitted allowlist beside explicit broad access
     deploymentCapabilities: {
       platform: "local",
       gatewayLifecycle: "agentos-managed",
+      gatewayConfigOwnership: "agentos-managed",
       terminalAccess: "unavailable",
       browserAutomation: "unknown",
       interactiveBrowserLogin: "unavailable",
@@ -155,6 +159,7 @@ test("AgentOS blocks invalid explicit security values fail-closed", async () => 
     deploymentCapabilities: {
       platform: "local",
       gatewayLifecycle: "agentos-managed",
+      gatewayConfigOwnership: "agentos-managed",
       terminalAccess: "unavailable",
       browserAutomation: "unknown",
       interactiveBrowserLogin: "unavailable",
@@ -166,4 +171,58 @@ test("AgentOS blocks invalid explicit security values fail-closed", async () => 
   assert.equal(result.status, "blocked-unsafe-policy");
   assert.equal(result.posture.status, "unavailable");
   assert.deepEqual(writes, []);
+});
+
+test("managed Gateway bootstrap reconciles omitted values once and verifies the fresh posture", async () => {
+  const writes: Array<[string, unknown]> = [];
+  const config: Record<string, unknown> = {};
+  const adapter = {
+    async getConfigSnapshot() {
+      return { config };
+    },
+    async setConfig(path: string, value: unknown) {
+      writes.push([path, value]);
+      const [root, child, leaf] = path.split(".");
+      const rootRecord = (config[root] ??= {}) as Record<string, unknown>;
+      const childRecord = (rootRecord[child] ??= {}) as Record<string, unknown>;
+      childRecord[leaf] = value;
+      return { stdout: "" };
+    }
+  } as unknown as OpenClawAdapter;
+  const capabilities = {
+    platform: "local" as const,
+    gatewayLifecycle: "agentos-managed" as const,
+    gatewayConfigOwnership: "agentos-managed" as const,
+    terminalAccess: "unavailable" as const,
+    browserAutomation: "unknown" as const,
+    interactiveBrowserLogin: "unavailable" as const,
+    existingBrowserSession: "unavailable" as const,
+    hostFileActions: "unavailable" as const
+  };
+
+  const first = await bootstrapAgentOsGatewaySecurity({ adapter, deploymentCapabilities: capabilities, audit: false });
+  const second = await bootstrapAgentOsGatewaySecurity({ adapter, deploymentCapabilities: capabilities, audit: false });
+
+  assert.equal(first.ready, true);
+  assert.equal(first.status, "migrated");
+  assert.equal(second.ready, true);
+  assert.equal(second.status, "unchanged");
+  assert.deepEqual(writes, [
+    ["tools.sessions.visibility", "tree"],
+    ["tools.agentToAgent.enabled", false],
+    ["tools.agentToAgent.allow", []]
+  ]);
+  assert.deepEqual(second.posture, {
+    source: "openclaw-config",
+    sessionsVisibility: "tree",
+    agentToAgentEnabled: false,
+    allow: [],
+    configured: { sessionsVisibility: true, agentToAgentEnabled: true, allow: true },
+    migrationRequired: false,
+    migrationBlocked: false,
+    status: "safe-explicit",
+    crossAgentAccess: "disabled",
+    humanUserIsolation: "not-guaranteed-by-shared-gateway",
+    explanation: "Session tools are explicitly bounded and cross-agent access is disabled by default."
+  });
 });

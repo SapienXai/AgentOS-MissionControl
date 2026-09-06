@@ -21,7 +21,6 @@ const WINDOWS_INSTALL_COMMAND = "iwr https://raw.githubusercontent.com/SapienXai
 const REQUIRED_NODE_ENGINE = ">=24.0.0";
 const REQUIRED_NODE_MAJOR = "24";
 const OPENCLAW_VERSIONS_FILE = "lib/openclaw/versions.ts";
-const OPENCLAW_BASELINE_COPY = "OpenClaw 2026.9.2 or newer";
 const RELEASE_ASSETS = [
   "agentos-darwin-arm64.tgz",
   "agentos-darwin-x64.tgz",
@@ -66,11 +65,15 @@ export function checkReleaseConsistency(options = {}) {
 
   validateRootPackage(context, rootPackage, agentosPackage);
   validateOpenClawVersions(context, openClawVersions);
+  const openClawVersionPolicy = {
+    recommended: readTypeScriptStringConstant(openClawVersions, "OPENCLAW_RECOMMENDED_VERSION"),
+    supportedBaseline: readTypeScriptStringConstant(openClawVersions, "OPENCLAW_SUPPORTED_BASELINE_VERSION")
+  };
   validateAgentosPackage(context, agentosPackage);
   validateLauncher(context, launcher, agentosPackage);
   validateInstallers(context, installSh, installPs1);
-  validateReadmes(context, readme, packageReadme, agentosPackage);
-  validateSecurityDocs(context, security, cleanInstallChecklist);
+  validateReadmes(context, readme, packageReadme, agentosPackage, openClawVersionPolicy);
+  validateSecurityDocs(context, security, cleanInstallChecklist, openClawVersionPolicy);
   validateReleaseNotesTemplate(context, releaseNotesTemplate);
   validateBuildScripts(context, rootPackage, agentosPackage, prepareBundle, runPrepack, smokePackage, missionControlSmoke);
   validateCiWorkflow(context, ciWorkflow);
@@ -270,7 +273,20 @@ function validateInstallers(context, installSh, installPs1) {
   }
 }
 
-function validateReadmes(context, readme, packageReadme, agentosPackage) {
+function validateReadmes(context, readme, packageReadme, agentosPackage, openClawVersionPolicy) {
+  const recommendedCopy = openClawVersionPolicy.recommended
+    ? `Recommended OpenClaw: \`${openClawVersionPolicy.recommended}\``
+    : null;
+  const supportedMinimumCopy = openClawVersionPolicy.supportedBaseline
+    ? `Supported minimum: \`${openClawVersionPolicy.supportedBaseline}\``
+    : null;
+  const packageRecommendedCopy = openClawVersionPolicy.recommended
+    ? `Recommended OpenClaw: ${openClawVersionPolicy.recommended}`
+    : null;
+  const packageSupportedMinimumCopy = openClawVersionPolicy.supportedBaseline
+    ? `Supported minimum: OpenClaw ${openClawVersionPolicy.supportedBaseline}`
+    : null;
+
   if (readme) {
     expectIncludes(context, "README.md", readme, INSTALL_COMMAND);
     expectIncludes(context, "README.md", readme, WINDOWS_INSTALL_COMMAND);
@@ -284,7 +300,9 @@ function validateReadmes(context, readme, packageReadme, agentosPackage) {
     expectIncludes(context, "README.md", readme, "packages/agentos/package.json");
     expectIncludes(context, "README.md", readme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
     expectIncludes(context, "README.md", readme, `- Node.js ${REQUIRED_NODE_MAJOR} or newer`);
-    expectIncludes(context, "README.md", readme, OPENCLAW_BASELINE_COPY);
+    if (recommendedCopy) expectIncludes(context, "README.md", readme, recommendedCopy);
+    if (supportedMinimumCopy) expectIncludes(context, "README.md", readme, supportedMinimumCopy);
+    if (openClawVersionPolicy.recommended) expectIncludes(context, "README.md", readme, `Native contract target: \`${openClawVersionPolicy.recommended}\``);
     expectIncludes(context, "README.md", readme, "CLI fallback remains explicit and visible");
     expectIncludes(context, "README.md", readme, "Accounts and browser profiles are an MVP bridge");
     expectIncludes(context, "README.md", readme, "OpenClaw does not yet expose typed browser-profile dispatch");
@@ -323,14 +341,16 @@ function validateReadmes(context, readme, packageReadme, agentosPackage) {
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "Packaged AgentOS uses API token authentication");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "AGENTOS_ALLOW_REMOTE_GATEWAY_URL=1");
-    expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, OPENCLAW_BASELINE_COPY);
+    if (packageRecommendedCopy) expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, packageRecommendedCopy);
+    if (packageSupportedMinimumCopy) expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, packageSupportedMinimumCopy);
+    if (openClawVersionPolicy.recommended) expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, `Native contract target: OpenClaw ${openClawVersionPolicy.recommended}`);
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "Gateway-first transport by default, with explicit CLI fallback");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "Account-target browser-profile dispatch is an MVP bridge");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "`requires_approval` rules remain blocked until approval dispatch exists");
   }
 }
 
-function validateSecurityDocs(context, security, cleanInstallChecklist) {
+function validateSecurityDocs(context, security, cleanInstallChecklist, openClawVersionPolicy) {
   if (security) {
     expectIncludes(context, "SECURITY.md", security, "Keep it bound to `127.0.0.1`");
     expectIncludes(context, "SECURITY.md", security, "Packaged AgentOS generates a local API token");
@@ -341,7 +361,11 @@ function validateSecurityDocs(context, security, cleanInstallChecklist) {
 
   if (cleanInstallChecklist) {
     expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
-    expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, OPENCLAW_BASELINE_COPY);
+    if (openClawVersionPolicy.recommended && openClawVersionPolicy.supportedBaseline) {
+      expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `recommended OpenClaw ${openClawVersionPolicy.recommended}`);
+      expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `supported minimum is OpenClaw ${openClawVersionPolicy.supportedBaseline}`);
+      expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `native contract target is ${openClawVersionPolicy.recommended}`);
+    }
     expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, "agentos doctor --deep");
     expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, "physical operator machine");
     expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, "`requires_approval` access rules remain blocked/coming soon until approval dispatch exists");

@@ -169,9 +169,17 @@ export async function reconcileAgentOsSessionSecurityDefaults(options: {
   }
 
   const capabilities = options.deploymentCapabilities ?? resolveAgentOsDeploymentCapabilities();
-  if (capabilities.gatewayLifecycle !== "agentos-managed") {
+  const configOwnership = capabilities.gatewayConfigOwnership ?? (capabilities.gatewayLifecycle === "agentos-managed" ? "agentos-managed" : "unknown");
+  if (configOwnership !== "agentos-managed") {
     return {
-      posture: { ...before, migrationBlocked: true, status: "unavailable", explanation: "OpenClaw session-security settings are omitted, but this Gateway is not owned by AgentOS. The deployment operator must configure them explicitly." },
+      posture: {
+        ...before,
+        migrationBlocked: true,
+        status: "unavailable",
+        explanation: configOwnership === "external"
+          ? "OpenClaw session-security settings are omitted, but this Gateway config is externally owned. The deployment operator must configure them explicitly."
+          : "OpenClaw session-security settings are omitted, but config ownership is unknown. AgentOS will not patch an ambiguous Gateway."
+      },
       changedPaths: [],
       status: "blocked-external-runtime"
     };

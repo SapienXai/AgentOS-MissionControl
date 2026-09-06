@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { getOpenClawInstallCommand } from "@/lib/openclaw/install";
 import { redactGatewayUrl } from "@/lib/openclaw/compat/targets";
+import { OpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
 import { OPENCLAW_RECOMMENDED_VERSION, OPENCLAW_SUPPORTED_BASELINE_VERSION } from "@/lib/openclaw/versions";
 import { OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT } from "@/lib/openclaw/identity/contract";
 import { serializeOpenClawRuntimeCertificationArtifact } from "@/lib/openclaw/runtime-certification/serialization";
@@ -83,10 +84,6 @@ async function main() {
         defaults: { workspace: workspacePath },
         list: [{ id: "dev", workspace: workspacePath }]
       },
-      tools: {
-        sessions: { visibility: "tree" },
-        agentToAgent: { enabled: false, allow: [] }
-      },
       cron: { enabled: true }
     }, null, 2)}\n`, { mode: 0o600 });
 
@@ -98,6 +95,38 @@ async function main() {
       token,
       homeDir: path.join(fixtureRoot, "home")
     });
+
+    const lifecycleEnv = {
+      ...process.env,
+      AGENTOS_DEPLOYMENT_PLATFORM: "local",
+      OPENCLAW_SUPERVISOR_MODE: "agentos-managed",
+      OPENCLAW_GATEWAY_URL: gatewayUrl,
+      OPENCLAW_GATEWAY_TOKEN: token,
+      OPENCLAW_GATEWAY_BINARY: path.join(installRoot, "openclaw.mjs"),
+      OPENCLAW_STATE_DIR: stateDir,
+      OPENCLAW_CONFIG_PATH: configPath
+    };
+    const lifecycle = new OpenClawLifecycleService({
+      env: lifecycleEnv,
+      platform: process.platform,
+      resolveBinary: async () => path.join(installRoot, "openclaw.mjs")
+    });
+    const lifecycleReadiness = await lifecycle.inspect();
+    const bootstrappedConfig = await readJson(configPath);
+    const securityConfig = asRecord(asRecord(bootstrappedConfig)?.tools);
+    const sessionsConfig = asRecord(securityConfig?.sessions);
+    const agentToAgentConfig = asRecord(securityConfig?.agentToAgent);
+    const securityBootstrap = {
+      path: "OpenClawLifecycleService.inspect -> native readiness -> AgentOS security bootstrap",
+      status: lifecycleReadiness.ready ? "ready" : "blocked",
+      gatewayConfigOwnership: "agentos-managed",
+      sessionsVisibility: sessionsConfig?.visibility ?? null,
+      agentToAgentEnabled: agentToAgentConfig?.enabled ?? null,
+      agentToAgentAllow: agentToAgentConfig?.allow ?? null
+    };
+    if (!lifecycleReadiness.ready || securityBootstrap.sessionsVisibility !== "tree" || securityBootstrap.agentToAgentEnabled !== false || !Array.isArray(securityBootstrap.agentToAgentAllow) || securityBootstrap.agentToAgentAllow.length !== 0) {
+      throw new Error("Managed fresh Gateway security bootstrap did not produce the explicit AgentOS policy.");
+    }
 
     const certification = await runRuntimeCertification({
       gatewayUrl,
@@ -135,6 +164,8 @@ async function main() {
       noMigrationEngine: true,
       noSourceStateProvided: true,
       noHistoricalMigrationFixture: true,
+      securityBootstrapReady: securityBootstrap.status === "ready",
+      securityPolicyExplicit: securityBootstrap.sessionsVisibility === "tree" && securityBootstrap.agentToAgentEnabled === false && Array.isArray(securityBootstrap.agentToAgentAllow) && securityBootstrap.agentToAgentAllow.length === 0,
       noMigrationJournalBeforeCleanup
     };
 
@@ -180,6 +211,7 @@ async function main() {
         migrationJournalAbsentAfterGatewayStop: noMigrationJournalAfterGatewayStop,
         configCreatedFromFreshRoot: true
       },
+      securityBootstrap,
       gateway: {
         url: redactGatewayUrl(gatewayUrl) ?? "[redacted]",
         protocol: asRecord(runtime)?.protocolVersion ?? null,

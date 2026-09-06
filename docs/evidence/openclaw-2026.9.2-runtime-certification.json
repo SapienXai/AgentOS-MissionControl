@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "artifactType": "openclaw-runtime-certification",
-  "generatedAt": "2026-09-06T11:10:45.791Z",
+  "generatedAt": "2026-09-06T12:19:40.700Z",
   "provenance": {
-    "agentosCertifiedCodeHead": "e4d80c088ffcc4e04c63a6d0cdc6722e0ea7521b",
+    "agentosCertifiedCodeHead": "cba8c5887e1be6c0434cd14eceaba692ae502cf5",
     "openclawRelease": "2026.9.2",
     "openclawSourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
     "openclawBuildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
@@ -7359,9 +7359,9 @@
   ],
   "runtime": {
     "schemaVersion": 2,
-    "generatedAt": "2026-09-06T11:10:35.102Z",
+    "generatedAt": "2026-09-06T12:19:30.680Z",
     "targetVersion": "2026.9.2",
-    "gatewayUrl": "ws://127.0.0.1:52809/",
+    "gatewayUrl": "ws://127.0.0.1:53765/",
     "installedVersion": "2026.9.2",
     "buildId": "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z",
     "protocolVersion": 4,
@@ -13386,6 +13386,8 @@
     "noMigrationEngine": true,
     "noSourceStateProvided": true,
     "noHistoricalMigrationFixture": true,
+    "securityBootstrapReady": true,
+    "securityPolicyExplicit": true,
     "noMigrationJournalBeforeCleanup": true
   },
   "success": true
