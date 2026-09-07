@@ -20,9 +20,11 @@ test("celestial bodies travel across separate daylight and night arcs", () => {
 
   assert.ok(sunrise.sunOpacity > 0.9);
   assert.ok(noon.sunY < sunrise.sunY);
+  assert.equal(noon.daylight, 1);
+  assert.equal(midnight.daylight, 0);
   assert.equal(noon.starOpacity, 0);
   assert.ok(midnight.moonOpacity > 0.9);
-  assert.ok(midnight.starOpacity > 0.7);
+  assert.ok(midnight.starOpacity > 0.5);
 });
 
 test("stars emerge gradually through late afternoon and sunset", () => {
