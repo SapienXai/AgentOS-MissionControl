@@ -628,7 +628,9 @@ function ConnectAiStage({
               onClick={() => {
                 void openExternalAuthUrl(chatGptBrowserAuth.browserUrl!).catch((error) => {
                   toast.error("ChatGPT sign-in could not be opened.", {
-                    description: error instanceof Error ? error.message : "The system browser could not be opened."
+                    description: error instanceof Error && error.message.includes("invalid OpenAI authorization URL")
+                      ? error.message
+                      : "The sign-in page could not be opened. Try Open sign-in again."
                   });
                 });
               }}

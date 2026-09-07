@@ -31,7 +31,6 @@ use tauri::{
     AppHandle, LogicalSize, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
 };
-use tauri_plugin_opener::OpenerExt;
 #[cfg(not(debug_assertions))]
 use uuid::Uuid;
 
@@ -74,7 +73,8 @@ impl DesktopState {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
+        // Keep external opening in this trusted Rust boundary. Do not expose
+        // the opener plugin commands or its automatic WebView link hook.
         .invoke_handler(tauri::generate_handler![open_external_auth_url])
         .setup(|app| {
             app.manage(DesktopState::new());
@@ -154,7 +154,7 @@ fn build_main_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std:
             if is_allowed_navigation(url, port) {
                 true
             } else {
-                open_external_url(&app_handle, url.as_str());
+                open_external_url(url.as_str());
                 false
             }
         })
@@ -289,7 +289,7 @@ fn reveal_main_window(window: &WebviewWindow) {
     }
 }
 
-fn open_external_url(app: &AppHandle, url: &str) {
+fn open_external_url(url: &str) {
     let Ok(parsed) = url.parse::<tauri::Url>() else {
         return;
     };
@@ -297,13 +297,14 @@ fn open_external_url(app: &AppHandle, url: &str) {
         return;
     }
 
-    if let Err(error) = app.opener().open_url(parsed.as_str(), None::<&str>) {
+    // This is the native Rust API, not the WebView `opener.open_url` command.
+    if let Err(error) = tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>) {
         eprintln!("AgentOS could not open external URL: {error}");
     }
 }
 
 #[tauri::command]
-fn open_external_auth_url(app: AppHandle, url: String) -> Result<(), String> {
+fn open_external_auth_url(url: String) -> Result<(), String> {
     let parsed = url
         .parse::<tauri::Url>()
         .map_err(|_| "The authorization URL could not be parsed.".to_string())?;
@@ -314,8 +315,7 @@ fn open_external_auth_url(app: AppHandle, url: String) -> Result<(), String> {
         );
     }
 
-    app.opener()
-        .open_url(parsed.as_str(), None::<&str>)
+    tauri_plugin_opener::open_url(parsed.as_str(), None::<&str>)
         .map_err(|error| format!("The system browser could not be opened: {error}"))
 }
 

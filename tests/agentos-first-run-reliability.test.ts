@@ -163,11 +163,11 @@ test("browser ChatGPT auth keeps onboarding focused and callback recovery compac
   assert.match(stagesSource, /<details className="mt-2\.5 text-\[10px\]">/);
   assert.match(stagesSource, /Use callback URL manually/);
   assert.doesNotMatch(stagesSource, /Mobile callback fallback/);
-  assert.match(shellSource, /await openExternalAuthUrl\(currentAuthFlow\.browserUrl\)/);
+  assert.doesNotMatch(shellSource, /openExternalAuthUrl\(currentAuthFlow\.browserUrl\)/);
   assert.match(shellSource, /refreshAuth: true,\s*discover: true/);
   assert.match(shellSource, /Refreshing the OpenClaw account and discovering models/);
-  assert.match(shellSource, /The ChatGPT sign-in page is ready\. Use Open sign-in to continue in your browser\./);
   assert.doesNotMatch(shellSource, /window\.open\(currentAuthFlow\.browserUrl/);
+  assert.match(stagesSource, /Open sign-in/);
 });
 
 test("launchpad uses the same compact status-row language as setup", () => {

@@ -61,8 +61,7 @@ if (JSON.stringify(permissions).match(/shell|fs|process/i)) {
 }
 
 const allowedCapabilityPermissions = [
-  "core:window:allow-start-dragging",
-  "opener:allow-default-urls"
+  "core:window:allow-start-dragging"
 ];
 if (
   !Array.isArray(capabilities.permissions)

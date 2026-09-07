@@ -10,7 +10,7 @@ import {
 
 const authorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=test&state=state-123";
 
-test("automatic ChatGPT browser opening rejects arbitrary URLs before any opener", async () => {
+test("manual ChatGPT browser opening rejects arbitrary URLs before any opener", async () => {
   await assert.rejects(
     () => openExternalAuthUrl("https://example.com/oauth/authorize?state=state-123"),
     /invalid OpenAI authorization URL/
@@ -87,7 +87,7 @@ test("packaged desktop builds route the validated URL through the narrow Tauri c
   }
 });
 
-test("duplicate attempts for one authorization URL share one browser open", async () => {
+test("concurrent manual attempts for one authorization URL share one browser open", async () => {
   const originalWindow = globalThis.window;
   const calls: string[] = [];
   const deduplicatedAuthorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=dedupe&state=state-123";
@@ -125,11 +125,44 @@ test("duplicate attempts for one authorization URL share one browser open", asyn
   }
 });
 
+test("manual fallback can reopen the same session URL after the first attempt settles", async () => {
+  const originalWindow = globalThis.window;
+  const calls: string[] = [];
+  const fallbackUrl = "https://auth.openai.com/oauth/authorize?client_id=manual&state=state-123";
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: async (_command: string, args: { url: string }) => {
+          calls.push(args.url);
+        }
+      }
+    }
+  });
+
+  try {
+    await openExternalAuthUrl(fallbackUrl);
+    await openExternalAuthUrl(fallbackUrl);
+    assert.deepEqual(calls, [fallbackUrl, fallbackUrl]);
+  } finally {
+    if (originalWindow === undefined) {
+      delete (globalThis as { window?: unknown }).window;
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      });
+    }
+  }
+});
+
 test("Tauri navigation keeps the general external opener separate from the auth command", async () => {
   const source = await readFile(join(process.cwd(), "apps/desktop/src-tauri/src/main.rs"), "utf8");
 
   assert.match(source, /generate_handler!\[open_external_auth_url\]/);
-  assert.match(source, /app\.opener\(\)\.open_url\(parsed\.as_str\(\), None::<&str>\)/);
+  assert.match(source, /tauri_plugin_opener::open_url\(parsed\.as_str\(\), None::<&str>\)/);
   assert.match(source, /Only the OpenAI authorization endpoint may be opened automatically/);
   assert.match(source, /fn is_external_web_url\(url: &tauri::Url\)/);
+  assert.doesNotMatch(source, /tauri_plugin_opener::init\(\)/);
 });

@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 const repoRoot = process.cwd();
 
-test("desktop capability grants only window drag and default URL permissions", async () => {
+test("desktop capability grants only the native window drag permission", async () => {
   const capability = JSON.parse(
     await readFile(
       join(repoRoot, "apps/desktop/src-tauri/capabilities/default.json"),
@@ -15,8 +15,7 @@ test("desktop capability grants only window drag and default URL permissions", a
 
   assert.deepEqual(capability.windows, ["main"]);
   assert.deepEqual(capability.permissions, [
-    "core:window:allow-start-dragging",
-    "opener:allow-default-urls"
+    "core:window:allow-start-dragging"
   ]);
 });
 
@@ -44,6 +43,8 @@ test("desktop shell uses native macOS overlay titlebar without replacing traffic
   assert.match(mainWindowSource, /\.hidden_title\(true\)/);
   assert.match(mainWindowSource, /\.traffic_light_position\(LogicalPosition::new\(16\.0, 18\.0\)\)/);
   assert.doesNotMatch(mainWindowSource, /\.decorations\(false\)/);
+  assert.doesNotMatch(source, /tauri_plugin_opener::init\(\)/);
+  assert.match(source, /tauri_plugin_opener::open_url\(parsed\.as_str\(\), None::<&str>\)/);
 });
 
 test("declared drag regions stay on shell surfaces instead of the sidebar controls", async () => {

@@ -2,9 +2,7 @@ import { validateOpenAiAuthorizationUrl } from "@/lib/openclaw/chatgpt-auth-url"
 
 export type ExternalAuthOpenMethod = "tauri" | "browser";
 
-const duplicateOpenWindowMs = 10_000;
 const inFlightOpenAttempts = new Map<string, Promise<ExternalAuthOpenMethod>>();
-const recentlyOpenedUrls = new Map<string, { method: ExternalAuthOpenMethod; openedAt: number }>();
 
 export function isTauriDesktopRuntime() {
   if (typeof window === "undefined") {
@@ -26,27 +24,12 @@ export async function openExternalAuthUrl(value: string): Promise<ExternalAuthOp
     throw new Error("OpenClaw returned an invalid OpenAI authorization URL.");
   }
 
-  const now = Date.now();
-  for (const [recentUrl, recentEntry] of recentlyOpenedUrls) {
-    if (now - recentEntry.openedAt >= duplicateOpenWindowMs) {
-      recentlyOpenedUrls.delete(recentUrl);
-    }
-  }
-
-  const recent = recentlyOpenedUrls.get(url);
-  if (recent) {
-    return recent.method;
-  }
-
   const inFlight = inFlightOpenAttempts.get(url);
   if (inFlight) {
     return inFlight;
   }
 
-  const attempt = openValidatedAuthUrl(url).then((method) => {
-    recentlyOpenedUrls.set(url, { method, openedAt: Date.now() });
-    return method;
-  }).finally(() => {
+  const attempt = openValidatedAuthUrl(url).finally(() => {
     inFlightOpenAttempts.delete(url);
   });
 
@@ -58,13 +41,17 @@ async function openValidatedAuthUrl(url: string): Promise<ExternalAuthOpenMethod
 
   if (isTauriDesktopRuntime()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_external_auth_url", { url });
+    try {
+      await invoke("open_external_auth_url", { url });
+    } catch {
+      throw new Error("The sign-in page could not be opened. Try Open sign-in again.");
+    }
     return "tauri";
   }
 
   const openedWindow = window.open(url, "_blank", "noopener,noreferrer");
   if (!openedWindow) {
-    throw new Error("The browser blocked automatic sign-in opening. Use Open sign-in to continue.");
+    throw new Error("The sign-in page could not be opened. Try Open sign-in again.");
   }
 
   return "browser";

@@ -146,7 +146,6 @@ import {
   startChatGptBrowserAuth,
   submitChatGptBrowserAuth
 } from "@/lib/openclaw/model-provider-adapters";
-import { openExternalAuthUrl } from "@/lib/desktop/open-external-auth-url";
 import { syncTauriDesktopPlatformMarker } from "@/lib/desktop/window-platform";
 import { cn } from "@/lib/utils";
 
@@ -2791,8 +2790,6 @@ export function MissionControlShell({
       setChatGptBrowserAuth(null);
 
       let authFlow: ChatGptBrowserAuthSnapshot | null = null;
-      let authUrlOpenAttempted = false;
-      let authUrlOpenError: string | null = null;
       try {
         authFlow = await startChatGptBrowserAuth(force);
         setChatGptBrowserAuth(authFlow);
@@ -2803,35 +2800,12 @@ export function MissionControlShell({
             throw new Error("ChatGPT sign-in did not start.");
           }
 
-          if (!authUrlOpenAttempted && currentAuthFlow.browserUrl) {
-            authUrlOpenAttempted = true;
-            try {
-              await openExternalAuthUrl(currentAuthFlow.browserUrl);
-            } catch (error) {
-              authUrlOpenError = error instanceof Error
-                ? error.message
-                : "Automatic browser opening was unavailable.";
-              setChatGptBrowserAuth((current) => current
-                ? {
-                    ...current,
-                    message: "The ChatGPT sign-in page is ready. Use Open sign-in to continue in your browser."
-                  }
-                : current);
-            }
-          }
-
           if (currentAuthFlow.state === "completed" || currentAuthFlow.state === "error") {
             break;
           }
 
           await new Promise((resolve) => globalThis.setTimeout(resolve, 1_000));
           authFlow = await readChatGptBrowserAuth(currentAuthFlow.sessionId);
-          if (authUrlOpenError && authFlow.browserUrl && authFlow.state === "waiting-for-redirect") {
-            authFlow = {
-              ...authFlow,
-              message: "Automatic browser opening was unavailable. Use Open sign-in to continue."
-            };
-          }
           setChatGptBrowserAuth(authFlow);
         }
 
@@ -2861,7 +2835,7 @@ export function MissionControlShell({
             ? authFlow.error
             : error instanceof Error
               ? error.message
-              : authUrlOpenError
+              : "ChatGPT sign-in could not be completed."
         );
         setModelOnboardingRunState("error");
         setModelOnboardingPhase("authenticating");

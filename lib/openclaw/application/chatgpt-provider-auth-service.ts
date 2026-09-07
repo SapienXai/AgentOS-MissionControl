@@ -91,7 +91,10 @@ export async function startOpenClawChatGptBrowserAuth(
 
   if (activeSession) {
     activeSession.abortController.abort();
-    chatGptAuthSessions.delete(activeSession.sessionId);
+    await activeSession.completion.catch(() => {});
+    if (chatGptAuthSessions.get(activeSession.sessionId) === activeSession) {
+      chatGptAuthSessions.delete(activeSession.sessionId);
+    }
   }
 
   const session: ChatGptBrowserAuthSession = {
