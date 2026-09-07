@@ -61,12 +61,16 @@ function sanitizePathEnv(sourceEnv) {
 
   const isolatedLocalAppData = path.join(repoRoot, ".next", "windows-localappdata");
   const isolatedRoamingAppData = path.join(repoRoot, ".next", "windows-appdata");
+  const isolatedUserProfile = path.join(repoRoot, ".next", "windows-userprofile");
 
   fs.mkdirSync(isolatedLocalAppData, { recursive: true });
   fs.mkdirSync(isolatedRoamingAppData, { recursive: true });
+  fs.mkdirSync(isolatedUserProfile, { recursive: true });
 
   env.LOCALAPPDATA = isolatedLocalAppData;
   env.APPDATA = isolatedRoamingAppData;
+  env.USERPROFILE = isolatedUserProfile;
+  env.HOME = isolatedUserProfile;
 
   const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
   const rawPath = pathKeys.map((key) => env[key]).find(Boolean);
