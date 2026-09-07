@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -59,14 +60,34 @@ export async function saveAgentOsGatewayAuthCredential(
 export async function readAgentOsGatewayAuthCredential(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<AgentOsGatewayAuthCredential | null> {
-  let payload: AgentOsGatewayAuthStateFile;
-
   try {
-    payload = JSON.parse(await readFile(resolveAgentOsGatewayAuthStatePath(env), "utf8")) as AgentOsGatewayAuthStateFile;
+    return parseAgentOsGatewayAuthCredential(
+      JSON.parse(await readFile(resolveAgentOsGatewayAuthStatePath(env), "utf8")) as AgentOsGatewayAuthStateFile
+    );
   } catch {
     return null;
   }
+}
 
+/**
+ * The Gateway client factory is intentionally synchronous, so packaged
+ * startup needs a synchronous read of the credential persisted by setup.
+ */
+export function readAgentOsGatewayAuthCredentialSync(
+  env: NodeJS.ProcessEnv = process.env
+): AgentOsGatewayAuthCredential | null {
+  try {
+    return parseAgentOsGatewayAuthCredential(
+      JSON.parse(readFileSync(resolveAgentOsGatewayAuthStatePath(env), "utf8")) as AgentOsGatewayAuthStateFile
+    );
+  } catch {
+    return null;
+  }
+}
+
+function parseAgentOsGatewayAuthCredential(
+  payload: AgentOsGatewayAuthStateFile
+): AgentOsGatewayAuthCredential | null {
   const kind = payload.kind === "token" || payload.kind === "password" ? payload.kind : null;
   const value = typeof payload.value === "string" && payload.value.trim() ? payload.value.trim() : null;
 

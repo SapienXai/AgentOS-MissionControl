@@ -1,6 +1,10 @@
 import "server-only";
 
 import type { GatewayClientName } from "@openclaw/gateway-protocol/client-info";
+import {
+  readAgentOsGatewayAuthCredentialSync,
+  type AgentOsGatewayAuthCredential
+} from "@/lib/agentos/runtime-auth";
 import { CliOpenClawGatewayClient } from "@/lib/openclaw/client/cli-gateway-client";
 import { resolveOpenClawStateDir } from "@/lib/openclaw/client/gateway-state";
 import {
@@ -40,10 +44,10 @@ export function createOpenClawGatewayClient(
     forceCli,
     token: options.token !== undefined
       ? options.token
-      : resolveGatewayCredential("AGENTOS_OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_TOKEN"),
+      : resolveGatewayCredential("token", "AGENTOS_OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_GATEWAY_TOKEN"),
     password: options.password !== undefined
       ? options.password
-      : resolveGatewayCredential("AGENTOS_OPENCLAW_GATEWAY_PASSWORD", "OPENCLAW_GATEWAY_PASSWORD"),
+      : resolveGatewayCredential("password", "AGENTOS_OPENCLAW_GATEWAY_PASSWORD", "OPENCLAW_GATEWAY_PASSWORD"),
     stateDir: options.stateDir ?? resolveOpenClawStateDir(),
     sharedStateMode: options.sharedStateMode ?? "managed-write",
     clientName: options.clientName as GatewayClientName | undefined,
@@ -58,7 +62,10 @@ function createDefaultOpenClawGatewayClient() {
   return createOpenClawGatewayClient();
 }
 
-function resolveGatewayCredential(...names: string[]) {
+function resolveGatewayCredential(
+  kind: AgentOsGatewayAuthCredential["kind"],
+  ...names: string[]
+) {
   for (const name of names) {
     const value = process.env[name]?.trim();
     if (value) {
@@ -66,7 +73,8 @@ function resolveGatewayCredential(...names: string[]) {
     }
   }
 
-  return null;
+  const persisted = readAgentOsGatewayAuthCredentialSync();
+  return persisted?.kind === kind ? persisted.value : null;
 }
 
 export function getOpenClawGatewayClient() {

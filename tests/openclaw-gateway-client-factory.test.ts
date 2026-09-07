@@ -8,6 +8,7 @@ import {
   getOpenClawGatewayClient,
   resetOpenClawGatewayClient
 } from "@/lib/openclaw/client/gateway-client-factory";
+import { saveAgentOsGatewayAuthCredential } from "@/lib/agentos/runtime-auth";
 import { OfficialGatewayHarness } from "@/tests/helpers/official-gateway-harness";
 
 const ENVIRONMENT_KEYS = [
@@ -20,7 +21,8 @@ const ENVIRONMENT_KEYS = [
   "OPENCLAW_GATEWAY_TOKEN",
   "AGENTOS_OPENCLAW_GATEWAY_PASSWORD",
   "OPENCLAW_GATEWAY_PASSWORD",
-  "OPENCLAW_STATE_DIR"
+  "OPENCLAW_STATE_DIR",
+  "AGENTOS_RUNTIME_DIR"
 ] as const;
 
 const originalEnvironment = new Map(
@@ -81,6 +83,40 @@ test("default factory reaches the official Gateway through the real domain clien
     assert.deepEqual(harness.requests.map(({ method }) => method), ["connect", "health"]);
   } finally {
     await rm(stateDir, { recursive: true, force: true });
+    await harness.close();
+  }
+});
+
+test("packaged factory loads the persisted shared Gateway credential after restart", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "agentos-factory-persisted-state-"));
+  const runtimeDir = await mkdtemp(join(tmpdir(), "agentos-factory-persisted-runtime-"));
+  const harness = await OfficialGatewayHarness.create({
+    routes: {
+      health: ({ respond }) => respond({ ok: true, source: "persisted-credential" })
+    }
+  });
+
+  try {
+    delete process.env.AGENTOS_OPENCLAW_GATEWAY_CLIENT;
+    delete process.env.OPENCLAW_GATEWAY_CLIENT;
+    delete process.env.AGENTOS_OPENCLAW_NATIVE_WS;
+    delete process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
+    delete process.env.OPENCLAW_GATEWAY_TOKEN;
+    delete process.env.AGENTOS_OPENCLAW_GATEWAY_PASSWORD;
+    delete process.env.OPENCLAW_GATEWAY_PASSWORD;
+    process.env.AGENTOS_OPENCLAW_GATEWAY_URL = harness.url;
+    process.env.AGENTOS_RUNTIME_DIR = runtimeDir;
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    await saveAgentOsGatewayAuthCredential({ kind: "token", value: "persisted-factory-token" });
+
+    const client = getOpenClawGatewayClient();
+    const health = await client.getHealth({ timeoutMs: 2_000 });
+    assert.deepEqual(health, { ok: true, source: "persisted-credential" });
+    const connectParams = harness.requests[0]?.params as { auth?: unknown } | undefined;
+    assert.deepEqual(connectParams?.auth, { token: "persisted-factory-token" });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(runtimeDir, { recursive: true, force: true });
     await harness.close();
   }
 });

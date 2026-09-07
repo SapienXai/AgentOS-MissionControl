@@ -103,7 +103,7 @@ test("ChatGPT OAuth preparation reaches the interactive login boundary with shar
 });
 
 test("ChatGPT browser auth progresses from preparation to redirect wait and completion", async () => {
-  let releaseLogin: (() => void) | null = null;
+  const loginControl: { release?: () => void } = {};
   const authorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=test&state=state-123";
 
   const started = await startOpenClawChatGptBrowserAuth(
@@ -115,7 +115,7 @@ test("ChatGPT browser auth progresses from preparation to redirect wait and comp
       runInteractiveLogin: async ({ onBrowserUrl }) => {
         onBrowserUrl?.(authorizationUrl);
         await new Promise<void>((resolve) => {
-          releaseLogin = resolve;
+          loginControl.release = resolve;
         });
       }
     }
@@ -127,7 +127,11 @@ test("ChatGPT browser auth progresses from preparation to redirect wait and comp
   assert.equal(waiting.state, "waiting-for-redirect");
   assert.equal(waiting.browserUrl, authorizationUrl);
 
-  releaseLogin?.();
+  const release = loginControl.release;
+  if (!release) {
+    throw new Error("The test login session did not reach the redirect wait state.");
+  }
+  release();
   await delay(0);
   assert.equal(getOpenClawChatGptBrowserAuth(started.sessionId).state, "completed");
 });
