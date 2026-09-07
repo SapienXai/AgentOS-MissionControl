@@ -12,6 +12,10 @@ const windowsPreloadPath = path.join(scriptDir, "windows-readdir-workaround.cjs"
 
 const env = sanitizePathEnv(process.env);
 
+if (process.platform === "win32") {
+  env.NODE_OPTIONS = appendNodePreload(env.NODE_OPTIONS, windowsPreloadPath);
+}
+
 cleanNextBuildOutput();
 
 await runCommand(process.execPath, resolveBuildArgs(), {
@@ -31,13 +35,13 @@ function resolveNextCliPath() {
 }
 
 function resolveBuildArgs() {
-  const args = [resolveNextCliPath(), "build", "--webpack"];
+  return [resolveNextCliPath(), "build", "--webpack"];
+}
 
-  if (process.platform === "win32") {
-    args.unshift("--require", windowsPreloadPath);
-  }
+function appendNodePreload(existingOptions, preloadPath) {
+  const preloadOption = `--require "${preloadPath}"`;
 
-  return args;
+  return existingOptions ? `${existingOptions} ${preloadOption}` : preloadOption;
 }
 
 function cleanNextBuildOutput() {
