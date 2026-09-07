@@ -705,3 +705,24 @@ test("OpenClaw adapter exposes catalog, config, agent turn, and probe methods", 
     { method: "listCronJobs", options: { timeoutMs: 19 } }
   ]);
 });
+
+test("OpenClaw adapter forces the official Gateway model auth refresh", async () => {
+  const calls: Array<{ method: string; params?: Record<string, unknown>; options?: OpenClawCommandOptions }> = [];
+  const { client } = createMockGatewayClient({
+    async call<TPayload>(method: string, params?: Record<string, unknown>, options?: OpenClawCommandOptions) {
+      calls.push({ method, params, options });
+      return { providers: [] } as TPayload;
+    }
+  });
+  const adapter = new GatewayBackedOpenClawAdapter(() => client);
+
+  assert.deepEqual(
+    await adapter.refreshModelAuthStatus?.({ timeoutMs: 8_000 }),
+    { providers: [] }
+  );
+  assert.deepEqual(calls, [{
+    method: "models.authStatus",
+    params: { refresh: true },
+    options: { timeoutMs: 8_000 }
+  }]);
+});

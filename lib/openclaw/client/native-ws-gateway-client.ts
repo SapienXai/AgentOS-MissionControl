@@ -286,10 +286,6 @@ function shouldRecoverPartialModelAuthStatusWithCli(status: ModelsStatusPayload)
   const allowed = status.allowed ?? [];
   const hasOpenAiRoute = allowed.some((modelId) => /^openai\//i.test(modelId));
 
-  if (!hasOpenAiRoute) {
-    return false;
-  }
-
   const authProviders = new Set(
     (status.auth?.providers ?? [])
       .map((entry) => entry.provider?.trim())
@@ -315,9 +311,34 @@ function shouldRecoverPartialModelAuthStatusWithCli(status: ModelsStatusPayload)
     return false;
   }
 
+  const hasOpenAiProviderEvidence = authProviders.has("openai") || oauthProviders.has("openai");
+
+  // A fresh AgentOS install can have a usable OpenAI OAuth profile before any
+  // openai/* model is configured or visible in the configured catalog. The
+  // CLI fallback is still only eligible when OpenClaw itself reported OpenAI
+  // auth evidence; unrelated providers must never trigger this recovery.
+  if (!hasOpenAiRoute && !hasOpenAiProviderEvidence) {
+    return false;
+  }
+
+  // An OpenAI route with provider evidence is already complete in the native
+  // response. Recovery remains eligible for partial Codex route status and
+  // for a fresh OAuth profile that has no configured model route yet.
+  if (hasOpenAiRoute && hasOpenAiProviderEvidence) {
+    return false;
+  }
+
   const hasLegacyAuthIdentity = [...authProviders, ...oauthProviders].some(isUnsupportedLegacyProviderId);
 
-  return !hasLegacyAuthIdentity && !authProviders.has("openai") && !oauthProviders.has("openai");
+  if (hasLegacyAuthIdentity) {
+    return false;
+  }
+
+  if (hasOpenAiProviderEvidence) {
+    return true;
+  }
+
+  return !authProviders.has("openai") && !oauthProviders.has("openai");
 }
 
 export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {

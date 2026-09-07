@@ -10,6 +10,8 @@ import {
 } from "@/lib/openclaw/client/gateway-client-factory";
 import { saveAgentOsGatewayAuthCredential } from "@/lib/agentos/runtime-auth";
 import { OfficialGatewayHarness } from "@/tests/helpers/official-gateway-harness";
+import { normalizeModelStatusPayload } from "@/lib/openclaw/client/native-ws-gateway-payloads";
+import { buildModelStatusConnectionStatus } from "@/lib/openclaw/domains/model-provider-connection";
 
 const ENVIRONMENT_KEYS = [
   "AGENTOS_OPENCLAW_GATEWAY_CLIENT",
@@ -117,6 +119,80 @@ test("packaged factory loads the persisted shared Gateway credential after resta
   } finally {
     await rm(stateDir, { recursive: true, force: true });
     await rm(runtimeDir, { recursive: true, force: true });
+    await harness.close();
+  }
+});
+
+test("official Gateway auth refresh exposes post-OAuth ChatGPT models to AgentOS", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "agentos-factory-oauth-refresh-state-"));
+  let authRefreshed = false;
+  const harness = await OfficialGatewayHarness.create({
+    routes: {
+      "models.authStatus": ({ request, respond }) => {
+        const params = request.params as { refresh?: boolean } | undefined;
+        if (params?.refresh === true) {
+          authRefreshed = true;
+          respond({
+            providers: [{
+              provider: "openai",
+              status: "ok",
+              profiles: [{
+                profileId: "openai:user@example.com",
+                type: "oauth",
+                status: "ok"
+              }]
+            }]
+          });
+          return;
+        }
+
+        respond({ providers: [] });
+      },
+      "models.list": ({ request, respond }) => {
+        const params = request.params as { refresh?: boolean } | undefined;
+        respond({
+          models: authRefreshed && params?.refresh === true
+            ? [{
+                key: "openai/gpt-5.5",
+                name: "gpt-5.5",
+                provider: "openai",
+                available: true,
+                tags: []
+              }]
+            : []
+        });
+      }
+    }
+  });
+
+  try {
+    delete process.env.AGENTOS_OPENCLAW_GATEWAY_CLIENT;
+    delete process.env.OPENCLAW_GATEWAY_CLIENT;
+    delete process.env.AGENTOS_OPENCLAW_NATIVE_WS;
+    process.env.AGENTOS_OPENCLAW_GATEWAY_URL = harness.url;
+    process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN = "factory-oauth-refresh-token";
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+
+    const client = getOpenClawGatewayClient();
+    const staleAuth = await client.call<{ providers: unknown[] }>("models.authStatus", {});
+    const refreshedAuth = await client.call<{ providers: unknown[] }>("models.authStatus", { refresh: true });
+    const models = await client.listModels({ all: true, provider: "openai", refresh: true });
+    const status = normalizeModelStatusPayload(refreshedAuth, models);
+    const connection = buildModelStatusConnectionStatus("openai", status, []);
+
+    assert.deepEqual(staleAuth, { providers: [] });
+    assert.equal(authRefreshed, true);
+    assert.equal(refreshedAuth.providers?.[0]?.provider, "openai");
+    assert.deepEqual(models.models.map((model) => model.key), ["openai/gpt-5.5"]);
+    assert.equal(connection?.connected, true);
+    assert.equal(connection?.authMethod, "chatgpt-oauth");
+    assert.deepEqual(
+      harness.requests.map(({ method }) => method),
+      ["connect", "models.authStatus", "models.authStatus", "models.list"]
+    );
+    assert.deepEqual((harness.requests[2]?.params), { refresh: true });
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
     await harness.close();
   }
 });

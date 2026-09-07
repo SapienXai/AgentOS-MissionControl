@@ -90,6 +90,7 @@ import type {
   OpenClawMemorySearchPayload,
   OpenClawMemoryStatusPayload,
   OpenClawModelAuthOrderSetInput,
+  OpenClawModelAuthStatusPayload,
   OpenClawModelScanPayload,
   OpenClawPluginListPayload,
   OpenClawQuestionListPayload,
@@ -179,6 +180,8 @@ export interface OpenClawAdapter {
   resumeNativeGatewaySuspend?(input: OpenClawGatewaySuspendResumeInput, options?: OpenClawCommandOptions): Promise<Record<string, unknown>>;
   getGatewayStatus(options?: OpenClawCommandOptions): Promise<GatewayStatusPayload>;
   getModelStatus(options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
+  /** Force OpenClaw to reload provider auth after an external CLI mutation. */
+  refreshModelAuthStatus?(options?: OpenClawCommandOptions): Promise<OpenClawModelAuthStatusPayload>;
   getAgentModelStatus(input: OpenClawAgentModelStatusInput, options?: OpenClawCommandOptions): Promise<ModelsStatusPayload>;
   setModelAuthOrder(input: OpenClawModelAuthOrderSetInput, options?: OpenClawCommandOptions): Promise<CommandResult>;
   listAgents(options?: OpenClawCommandOptions): Promise<OpenClawAgentListPayload>;
@@ -451,6 +454,14 @@ export class GatewayBackedOpenClawAdapter implements OpenClawAdapter {
 
   getModelStatus(options: OpenClawCommandOptions = {}) {
     return this.getClient().getModelStatus(options);
+  }
+
+  refreshModelAuthStatus(options: OpenClawCommandOptions = {}) {
+    return this.getClient().call<OpenClawModelAuthStatusPayload>(
+      "models.authStatus",
+      { refresh: true },
+      options
+    );
   }
 
   getAgentModelStatus(input: OpenClawAgentModelStatusInput, options: OpenClawCommandOptions = {}) {

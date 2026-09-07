@@ -90,6 +90,10 @@ export function resolveChatGptRecoveryMessage(message?: string | null) {
     return "OpenClaw's local device access needs operator scope. Repair Gateway device access in Settings, then retry ChatGPT sign-in.";
   }
 
+  if (/auth refresh failed|could not refresh .* authentication|gateway auth refresh/i.test(normalized)) {
+    return message?.trim() || "OpenClaw could not refresh the local ChatGPT authentication state. Try again when the Gateway is ready.";
+  }
+
   if (/cancel|interrupted/.test(normalized)) {
     return "ChatGPT sign-in was cancelled before OpenClaw could save the account.";
   }

@@ -107,7 +107,9 @@ const requestSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("status"),
     provider: explicitProviderIdSchema,
-    includeSnapshot: z.boolean().optional()
+    includeSnapshot: z.boolean().optional(),
+    refreshAuth: z.boolean().optional(),
+    discover: z.boolean().optional()
   }),
   z.object({
     action: z.literal("connect"),
@@ -477,10 +479,26 @@ async function handleProviderAction(
   }
 
   if (input.action === "status") {
-    const [statusContext, providerConfig] = await Promise.all([
-      readProviderConnectionContext(input.provider),
-      readOpenClawProviderConfigSummary(input.provider)
-    ]);
+    if (input.refreshAuth === true || input.discover === true) {
+      clearModelProviderCaches();
+    }
+
+    let statusContext: Awaited<ReturnType<typeof readProviderConnectionContext>>;
+    let authRefreshError: unknown = null;
+    try {
+      statusContext = await readProviderConnectionContext(input.provider, {
+        refreshAuth: input.refreshAuth === true
+      });
+    } catch (error) {
+      authRefreshError = error;
+      statusContext = await readProviderConnectionContext(input.provider).catch(() => ({
+        connection: buildUnknownProviderConnectionStatus(input.provider, error),
+        configuredModelIds: new Set<string>(),
+        ollamaState: null
+      }));
+    }
+
+    const providerConfig = await readOpenClawProviderConfigSummary(input.provider);
     const intentionallyDisconnected = await isModelProviderDisconnected(input.provider);
     const connection = intentionallyDisconnected
       ? {
@@ -493,19 +511,66 @@ async function handleProviderAction(
           detail: "Disconnected in AgentOS. Connect again to replace the provider credential and rediscover models."
         }
       : statusContext.connection;
-    const snapshot = input.includeSnapshot && connection.connected
+    let models: AddModelsCatalogModel[] = [];
+    let discovery: AddModelsProviderActionResult["discovery"] = {
+      status: "not-requested",
+      retryable: false,
+      error: null
+    };
+
+    if (!authRefreshError && input.discover === true && connection.connected) {
+      try {
+        models = await readProviderCatalog(input.provider, statusContext.configuredModelIds, { refresh: true });
+        discovery = {
+          status: models.length > 0 ? "ready" : "empty",
+          retryable: true,
+          error: null
+        };
+      } catch (error) {
+        discovery = {
+          status: "failed",
+          retryable: true,
+          error: readProviderActionError(error)
+        };
+      }
+    }
+
+    const snapshot = (input.includeSnapshot || input.refreshAuth === true || input.discover === true) && connection.connected
       ? await getMissionControlSnapshot({ force: true }).catch(() => undefined)
       : undefined;
+
+    const responseConnection = authRefreshError
+      ? {
+          ...connection,
+          connected: false,
+          verification: "unknown" as const,
+          degraded: true,
+          recovery: "Retry ChatGPT sign-in after the local OpenClaw Gateway auth state is available.",
+          detail: readProviderActionError(authRefreshError)
+        }
+      : discovery.status === "failed" && connection.connected
+        ? {
+            ...connection,
+            verification: "verified" as const,
+            degraded: true,
+            recovery: "ChatGPT is connected. Retry model discovery when the OpenClaw catalog is available."
+          }
+        : connection;
 
     return buildActionResult({
       ok: true,
       action: input.action,
       provider: input.provider,
-      message: resolveProviderStatusMessage(input.provider, connection),
+      message: authRefreshError
+        ? `OpenClaw could not refresh ${formatModelProviderLabel(input.provider)} authentication: ${readProviderActionError(authRefreshError)}`
+        : discovery.status === "failed"
+          ? `${formatModelProviderLabel(input.provider)} is connected, but model discovery failed: ${discovery.error ?? "OpenClaw did not return a catalog yet."}`
+          : resolveProviderStatusMessage(input.provider, responseConnection),
       snapshot,
-      connection,
+      connection: responseConnection,
       providerConfig,
-      models: [],
+      models,
+      discovery,
       emptyState: statusContext.ollamaState ? resolveOllamaEmptyState(statusContext.ollamaState) : null,
       docsUrl: addModelsDocsUrl
     });
@@ -546,11 +611,33 @@ async function handleProviderAction(
           signal
         });
         clearModelProviderCaches();
-        const refreshedStatus = await readProviderConnectionContext(input.provider);
-        const models = await readProviderCatalog(
-          input.provider,
-          refreshedStatus.configuredModelIds
-        ).catch(() => []);
+        const refreshedStatus = await readProviderConnectionContext(input.provider, { refreshAuth: true });
+        let models: AddModelsCatalogModel[] = [];
+        let discovery: AddModelsProviderActionResult["discovery"] = {
+          status: "not-requested",
+          retryable: false,
+          error: null
+        };
+
+        try {
+          models = await readProviderCatalog(
+            input.provider,
+            refreshedStatus.configuredModelIds,
+            { refresh: true }
+          );
+          discovery = {
+            status: models.length > 0 ? "ready" : "empty",
+            retryable: true,
+            error: null
+          };
+        } catch (error) {
+          discovery = {
+            status: "failed",
+            retryable: true,
+            error: readProviderActionError(error)
+          };
+        }
+
         const snapshot = await getMissionControlSnapshot({ force: true }).catch(() => undefined);
 
         return buildActionResult({
@@ -558,16 +645,23 @@ async function handleProviderAction(
           action: input.action,
           provider: input.provider,
           message: refreshedStatus.connection.connected
-            ? `${authResult.pluginInstalled ? "Installed @openclaw/codex and connected" : "Connected"} ChatGPT through OpenClaw. Found ${models.length} available model${models.length === 1 ? "" : "s"}.`
+            ? discovery.status === "failed"
+              ? `${authResult.pluginInstalled ? "Installed @openclaw/codex and connected" : "Connected"} ChatGPT through OpenClaw, but model discovery failed: ${discovery.error ?? "retry discovery to load models."}`
+              : `${authResult.pluginInstalled ? "Installed @openclaw/codex and connected" : "Connected"} ChatGPT through OpenClaw. Found ${models.length} available model${models.length === 1 ? "" : "s"}.`
             : "OpenClaw finished ChatGPT sign-in but did not report a usable account yet. Try connecting again.",
           connection: {
             ...refreshedStatus.connection,
             needsTerminal: false,
+            verification: refreshedStatus.connection.connected ? "verified" : refreshedStatus.connection.verification,
+            degraded: refreshedStatus.connection.connected && discovery.status === "failed",
             recovery: refreshedStatus.connection.connected
-              ? null
+              ? discovery.status === "failed"
+                ? "ChatGPT is connected. Retry model discovery when the OpenClaw catalog is available."
+                : null
               : "Try the in-app ChatGPT sign-in again. AgentOS will reopen OpenClaw's authorization page."
           },
           models,
+          discovery,
           snapshot,
           manualCommand: null,
           docsUrl: addModelsDocsUrl
@@ -1171,7 +1265,7 @@ async function discoverProviderModels(
 async function readProviderCatalog(
   provider: AddModelsProviderId,
   configuredModelIds: Set<string>,
-  options: { preferScan?: boolean } = {}
+  options: { preferScan?: boolean; refresh?: boolean } = {}
 ): Promise<AddModelsCatalogModel[]> {
   if (options.preferScan) {
     const scanPayload = await scanProviderModels(provider);
@@ -1182,7 +1276,11 @@ async function readProviderCatalog(
     }
   }
 
-  const providerPayload = await readProviderModelPayload(provider, { all: true, provider });
+  const providerPayload = await readProviderModelPayload(provider, {
+    all: true,
+    provider,
+    ...(options.refresh ? { refresh: true } : {})
+  });
   const providerModels = normalizeCatalogModels(provider, providerPayload.models, configuredModelIds);
 
   if (providerModels.length > 0) {
@@ -1191,7 +1289,10 @@ async function readProviderCatalog(
       : providerModels;
   }
 
-  const globalPayload = await readProviderModelPayload(provider, { all: true });
+  const globalPayload = await readProviderModelPayload(provider, {
+    all: true,
+    ...(options.refresh ? { refresh: true } : {})
+  });
   const globalModels = normalizeCatalogModels(provider, globalPayload.models, configuredModelIds);
 
   if (globalModels.length > 0) {
@@ -1546,6 +1647,7 @@ function buildActionResult({
   snapshot,
   connection,
   models,
+  discovery,
   emptyState = null,
   manualCommand = null,
   docsUrl = null,
@@ -1561,6 +1663,7 @@ function buildActionResult({
   snapshot?: MissionControlSnapshot;
   connection: AddModelsProviderConnectionStatus;
   models: AddModelsCatalogModel[];
+  discovery?: AddModelsProviderActionResult["discovery"];
   emptyState?: AddModelsEmptyState | null;
   manualCommand?: string | null;
   docsUrl?: string | null;
@@ -1576,6 +1679,7 @@ function buildActionResult({
     message,
     connection,
     models,
+    discovery,
     emptyState,
     manualCommand,
     docsUrl,
@@ -1640,15 +1744,40 @@ function readProviderActionError(error: unknown) {
   return redactErrorMessage(error, "Model provider action failed.");
 }
 
+function buildUnknownProviderConnectionStatus(
+  provider: AddModelsProviderId,
+  error: unknown
+): AddModelsProviderConnectionStatus {
+  const descriptor = getModelProviderDescriptor(provider);
+
+  return {
+    provider,
+    authMethod: null,
+    availableAuthMethods: descriptor.authMethods ? [...descriptor.authMethods] : undefined,
+    connected: false,
+    verification: "unknown",
+    canConnect: true,
+    needsTerminal: false,
+    detail: readProviderActionError(error),
+    source: "unknown",
+    degraded: true,
+    stale: false,
+    recovery: "Retry after the local OpenClaw Gateway is available."
+  };
+}
+
 function clearModelProviderCaches() {
   clearMissionControlCaches();
   clearModelCatalogCache();
 }
 
-async function readProviderConnectionContext(provider: AddModelsProviderId) {
+async function readProviderConnectionContext(
+  provider: AddModelsProviderId,
+  options: { refreshAuth?: boolean } = {}
+) {
   const [configuredModelIds, modelStatus] = await Promise.all([
     readOpenClawConfiguredModelIds(),
-    readOpenClawProviderModelStatus()
+    readOpenClawProviderModelStatus({ refreshAuth: options.refreshAuth === true })
   ]);
 
   if (provider === "ollama") {

@@ -6,6 +6,7 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { normalizeModelStatusPayload } from "@/lib/openclaw/client/native-ws-gateway-payloads";
 import { getOpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
 import {
   isGatewayConfigRateLimitError,
@@ -29,7 +30,10 @@ import type {
   AddModelsProviderConfigSummary,
   AddModelsProviderId
 } from "@/lib/openclaw/types";
-import type { ModelsStatusPayload } from "@/lib/openclaw/client/gateway-client";
+import type {
+  ModelsStatusPayload,
+  OpenClawModelAuthStatusPayload
+} from "@/lib/openclaw/client/gateway-client";
 
 type OpenClawConfigPayload = {
   meta?: {
@@ -148,14 +152,55 @@ function readConfiguredModelIdsFromDefaults(defaults: OpenClawAgentDefaultsConfi
   return new Set([...Object.keys(modelEntries), primaryModel].filter(Boolean));
 }
 
-export async function readOpenClawProviderModelStatus(): Promise<ModelsStatusPayload | null> {
+export type OpenClawProviderModelStatusOptions = {
+  /** Reload OpenClaw's in-memory auth state after an external CLI mutation. */
+  refreshAuth?: boolean;
+};
+
+export class OpenClawModelAuthRefreshError extends Error {
+  readonly causeError: unknown;
+
+  constructor(message: string, causeError: unknown) {
+    super(message);
+    this.name = "OpenClawModelAuthRefreshError";
+    this.causeError = causeError;
+  }
+}
+
+export async function readOpenClawProviderModelStatus(
+  options: OpenClawProviderModelStatusOptions = {}
+): Promise<ModelsStatusPayload | null> {
   try {
-    const [status, credentialProviders] = await Promise.all([
-      getOpenClawAdapter().getModelStatus({ timeoutMs: 8_000 }),
-      readOpenClawConfiguredProviderCredentialIds()
-    ]);
+    const adapter = getOpenClawAdapter();
+    const status = options.refreshAuth
+      ? normalizeModelStatusPayload(
+          await (adapter.refreshModelAuthStatus?.({ timeoutMs: 8_000 }) ??
+            adapter.call<OpenClawModelAuthStatusPayload>(
+              "models.authStatus",
+              { refresh: true },
+              { timeoutMs: 8_000 }
+            )),
+          { models: [] }
+        )
+      : await adapter.getModelStatus({ timeoutMs: 8_000 });
+    const credentialProviders = await readOpenClawConfiguredProviderCredentialIds();
+
+    // A forced auth refresh invalidates the upstream runtime state, but it
+    // does not need to rediscover models. Catalog discovery is deliberately a
+    // separate step so a catalog outage cannot erase a verified login.
+    if (options.refreshAuth) {
+      adapter.invalidateReadCache?.();
+    }
+
     return mergeModelStatusWithGatewayCredentials(status, credentialProviders);
-  } catch {
+  } catch (error) {
+    if (options.refreshAuth) {
+      throw new OpenClawModelAuthRefreshError(
+        `OpenClaw Gateway auth refresh failed: ${normalizeClientError(error).message}`,
+        error
+      );
+    }
+
     return null;
   }
 }

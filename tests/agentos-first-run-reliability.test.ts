@@ -159,10 +159,13 @@ test("browser ChatGPT auth keeps onboarding focused and callback recovery compac
   assert.match(onboardingSource, /isChatGptAuthSurface && "!hidden"/);
   assert.match(stagesSource, /open=\{run\.runState === "running" && modelSwitchFeedback\.phase === "idle" && \(!chatGptBrowserAuth \|\| isChatGptPreparation\)\}/);
   assert.match(stagesSource, /role=\{browserAuthError \? "alert" : "status"\}/);
+  assert.match(stagesSource, /Refreshing ChatGPT models/);
   assert.match(stagesSource, /<details className="mt-2\.5 text-\[10px\]">/);
   assert.match(stagesSource, /Use callback URL manually/);
   assert.doesNotMatch(stagesSource, /Mobile callback fallback/);
   assert.match(shellSource, /await openExternalAuthUrl\(currentAuthFlow\.browserUrl\)/);
+  assert.match(shellSource, /refreshAuth: true,\s*discover: true/);
+  assert.match(shellSource, /Refreshing the OpenClaw account and discovering models/);
   assert.match(shellSource, /The ChatGPT sign-in page is ready\. Use Open sign-in to continue in your browser\./);
   assert.doesNotMatch(shellSource, /window\.open\(currentAuthFlow\.browserUrl/);
 });

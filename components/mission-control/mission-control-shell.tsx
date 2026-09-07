@@ -2209,7 +2209,12 @@ export function MissionControlShell({
 
   const readModelProviderStatus = async (
     provider: AddModelsProviderId,
-    options: { includeSnapshot?: boolean; timeoutMs?: number } = {}
+    options: {
+      includeSnapshot?: boolean;
+      timeoutMs?: number;
+      refreshAuth?: boolean;
+      discover?: boolean;
+    } = {}
   ) => {
     const abortController = options.timeoutMs ? new AbortController() : null;
     const timeoutId = options.timeoutMs
@@ -2225,7 +2230,9 @@ export function MissionControlShell({
         body: JSON.stringify({
           action: "status",
           provider,
-          includeSnapshot: options.includeSnapshot
+          includeSnapshot: options.includeSnapshot,
+          refreshAuth: options.refreshAuth,
+          discover: options.discover
         }),
         signal: abortController?.signal
       });
@@ -2255,7 +2262,11 @@ export function MissionControlShell({
       }
 
       try {
-        const result = await readModelProviderStatus("openai", { includeSnapshot: true });
+        const result = await readModelProviderStatus("openai", {
+          includeSnapshot: true,
+          refreshAuth: true,
+          discover: true
+        });
         lastResult = result;
 
         if (result.connection.connected) {
@@ -2271,6 +2282,10 @@ export function MissionControlShell({
     }
 
     if (lastResult) {
+      if (!lastResult.connection.connected && lastResult.message) {
+        throw new Error(lastResult.message);
+      }
+
       return lastResult;
     }
 
@@ -2282,7 +2297,8 @@ export function MissionControlShell({
   const markModelProviderConnected = (
     provider: AddModelsProviderId,
     detail?: string | null,
-    connectedSnapshot?: MissionControlSnapshot
+    connectedSnapshot?: MissionControlSnapshot,
+    connectedResult?: AddModelsProviderActionResult
   ) => {
     const descriptor = getModelProviderDescriptor(provider);
 
@@ -2304,10 +2320,15 @@ export function MissionControlShell({
 
     setModelOnboardingStatusMessage(null);
     setModelOnboardingRunState("success");
-    setModelOnboardingResultMessage(`${descriptor.shortLabel} is connected. You can discover or add models now.`);
+    const discoveryMessage = connectedResult?.discovery?.status === "failed"
+      ? `${descriptor.shortLabel} is connected, but model discovery is temporarily unavailable. Retry discovery when OpenClaw is ready.`
+      : connectedResult?.discovery?.status === "empty"
+        ? `${descriptor.shortLabel} is connected, but OpenClaw returned no selectable models yet.`
+        : `${descriptor.shortLabel} is connected. ${connectedResult?.models?.length ? `Found ${connectedResult.models.length} available model${connectedResult.models.length === 1 ? "" : "s"}.` : "You can discover or add models now."}`;
+    setModelOnboardingResultMessage(discoveryMessage);
     appendModelOnboardingLog(`\n> ${descriptor.shortLabel} connected. AgentOS refreshed OpenClaw model status.\n`);
     toast.success(`${descriptor.shortLabel} connected.`, {
-      description: detail || "AgentOS refreshed OpenClaw model status."
+      description: detail || connectedResult?.discovery?.error || "AgentOS refreshed OpenClaw model status."
     });
   };
 
@@ -2810,9 +2831,11 @@ export function MissionControlShell({
       setChatGptBrowserAuth((current) => current
         ? {
             ...current,
-            message: "ChatGPT sign-in completed. Checking the account and model catalog..."
+            message: "ChatGPT sign-in completed. Refreshing the OpenClaw account and discovering models..."
           }
         : current);
+      setModelOnboardingPhase("refreshing");
+      setModelOnboardingStatusMessage("Refreshing ChatGPT authentication before discovering models...");
       const result = await waitForChatGptProviderStatus();
 
       if (!result.connection.connected) {
@@ -2820,7 +2843,7 @@ export function MissionControlShell({
       }
 
       setChatGptBrowserAuth(null);
-      markModelProviderConnected("openai", result.connection.detail, result.snapshot);
+      markModelProviderConnected("openai", result.connection.detail, result.snapshot, result);
     } catch (error) {
       const message = resolveChatGptRecoveryMessage(
         authFlow?.state === "error"

@@ -21,6 +21,7 @@ import {
   updateOpenClawProviderSettings
 } from "@/lib/openclaw/application/model-provider-state-service";
 import { buildModelStatusConnectionStatus } from "@/lib/openclaw/domains/model-provider-connection";
+import type { OpenClawCommandOptions } from "@/lib/openclaw/client/gateway-client";
 
 const originalFetch = globalThis.fetch;
 
@@ -185,6 +186,96 @@ test("Gateway-stored provider credentials make configured model routes ready wit
 
   assert.equal(connection?.connected, true);
   assert.equal(connection?.needsTerminal, false);
+});
+
+test("fresh ChatGPT OAuth is verified after an explicit Gateway auth refresh without configured models", async () => {
+  let refreshCalls = 0;
+  let normalStatusCalls = 0;
+
+  setOpenClawAdapterForTesting({
+    async getConfig() {
+      return null;
+    },
+    async refreshModelAuthStatus(options: OpenClawCommandOptions) {
+      refreshCalls += 1;
+      assert.deepEqual(options, { timeoutMs: 8_000 });
+      return {
+        providers: [{
+          provider: "openai",
+          status: "ok",
+          profiles: [{
+            profileId: "openai:user@example.com",
+            type: "oauth",
+            status: "ok"
+          }]
+        }]
+      };
+    },
+    async getModelStatus() {
+      normalStatusCalls += 1;
+      return {};
+    }
+  } as unknown as OpenClawAdapter);
+
+  const status = await readOpenClawProviderModelStatus({ refreshAuth: true });
+  const connection = buildModelStatusConnectionStatus("openai", status, []);
+
+  assert.equal(refreshCalls, 1);
+  assert.equal(normalStatusCalls, 0);
+  assert.deepEqual(status?.allowed, []);
+  assert.equal(connection?.connected, true);
+  assert.equal(connection?.authMethod, "chatgpt-oauth");
+  assert.equal(connection?.verification, "credential-stored");
+});
+
+test("valid ChatGPT OAuth remains connected when model discovery fails", async () => {
+  setOpenClawAdapterForTesting({
+    async getConfig() {
+      return null;
+    },
+    async refreshModelAuthStatus() {
+      return {
+        providers: [{
+          provider: "openai",
+          status: "ok",
+          profiles: [{
+            profileId: "openai:user@example.com",
+            type: "oauth",
+            status: "ok"
+          }]
+        }]
+      };
+    },
+    async listModels() {
+      throw new Error("OpenClaw model catalog temporarily unavailable");
+    },
+    async scanModels() {
+      throw new Error("OpenClaw model catalog temporarily unavailable");
+    }
+  } as unknown as OpenClawAdapter);
+
+  const response = await modelsProviderPost(
+    new Request("http://agentos.test/api/models/providers", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "status",
+        provider: "openai",
+        refreshAuth: true,
+        discover: true,
+        includeSnapshot: true
+      })
+    })
+  );
+  const payload = await response.json();
+
+  assert.equal(response.status, 200, JSON.stringify(payload));
+  assert.equal(payload.ok, true);
+  assert.equal(payload.connection.connected, true);
+  assert.equal(payload.connection.authMethod, "chatgpt-oauth");
+  assert.equal(payload.connection.degraded, true);
+  assert.equal(payload.discovery.status, "failed");
+  assert.equal(payload.discovery.retryable, true);
+  assert.match(payload.message, /model discovery failed/i);
 });
 
 test("Gateway secret references count as stored provider credentials without exposing values", async () => {

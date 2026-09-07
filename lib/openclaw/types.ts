@@ -1934,6 +1934,8 @@ export type AddModelsProviderActionRequest =
       action: "status";
       provider: AddModelsProviderId;
       includeSnapshot?: boolean;
+      refreshAuth?: boolean;
+      discover?: boolean;
     }
   | {
       action: "connect";
@@ -2019,6 +2021,11 @@ export interface AddModelsProviderActionResult {
   message: string;
   connection: AddModelsProviderConnectionStatus;
   models: AddModelsCatalogModel[];
+  discovery?: {
+    status: "not-requested" | "ready" | "empty" | "failed";
+    retryable: boolean;
+    error?: string | null;
+  };
   emptyState?: AddModelsEmptyState | null;
   manualCommand?: string | null;
   docsUrl?: string | null;

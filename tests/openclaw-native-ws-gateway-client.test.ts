@@ -1668,6 +1668,60 @@ test("native WS gateway client recovers partial Codex model auth status through 
   assert.deepEqual(fallback.calls.map((call) => call.method), ["getModelStatus"]);
 });
 
+test("native WS gateway client recovers a fresh OpenAI OAuth profile without a configured model route", async () => {
+  const fallback = new FallbackGatewayClient();
+  fallback.modelStatusPayload = {
+    allowed: ["openai/gpt-5.5"],
+    auth: {
+      providers: [{
+        provider: "openai",
+        effective: { kind: "oauth" },
+        profiles: { count: 1, oauth: 1, token: 0, apiKey: 0 }
+      }],
+      oauth: {
+        providers: [{
+          provider: "openai",
+          status: "ok",
+          profiles: [{ profileId: "openai:user@example.com", status: "ok" }]
+        }]
+      }
+    } as never
+  };
+  const { transport } = createFakeGatewayTransport((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      const payload = frame.method === "connect"
+        ? { protocol: 4 }
+        : frame.method === "models.authStatus"
+          ? {
+              providers: [{
+                provider: "openai",
+                status: "ok",
+                profiles: [{ profileId: "openai:user@example.com", type: "oauth", status: "ok" }]
+              }]
+            }
+          : { models: [] };
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    transport,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const status = await client.getModelStatus();
+
+  assert.deepEqual(status.allowed, ["openai/gpt-5.5"]);
+  assert.equal(status.auth?.oauth?.providers?.[0]?.status, "ok");
+  assert.deepEqual(fallback.calls.map((call) => call.method), ["getModelStatus"]);
+});
+
 test("native WS gateway client reads agent model status through Gateway methods", async () => {
   const fallback = new FallbackGatewayClient();
   const { transport, sentFrames } = createFakeGatewayTransport((socket, frame) => {

@@ -373,21 +373,27 @@ export function ModelStage({
       }),
     [modelPhase, run, selectedModelLabel, statusCopy]
   );
-  const isChatGptPreparation = chatGptBrowserAuth?.state === "preparing" || chatGptBrowserAuth?.state === "waiting-for-browser";
+  const isChatGptBrowserPreparation = chatGptBrowserAuth?.state === "preparing" || chatGptBrowserAuth?.state === "waiting-for-browser";
+  const isChatGptPostAuthSync = chatGptBrowserAuth?.state === "completed" && run.runState === "running";
+  const isChatGptPreparation = isChatGptBrowserPreparation || isChatGptPostAuthSync;
 
   return (
     <>
       <PikoLoader
         open={run.runState === "running" && modelSwitchFeedback.phase === "idle" && (!chatGptBrowserAuth || isChatGptPreparation)}
-        title={isChatGptPreparation
+        title={isChatGptBrowserPreparation
           ? "Preparing ChatGPT sign-in"
+          : isChatGptPostAuthSync
+            ? "Refreshing ChatGPT models"
           : modelSwitchFeedback.phase === "saving"
           ? "Switching default model"
           : advancedProviderFlowOpen
             ? "Preparing model setup"
             : "Connecting your AI"}
-        description={isChatGptPreparation
+        description={isChatGptBrowserPreparation
           ? "Starting secure authentication with OpenClaw."
+          : isChatGptPostAuthSync
+            ? statusCopy || "Refreshing authentication and discovering models through OpenClaw."
           : modelSwitchFeedback.phase === "saving"
           ? statusCopy || "Saving the selected model in OpenClaw."
           : advancedProviderFlowOpen
