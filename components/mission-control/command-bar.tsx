@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { PikoLoader } from "@/components/ui/piko-loader";
 import { toast } from "@/components/ui/sonner";
+import { shouldPreserveComposerOnBlur } from "@/components/mission-control/command-bar.utils";
 import type { MissionControlSnapshot, MissionResponse, MissionSubmission } from "@/lib/agentos/contracts";
 import { formatAgentDisplayName } from "@/lib/openclaw/presenters";
 import { cn } from "@/lib/utils";
@@ -243,6 +244,20 @@ export function CommandBar({
   useEffect(() => {
     onTargetAgentChange?.(effectiveTargetAgentId ?? null);
   }, [effectiveTargetAgentId, onTargetAgentChange]);
+
+  useEffect(() => {
+    const resetPointerDownInside = () => {
+      pointerDownInsideRef.current = false;
+    };
+
+    window.addEventListener("pointerup", resetPointerDownInside);
+    window.addEventListener("pointercancel", resetPointerDownInside);
+
+    return () => {
+      window.removeEventListener("pointerup", resetPointerDownInside);
+      window.removeEventListener("pointercancel", resetPointerDownInside);
+    };
+  }, []);
 
   useEffect(() => {
     if (!composeIntent) {
@@ -500,7 +515,6 @@ export function CommandBar({
         }}
         onPointerDownCapture={() => {
           pointerDownInsideRef.current = true;
-          queueMicrotask(() => { pointerDownInsideRef.current = false; });
         }}
         onFocusCapture={() => {
           setIsCompactAfterSubmit(false);
@@ -508,7 +522,15 @@ export function CommandBar({
         }}
         onBlurCapture={(event) => {
           const nextTarget = event.relatedTarget;
-          if (pointerDownInsideRef.current || (nextTarget instanceof Node && commandBarRef.current?.contains(nextTarget))) return;
+          const activeElement = typeof document !== "undefined" ? document.activeElement : null;
+          if (shouldPreserveComposerOnBlur({
+            pointerDownInside: pointerDownInsideRef.current,
+            relatedTargetInside: nextTarget instanceof Node && Boolean(commandBarRef.current?.contains(nextTarget)),
+            activeElementInside: activeElement instanceof Node && Boolean(commandBarRef.current?.contains(activeElement))
+          })) {
+            return;
+          }
+
           setIsAdvancedOpen(false);
           setIsScheduleOpen(false);
           onComposerActiveChange?.(false);

@@ -33,6 +33,7 @@ import {
   resolveWorkspaceContextEngineAgent,
   shouldDeferWorkspaceSelectionHydration
 } from "@/components/mission-control/mission-control-shell.utils";
+import { shouldPreserveComposerOnBlur } from "@/components/mission-control/command-bar.utils";
 import {
   resolveChatGptRecoveryMessage,
   resolveChatGptOnboardingState,
@@ -155,6 +156,48 @@ test("ChatGPT onboarding preserves the browser-auth state machine", () => {
       modelReady: false
     }),
     "error"
+  );
+});
+
+test("mission composer keeps internal controls open during blur transitions", () => {
+  const commandBarSource = readFileSync(path.join(rootDir, "components/mission-control/command-bar.tsx"), "utf8");
+
+  assert.match(commandBarSource, /onPointerDownCapture=\{\(\) => \{\s*pointerDownInsideRef\.current = true;/);
+  assert.doesNotMatch(commandBarSource, /queueMicrotask\(\(\) => \{ pointerDownInsideRef\.current = false;/);
+  assert.match(commandBarSource, /window\.addEventListener\("pointerup", resetPointerDownInside\)/);
+  assert.match(commandBarSource, /shouldPreserveComposerOnBlur\(\{/);
+
+  assert.equal(
+    shouldPreserveComposerOnBlur({
+      pointerDownInside: true,
+      relatedTargetInside: false,
+      activeElementInside: false
+    }),
+    true
+  );
+  assert.equal(
+    shouldPreserveComposerOnBlur({
+      pointerDownInside: false,
+      relatedTargetInside: true,
+      activeElementInside: false
+    }),
+    true
+  );
+  assert.equal(
+    shouldPreserveComposerOnBlur({
+      pointerDownInside: false,
+      relatedTargetInside: false,
+      activeElementInside: true
+    }),
+    true
+  );
+  assert.equal(
+    shouldPreserveComposerOnBlur({
+      pointerDownInside: false,
+      relatedTargetInside: false,
+      activeElementInside: false
+    }),
+    false
   );
 });
 
