@@ -68,7 +68,9 @@ function shouldSuppressReaddirError(targetPath, error) {
   }
 
   const normalizedPath = resolvedPath.replace(/\//g, "\\").toLowerCase();
-  return normalizedPath.includes("\\microsoft\\windowsapps\\") || normalizedPath.endsWith(".exe");
+  return normalizedPath.includes("\\microsoft\\windowsapps\\")
+    || normalizedPath.endsWith(".exe")
+    || normalizedPath.endsWith("\\application data");
 }
 
 function normalizePathValue(targetPath) {
