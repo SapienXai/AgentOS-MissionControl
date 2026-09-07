@@ -65,7 +65,7 @@ function isForbiddenPath(relativePath) {
       segment === ".git"
       || segment === ".desktop-cache"
       || /^\.env(?:\.|$)/i.test(segment)
-      || /(?:^|[-_.])(?:private|secret|credential|signing)[-_.].*key/i.test(segment)
+      || /(?:^|[-_.])(?:private|secret|credential|signing)[-_.]?(?:key|secret|credential)(?:$|[-_.])/i.test(segment)
       || /(?:tauri|signing).*(?:private|secret).*key/i.test(segment)
   );
 }
