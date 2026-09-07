@@ -190,6 +190,13 @@
   --lock-screen-orbit: 197 208 214;
   --lock-screen-veil: 5 12 18;
   --lock-screen-accent: 238 246 247;
+  --lock-screen-video-opacity: 0.17;
+  --lock-screen-video-brightness: 0.52;
+  --lock-screen-video-saturation: 0.4;
+  --lock-screen-video-contrast: 1.06;
+  --lock-screen-video-wash: linear-gradient(180deg, rgb(4 10 16 / 0.34), rgb(7 14 21 / 0.68));
+  --lock-screen-crt-opacity: 0.055;
+  --lock-screen-crt-line-opacity: 0.05;
   --lock-avatar-light: 226 232 234;
   --lock-avatar-accent: 157 174 181;
   --lock-avatar-dark: 37 47 56;
@@ -215,6 +222,13 @@
   --lock-screen-orbit: 50 61 68;
   --lock-screen-veil: 255 255 255;
   --lock-screen-accent: 255 255 255;
+  --lock-screen-video-opacity: 0.18;
+  --lock-screen-video-brightness: 1.04;
+  --lock-screen-video-saturation: 0.58;
+  --lock-screen-video-contrast: 0.96;
+  --lock-screen-video-wash: linear-gradient(180deg, rgb(255 252 243 / 0.12), rgb(247 243 235 / 0.42));
+  --lock-screen-crt-opacity: 0.042;
+  --lock-screen-crt-line-opacity: 0.035;
   --lock-avatar-light: 255 255 255;
   --lock-avatar-accent: 190 174 151;
   --lock-avatar-dark: 56 61 61;
@@ -239,6 +253,13 @@
   --lock-screen-orbit: 205 212 211;
   --lock-screen-veil: 4 10 16;
   --lock-screen-accent: 246 242 233;
+  --lock-screen-video-opacity: 0.2;
+  --lock-screen-video-brightness: 0.74;
+  --lock-screen-video-saturation: 0.62;
+  --lock-screen-video-contrast: 1.04;
+  --lock-screen-video-wash: linear-gradient(180deg, rgb(8 16 26 / 0.18), rgb(15 19 22 / 0.46));
+  --lock-screen-crt-opacity: 0.05;
+  --lock-screen-crt-line-opacity: 0.045;
   --lock-avatar-light: 247 246 239;
   --lock-avatar-accent: 166 142 117;
   --lock-avatar-dark: 38 45 50;
@@ -255,6 +276,50 @@
   --lock-glass-muted: 194 201 201;
   --lock-glass-label: 171 182 182;
   --lock-glass-backdrop-brightness: 0.98;
+}
+
+.lock-screen-video {
+  filter: brightness(var(--lock-screen-video-brightness)) saturate(var(--lock-screen-video-saturation)) contrast(var(--lock-screen-video-contrast));
+  opacity: var(--lock-screen-video-opacity);
+  object-position: center;
+  transition: opacity 1600ms ease, filter 1600ms ease;
+}
+
+.lock-screen-video-wash {
+  background: var(--lock-screen-video-wash);
+  mix-blend-mode: multiply;
+}
+
+.lock-screen-crt-scanlines {
+  background: repeating-linear-gradient(180deg, rgb(255 255 255 / var(--lock-screen-crt-line-opacity)) 0 1px, transparent 1px 4px);
+  mix-blend-mode: soft-light;
+  opacity: 0.75;
+}
+
+.lock-screen-crt-grain {
+  animation: lock-screen-crt-grain 260ms steps(2) infinite;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.28'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  mix-blend-mode: soft-light;
+  opacity: var(--lock-screen-crt-opacity);
+}
+
+@keyframes lock-screen-crt-grain {
+  0% {
+    background-position: 0 0;
+  }
+  25% {
+    background-position: 11px -7px;
+  }
+  50% {
+    background-position: -8px 13px;
+  }
+  75% {
+    background-position: 7px 5px;
+  }
+  100% {
+    background-position: -4px -11px;
+  }
 }
 
 .lock-screen-copy,
@@ -441,6 +506,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .piko-loader-float {
+    animation: none;
+  }
+
+  .lock-screen-video {
+    display: none;
+  }
+
+  .lock-screen-crt-grain {
     animation: none;
   }
 }

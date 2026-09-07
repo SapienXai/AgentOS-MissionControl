@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { test } from "node:test";
 
@@ -57,6 +57,23 @@ test("celestial moon renders as a complete luminous sphere", async () => {
   assert.match(source, /data-celestial-body="moon"/);
   assert.match(source, /#ffffff_0%,#f4f7f8_30%,#dbe4e8_65%,#aebfc8_100%/);
   assert.doesNotMatch(source, /after:bg-\[#101b38\]/);
+});
+
+test("lock background uses a local video layer with a reduced-motion fallback", async () => {
+  const source = await readFile(path.join(rootDir, "components/auth/celestial-lock-background.tsx"), "utf8");
+  const styles = await readFile(path.join(rootDir, "app/globals.css"), "utf8");
+  const asset = await stat(path.join(rootDir, "public/assets/lock-screen/lockBack.mp4"));
+
+  assert.ok(asset.size > 100_000);
+  assert.match(source, /src="\/assets\/lock-screen\/lockBack\.mp4"/);
+  assert.match(source, /preload="metadata"/);
+  assert.match(source, /video\.pause\(\)/);
+  assert.match(styles, /\.lock-screen-video \{/);
+  assert.match(styles, /\.lock-screen-video-wash \{/);
+  assert.match(styles, /\.lock-screen-crt-scanlines \{/);
+  assert.match(styles, /\.lock-screen-crt-grain \{/);
+  assert.match(styles, /--lock-screen-video-brightness: 1\.04/);
+  assert.match(styles, /\.lock-screen-video \{\n    display: none;/);
 });
 
 test("celestial stars twinkle in independent reduced-motion-aware layers", async () => {

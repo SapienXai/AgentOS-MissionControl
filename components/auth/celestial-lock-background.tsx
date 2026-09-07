@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getCelestialSky, type CelestialSky } from "@/lib/agentos/celestial-sky";
 
@@ -57,6 +57,25 @@ export function useCelestialSky() {
 export function CelestialLockBackground({ sky }: { sky: CelestialSky | null }) {
   const reduceMotion = useReducedMotion();
   const renderSky = sky ?? INITIAL_SKY;
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncPlayback = () => {
+      if (reduceMotion === true || motionPreference.matches) {
+        video.pause();
+        return;
+      }
+      void video.play().catch(() => undefined);
+    };
+
+    syncPlayback();
+    motionPreference.addEventListener("change", syncPlayback);
+    return () => motionPreference.removeEventListener("change", syncPlayback);
+  }, [reduceMotion]);
 
   return (
     <div
@@ -69,6 +88,21 @@ export function CelestialLockBackground({ sky }: { sky: CelestialSky | null }) {
         className="absolute inset-0 transition-[background] [transition-duration:4000ms] ease-linear motion-reduce:transition-none"
         style={{ background: `linear-gradient(180deg, ${renderSky.top} 0%, ${renderSky.middle} 44%, ${renderSky.bottom} 74%, ${renderSky.horizon} 100%)` }}
       />
+      <video
+        ref={videoRef}
+        aria-hidden="true"
+        tabIndex={-1}
+        className="lock-screen-video absolute inset-0 h-full w-full object-cover"
+        src="/assets/lock-screen/lockBack.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+        preload="metadata"
+      />
+      <div aria-hidden="true" className="lock-screen-video-wash absolute inset-0" />
+      <div aria-hidden="true" className="lock-screen-crt-scanlines absolute inset-0" />
+      <div aria-hidden="true" className="lock-screen-crt-grain absolute inset-0" />
 
       <motion.div
         className="absolute -inset-x-[18%] -top-[20%] h-[68%] rotate-[-8deg] rounded-[50%] blur-[110px]"
