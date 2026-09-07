@@ -146,6 +146,7 @@ import {
   startChatGptBrowserAuth,
   submitChatGptBrowserAuth
 } from "@/lib/openclaw/model-provider-adapters";
+import { openExternalAuthUrl } from "@/lib/desktop/open-external-auth-url";
 import { cn } from "@/lib/utils";
 
 const MissionCanvasView = dynamic(
@@ -2757,10 +2758,9 @@ export function MissionControlShell({
     setModelSwitchFeedback(initialModelSwitchFeedback);
     setChatGptBrowserAuth(null);
 
-    let authWindow: Window | null = null;
     let authFlow: ChatGptBrowserAuthSnapshot | null = null;
-    let authUrlOpened = false;
     let authUrlOpenAttempted = false;
+    let authUrlOpenError: string | null = null;
     try {
       authFlow = await startChatGptBrowserAuth(force);
       setChatGptBrowserAuth(authFlow);
@@ -2773,13 +2773,18 @@ export function MissionControlShell({
 
         if (!authUrlOpenAttempted && currentAuthFlow.browserUrl) {
           authUrlOpenAttempted = true;
-          const openedWindow =
-            typeof window !== "undefined"
-              ? window.open(currentAuthFlow.browserUrl, "_blank", "noopener,noreferrer")
-              : null;
-          if (openedWindow) {
-            authWindow = openedWindow;
-            authUrlOpened = true;
+          try {
+            await openExternalAuthUrl(currentAuthFlow.browserUrl);
+          } catch (error) {
+            authUrlOpenError = error instanceof Error
+              ? error.message
+              : "Automatic browser opening was unavailable.";
+            setChatGptBrowserAuth((current) => current
+              ? {
+                  ...current,
+                  message: "The ChatGPT sign-in page is ready. Use Open sign-in to continue in your browser."
+                }
+              : current);
           }
         }
 
@@ -2789,6 +2794,12 @@ export function MissionControlShell({
 
         await new Promise((resolve) => globalThis.setTimeout(resolve, 1_000));
         authFlow = await readChatGptBrowserAuth(currentAuthFlow.sessionId);
+        if (authUrlOpenError && authFlow.browserUrl && authFlow.state === "waiting-for-redirect") {
+          authFlow = {
+            ...authFlow,
+            message: "Automatic browser opening was unavailable. Use Open sign-in to continue."
+          };
+        }
         setChatGptBrowserAuth(authFlow);
       }
 
@@ -2811,11 +2822,12 @@ export function MissionControlShell({
       setChatGptBrowserAuth(null);
       markModelProviderConnected("openai", result.connection.detail, result.snapshot);
     } catch (error) {
-      if (!authUrlOpened && authWindow && !authWindow.closed) {
-        authWindow.close();
-      }
       const message = resolveChatGptRecoveryMessage(
-        authFlow?.state === "error" ? authFlow.error : error instanceof Error ? error.message : null
+        authFlow?.state === "error"
+          ? authFlow.error
+          : error instanceof Error
+            ? error.message
+            : authUrlOpenError
       );
       setModelOnboardingRunState("error");
       setModelOnboardingPhase("authenticating");

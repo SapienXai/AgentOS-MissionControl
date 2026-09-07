@@ -90,7 +90,7 @@ test("default model switching uses a compact feedback state", () => {
   const switchEnd = stagesSource.indexOf("function resolveModelDisplayLabel", switchStart);
   const switchSource = stagesSource.slice(switchStart, switchEnd);
 
-  assert.match(stagesSource, /open=\{run\.runState === "running" && modelSwitchFeedback\.phase === "idle" && !chatGptBrowserAuth\}/);
+  assert.match(stagesSource, /open=\{run\.runState === "running" && modelSwitchFeedback\.phase === "idle" && \(!chatGptBrowserAuth \|\| isChatGptPreparation\)\}/);
   assert.match(switchSource, /max-w-\[560px\] rounded-\[14px\]/);
   assert.match(switchSource, /role="status"/);
   assert.doesNotMatch(switchSource, /min-h-\[300px\]|Saving model route|Previous|Model route/);
@@ -150,17 +150,21 @@ test("Model Library ChatGPT account switching returns to live model selection", 
 test("browser ChatGPT auth keeps onboarding focused and callback recovery compact", () => {
   const onboardingSource = readFileSync(path.join(process.cwd(), "components/mission-control/openclaw-onboarding.tsx"), "utf8");
   const stagesSource = readFileSync(path.join(process.cwd(), "components/mission-control/openclaw-onboarding.stages.tsx"), "utf8");
+  const shellSource = readFileSync(path.join(process.cwd(), "components/mission-control/mission-control-shell.tsx"), "utf8");
 
   assert.match(onboardingSource, /const isChatGptAuthSurface = visualStage === "models" && Boolean\(chatGptBrowserAuth\);/);
-  assert.match(onboardingSource, /isChatGptAuthSurface\s*\n\s*\? "sm:max-w-\[720px\]"/);
+  assert.match(onboardingSource, /isChatGptAuthSurface && !advancedProviderFlowOpen\s*\n\s*\? "sm:max-w-\[720px\]"/);
   assert.match(onboardingSource, /sm:w-\[min\(1240px,calc\(100vw-32px\)\)\] sm:max-w-\[1240px\]/);
   assert.match(onboardingSource, /!isModelSwitchActive && !isChatGptAuthSurface/);
   assert.match(onboardingSource, /isChatGptAuthSurface && "!hidden"/);
-  assert.match(stagesSource, /open=\{run\.runState === "running" && modelSwitchFeedback\.phase === "idle" && !chatGptBrowserAuth\}/);
+  assert.match(stagesSource, /open=\{run\.runState === "running" && modelSwitchFeedback\.phase === "idle" && \(!chatGptBrowserAuth \|\| isChatGptPreparation\)\}/);
   assert.match(stagesSource, /role=\{browserAuthError \? "alert" : "status"\}/);
   assert.match(stagesSource, /<details className="mt-2\.5 text-\[10px\]">/);
   assert.match(stagesSource, /Use callback URL manually/);
   assert.doesNotMatch(stagesSource, /Mobile callback fallback/);
+  assert.match(shellSource, /await openExternalAuthUrl\(currentAuthFlow\.browserUrl\)/);
+  assert.match(shellSource, /The ChatGPT sign-in page is ready\. Use Open sign-in to continue in your browser\./);
+  assert.doesNotMatch(shellSource, /window\.open\(currentAuthFlow\.browserUrl/);
 });
 
 test("launchpad uses the same compact status-row language as setup", () => {

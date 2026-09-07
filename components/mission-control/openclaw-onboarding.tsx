@@ -304,7 +304,7 @@ export function OpenClawOnboarding({
         animate={{ opacity: 1, y: 0, scale: isMobileViewport ? 1 : 0.9 }}
         className={cn(
           "relative z-10 flex h-dvh w-full min-h-0 max-h-dvh max-w-none flex-col overflow-hidden rounded-none border-0 sm:h-auto sm:max-h-[calc(100dvh-32px)] sm:rounded-[18px] sm:border sm:backdrop-blur-2xl",
-          isChatGptAuthSurface
+          isChatGptAuthSurface && !advancedProviderFlowOpen
             ? "sm:max-w-[720px]"
             : "sm:w-[min(1240px,calc(100vw-32px))] sm:max-w-[1240px]",
           surfaceTheme === "light"

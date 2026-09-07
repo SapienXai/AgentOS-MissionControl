@@ -67,6 +67,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![open_external_auth_url])
         .setup(|app| {
             app.manage(DesktopState::new());
             let _window = build_main_window(app)?;
@@ -206,8 +207,36 @@ fn open_external_url(app: &AppHandle, url: &str) {
     }
 }
 
+#[tauri::command]
+fn open_external_auth_url(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed = url
+        .parse::<tauri::Url>()
+        .map_err(|_| "The authorization URL could not be parsed.".to_string())?;
+
+    if !is_openai_authorization_url(&parsed) {
+        return Err(
+            "Only the OpenAI authorization endpoint may be opened automatically.".to_string(),
+        );
+    }
+
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|error| format!("The system browser could not be opened: {error}"))
+}
+
 fn is_external_web_url(url: &tauri::Url) -> bool {
     matches!(url.scheme(), "http:" | "http" | "https:" | "https")
+}
+
+fn is_openai_authorization_url(url: &tauri::Url) -> bool {
+    url.scheme() == "https"
+        && url.host_str() == Some("auth.openai.com")
+        && url.port().is_none()
+        && url.path() == "/oauth/authorize"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
+        && url.query().is_some()
 }
 
 #[cfg(not(debug_assertions))]
@@ -572,7 +601,7 @@ mod tests {
 
     use super::{
         build_authenticated_url, is_allowed_navigation, is_external_web_url,
-        is_retryable_startup_error,
+        is_openai_authorization_url, is_retryable_startup_error,
     };
     use super::{request_graceful_termination, wait_for_child_exit};
 
@@ -644,6 +673,33 @@ mod tests {
             &"javascript:alert(1)".parse().unwrap()
         ));
         assert!(!is_external_web_url(&"file:///etc/passwd".parse().unwrap()));
+    }
+
+    #[test]
+    fn automatic_auth_opening_accepts_only_the_openai_authorization_endpoint() {
+        assert!(is_openai_authorization_url(
+            &"https://auth.openai.com/oauth/authorize?client_id=test&state=state"
+                .parse()
+                .unwrap()
+        ));
+        assert!(!is_openai_authorization_url(
+            &"https://evil.example/oauth/authorize?client_id=test"
+                .parse()
+                .unwrap()
+        ));
+        assert!(!is_openai_authorization_url(
+            &"javascript:alert(1)".parse().unwrap()
+        ));
+        assert!(!is_openai_authorization_url(
+            &"https://auth.openai.com/oauth/authorize?client_id=test#callback"
+                .parse()
+                .unwrap()
+        ));
+        assert!(!is_openai_authorization_url(
+            &"https://auth.openai.com:444/oauth/authorize?client_id=test"
+                .parse()
+                .unwrap()
+        ));
     }
 
     #[test]

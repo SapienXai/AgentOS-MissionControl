@@ -8,10 +8,9 @@ import {
   buildOpenClawSpawnEnv,
   resolveOpenClawSpawnInvocation
 } from "@/lib/openclaw/install";
-import { resolveOpenClawBin, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
+import { resolveOpenClawBin, runOpenClaw } from "@/lib/openclaw/cli";
 import { readOpenClawCodexPluginReady } from "@/lib/openclaw/application/model-provider-state-service";
-import { repairGatewayNativeDeviceAccess } from "@/lib/openclaw/application/settings-service";
-import { resolveLatestPendingDeviceRequestId } from "@/lib/openclaw/client/native-ws-gateway-protocol";
+import { validateOpenAiAuthorizationUrl } from "@/lib/openclaw/chatgpt-auth-url";
 import type {
   ChatGptBrowserAuthSnapshot
 } from "@/lib/agentos/contracts";
@@ -19,14 +18,13 @@ import type {
 const chatGptAuthTimeoutMs = 6 * 60_000;
 const pluginSetupTimeoutMs = 2 * 60_000;
 const chatGptAuthSessionRetentionMs = 10 * 60_000;
-const openAiAuthorizationUrlPattern = /https:\/\/auth\.openai\.com\/oauth\/authorize\S+/ig;
+const openAiAuthorizationUrlPattern = /https:\/\/auth\.openai\.com\/oauth\/authorize[^\s"'<>]*/ig;
 const openClawPtyRunnerPath = join(process.cwd(), "scripts", "openclaw-pty-runner.py");
 
-type ChatGptProviderAuthDependencies = {
+export type ChatGptProviderAuthDependencies = {
   platform: NodeJS.Platform;
   readPluginReady: () => Promise<boolean>;
   runSetupCommand: (args: string[], timeoutMs: number) => Promise<void>;
-  repairGatewayAccess: () => Promise<void>;
   runInteractiveLogin: (input: {
     force: boolean;
     signal?: AbortSignal;
@@ -67,16 +65,16 @@ const defaultDependencies: ChatGptProviderAuthDependencies = {
   platform: process.platform,
   readPluginReady: async () => await readOpenClawCodexPluginReady(),
   runSetupCommand: async (args, timeoutMs) => {
-    // The lifecycle service waits for native operator scopes during restart;
-    // this flow repairs those scopes immediately after the CLI restart.
     await runOpenClaw(args, { timeoutMs });
   },
-  repairGatewayAccess: repairChatGptGatewayAccess,
   runInteractiveLogin: runOpenClawChatGptInteractiveLogin
 };
 
-export async function startOpenClawChatGptBrowserAuth(input: { force?: boolean } = {}) {
-  if (process.platform !== "darwin") {
+export async function startOpenClawChatGptBrowserAuth(
+  input: { force?: boolean } = {},
+  dependencies: ChatGptProviderAuthDependencies = defaultDependencies
+) {
+  if (dependencies.platform !== "darwin") {
     throw new ChatGptBrowserAuthError(
       "Browser ChatGPT sign-in currently requires local AgentOS on macOS.",
       "chatgpt-auth-unsupported"
@@ -108,7 +106,7 @@ export async function startOpenClawChatGptBrowserAuth(input: { force?: boolean }
   };
 
   chatGptAuthSessions.set(session.sessionId, session);
-  session.completion = runBrowserAuthSession(session, input.force === true);
+  session.completion = runBrowserAuthSession(session, input.force === true, dependencies);
   void session.completion;
   scheduleChatGptAuthSessionCleanup(session.sessionId);
 
@@ -168,13 +166,17 @@ export function cancelOpenClawChatGptBrowserAuth(sessionId: string) {
   chatGptAuthSessions.delete(sessionId);
 }
 
-async function runBrowserAuthSession(session: ChatGptBrowserAuthSession, force: boolean) {
+async function runBrowserAuthSession(
+  session: ChatGptBrowserAuthSession,
+  force: boolean,
+  dependencies: ChatGptProviderAuthDependencies
+) {
   try {
-    await prepareChatGptProviderAuth(defaultDependencies);
+    await prepareChatGptProviderAuth(dependencies);
     session.state = "waiting-for-browser";
     session.message = "Open the ChatGPT sign-in page in the new browser tab.";
 
-    await defaultDependencies.runInteractiveLogin({
+    await dependencies.runInteractiveLogin({
       force,
       signal: session.abortController.signal,
       onChild: (child) => {
@@ -205,7 +207,7 @@ async function runBrowserAuthSession(session: ChatGptBrowserAuthSession, force: 
   }
 }
 
-async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAuthDependencies) {
+export async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAuthDependencies) {
   const pluginReady = await dependencies.readPluginReady().catch(() => false);
 
   if (!pluginReady) {
@@ -216,34 +218,7 @@ async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAuthDepen
     await dependencies.runSetupCommand(["gateway", "restart"], pluginSetupTimeoutMs);
   }
 
-  await dependencies.repairGatewayAccess();
   return !pluginReady;
-}
-
-/**
- * Repair the local OpenClaw device scope before starting OAuth. The native
- * probe creates the pending scope request; the local OpenClaw CLI approves it
- * because the current device may not yet have operator.pairing itself.
- */
-async function repairChatGptGatewayAccess() {
-  await repairGatewayNativeDeviceAccess({
-    approveLatest: async () => {
-      const pending = await runOpenClawJson<Record<string, unknown>>(
-        ["devices", "list", "--json"],
-        { timeoutMs: pluginSetupTimeoutMs }
-      );
-      const requestId = resolveLatestPendingDeviceRequestId(pending);
-
-      if (!requestId) {
-        throw new Error("No pending OpenClaw device access request found.");
-      }
-
-      return await runOpenClawJson<Record<string, unknown>>(
-        ["devices", "approve", requestId, "--json"],
-        { timeoutMs: pluginSetupTimeoutMs }
-      );
-    }
-  });
 }
 
 function toChatGptBrowserAuthSnapshot(session: ChatGptBrowserAuthSession): ChatGptBrowserAuthSnapshot {
@@ -267,15 +242,11 @@ export function extractOpenAiAuthorizationUrl(output: string) {
   const cleanOutput = output.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "");
 
   for (const match of cleanOutput.matchAll(openAiAuthorizationUrlPattern)) {
-    const candidate = match[0].replace(/[),.;]+$/g, "");
+    const candidate = match[0].replace(/[\])},.;]+$/g, "");
 
-    try {
-      const url = new URL(candidate);
-      if (url.protocol === "https:" && url.hostname === "auth.openai.com" && url.pathname === "/oauth/authorize") {
-        return url.toString();
-      }
-    } catch {
-      // Ignore partial or malformed terminal output.
+    const authorizationUrl = validateOpenAiAuthorizationUrl(candidate);
+    if (authorizationUrl) {
+      return authorizationUrl;
     }
   }
 
