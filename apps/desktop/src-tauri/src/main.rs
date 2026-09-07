@@ -374,9 +374,7 @@ fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String
 #[cfg_attr(not(test), allow(dead_code))]
 fn is_retryable_startup_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
-    lower.contains("eaddrinuse")
-        || lower.contains("address already in use")
-        || lower.contains("exited during startup")
+    lower.contains("eaddrinuse") || lower.contains("address already in use")
 }
 
 #[cfg(not(debug_assertions))]
@@ -630,12 +628,16 @@ mod tests {
         assert!(is_retryable_startup_error(
             "EADDRINUSE: address already in use"
         ));
-        assert!(is_retryable_startup_error(
+        assert!(!is_retryable_startup_error(
             "the packaged AgentOS server exited during startup"
         ));
         assert!(!is_retryable_startup_error(
             "the packaged AgentOS server or Node runtime is missing"
         ));
+        assert!(!is_retryable_startup_error(
+            "invalid packaged server configuration"
+        ));
+        assert!(!is_retryable_startup_error("permission denied"));
     }
 
     #[test]
