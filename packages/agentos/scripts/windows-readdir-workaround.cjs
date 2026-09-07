@@ -6,6 +6,18 @@ if (process.platform !== "win32") {
 
 const suppressedPaths = new Set();
 const retryableCodes = new Set(["EACCES", "ENOTDIR", "EPERM"]);
+const legacyProfileJunctionNames = new Set([
+  "application data",
+  "cookies",
+  "local settings",
+  "my documents",
+  "nethood",
+  "printhood",
+  "recent",
+  "sendto",
+  "start menu",
+  "templates"
+]);
 const originalReaddir = fs.readdir.bind(fs);
 const originalReaddirSync = fs.readdirSync.bind(fs);
 const originalPromisesReaddir = fs.promises.readdir.bind(fs.promises);
@@ -70,7 +82,16 @@ function shouldSuppressReaddirError(targetPath, error) {
   const normalizedPath = resolvedPath.replace(/\//g, "\\").toLowerCase();
   return normalizedPath.includes("\\microsoft\\windowsapps\\")
     || normalizedPath.endsWith(".exe")
-    || normalizedPath.endsWith("\\application data");
+    || isLegacyProfileJunctionPath(normalizedPath);
+}
+
+function isLegacyProfileJunctionPath(normalizedPath) {
+  const segments = normalizedPath.split("\\");
+
+  return segments.length === 4
+    && /^[a-z]:$/.test(segments[0])
+    && segments[1] === "users"
+    && legacyProfileJunctionNames.has(segments[3]);
 }
 
 function normalizePathValue(targetPath) {
