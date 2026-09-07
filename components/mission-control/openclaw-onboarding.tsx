@@ -299,6 +299,11 @@ export function OpenClawOnboarding({
       )}
     >
       <SetupBackground surfaceTheme={surfaceTheme} />
+      <div
+        aria-hidden="true"
+        data-tauri-drag-region="deep"
+        className="pointer-events-auto absolute inset-x-0 top-0 z-[1] h-16"
+      />
       <motion.div
         initial={{ opacity: 0, y: 18, scale: isMobileViewport ? 1 : 0.885 }}
         animate={{ opacity: 1, y: 0, scale: isMobileViewport ? 1 : 0.9 }}

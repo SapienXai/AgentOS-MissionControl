@@ -181,7 +181,7 @@ fn build_main_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std:
         builder = builder
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .hidden_title(true)
-            .traffic_light_position(LogicalPosition::new(16.0, 12.0));
+            .traffic_light_position(LogicalPosition::new(16.0, 18.0));
     }
 
     let window = builder.build()?;

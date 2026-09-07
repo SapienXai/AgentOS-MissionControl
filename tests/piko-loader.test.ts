@@ -17,7 +17,7 @@ test("Piko selects the macOS alpha asset and Chromium selects WebM alpha", () =>
 });
 
 test("Piko falls back when the selected transparent video cannot play", () => {
-  assert.equal(resolvePikoVideoSource("macos", () => ""), null);
+  assert.equal(resolvePikoVideoSource("macos", () => "")?.src, PIKO_VIDEO_SOURCES.macos.src);
   assert.equal(resolvePikoVideoSource("chromium", () => ""), null);
   assert.equal(resolvePikoVideoSource("other"), null);
 });
@@ -38,6 +38,20 @@ test("desktop bootstrap keeps the Piko startup surface asset-backed", async () =
   assert.match(source, /pikoLoader\.hevc\.mov/);
   assert.match(source, /pikoLoader\.webm/);
   assert.match(source, /showFallback/);
+});
+
+test("every Piko surface uses the generated macOS alpha asset", async () => {
+  const { readFile, stat } = await import("node:fs/promises");
+  const [source, loader, bootstrap] = await Promise.all([
+    readFile("lib/ui/piko-video-source.ts", "utf8"),
+    readFile("components/ui/piko-loader.tsx", "utf8"),
+    readFile("apps/desktop/bootstrap/index.html", "utf8")
+  ]);
+
+  assert.match(source, /src: "\/assets\/pikoLoader\.hevc\.mov"/);
+  assert.match(loader, /resolveRuntimePikoVideoSource/);
+  assert.match(bootstrap, /\/assets\/pikoLoader\.hevc\.mov/);
+  assert.ok((await stat("public/assets/pikoLoader.hevc.mov")).size > 0);
 });
 
 test("the macOS alpha generator preserves enclosed dark pixels through edge flood fill", async () => {

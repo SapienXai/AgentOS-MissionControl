@@ -39,7 +39,7 @@ test("desktop shell uses native macOS overlay titlebar without replacing traffic
 
   assert.match(mainWindowSource, /\.title_bar_style\(tauri::TitleBarStyle::Overlay\)/);
   assert.match(mainWindowSource, /\.hidden_title\(true\)/);
-  assert.match(mainWindowSource, /\.traffic_light_position\(LogicalPosition::new\(16\.0, 12\.0\)\)/);
+  assert.match(mainWindowSource, /\.traffic_light_position\(LogicalPosition::new\(16\.0, 18\.0\)\)/);
   assert.doesNotMatch(mainWindowSource, /\.decorations\(false\)/);
 });
 
@@ -52,6 +52,7 @@ test("declared drag regions stay on shell surfaces instead of the sidebar contro
   ]);
 
   assert.match(topbar, /data-tauri-drag-region="deep"/);
+  assert.match(shell, /data-tauri-drag-region="deep"[\s\S]*h-16/);
   assert.match(shell, /data-tauri-drag-region="deep"/);
   assert.match(onboarding, /data-tauri-drag-region="deep"/);
   assert.match(sidebar, /agentos-sidebar-surface/);

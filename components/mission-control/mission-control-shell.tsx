@@ -4404,8 +4404,9 @@ export function MissionControlShell({
 
         <SettingsControlCenter {...settingsPanelProps} sidebarOpen={isSidebarOpen} />
         <div
+          data-tauri-drag-region="deep"
           className={cn(
-            "pointer-events-none fixed top-0 z-40 hidden lg:block",
+            "pointer-events-auto fixed top-0 z-40 hidden h-16 lg:block",
             isSidebarOpen ? "lg:left-[316px]" : "lg:left-[80px]",
             "lg:right-[84px]"
           )}
@@ -4582,8 +4583,9 @@ export function MissionControlShell({
       </div>
 
       <div
+        data-tauri-drag-region="deep"
         className={cn(
-          "pointer-events-none absolute top-0 z-40 hidden lg:block",
+          "pointer-events-auto absolute top-0 z-40 hidden h-16 lg:block",
           isSidebarOpen ? "lg:left-[316px]" : "lg:left-[80px]",
           !isInspectorOpen && "lg:right-[76px]"
         )}

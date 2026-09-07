@@ -42,7 +42,10 @@ export function resolvePikoVideoSource(
   }
 
   const source = PIKO_VIDEO_SOURCES[platform];
-  if (canPlayType && !canPlayType(source.type)) {
+  // WKWebView can return an empty canPlayType result for HEVC alpha even when
+  // the packaged MOV is playable. Let the media element make the final call
+  // on macOS so its error event can activate the static fallback if needed.
+  if (platform !== "macos" && canPlayType && !canPlayType(source.type)) {
     return null;
   }
 
