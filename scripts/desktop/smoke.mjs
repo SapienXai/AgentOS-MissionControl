@@ -13,6 +13,7 @@ const repoRoot = path.resolve(scriptDir, "../..");
 const runtimeRoot = path.join(repoRoot, "apps", "desktop", "runtime");
 const targetPlatform = resolveTargetPlatform();
 const serverRoot = path.join(runtimeRoot, "agentos");
+const serverWrapperPath = path.join(serverRoot, "agentos-desktop-server.cjs");
 const nodePath = targetPlatform === "win32"
   ? path.join(runtimeRoot, "node", nodeExecutableName(targetPlatform))
   : path.join(runtimeRoot, "node", "bin", nodeExecutableName(targetPlatform));
@@ -21,9 +22,9 @@ const runtimeState = path.join(tempRoot, "agentos-state");
 const port = await reservePort();
 const apiToken = randomBytes(32).toString("hex");
 
-const child = spawn(nodePath, [path.join(serverRoot, "server.js")], {
+const child = spawn(nodePath, [serverWrapperPath], {
   cwd: serverRoot,
-  stdio: ["ignore", "pipe", "pipe"],
+  stdio: ["pipe", "pipe", "pipe"],
   env: {
     ...process.env,
     NODE_ENV: "production",
@@ -49,9 +50,10 @@ try {
     throw new Error(`AgentOS server did not bind to loopback only: ${binding.value}`);
   }
 
-  child.kill("SIGTERM");
+  child.stdin.write("shutdown\n");
+  child.stdin.end();
   const exit = await waitForExit(child);
-  if (exit !== 0 && exit !== 143) throw new Error(`AgentOS server did not exit cleanly after SIGTERM (code ${exit}).`);
+  if (exit !== 0 && exit !== 143) throw new Error(`AgentOS server did not exit cleanly after graceful shutdown (code ${exit}).`);
   console.log(`Desktop packaged-server smoke passed on ${process.platform}/${process.arch}; loopback binding ${binding.status}.`);
 } catch (error) {
   if (!child.killed) child.kill("SIGKILL");

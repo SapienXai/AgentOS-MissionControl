@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+
 export const DESKTOP_NODE_VERSION = process.env.AGENTOS_DESKTOP_NODE_VERSION?.trim() || "24.15.0";
 
 export function resolveTargetPlatform(value = process.env.AGENTOS_DESKTOP_TARGET_PLATFORM || process.platform) {
@@ -22,6 +25,51 @@ export function nodeArchiveName({ platform, arch, version = DESKTOP_NODE_VERSION
 
 export function nodeArchiveUrl({ platform, arch, version = DESKTOP_NODE_VERSION }) {
   return `https://nodejs.org/dist/v${version}/${nodeArchiveName({ platform, arch, version })}`;
+}
+
+export function nodeChecksumManifestUrl(version = DESKTOP_NODE_VERSION) {
+  return `https://nodejs.org/dist/v${version}/SHASUMS256.txt`;
+}
+
+export function parseSha256Manifest(manifestText, archiveName) {
+  let sawArchiveName = false;
+
+  for (const rawLine of String(manifestText).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const match = /^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/.exec(line);
+    if (line.includes(archiveName)) sawArchiveName = true;
+    if (!match || match[2] !== archiveName) continue;
+    return match[1].toLowerCase();
+  }
+
+  if (sawArchiveName) {
+    throw new Error(`Malformed SHA-256 checksum entry for ${archiveName}.`);
+  }
+
+  return null;
+}
+
+export async function sha256File(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+export async function verifySha256File(filePath, expectedChecksum) {
+  if (!/^[0-9a-f]{64}$/i.test(expectedChecksum)) {
+    throw new Error("Expected a 64-character SHA-256 checksum.");
+  }
+
+  const actualChecksum = await sha256File(filePath);
+  if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
+    throw new Error(`SHA-256 checksum mismatch for ${filePath}: expected ${expectedChecksum}, got ${actualChecksum}.`);
+  }
+
+  return actualChecksum;
 }
 
 export function isLoopbackHost(hostname) {

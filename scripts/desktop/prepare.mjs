@@ -1,6 +1,8 @@
-import { chmod, cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createWriteStream, statSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,8 +11,11 @@ import {
   nodeArchiveName,
   nodeArchiveUrl,
   nodeExecutableName,
+  nodeChecksumManifestUrl,
+  parseSha256Manifest,
   resolveTargetArch,
-  resolveTargetPlatform
+  resolveTargetPlatform,
+  verifySha256File
 } from "./runtime.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +24,8 @@ const desktopRoot = path.join(repoRoot, "apps", "desktop");
 const runtimeRoot = path.join(desktopRoot, "runtime");
 const agentosRuntimeRoot = path.join(runtimeRoot, "agentos");
 const nodeRuntimeRoot = path.join(runtimeRoot, "node");
+const serverWrapperSource = path.join(desktopRoot, "agentos-server-wrapper.cjs");
+const serverWrapperTarget = path.join(agentosRuntimeRoot, "agentos-desktop-server.cjs");
 const cacheRoot = path.join(repoRoot, ".desktop-cache");
 const targetPlatform = resolveTargetPlatform();
 const targetArch = resolveTargetArch();
@@ -35,6 +42,7 @@ if (process.env.AGENTOS_DESKTOP_SKIP_BUILD !== "1") {
 await rm(runtimeRoot, { recursive: true, force: true });
 await mkdir(agentosRuntimeRoot, { recursive: true });
 await copyDirectoryContents(path.join(repoRoot, "packages", "agentos", "bundle"), agentosRuntimeRoot);
+await cp(serverWrapperSource, serverWrapperTarget);
 await removeRuntimeEnvironmentFiles(agentosRuntimeRoot);
 
 const nodeRuntime = await resolveNodeRuntime();
@@ -52,10 +60,17 @@ if (targetPlatform !== "win32") {
 
 await writeFile(
   path.join(runtimeRoot, "metadata.json"),
-  `${JSON.stringify({ nodeVersion: DESKTOP_NODE_VERSION, platform: targetPlatform, arch: targetArch }, null, 2)}\n`
+  `${JSON.stringify({
+    nodeVersion: DESKTOP_NODE_VERSION,
+    platform: targetPlatform,
+    arch: targetArch,
+    nodeSource: nodeRuntime.source,
+    nodeSha256: nodeRuntime.sha256 ?? null
+  }, null, 2)}\n`
 );
 
 assertFile(path.join(agentosRuntimeRoot, "server.js"), "standalone AgentOS server");
+assertFile(serverWrapperTarget, "desktop server lifecycle wrapper");
 assertFile(path.join(agentosRuntimeRoot, ".next", "static"), "Next.js static assets");
 assertFile(path.join(agentosRuntimeRoot, "public"), "public assets");
 assertFile(nodeBinaryTarget, "packaged Node runtime");
@@ -66,12 +81,12 @@ async function resolveNodeRuntime() {
   const explicitBinary = process.env.AGENTOS_DESKTOP_NODE_BINARY?.trim();
   if (explicitBinary) {
     assertFile(explicitBinary, "AGENTOS_DESKTOP_NODE_BINARY");
-    return { binary: explicitBinary, root: inferNodeRuntimeRoot(explicitBinary) };
+    return { binary: explicitBinary, root: inferNodeRuntimeRoot(explicitBinary), source: "explicit-host" };
   }
 
   const hostMatchesTarget = process.platform === targetPlatform && process.arch === targetArch;
   if (process.env.AGENTOS_DESKTOP_USE_HOST_NODE === "1" && hostMatchesTarget) {
-    return { binary: process.execPath, root: inferNodeRuntimeRoot(process.execPath) };
+    return { binary: process.execPath, root: inferNodeRuntimeRoot(process.execPath), source: "host" };
   }
 
   if (process.env.AGENTOS_DESKTOP_USE_HOST_NODE === "1" && !hostMatchesTarget) {
@@ -86,24 +101,41 @@ async function resolveNodeRuntime() {
 async function downloadNodeRuntime() {
   const archiveName = nodeArchiveName({ platform: targetPlatform, arch: targetArch });
   const archivePath = path.join(cacheRoot, archiveName);
+  const manifestResponse = await fetch(nodeChecksumManifestUrl());
+  if (!manifestResponse.ok) {
+    throw new Error(`Unable to download the official Node checksum manifest (${manifestResponse.status} ${manifestResponse.statusText}).`);
+  }
+  const manifest = await manifestResponse.text();
+  const expectedChecksum = parseSha256Manifest(manifest, archiveName);
+  if (!expectedChecksum) {
+    throw new Error(`The official Node checksum manifest has no SHA-256 entry for ${archiveName}.`);
+  }
+
   await mkdir(cacheRoot, { recursive: true });
 
-  if (!(await pathExists(archivePath))) {
+  if (await pathExists(archivePath)) {
+    try {
+      await verifySha256File(archivePath, expectedChecksum);
+    } catch (error) {
+      await rm(archivePath, { force: true });
+      throw new Error(`Cached Node archive was removed after integrity verification failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else {
+    const temporaryArchivePath = `${archivePath}.download-${process.pid}`;
+    await rm(temporaryArchivePath, { force: true });
     const response = await fetch(nodeArchiveUrl({ platform: targetPlatform, arch: targetArch }));
     if (!response.ok || !response.body) {
       throw new Error(`Unable to download the official Node runtime (${response.status} ${response.statusText}).`);
     }
 
-    const output = createWriteStream(archivePath);
-    await new Promise(async (resolve, reject) => {
-      try {
-        for await (const chunk of response.body) output.write(chunk);
-        output.end(resolve);
-      } catch (error) {
-        output.destroy();
-        reject(error);
-      }
-    });
+    try {
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporaryArchivePath));
+      await verifySha256File(temporaryArchivePath, expectedChecksum);
+      await rename(temporaryArchivePath, archivePath);
+    } catch (error) {
+      await rm(temporaryArchivePath, { force: true });
+      throw new Error(`Downloaded Node archive failed integrity verification: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   const extractRoot = path.join(cacheRoot, `${archiveName}.extract`);
@@ -116,7 +148,7 @@ async function downloadNodeRuntime() {
     ? path.join(extractedRoot, "node.exe")
     : path.join(extractedRoot, "bin", nodeExecutableName(targetPlatform));
   assertFile(executable, "downloaded Node runtime");
-  return { binary: executable, root: extractedRoot };
+  return { binary: executable, root: extractedRoot, source: "official", sha256: expectedChecksum };
 }
 
 function inferNodeRuntimeRoot(binaryPath) {

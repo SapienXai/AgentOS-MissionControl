@@ -2,22 +2,24 @@
 
 #[cfg(not(debug_assertions))]
 use std::collections::VecDeque;
+#[cfg(windows)]
+use std::io::Write;
 #[cfg(not(debug_assertions))]
 use std::io::{BufRead, BufReader};
 #[cfg(not(debug_assertions))]
 use std::net::TcpListener;
+use std::process::Child;
+#[cfg(not(debug_assertions))]
+use std::process::Command;
 #[cfg(not(debug_assertions))]
 use std::process::Stdio;
-use std::process::{Child, Command};
 #[cfg(not(debug_assertions))]
 use std::sync::Arc;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
-#[cfg(not(debug_assertions))]
 use std::thread;
-#[cfg(not(debug_assertions))]
 use std::time::{Duration, Instant};
 
 use tauri::{
@@ -25,11 +27,17 @@ use tauri::{
     tray::TrayIconBuilder,
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_opener::OpenerExt;
 
 #[cfg(not(debug_assertions))]
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(not(debug_assertions))]
 const STARTUP_POLL: Duration = Duration::from_millis(250);
+#[cfg(not(debug_assertions))]
+const STARTUP_ATTEMPTS: usize = 4;
+#[cfg(not(debug_assertions))]
+const STARTUP_RETRY_DELAY: Duration = Duration::from_millis(150);
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 struct DesktopState {
     child: Mutex<Option<Child>>,
@@ -37,6 +45,7 @@ struct DesktopState {
     #[cfg(not(debug_assertions))]
     output: Arc<Mutex<VecDeque<String>>>,
     quitting: AtomicBool,
+    restarting: AtomicBool,
 }
 
 impl DesktopState {
@@ -47,6 +56,7 @@ impl DesktopState {
             #[cfg(not(debug_assertions))]
             output: Arc::new(Mutex::new(VecDeque::with_capacity(12))),
             quitting: AtomicBool::new(false),
+            restarting: AtomicBool::new(false),
         }
     }
 }
@@ -54,6 +64,7 @@ impl DesktopState {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(DesktopState::new());
             let _window = build_main_window(app)?;
@@ -113,7 +124,7 @@ fn build_main_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std:
             if is_allowed_navigation(url, port) {
                 true
             } else {
-                open_external_url(url.as_str());
+                open_external_url(&app_handle, url.as_str());
                 false
             }
         })
@@ -143,9 +154,11 @@ fn install_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
                 }
             }
             "restart" => {
-                app.state::<DesktopState>()
-                    .quitting
-                    .store(true, Ordering::SeqCst);
+                let state = app.state::<DesktopState>();
+                if state.restarting.swap(true, Ordering::SeqCst) {
+                    return;
+                }
+                state.quitting.store(true, Ordering::SeqCst);
                 shutdown_embedded_agentos(app);
                 tauri::process::restart(&app.env());
             }
@@ -178,26 +191,21 @@ fn is_allowed_navigation(url: &tauri::Url, allowed_port: Option<u16>) -> bool {
     loopback && url.port_or_known_default() == allowed_port
 }
 
-fn open_external_url(url: &str) {
+fn open_external_url(app: &AppHandle, url: &str) {
     let Ok(parsed) = url.parse::<tauri::Url>() else {
         return;
     };
-    if parsed.scheme() != "http:"
-        && parsed.scheme() != "https:"
-        && parsed.scheme() != "http"
-        && parsed.scheme() != "https"
-    {
+    if !is_external_web_url(&parsed) {
         return;
     }
 
-    #[cfg(target_os = "macos")]
-    let (command, args) = ("open", vec![url]);
-    #[cfg(target_os = "windows")]
-    let (command, args) = ("cmd", vec!["/C", "start", "", url]);
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let (command, args) = ("xdg-open", vec![url]);
+    if let Err(error) = app.opener().open_url(parsed.as_str(), None::<&str>) {
+        eprintln!("AgentOS could not open external URL: {error}");
+    }
+}
 
-    let _ = Command::new(command).args(args).spawn();
+fn is_external_web_url(url: &tauri::Url) -> bool {
+    matches!(url.scheme(), "http:" | "http" | "https:" | "https")
 }
 
 #[cfg(not(debug_assertions))]
@@ -220,13 +228,45 @@ fn start_embedded_agentos(app: AppHandle, window: WebviewWindow) {
         Err(error) => {
             eprintln!("AgentOS embedded server failed to start: {error}");
             shutdown_embedded_agentos(&app);
-            show_bootstrap_error(&window, &format!("AgentOS could not start. {error}"));
+            if !app.state::<DesktopState>().quitting.load(Ordering::SeqCst) {
+                show_bootstrap_error(&window, &format!("AgentOS could not start. {error}"));
+            }
         }
     });
 }
 
 #[cfg(not(debug_assertions))]
 fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), String> {
+    let mut last_error = String::from("unknown startup failure");
+
+    for attempt in 1..=STARTUP_ATTEMPTS {
+        match spawn_agentos_server_once(app) {
+            Ok(result) => return Ok(result),
+            Err(error) => {
+                last_error = error.clone();
+                shutdown_embedded_agentos(app);
+
+                if !is_retryable_startup_error(&error) || attempt == STARTUP_ATTEMPTS {
+                    return Err(format!(
+                        "startup attempt {attempt}/{STARTUP_ATTEMPTS} failed: {error}"
+                    ));
+                }
+
+                eprintln!(
+                    "AgentOS embedded server startup attempt {attempt}/{STARTUP_ATTEMPTS} failed; retrying with a new loopback port: {error}"
+                );
+                thread::sleep(STARTUP_RETRY_DELAY);
+            }
+        }
+    }
+
+    Err(format!(
+        "embedded AgentOS startup failed after {STARTUP_ATTEMPTS} attempts: {last_error}"
+    ))
+}
+
+#[cfg(not(debug_assertions))]
+fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String>), String> {
     let state = app.state::<DesktopState>();
     let port = reserve_loopback_port()?;
     let resource_dir = app
@@ -235,6 +275,7 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
         .map_err(|error| format!("resource directory unavailable: {error}"))?;
     let server_root = resource_dir.join("agentos-runtime").join("agentos");
     let server_path = server_root.join("server.js");
+    let server_wrapper_path = server_root.join("agentos-desktop-server.cjs");
     let node_path = resource_dir
         .join("agentos-runtime")
         .join("node")
@@ -244,8 +285,11 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
             "bin/node"
         });
 
-    if !server_path.is_file() || !node_path.is_file() {
-        return Err("the packaged AgentOS server or Node runtime is missing".to_string());
+    if !server_path.is_file() || !server_wrapper_path.is_file() || !node_path.is_file() {
+        return Err(
+            "the packaged AgentOS server, lifecycle wrapper, or Node runtime is missing"
+                .to_string(),
+        );
     }
 
     let runtime_dir = app
@@ -256,7 +300,7 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
         .map_err(|error| format!("could not create AgentOS data directory: {error}"))?;
 
     let mut child = Command::new(node_path)
-        .arg(server_path)
+        .arg(server_wrapper_path)
         .current_dir(&server_root)
         .env("NODE_ENV", "production")
         .env("HOSTNAME", "127.0.0.1")
@@ -264,13 +308,16 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
         .env("AGENTOS_PACKAGE_RUNTIME", "1")
         .env("AGENTOS_DESKTOP", "1")
         .env("AGENTOS_RUNTIME_DIR", &runtime_dir)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("could not launch the packaged AgentOS server: {error}"))?;
 
     let output = state.output.clone();
+    if let Ok(mut lines) = output.lock() {
+        lines.clear();
+    }
     capture_output(child.stdout.take(), output.clone());
     capture_output(child.stderr.take(), output.clone());
 
@@ -284,6 +331,10 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
     let readiness_url = format!("http://127.0.0.1:{port}/api/auth/status");
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     while Instant::now() < deadline {
+        if state.quitting.load(Ordering::SeqCst) {
+            return Err("desktop quit requested during AgentOS startup".to_string());
+        }
+
         {
             let mut guard = state
                 .child
@@ -294,9 +345,8 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
                     .try_wait()
                     .map_err(|error| format!("could not inspect AgentOS server: {error}"))?
                 {
-                    return Err(format!(
-                        "the packaged AgentOS server exited during startup ({status})"
-                    ));
+                    let diagnostics = snapshot_output(&state);
+                    return Err(format_startup_exit_error(status, &diagnostics));
                 }
             }
         }
@@ -321,6 +371,25 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
     Err("the packaged AgentOS server did not become ready within 60 seconds".to_string())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_retryable_startup_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("eaddrinuse")
+        || lower.contains("address already in use")
+        || lower.contains("exited during startup")
+}
+
+#[cfg(not(debug_assertions))]
+fn format_startup_exit_error(status: std::process::ExitStatus, diagnostics: &str) -> String {
+    if diagnostics.is_empty() {
+        return format!("the packaged AgentOS server exited during startup ({status})");
+    }
+
+    format!(
+        "the packaged AgentOS server exited during startup ({status}); diagnostics: {diagnostics}"
+    )
+}
+
 #[cfg(not(debug_assertions))]
 fn monitor_agentos_server(app: AppHandle, window: WebviewWindow) {
     thread::spawn(move || loop {
@@ -331,11 +400,16 @@ fn monitor_agentos_server(app: AppHandle, window: WebviewWindow) {
             .lock()
             .ok()
             .and_then(|mut guard| {
-                guard
+                let status = guard
                     .as_mut()
-                    .and_then(|child| child.try_wait().ok().flatten())
+                    .and_then(|child| child.try_wait().ok().flatten());
+                if status.is_some() {
+                    guard.take();
+                }
+                status
             });
         if let Some(status) = exited {
+            set_allowed_port(&app.state::<DesktopState>(), None);
             show_bootstrap_error(
                 &window,
                 &format!(
@@ -367,6 +441,15 @@ fn capture_output(
             }
         }
     });
+}
+
+#[cfg(not(debug_assertions))]
+fn snapshot_output(state: &DesktopState) -> String {
+    state
+        .output
+        .lock()
+        .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join(" | "))
+        .unwrap_or_default()
 }
 
 #[cfg(not(debug_assertions))]
@@ -414,15 +497,89 @@ fn shutdown_embedded_agentos(app: &AppHandle) {
         return;
     };
     let Some(mut child) = child.take() else {
+        set_allowed_port(&state, None);
         return;
     };
-    let _ = child.kill();
-    let _ = child.wait();
+
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = request_graceful_termination(&mut child);
+        if !wait_for_child_exit(&mut child, SHUTDOWN_GRACE) {
+            eprintln!(
+                "AgentOS embedded server exceeded the shutdown grace period; forcing termination."
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    set_allowed_port(&state, None);
+}
+
+fn wait_for_child_exit(child: &mut Child, grace: Duration) -> bool {
+    let deadline = Instant::now() + grace;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+            Ok(None) => return false,
+            Err(_) => return false,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn request_graceful_termination(child: &mut Child) -> bool {
+    unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) == 0 }
+}
+
+#[cfg(windows)]
+fn request_graceful_termination(child: &mut Child) -> bool {
+    // Windows has no portable POSIX signal equivalent. The packaged wrapper
+    // receives this command over stdin and emits the existing Next.js cleanup
+    // signal inside the server process. A non-wrapper child still gets the
+    // native termination fallback so tests and unexpected children cannot leak.
+    if let Some(stdin) = child.stdin.as_mut() {
+        if stdin
+            .write_all(b"shutdown\n")
+            .and_then(|_| stdin.flush())
+            .is_ok()
+        {
+            return true;
+        }
+    }
+
+    child.kill().is_ok()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn request_graceful_termination(child: &mut Child) -> bool {
+    child.kill().is_ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_navigation;
+    use std::process::{Child, Command};
+    use std::time::Duration;
+
+    use super::{is_allowed_navigation, is_external_web_url, is_retryable_startup_error};
+    use super::{request_graceful_termination, wait_for_child_exit};
+
+    fn spawn_test_child(command: &str) -> Child {
+        #[cfg(unix)]
+        {
+            Command::new("sh")
+                .args(["-c", command])
+                .spawn()
+                .expect("test child should start")
+        }
+
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", command])
+                .spawn()
+                .expect("test child should start")
+        }
+    }
 
     #[test]
     fn only_embedded_loopback_urls_are_allowed() {
@@ -446,5 +603,77 @@ mod tests {
             &"file:///etc/passwd".parse().unwrap(),
             Some(43123)
         ));
+        assert!(!is_allowed_navigation(
+            &"javascript:alert(1)".parse().unwrap(),
+            Some(43123)
+        ));
+        assert!(!is_allowed_navigation(
+            &"http://127.0.0.1.evil.example:43123/".parse().unwrap(),
+            Some(43123)
+        ));
+    }
+
+    #[test]
+    fn only_http_urls_are_candidates_for_external_opening() {
+        assert!(is_external_web_url(
+            &"https://example.com/path?q=1".parse().unwrap()
+        ));
+        assert!(is_external_web_url(&"http://example.com/".parse().unwrap()));
+        assert!(!is_external_web_url(
+            &"javascript:alert(1)".parse().unwrap()
+        ));
+        assert!(!is_external_web_url(&"file:///etc/passwd".parse().unwrap()));
+    }
+
+    #[test]
+    fn startup_retry_is_limited_to_process_address_collisions() {
+        assert!(is_retryable_startup_error(
+            "EADDRINUSE: address already in use"
+        ));
+        assert!(is_retryable_startup_error(
+            "the packaged AgentOS server exited during startup"
+        ));
+        assert!(!is_retryable_startup_error(
+            "the packaged AgentOS server or Node runtime is missing"
+        ));
+    }
+
+    #[test]
+    fn shutdown_wait_handles_an_already_exited_child() {
+        let mut child = spawn_test_child("exit 0");
+        assert!(wait_for_child_exit(&mut child, Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn shutdown_wait_observes_a_child_exiting_during_the_grace_period() {
+        let mut child = spawn_test_child(if cfg!(unix) {
+            "sleep 0.1"
+        } else {
+            "ping 127.0.0.1 -n 2 > nul"
+        });
+        assert!(wait_for_child_exit(&mut child, Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn shutdown_wait_has_a_bounded_grace_period_for_a_hung_child() {
+        let mut child = spawn_test_child(if cfg!(unix) {
+            "sleep 30"
+        } else {
+            "ping 127.0.0.1 -n 31 > nul"
+        });
+        assert!(!wait_for_child_exit(&mut child, Duration::from_millis(100)));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn graceful_termination_reaps_a_child_during_shutdown() {
+        let mut child = spawn_test_child(if cfg!(unix) {
+            "sleep 30"
+        } else {
+            "ping 127.0.0.1 -n 31 > nul"
+        });
+        assert!(request_graceful_termination(&mut child));
+        assert!(wait_for_child_exit(&mut child, Duration::from_secs(1)));
     }
 }
