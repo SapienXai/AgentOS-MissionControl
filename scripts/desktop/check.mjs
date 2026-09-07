@@ -26,6 +26,9 @@ const runtimeMetadata = JSON.parse(await readFile(path.join(runtimeRoot, "metada
 const requiredPaths = [
   path.join(desktopRoot, "bootstrap", "index.html"),
   path.join(desktopRoot, "bootstrap", "assets", "pikoLoader.webm"),
+  ...(targetPlatform === "darwin"
+    ? [path.join(desktopRoot, "bootstrap", "assets", "pikoLoader.hevc.mov")]
+    : []),
   path.join(desktopRoot, "src-tauri", "Cargo.toml"),
   path.join(desktopRoot, "src-tauri", "src", "main.rs"),
   path.join(runtimeRoot, "agentos", "server.js"),

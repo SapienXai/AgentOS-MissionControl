@@ -195,7 +195,7 @@ async function prepareBootstrapAssets() {
 
   const macAlphaSource = path.join(repoRoot, "public", "assets", "pikoLoader.hevc.mov");
   const macAlphaTarget = path.join(bootstrapAssetRoot, "pikoLoader.hevc.mov");
-  if (await pathExists(macAlphaSource)) {
+  if (targetPlatform === "darwin" && await pathExists(macAlphaSource)) {
     await cp(macAlphaSource, macAlphaTarget);
   } else {
     await rm(macAlphaTarget, { force: true });

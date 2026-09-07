@@ -39,3 +39,13 @@ test("desktop bootstrap keeps the Piko startup surface asset-backed", async () =
   assert.match(source, /pikoLoader\.webm/);
   assert.match(source, /showFallback/);
 });
+
+test("the macOS alpha generator preserves enclosed dark pixels through edge flood fill", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile("scripts/desktop/generate-piko-hevc-alpha.mjs", "utf8");
+
+  assert.match(source, /color 0,0 floodfill/);
+  assert.match(source, /hevc_videotoolbox/);
+  assert.match(source, /alpha_quality/);
+  assert.match(source, /pikoLoader\.hevc\.mov/);
+});

@@ -11,6 +11,7 @@
     "dev": "next dev",
     "desktop:dev": "tauri dev --config apps/desktop/src-tauri/tauri.conf.json",
     "desktop:prepare": "node scripts/desktop/prepare.mjs",
+    "desktop:generate-piko-alpha": "node scripts/desktop/generate-piko-hevc-alpha.mjs",
     "desktop:build": "pnpm desktop:prepare && tauri build --config apps/desktop/src-tauri/tauri.conf.json && pnpm desktop:audit",
     "desktop:check": "node scripts/desktop/check.mjs",
     "desktop:audit": "node scripts/desktop/audit.mjs",
