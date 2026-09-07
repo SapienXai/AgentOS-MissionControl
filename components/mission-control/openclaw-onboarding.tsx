@@ -304,7 +304,9 @@ export function OpenClawOnboarding({
         animate={{ opacity: 1, y: 0, scale: isMobileViewport ? 1 : 0.9 }}
         className={cn(
           "relative z-10 flex h-dvh w-full min-h-0 max-h-dvh max-w-none flex-col overflow-hidden rounded-none border-0 sm:h-auto sm:max-h-[calc(100dvh-32px)] sm:rounded-[18px] sm:border sm:backdrop-blur-2xl",
-          isChatGptAuthSurface ? "sm:max-w-[720px]" : "sm:max-w-[980px]",
+          isChatGptAuthSurface
+            ? "sm:max-w-[720px]"
+            : "sm:w-[min(1240px,calc(100vw-32px))] sm:max-w-[1240px]",
           surfaceTheme === "light"
             ? "bg-card text-foreground shadow-none sm:border-border/80 sm:bg-card/92 sm:shadow-[0_24px_70px_rgba(15,23,42,0.14)]"
             : "bg-background text-foreground shadow-none sm:border-primary/18 sm:bg-[hsl(var(--card)/0.88)] sm:shadow-[0_0_0_1px_hsl(var(--primary)/0.08),0_28px_90px_rgba(0,0,0,0.48)]"

@@ -113,6 +113,7 @@ export class OfficialOpenClawGatewayTransport {
     const hostDeps = options.hostDeps ?? createAgentOsGatewayClientHostDeps({
       stateDir: options.stateDir,
       sharedStateMode: options.sharedStateMode,
+      ensureDeviceIdentity: options.ensureDeviceIdentity,
       overrides: options.overrides
     });
     this.#requestedRole = options.role ?? "operator";

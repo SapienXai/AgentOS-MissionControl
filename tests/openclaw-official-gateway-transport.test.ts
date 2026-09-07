@@ -376,6 +376,33 @@ test("read-only official host dependencies read shared identity/auth without mut
   assert.equal(await readFile(authFile, "utf8"), beforeAuth);
 });
 
+test("repair host dependencies create and reuse OpenClaw device identity state", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "agentos-official-host-create-"));
+
+  try {
+    const deps = createAgentOsGatewayClientHostDeps({
+      stateDir,
+      sharedStateMode: "read-only",
+      ensureDeviceIdentity: true
+    });
+    const first = deps.loadOrCreateDeviceIdentity?.();
+    assert.ok(first);
+    assert.match(first.deviceId, /^[a-f0-9]{64}$/);
+    assert.match(first.publicKeyPem, /BEGIN PUBLIC KEY/);
+    assert.match(first.privateKeyPem, /BEGIN PRIVATE KEY/);
+
+    const persisted = JSON.parse(await readFile(join(stateDir, "identity", "device.json"), "utf8")) as {
+      deviceId?: string;
+      createdAtMs?: number;
+    };
+    assert.equal(persisted.deviceId, first.deviceId);
+    assert.equal(typeof persisted.createdAtMs, "number");
+    assert.deepEqual(deps.loadOrCreateDeviceIdentity?.(), first);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
 test("official device auth verifies the v3 challenge signature and persists rotated tokens only in managed-write mode", async () => {
   const stateDir = await mkdtemp(join(tmpdir(), "agentos-official-device-auth-"));
   const identityDir = join(stateDir, "identity");

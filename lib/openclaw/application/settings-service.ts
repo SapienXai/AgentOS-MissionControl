@@ -622,7 +622,10 @@ export async function repairGatewayNativeDeviceAccess(
 ): Promise<GatewayNativeDeviceAccessRepairResult> {
   const readDeviceAuthToken = options.readDeviceAuthToken ?? readLocalOpenClawDeviceAuthToken;
   const requiredScopes = normalizeGatewayRepairScopes(options.requiredScopes);
-  const nativeProbe = options.nativeProbe ?? assertGatewayNativeConfigMutationAccess;
+  const nativeProbe = options.nativeProbe ?? (() => assertGatewayNativeConfigMutationAccess({
+    includeDeviceIdentityWithExplicitAuth: true,
+    ensureDeviceIdentity: true
+  }));
   let probeSucceeded = false;
 
   try {
@@ -733,8 +736,14 @@ async function approveLatestOpenClawDeviceAccess(
   );
 }
 
-export async function assertGatewayNativeConfigMutationAccess() {
-  const client = createOpenClawGatewayClient();
+export async function assertGatewayNativeConfigMutationAccess(options: {
+  includeDeviceIdentityWithExplicitAuth?: boolean;
+  ensureDeviceIdentity?: boolean;
+} = {}) {
+  const client = createOpenClawGatewayClient({
+    includeDeviceIdentityWithExplicitAuth: options.includeDeviceIdentityWithExplicitAuth,
+    ensureDeviceIdentity: options.ensureDeviceIdentity
+  });
 
   try {
     return await client.callNative("config.schema.lookup", { path: "agents.entries" }, {

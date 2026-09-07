@@ -695,7 +695,9 @@ test("Gateway device repair probes admin-level config access instead of read-onl
     "utf8"
   );
 
-  assert.match(source, /options\.nativeProbe \?\? assertGatewayNativeConfigMutationAccess/);
+  assert.match(source, /options\.nativeProbe \?\? \(\(\) => assertGatewayNativeConfigMutationAccess/);
+  assert.match(source, /includeDeviceIdentityWithExplicitAuth: true/);
+  assert.match(source, /ensureDeviceIdentity: true/);
   assert.match(source, /callNative\("config\.schema\.lookup", \{ path: "agents\.entries" \}/);
   assert.doesNotMatch(source, /probeGatewayNativeStatusForDeviceAccessRepair/);
 });

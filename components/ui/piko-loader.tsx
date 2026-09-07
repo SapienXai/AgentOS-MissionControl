@@ -1,5 +1,6 @@
 "use client";
 
+import { LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
@@ -33,6 +34,7 @@ export function PikoLoader({ open, title, description, className }: PikoLoaderPr
     () => true,
     () => false
   );
+  const useTransparentVideo = mounted && supportsTransparentVideo();
   const loaderRef = useRef<HTMLDivElement | null>(null);
   const motionRef = useRef<LoaderMotion>({
     frame: null,
@@ -130,15 +132,25 @@ export function PikoLoader({ open, title, description, className }: PikoLoaderPr
       >
         <div className="piko-loader-float relative flex h-[90px] w-[90px] items-center justify-center sm:h-[107px] sm:w-[107px]">
           <div className="absolute inset-3 rounded-full bg-violet-400/20 blur-3xl" />
-          <video
-            className="relative h-full w-full object-contain drop-shadow-[0_18px_24px_rgba(0,0,0,0.5)]"
-            src="/assets/pikoLoader.webm"
-            autoPlay
-            loop
-            muted
-            playsInline
-            aria-hidden="true"
-          />
+          {useTransparentVideo ? (
+            <video
+              className="relative h-full w-full object-contain drop-shadow-[0_18px_24px_rgba(0,0,0,0.5)]"
+              src="/assets/pikoLoader.webm"
+              autoPlay
+              loop
+              muted
+              playsInline
+              aria-hidden="true"
+            />
+          ) : (
+            <span
+              className="relative flex h-[72%] w-[72%] items-center justify-center rounded-full border border-cyan-200/35 bg-[radial-gradient(circle_at_35%_30%,rgba(255,255,255,0.28),rgba(34,211,238,0.15)_42%,rgba(124,58,237,0.12)_72%,transparent)] shadow-[0_12px_30px_rgba(34,211,238,0.18)]"
+              aria-hidden="true"
+            >
+              <span className="absolute inset-2 rounded-full border border-cyan-100/25" />
+              <LoaderCircle className="h-8 w-8 animate-spin text-cyan-200" strokeWidth={1.6} />
+            </span>
+          )}
         </div>
         <div className="mt-0.5 rounded-md border border-border/70 bg-background/80 px-1.5 py-1 shadow-sm backdrop-blur-sm">
           <p className="font-display text-[10px] font-semibold tracking-[-0.02em] text-foreground">{title}</p>
@@ -148,4 +160,17 @@ export function PikoLoader({ open, title, description, className }: PikoLoaderPr
     </div>,
     document.body
   );
+}
+
+function supportsTransparentVideo() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent;
+  const isAppleWebKit = /AppleWebKit/i.test(userAgent) &&
+    !/(Chrome|Chromium|CriOS|Edg|OPR)/i.test(userAgent);
+  // macOS WebKit/WKWebView can decode VP9 WebM but paint its alpha channel
+  // as opaque black. Keep the loader transparent and legible on that path.
+  return !isAppleWebKit;
 }

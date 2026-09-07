@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -31,6 +31,8 @@ export type AgentOsGatewayClientHostOptions = {
   stateDir?: string;
   /** Read-only is safe for probes; managed-write enables fenced token rotation. */
   sharedStateMode?: "read-only" | "managed-write";
+  /** Repair probes may create OpenClaw's canonical local device identity when absent. */
+  ensureDeviceIdentity?: boolean;
   overrides?: GatewayClientHostDeps;
 };
 
@@ -51,8 +53,9 @@ type DeviceAuthSnapshot = {
 
 /**
  * Bridges the official package to AgentOS/OpenClaw state without making the
- * package aware of AgentOS storage. Identity creation is never delegated to
- * AgentOS here. Token writes require the explicit managed-write mode and are
+ * package aware of AgentOS storage. Identity creation is opt-in and writes
+ * OpenClaw's own canonical local identity state, never an AgentOS shadow
+ * identity. Token writes require the explicit managed-write mode and are
  * fenced against the token observed by this host before the connect attempt.
  */
 export function createAgentOsGatewayClientHostDeps(
@@ -64,7 +67,9 @@ export function createAgentOsGatewayClientHostDeps(
   const snapshots = new Map<string, DeviceAuthSnapshot>();
 
   const hostDeps: GatewayClientHostDeps = {
-    loadOrCreateDeviceIdentity: () => readDeviceIdentity(stateDir),
+    loadOrCreateDeviceIdentity: () => options.ensureDeviceIdentity
+      ? readOrCreateDeviceIdentity(stateDir)
+      : readDeviceIdentity(stateDir),
     signDevicePayload,
     publicKeyRawBase64UrlFromPem,
     loadDeviceAuthToken: ({ deviceId, role }) => {
@@ -95,7 +100,9 @@ export function createAgentOsGatewayClientHostDeps(
 
   // Do not let arbitrary host-dependency overrides bypass the identity or
   // token policy. The official package must use these exact AgentOS hooks.
-  hostDeps.loadOrCreateDeviceIdentity = () => readDeviceIdentity(stateDir);
+  hostDeps.loadOrCreateDeviceIdentity = () => options.ensureDeviceIdentity
+    ? readOrCreateDeviceIdentity(stateDir)
+    : readDeviceIdentity(stateDir);
   hostDeps.loadDeviceAuthToken = ({ deviceId, role }) => {
     const result = readDeviceAuthToken(stateDir, deviceId, role);
     snapshots.set(authSnapshotKey(deviceId, role), { token: result?.token ?? null });
@@ -127,6 +134,66 @@ function readDeviceIdentity(stateDir: string): DeviceIdentity | undefined {
   }
 
   return { deviceId, privateKeyPem, publicKeyPem };
+}
+
+function readOrCreateDeviceIdentity(stateDir: string): DeviceIdentity {
+  const existing = readDeviceIdentity(stateDir);
+  if (existing) {
+    return existing;
+  }
+
+  return withDeviceIdentityStateLock(stateDir, () => {
+    const concurrent = readDeviceIdentity(stateDir);
+    if (concurrent) {
+      return concurrent;
+    }
+
+    const identity = generateDeviceIdentity();
+    if (canonicalStateDatabaseExists(stateDir)) {
+      if (existsSync(join(stateDir, "identity", "device.json"))) {
+        throw new Error("OpenClaw legacy device identity needs doctor repair before native access can be created.");
+      }
+      return writeCanonicalDeviceIdentity(stateDir, identity);
+    }
+
+    const identityPath = join(stateDir, "identity", "device.json");
+    if (existsSync(identityPath)) {
+      throw new Error("OpenClaw device identity exists but could not be read safely.");
+    }
+
+    return writeDeviceIdentityFile(stateDir, identity);
+  });
+}
+
+function generateDeviceIdentity(): DeviceIdentity & { createdAtMs: number } {
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" }).toString().trim();
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" }).toString().trim();
+  const publicKeyRaw = Buffer.from(publicKeyRawBase64UrlFromPem(publicKeyPem), "base64url");
+
+  return {
+    deviceId: createHash("sha256").update(publicKeyRaw).digest("hex"),
+    privateKeyPem,
+    publicKeyPem,
+    createdAtMs: Date.now()
+  };
+}
+
+function writeDeviceIdentityFile(
+  stateDir: string,
+  identity: DeviceIdentity & { createdAtMs: number }
+): DeviceIdentity {
+  const identityDir = join(stateDir, "identity");
+  mkdirSync(identityDir, { recursive: true, mode: 0o700 });
+  const identityPath = join(identityDir, "device.json");
+  const temporaryPath = `${identityPath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(identity, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  renameSync(temporaryPath, identityPath);
+  return {
+    deviceId: identity.deviceId,
+    privateKeyPem: identity.privateKeyPem,
+    publicKeyPem: identity.publicKeyPem
+  };
 }
 
 function readDeviceAuthToken(
@@ -170,7 +237,7 @@ function fencedStoreDeviceAuthToken(
   }
 
   const key = authSnapshotKey(params.deviceId, params.role);
-  withDeviceAuthFileLock(stateDir, () => {
+  withDeviceIdentityStateLock(stateDir, () => {
     const current = readDeviceAuthToken(stateDir, params.deviceId, params.role);
     const expected = snapshots.get(key)?.token ?? null;
     if ((current?.token ?? null) !== expected) {
@@ -203,7 +270,7 @@ function fencedClearDeviceAuthToken(
   }
 
   const key = authSnapshotKey(params.deviceId, params.role);
-  withDeviceAuthFileLock(stateDir, () => {
+  withDeviceIdentityStateLock(stateDir, () => {
     const current = readDeviceAuthToken(stateDir, params.deviceId, params.role);
     const expected = snapshots.get(key)?.token ?? null;
     if ((current?.token ?? null) !== expected) {
@@ -260,6 +327,52 @@ function readCanonicalDeviceIdentity(stateDir: string): DeviceIdentity | undefin
   } catch {
     return undefined;
   }
+}
+
+function writeCanonicalDeviceIdentity(
+  stateDir: string,
+  identity: DeviceIdentity & { createdAtMs: number }
+): DeviceIdentity {
+  return withCanonicalStateDatabase(stateDir, (db) => {
+    db.exec("PRAGMA busy_timeout = 5000");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = db
+        .prepare("SELECT device_id, public_key_pem, private_key_pem FROM device_identities WHERE identity_key = ?")
+        .get("primary") as CanonicalDeviceIdentityRow | undefined;
+      if (existing) {
+        throw new Error("OpenClaw canonical device identity exists but could not be read safely.");
+      }
+
+      db.prepare(
+        "INSERT INTO device_identities (identity_key, device_id, public_key_pem, private_key_pem, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(
+        "primary",
+        identity.deviceId,
+        identity.publicKeyPem,
+        identity.privateKeyPem,
+        identity.createdAtMs,
+        identity.createdAtMs
+      );
+      db.exec("COMMIT");
+      return {
+        deviceId: identity.deviceId,
+        privateKeyPem: identity.privateKeyPem,
+        publicKeyPem: identity.publicKeyPem
+      };
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Preserve the original SQLite failure.
+      }
+      const concurrent = readCanonicalDeviceIdentity(stateDir);
+      if (concurrent) {
+        return concurrent;
+      }
+      throw error;
+    }
+  });
 }
 
 function readCanonicalDeviceAuthToken(
@@ -389,10 +502,10 @@ function writeDeviceAuthFile(stateDir: string, file: DeviceAuthFile) {
   renameSync(temporaryPath, authPath);
 }
 
-function withDeviceAuthFileLock(stateDir: string, callback: () => void) {
+function withDeviceIdentityStateLock<T>(stateDir: string, callback: () => T): T {
   const identityDir = join(stateDir, "identity");
   mkdirSync(identityDir, { recursive: true, mode: 0o700 });
-  const lockPath = join(identityDir, ".agentos-device-auth.lock");
+  const lockPath = join(identityDir, ".agentos-device-state.lock");
   let descriptor: number | null = null;
   const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 
@@ -413,7 +526,7 @@ function withDeviceAuthFileLock(stateDir: string, callback: () => void) {
   }
 
   try {
-    callback();
+    return callback();
   } finally {
     closeSync(descriptor);
     try {
