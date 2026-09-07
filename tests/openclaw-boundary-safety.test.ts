@@ -81,6 +81,7 @@ test("OpenClaw direct CLI JSON usage remains in documented fallback/discovery fi
     "lib/openclaw/cli.ts",
     "lib/openclaw/client/cli-gateway-client.ts",
     "lib/openclaw/application/channel-connect-service.ts",
+    "lib/openclaw/application/chatgpt-provider-auth-service.ts",
     "lib/openclaw/application/mobile-pairing-service.ts",
     "lib/openclaw/application/task-health-service.ts"
   ]);

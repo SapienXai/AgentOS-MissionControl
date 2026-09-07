@@ -8,9 +8,10 @@ import {
   buildOpenClawSpawnEnv,
   resolveOpenClawSpawnInvocation
 } from "@/lib/openclaw/install";
-import { resolveOpenClawBin, runOpenClaw } from "@/lib/openclaw/cli";
+import { resolveOpenClawBin, runOpenClaw, runOpenClawJson } from "@/lib/openclaw/cli";
 import { readOpenClawCodexPluginReady } from "@/lib/openclaw/application/model-provider-state-service";
-import { getOpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
+import { repairGatewayNativeDeviceAccess } from "@/lib/openclaw/application/settings-service";
+import { resolveLatestPendingDeviceRequestId } from "@/lib/openclaw/client/native-ws-gateway-protocol";
 import type {
   ChatGptBrowserAuthSnapshot
 } from "@/lib/agentos/contracts";
@@ -25,6 +26,7 @@ type ChatGptProviderAuthDependencies = {
   platform: NodeJS.Platform;
   readPluginReady: () => Promise<boolean>;
   runSetupCommand: (args: string[], timeoutMs: number) => Promise<void>;
+  repairGatewayAccess: () => Promise<void>;
   runInteractiveLogin: (input: {
     force: boolean;
     signal?: AbortSignal;
@@ -65,12 +67,11 @@ const defaultDependencies: ChatGptProviderAuthDependencies = {
   platform: process.platform,
   readPluginReady: async () => await readOpenClawCodexPluginReady(),
   runSetupCommand: async (args, timeoutMs) => {
-    if (args[0] === "gateway" && args[1] === "restart") {
-      await getOpenClawLifecycleService().restart();
-      return;
-    }
+    // The lifecycle service waits for native operator scopes during restart;
+    // this flow repairs those scopes immediately after the CLI restart.
     await runOpenClaw(args, { timeoutMs });
   },
+  repairGatewayAccess: repairChatGptGatewayAccess,
   runInteractiveLogin: runOpenClawChatGptInteractiveLogin
 };
 
@@ -207,16 +208,42 @@ async function runBrowserAuthSession(session: ChatGptBrowserAuthSession, force: 
 async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAuthDependencies) {
   const pluginReady = await dependencies.readPluginReady().catch(() => false);
 
-  if (pluginReady) {
-    return false;
+  if (!pluginReady) {
+    await dependencies.runSetupCommand(
+      ["plugins", "install", "--force", "--accept-capabilities", "@openclaw/codex"],
+      pluginSetupTimeoutMs
+    );
+    await dependencies.runSetupCommand(["gateway", "restart"], pluginSetupTimeoutMs);
   }
 
-  await dependencies.runSetupCommand(
-    ["plugins", "install", "--force", "--accept-capabilities", "@openclaw/codex"],
-    pluginSetupTimeoutMs
-  );
-  await dependencies.runSetupCommand(["gateway", "restart"], pluginSetupTimeoutMs);
-  return true;
+  await dependencies.repairGatewayAccess();
+  return !pluginReady;
+}
+
+/**
+ * Repair the local OpenClaw device scope before starting OAuth. The native
+ * probe creates the pending scope request; the local OpenClaw CLI approves it
+ * because the current device may not yet have operator.pairing itself.
+ */
+async function repairChatGptGatewayAccess() {
+  await repairGatewayNativeDeviceAccess({
+    approveLatest: async () => {
+      const pending = await runOpenClawJson<Record<string, unknown>>(
+        ["devices", "list", "--json"],
+        { timeoutMs: pluginSetupTimeoutMs }
+      );
+      const requestId = resolveLatestPendingDeviceRequestId(pending);
+
+      if (!requestId) {
+        throw new Error("No pending OpenClaw device access request found.");
+      }
+
+      return await runOpenClawJson<Record<string, unknown>>(
+        ["devices", "approve", requestId, "--json"],
+        { timeoutMs: pluginSetupTimeoutMs }
+      );
+    }
+  });
 }
 
 function toChatGptBrowserAuthSnapshot(session: ChatGptBrowserAuthSession): ChatGptBrowserAuthSnapshot {
@@ -303,13 +330,7 @@ export async function connectOpenClawChatGptProvider(
     );
   }
 
-  let pluginInstalled = false;
-  const pluginReady = await dependencies.readPluginReady().catch(() => false);
-
-  if (!pluginReady) {
-    await prepareChatGptProviderAuth(dependencies);
-    pluginInstalled = true;
-  }
+  const pluginInstalled = await prepareChatGptProviderAuth(dependencies);
 
   await dependencies.runInteractiveLogin({
     force: input.force === true,

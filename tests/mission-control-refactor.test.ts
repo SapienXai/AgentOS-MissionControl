@@ -107,6 +107,13 @@ test("ChatGPT onboarding explains a post-auth model refresh failure", () => {
   );
 });
 
+test("ChatGPT onboarding explains a missing OpenClaw device scope", () => {
+  assert.match(
+    resolveChatGptRecoveryMessage("OpenClaw Gateway rejected the request: missing scope: operator.read"),
+    /local device access needs operator scope/
+  );
+});
+
 test("ChatGPT onboarding preserves the browser-auth state machine", () => {
   assert.equal(
     resolveChatGptOnboardingState({

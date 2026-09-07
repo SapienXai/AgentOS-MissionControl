@@ -86,6 +86,10 @@ export function resolveChatGptRecoveryMessage(message?: string | null) {
     return "ChatGPT sign-in is available from the local AgentOS machine. Use another provider here, or sign in locally first.";
   }
 
+  if (/operator\.(?:admin|read|write|pairing)|device access|pending.*device/.test(normalized)) {
+    return "OpenClaw's local device access needs operator scope. Repair Gateway device access in Settings, then retry ChatGPT sign-in.";
+  }
+
   if (/cancel|interrupted/.test(normalized)) {
     return "ChatGPT sign-in was cancelled before OpenClaw could save the account.";
   }

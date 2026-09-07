@@ -23,6 +23,7 @@ test("ChatGPT provider auth extracts only the canonical OpenAI authorization URL
 
 test("ChatGPT provider auth runs OpenClaw login directly when the Codex plugin is ready", async () => {
   const setupCalls: string[][] = [];
+  const repairCalls: string[] = [];
   const loginCalls: Array<{ force: boolean }> = [];
 
   const result = await connectOpenClawChatGptProvider(
@@ -33,6 +34,9 @@ test("ChatGPT provider auth runs OpenClaw login directly when the Codex plugin i
       runSetupCommand: async (args) => {
         setupCalls.push(args);
       },
+      repairGatewayAccess: async () => {
+        repairCalls.push("repair");
+      },
       runInteractiveLogin: async (input) => {
         loginCalls.push({ force: input.force });
       }
@@ -40,6 +44,7 @@ test("ChatGPT provider auth runs OpenClaw login directly when the Codex plugin i
   );
 
   assert.deepEqual(setupCalls, []);
+  assert.deepEqual(repairCalls, ["repair"]);
   assert.deepEqual(loginCalls, [{ force: true }]);
   assert.deepEqual(result, {
     pluginInstalled: false,
@@ -58,6 +63,9 @@ test("ChatGPT provider auth installs and repairs the Codex plugin before login",
       runSetupCommand: async (args) => {
         calls.push(args.join(" "));
       },
+      repairGatewayAccess: async () => {
+        calls.push("repair gateway access");
+      },
       runInteractiveLogin: async (input) => {
         calls.push(`login force=${input.force}`);
       }
@@ -67,6 +75,7 @@ test("ChatGPT provider auth installs and repairs the Codex plugin before login",
   assert.deepEqual(calls, [
     "plugins install --force --accept-capabilities @openclaw/codex",
     "gateway restart",
+    "repair gateway access",
     "login force=false"
   ]);
   assert.equal(result.pluginInstalled, true);
@@ -80,6 +89,7 @@ test("ChatGPT provider auth fails honestly when in-app OAuth is unavailable", as
         platform: "linux",
         readPluginReady: async () => true,
         runSetupCommand: async () => {},
+        repairGatewayAccess: async () => {},
         runInteractiveLogin: async () => {}
       }
     ),
