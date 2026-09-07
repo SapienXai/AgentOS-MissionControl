@@ -65,5 +65,6 @@ export interface AgentRuntime {
   stop(): Promise<RuntimeStatus>;
   restart(): Promise<RuntimeStatus>;
   doctor(): Promise<RuntimeDoctorResult>;
+  getLogs(): Promise<RuntimeLogEntry[]>;
   subscribe(listener: (event: RuntimeEvent) => void): RuntimeSubscription;
 }

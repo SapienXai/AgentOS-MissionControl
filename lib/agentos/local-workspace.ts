@@ -29,3 +29,14 @@ export type OllamaStatus = {
   models: string[];
   reason: string | null;
 };
+
+export type TerminalSession = {
+  id: string;
+  workspaceId: string;
+  shell: string;
+};
+
+export type TerminalOutput = {
+  sessionId: string;
+  data: string;
+};

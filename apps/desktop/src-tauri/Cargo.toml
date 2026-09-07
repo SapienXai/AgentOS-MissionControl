@@ -1,0 +1,31 @@
+[package]
+name = "agentos-desktop"
+version = "0.1.0"
+description = "Native desktop application for AgentOS"
+authors = ["SapienXai"]
+edition = "2021"
+
+[lib]
+name = "agentos_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+updater = ["dep:tauri-plugin-updater"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.0", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-deep-link = "2.4.10"
+tauri-plugin-notification = "2.4.0"
+tauri-plugin-single-instance = { version = "2.4.4", features = ["deep-link"] }
+tauri-plugin-updater = { version = "2.11.0", optional = true }
+thiserror = "2"
+keyring = "4.2.0"
+portable-pty = "0.9.0"

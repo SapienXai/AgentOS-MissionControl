@@ -3,7 +3,13 @@ import nextTypescript from "eslint-config-next/typescript";
 
 const config = [
   {
-    ignores: ["**/.next/**", "packages/agentos/bundle/**", "deliverables/**"]
+    ignores: [
+      "**/.next/**",
+      "apps/desktop/dist/**",
+      "apps/desktop/src-tauri/target/**",
+      "packages/agentos/bundle/**",
+      "deliverables/**"
+    ]
   },
   ...nextVitals,
   ...nextTypescript,

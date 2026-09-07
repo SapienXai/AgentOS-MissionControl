@@ -1,6 +1,7 @@
 .DS_Store
 .env*.local
 /node_modules
+apps/desktop/node_modules
 /.next
 /.mission-control
 /.openclaw-release-intake
@@ -9,3 +10,10 @@
 /deliverables
 package-lock.json
 tsconfig.tsbuildinfo
+apps/desktop/dist
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+apps/desktop/src-tauri/tauri.release.generated.json
+apps/desktop/src-tauri/capabilities/release.generated.json
+.playwright-cli
+output/playwright

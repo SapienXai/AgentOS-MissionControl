@@ -10,6 +10,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "desktop:dev": "tauri dev --config apps/desktop/src-tauri/tauri.conf.json",
+    "desktop:build": "tauri build --config apps/desktop/src-tauri/tauri.conf.json",
+    "desktop:build:binary": "tauri build --config apps/desktop/src-tauri/tauri.conf.json --no-bundle",
+    "desktop:typecheck": "tsc --noEmit -p apps/desktop/tsconfig.json",
+    "desktop:web:dev": "vite --config apps/desktop/vite.config.ts",
+    "desktop:web:build": "vite build --config apps/desktop/vite.config.ts",
+    "desktop:release:config": "node scripts/prepare-desktop-release.mjs",
     "check:release": "node packages/agentos/scripts/check-release-consistency.mjs",
     "build:agentos-package": "pnpm check:release && node packages/agentos/scripts/run-prepack.mjs",
     "pack:agentos": "pnpm check:release && npm pack ./packages/agentos --pack-destination /tmp --cache /tmp/agentos-npm-cache",
@@ -48,6 +55,11 @@
     "publish:agentos": "pnpm check:release && npm publish ./packages/agentos --access public --cache /tmp/agentos-npm-cache"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-autostart": "^2.5.0",
+    "@tauri-apps/plugin-deep-link": "^2.4.0",
+    "@tauri-apps/plugin-notification": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "@openclaw/gateway-client": "2026.9.2",
     "@openclaw/gateway-protocol": "2026.9.2",
     "@radix-ui/react-avatar": "^1.1.3",
@@ -81,12 +93,15 @@
     "@types/react-dom": "^19.0.4",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
+    "@tauri-apps/cli": "^2.11.4",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.22.0",
     "eslint-config-next": "^16.2.0",
     "jiti": "1.21.7",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vite": "^8.2.2"
   }
 }

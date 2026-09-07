@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default least-privilege capability set for the AgentOS desktop window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "autostart:default",
+    "deep-link:default",
+    "notification:default"
+  ]
+}

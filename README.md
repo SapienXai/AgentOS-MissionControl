@@ -414,6 +414,26 @@ pnpm dev
 
 Open the URL printed by Next.js, usually `http://localhost:3000`.
 
+### Run the desktop app
+
+The desktop app is a standalone Tauri 2 + React/Vite surface. It does not
+embed the hosted AgentOS website and does not replace the Next.js web app.
+
+Desktop prerequisites are Node.js 24+, pnpm, Rust/Cargo, and the platform
+native build tools documented by Tauri. On macOS, install Xcode or the Xcode
+Command Line Tools; Windows requires the Microsoft C++ build tools; Linux
+requires the WebKitGTK development packages used by Tauri.
+
+```bash
+pnpm desktop:dev
+pnpm desktop:build
+pnpm desktop:typecheck
+```
+
+The local desktop frontend runs on `127.0.0.1:1420` during development. Native
+runtime and workspace operations are deliberately unavailable in a plain Vite
+browser preview; use `desktop:dev` to exercise the Tauri bridge.
+
 ### Quality checks
 
 ```bash
@@ -450,6 +470,7 @@ The release workflow builds and smoke-tests packages for:
 
 ```text
 app/                         Next.js routes and API surfaces
+apps/desktop/                Tauri 2 desktop frontend and native Rust shell
 components/mission-control/  Main operator interface
 components/operations/       Workers, jobs, models, and operational views
 hooks/                       Client data and workflow hooks
