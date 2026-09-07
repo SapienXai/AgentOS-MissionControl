@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { join } from "node:path";
+import { assertOAuthCallbackAvailable } from "@/lib/openclaw/application/oauth-callback-availability";
 
 import {
   buildOpenClawSpawnEnv,
@@ -60,6 +61,7 @@ export class ChatGptBrowserAuthError extends Error {
 }
 
 const chatGptAuthSessions = new Map<string, ChatGptBrowserAuthSession>();
+let authStartQueue: Promise<unknown> = Promise.resolve();
 
 const defaultDependencies: ChatGptProviderAuthDependencies = {
   platform: process.platform,
@@ -74,6 +76,15 @@ export async function startOpenClawChatGptBrowserAuth(
   input: { force?: boolean } = {},
   dependencies: ChatGptProviderAuthDependencies = defaultDependencies
 ) {
+  const started = authStartQueue.then(() => startBrowserAuthSession(input, dependencies));
+  authStartQueue = started.catch(() => {});
+  return started;
+}
+
+async function startBrowserAuthSession(
+  input: { force?: boolean },
+  dependencies: ChatGptProviderAuthDependencies
+) {
   if (dependencies.platform !== "darwin") {
     throw new ChatGptBrowserAuthError(
       "Browser ChatGPT sign-in currently requires local AgentOS on macOS.",
@@ -85,7 +96,7 @@ export async function startOpenClawChatGptBrowserAuth(
     !["completed", "error"].includes(session.state)
   );
 
-  if (activeSession && input.force !== true) {
+  if (activeSession && input.force !== true && !activeSession.abortController.signal.aborted) {
     return toChatGptBrowserAuthSnapshot(activeSession);
   }
 
@@ -166,7 +177,7 @@ export function cancelOpenClawChatGptBrowserAuth(sessionId: string) {
   }
 
   session.abortController.abort();
-  chatGptAuthSessions.delete(sessionId);
+  void session.completion.finally(() => chatGptAuthSessions.delete(sessionId));
 }
 
 async function runBrowserAuthSession(
@@ -176,6 +187,7 @@ async function runBrowserAuthSession(
 ) {
   try {
     await prepareChatGptProviderAuth(dependencies);
+    session.abortController.signal.throwIfAborted();
     session.state = "waiting-for-browser";
     session.message = "Open the ChatGPT sign-in page in the new browser tab.";
 
@@ -211,9 +223,11 @@ async function runBrowserAuthSession(
 }
 
 export async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAuthDependencies) {
-  const pluginReady = await dependencies.readPluginReady().catch(() => false);
+  // An unavailable Gateway is not evidence that a plugin is missing.
+  // Let the canonical login command verify provider support in that case.
+  const pluginReady = await dependencies.readPluginReady().catch(() => null);
 
-  if (!pluginReady) {
+  if (pluginReady === false) {
     await dependencies.runSetupCommand(
       ["plugins", "install", "--force", "--accept-capabilities", "@openclaw/codex"],
       pluginSetupTimeoutMs
@@ -221,7 +235,7 @@ export async function prepareChatGptProviderAuth(dependencies: ChatGptProviderAu
     await dependencies.runSetupCommand(["gateway", "restart"], pluginSetupTimeoutMs);
   }
 
-  return !pluginReady;
+  return pluginReady === false;
 }
 
 function toChatGptBrowserAuthSnapshot(session: ChatGptBrowserAuthSession): ChatGptBrowserAuthSnapshot {
@@ -325,6 +339,9 @@ async function runOpenClawChatGptInteractiveLogin(input: {
   onChild?: (child: ChildProcess) => void;
 }) {
   const openClawBin = await resolveOpenClawBin();
+  input.signal?.throwIfAborted();
+  await assertOAuthCallbackAvailable();
+  input.signal?.throwIfAborted();
   const args = [
     "models",
     "auth",
@@ -368,6 +385,7 @@ async function runOpenClawChatGptInteractiveLogin(input: {
     child.stdout?.on("data", handleOutput);
     child.stderr?.on("data", handleOutput);
     let settled = false;
+    let stopError: Error | null = null;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
 
     const terminate = (signal: NodeJS.Signals) => {
@@ -379,20 +397,20 @@ async function runOpenClawChatGptInteractiveLogin(input: {
       }
       child.kill(signal);
     };
-    const cleanup = (preserveKillTimer = false) => {
+    const cleanup = () => {
       clearTimeout(timeout);
-      if (killTimer && !preserveKillTimer) {
+      if (killTimer) {
         clearTimeout(killTimer);
         killTimer = null;
       }
       input.signal?.removeEventListener("abort", handleAbort);
     };
-    const finish = (handler: () => void, preserveKillTimer = false) => {
+    const finish = (handler: () => void) => {
       if (settled) {
         return;
       }
       settled = true;
-      cleanup(preserveKillTimer);
+      cleanup();
       handler();
     };
     const stop = () => {
@@ -401,32 +419,34 @@ async function runOpenClawChatGptInteractiveLogin(input: {
       killTimer.unref();
     };
     const handleAbort = () => {
+      if (stopError) return;
+      stopError = new Error("ChatGPT sign-in was cancelled.");
       stop();
-      finish(() => reject(new Error("ChatGPT sign-in was cancelled.")), true);
     };
     const timeout = setTimeout(() => {
+      if (stopError) return;
+      stopError = new Error("ChatGPT sign-in timed out. Close any stale authorization tab and try again.");
       stop();
-      finish(
-        () => reject(new Error("ChatGPT sign-in timed out. Close any stale authorization tab and try again.")),
-        true
-      );
     }, chatGptAuthTimeoutMs);
 
     if (input.signal?.aborted) {
       handleAbort();
-      return;
     }
     input.signal?.addEventListener("abort", handleAbort, { once: true });
 
     child.once("error", () => {
       finish(() => reject(new Error("OpenClaw could not start the in-app ChatGPT sign-in flow.")));
     });
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       if (killTimer) {
         clearTimeout(killTimer);
         killTimer = null;
       }
       if (settled) {
+        return;
+      }
+      if (stopError) {
+        finish(() => reject(stopError));
         return;
       }
       if (code === 0) {

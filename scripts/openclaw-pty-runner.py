@@ -7,6 +7,7 @@ import pty
 import select
 import signal
 import sys
+import time
 
 
 if len(sys.argv) < 2:
@@ -17,13 +18,19 @@ if len(sys.argv) < 2:
 child_pid = None
 master_fd = None
 child_status = None
+stop_started = None
 
 
 def forward_signal(signum, _frame):
+    global stop_started
+    if stop_started is None:
+        stop_started = time.monotonic()
     if child_pid is None:
         return
     try:
-        os.kill(child_pid, signum)
+        # pty.fork creates a new session. The CLI may spawn the actual
+        # callback listener beneath itself, so signal the entire PTY group.
+        os.killpg(child_pid, signum)
     except ProcessLookupError:
         pass
 
@@ -41,6 +48,8 @@ stdin_open = True
 
 try:
     while child_status is None:
+        if stop_started is not None and time.monotonic() - stop_started >= 0.75:
+            forward_signal(signal.SIGKILL, None)
         read_fds = [master_fd]
         if stdin_open:
             read_fds.append(stdin_fd)
@@ -70,16 +79,20 @@ try:
                 os.write(master_fd, data)
             else:
                 stdin_open = False
+                # The owning backend closed or crashed. Never leave OAuth
+                # and its callback listener alive after the pipe closes.
+                forward_signal(signal.SIGTERM, None)
 
         finished_pid, status = os.waitpid(child_pid, os.WNOHANG)
         if finished_pid == child_pid:
             child_status = status
 finally:
-    if child_status is None and child_pid is not None:
+    if child_pid is not None:
         try:
-            os.kill(child_pid, signal.SIGTERM)
+            os.killpg(child_pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    if child_status is None and child_pid is not None:
         _, child_status = os.waitpid(child_pid, 0)
 
     if master_fd is not None:

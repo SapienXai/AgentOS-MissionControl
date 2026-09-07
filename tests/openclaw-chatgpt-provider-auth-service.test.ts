@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   connectOpenClawChatGptProvider,
+  cancelOpenClawChatGptBrowserAuth,
   extractOpenAiAuthorizationUrl,
   getOpenClawChatGptBrowserAuth,
   prepareChatGptProviderAuth,
@@ -102,6 +103,19 @@ test("ChatGPT OAuth preparation reaches the interactive login boundary with shar
   assert.deepEqual(calls, []);
 });
 
+test("failed plugin status read never triggers a reinstall or Gateway restart", async () => {
+  let mutations = 0;
+  let logins = 0;
+  await connectOpenClawChatGptProvider({}, {
+    platform: "darwin",
+    readPluginReady: async () => { throw new Error("Gateway unavailable"); },
+    runSetupCommand: async () => { mutations += 1; },
+    runInteractiveLogin: async () => { logins += 1; }
+  });
+  assert.equal(mutations, 0);
+  assert.equal(logins, 1);
+});
+
 test("ChatGPT browser auth progresses from preparation to redirect wait and completion", async () => {
   const loginControl: { release?: () => void } = {};
   const authorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=test&state=state-123";
@@ -190,6 +204,34 @@ test("explicit ChatGPT retry aborts the previous session before starting another
   assert.notEqual(first.sessionId, second.sessionId);
   assert.equal(loginCount, 2);
   firstLogin.release?.();
+});
+
+test("concurrent starts share one child and cancellation waits for child completion", async () => {
+  let loginCount = 0;
+  let release: (() => void) | undefined;
+  const dependencies = {
+    platform: "darwin" as const,
+    readPluginReady: async () => true,
+    runSetupCommand: async () => {},
+    runInteractiveLogin: async () => {
+      loginCount += 1;
+      if (loginCount === 1) await new Promise<void>((resolve) => { release = resolve; });
+    }
+  };
+  const [first, duplicate] = await Promise.all([
+    startOpenClawChatGptBrowserAuth({}, dependencies),
+    startOpenClawChatGptBrowserAuth({}, dependencies)
+  ]);
+  assert.equal(first.sessionId, duplicate.sessionId);
+  assert.equal(loginCount, 1);
+  cancelOpenClawChatGptBrowserAuth(first.sessionId);
+  const next = startOpenClawChatGptBrowserAuth({}, dependencies);
+  await delay(0);
+  assert.equal(loginCount, 1);
+  release?.();
+  await next;
+  await delay(0);
+  assert.equal(loginCount, 2);
 });
 
 test("ChatGPT browser auth preserves a recoverable preparation failure", async () => {
