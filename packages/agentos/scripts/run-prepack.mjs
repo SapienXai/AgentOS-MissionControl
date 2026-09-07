@@ -39,7 +39,8 @@ function resolveBuildArgs() {
 }
 
 function appendNodePreload(existingOptions, preloadPath) {
-  const preloadOption = `--require "${preloadPath}"`;
+  const normalizedPreloadPath = preloadPath.replaceAll("\\", "/");
+  const preloadOption = `--require "${normalizedPreloadPath}"`;
 
   return existingOptions ? `${existingOptions} ${preloadOption}` : preloadOption;
 }
