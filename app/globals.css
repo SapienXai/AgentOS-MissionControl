@@ -178,6 +178,14 @@
       linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 100%);
   }
 
+  html[data-agentos-desktop-platform="macos"] .agentos-titlebar-surface {
+    padding-top: max(2.5rem, env(safe-area-inset-top)) !important;
+  }
+
+  html[data-agentos-desktop-platform="macos"] .agentos-sidebar-surface {
+    padding-top: 2.75rem;
+  }
+
   pre,
   code {
     @apply font-mono;

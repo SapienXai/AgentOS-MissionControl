@@ -2546,7 +2546,7 @@ function CollapsedSidebar({
   operatorProfile: OperatorProfileSummary;
 }) {
   return (
-    <aside className="relative flex h-full w-full flex-col items-center overflow-hidden border-r border-border bg-card px-1 py-4 text-card-foreground shadow-panel">
+    <aside className="agentos-sidebar-surface relative flex h-full w-full flex-col items-center overflow-hidden border-r border-border bg-card px-1 py-4 text-card-foreground shadow-panel">
       <button
         type="button"
         onClick={onExpandCollapsed}

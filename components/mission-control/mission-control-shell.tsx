@@ -147,6 +147,7 @@ import {
   submitChatGptBrowserAuth
 } from "@/lib/openclaw/model-provider-adapters";
 import { openExternalAuthUrl } from "@/lib/desktop/open-external-auth-url";
+import { syncTauriDesktopPlatformMarker } from "@/lib/desktop/window-platform";
 import { cn } from "@/lib/utils";
 
 const MissionCanvasView = dynamic(
@@ -275,6 +276,10 @@ export function MissionControlShell({
     safeLockedTaskKeys,
     clearPreferenceState
   } = useMissionControlPreferences();
+
+  useEffect(() => {
+    syncTauriDesktopPlatformMarker();
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -4641,7 +4646,10 @@ export function MissionControlShell({
           </div>
         ) : null}
 
-        <div className="pointer-events-none absolute left-[80px] top-6 z-10 hidden lg:block">
+        <div
+          data-tauri-drag-region="deep"
+          className="pointer-events-auto absolute left-[80px] top-6 z-10 hidden lg:block"
+        >
           <MissionControlCanvasTitlePill surfaceTheme={surfaceTheme} />
         </div>
 

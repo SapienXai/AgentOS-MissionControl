@@ -22,10 +22,14 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
+use tauri::LogicalPosition;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
+    webview::PageLoadEvent,
+    AppHandle, LogicalSize, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 #[cfg(not(debug_assertions))]
@@ -39,6 +43,8 @@ const STARTUP_POLL: Duration = Duration::from_millis(250);
 const STARTUP_ATTEMPTS: usize = 4;
 #[cfg(not(debug_assertions))]
 const STARTUP_RETRY_DELAY: Duration = Duration::from_millis(150);
+#[cfg(not(debug_assertions))]
+const MAIN_NAVIGATION_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 struct DesktopState {
@@ -48,6 +54,7 @@ struct DesktopState {
     output: Arc<Mutex<VecDeque<String>>>,
     quitting: AtomicBool,
     restarting: AtomicBool,
+    main_ready: AtomicBool,
 }
 
 impl DesktopState {
@@ -59,6 +66,7 @@ impl DesktopState {
             output: Arc::new(Mutex::new(VecDeque::with_capacity(12))),
             quitting: AtomicBool::new(false),
             restarting: AtomicBool::new(false),
+            main_ready: AtomicBool::new(false),
         }
     }
 }
@@ -70,20 +78,37 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![open_external_auth_url])
         .setup(|app| {
             app.manage(DesktopState::new());
-            let _window = build_main_window(app)?;
+            let window = build_main_window(app)?;
+
+            #[cfg(not(debug_assertions))]
+            build_splash_window(app)?;
+
             install_tray(app)?;
 
             #[cfg(not(debug_assertions))]
-            start_embedded_agentos(app.handle().clone(), _window.clone());
+            start_embedded_agentos(app.handle().clone(), window.clone());
 
             #[cfg(debug_assertions)]
-            set_allowed_port(&app.state::<DesktopState>(), Some(3000));
+            {
+                set_allowed_port(&app.state::<DesktopState>(), Some(3000));
+                let _ = window;
+            }
 
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.app_handle().state::<DesktopState>();
+
+                if window.label() == "splash" {
+                    if state.main_ready.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    state.quitting.store(true, Ordering::SeqCst);
+                    window.app_handle().exit(0);
+                    return;
+                }
+
                 if !state.quitting.load(Ordering::SeqCst) {
                     api.prevent_close();
                     let _ = window.hide();
@@ -110,12 +135,14 @@ fn build_main_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std:
         WebviewUrl::App("index.html".into())
     };
     let app_handle = app.handle().clone();
-    let window = WebviewWindowBuilder::new(app, "main", source)
+    let mut builder = WebviewWindowBuilder::new(app, "main", source)
         .title("AgentOS")
         .inner_size(1440.0, 920.0)
         .min_inner_size(980.0, 640.0)
         .resizable(true)
         .center()
+        .prevent_overflow_with_margin(LogicalSize::new(24.0, 24.0))
+        .visible(cfg!(debug_assertions))
         .on_navigation(move |url| {
             let port = app_handle
                 .state::<DesktopState>()
@@ -131,8 +158,52 @@ fn build_main_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std:
                 false
             }
         })
-        .build()?;
+        .on_page_load(|window, payload| {
+            if !matches!(payload.event(), PageLoadEvent::Finished) {
+                return;
+            }
+
+            let port = window
+                .app_handle()
+                .state::<DesktopState>()
+                .allowed_port
+                .lock()
+                .ok()
+                .and_then(|value| *value);
+
+            if is_ready_main_navigation(payload.url(), port) {
+                reveal_main_window(&window);
+            }
+        });
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .traffic_light_position(LogicalPosition::new(16.0, 12.0));
+    }
+
+    let window = builder.build()?;
     Ok(window)
+}
+
+#[cfg(not(debug_assertions))]
+fn build_splash_window(app: &mut tauri::App) -> Result<WebviewWindow, Box<dyn std::error::Error>> {
+    WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("index.html".into()))
+        .title("AgentOS")
+        .inner_size(360.0, 220.0)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .center()
+        .prevent_overflow()
+        .visible(true)
+        .build()
+        .map_err(Into::into)
 }
 
 fn install_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -151,9 +222,15 @@ fn install_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
         .tooltip("AgentOS")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if app
+                    .state::<DesktopState>()
+                    .main_ready
+                    .load(Ordering::SeqCst)
+                {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
                 }
             }
             "restart" => {
@@ -192,6 +269,24 @@ fn is_allowed_navigation(url: &tauri::Url, allowed_port: Option<u16>) -> bool {
     };
     let loopback = matches!(host, "127.0.0.1" | "localhost" | "::1");
     loopback && url.port_or_known_default() == allowed_port
+}
+
+fn is_ready_main_navigation(url: &tauri::Url, allowed_port: Option<u16>) -> bool {
+    url.scheme() != "tauri" && is_allowed_navigation(url, allowed_port)
+}
+
+fn reveal_main_window(window: &WebviewWindow) {
+    let state = window.app_handle().state::<DesktopState>();
+    if state.main_ready.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    if let Some(splash) = window.app_handle().get_webview_window("splash") {
+        let _ = splash.close();
+    }
 }
 
 fn open_external_url(app: &AppHandle, url: &str) {
@@ -250,9 +345,19 @@ fn start_embedded_agentos(app: AppHandle, window: WebviewWindow) {
             if let Ok(target) = authenticated_url.parse::<tauri::Url>() {
                 if let Err(error) = window.navigate(target) {
                     eprintln!("AgentOS WebView navigation failed: {error}");
+                    show_bootstrap_error(
+                        &window,
+                        "AgentOS could not load the application window after the local runtime became ready.",
+                    );
+                } else {
+                    watch_main_navigation(app.clone(), window.clone());
                 }
             } else {
                 eprintln!("AgentOS WebView navigation target could not be parsed: {url}");
+                show_bootstrap_error(
+                    &window,
+                    "AgentOS could not open its local application window.",
+                );
             }
             monitor_agentos_server(app, window);
         }
@@ -262,6 +367,27 @@ fn start_embedded_agentos(app: AppHandle, window: WebviewWindow) {
             if !app.state::<DesktopState>().quitting.load(Ordering::SeqCst) {
                 show_bootstrap_error(&window, &format!("AgentOS could not start. {error}"));
             }
+        }
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn watch_main_navigation(app: AppHandle, window: WebviewWindow) {
+    thread::spawn(move || {
+        let deadline = Instant::now() + MAIN_NAVIGATION_TIMEOUT;
+        loop {
+            let state = app.state::<DesktopState>();
+            if state.main_ready.load(Ordering::SeqCst) || state.quitting.load(Ordering::SeqCst) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                show_bootstrap_error(
+                    &window,
+                    "AgentOS could not finish loading its local application window.",
+                );
+                return;
+            }
+            thread::sleep(STARTUP_POLL);
         }
     });
 }
@@ -507,6 +633,7 @@ fn show_bootstrap_error(window: &WebviewWindow, message: &str) {
         "document.body.innerHTML = '<main style=\"margin:auto;max-width:28rem;padding:2rem;font-family:system-ui;color:#f8fafc;background:#0f121e;border:1px solid #334155;border-radius:1rem\"><h1>AgentOS</h1><p id=\"agentos-error\" style=\"color:#fda4af;line-height:1.5\"></p></main>'; document.getElementById('agentos-error').textContent = {encoded};"
     );
     let _ = window.eval(&script);
+    reveal_main_window(window);
 }
 
 #[cfg(not(debug_assertions))]
@@ -601,7 +728,7 @@ mod tests {
 
     use super::{
         build_authenticated_url, is_allowed_navigation, is_external_web_url,
-        is_openai_authorization_url, is_retryable_startup_error,
+        is_openai_authorization_url, is_ready_main_navigation, is_retryable_startup_error,
     };
     use super::{request_graceful_termination, wait_for_child_exit};
 
@@ -651,6 +778,24 @@ mod tests {
         ));
         assert!(!is_allowed_navigation(
             &"http://127.0.0.1.evil.example:43123/".parse().unwrap(),
+            Some(43123)
+        ));
+    }
+
+    #[test]
+    fn startup_reveals_main_only_after_embedded_runtime_navigation_loads() {
+        assert!(!is_ready_main_navigation(
+            &"tauri://localhost/index.html".parse().unwrap(),
+            Some(43123)
+        ));
+        assert!(is_ready_main_navigation(
+            &"http://127.0.0.1:43123/#agentos_token=redacted"
+                .parse()
+                .unwrap(),
+            Some(43123)
+        ));
+        assert!(!is_ready_main_navigation(
+            &"http://127.0.0.1:43124/".parse().unwrap(),
             Some(43123)
         ));
     }

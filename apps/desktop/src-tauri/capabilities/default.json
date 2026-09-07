@@ -1,7 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "identifier": "agentos-desktop-default",
-  "description": "The AgentOS desktop WebView has no application-defined native IPC permissions.",
+  "description": "The AgentOS desktop WebView may start dragging its assigned native window from declared titlebar regions.",
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "core:window:allow-start-dragging"
+  ]
 }

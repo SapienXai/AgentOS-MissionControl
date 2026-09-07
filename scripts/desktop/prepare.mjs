@@ -26,6 +26,8 @@ const agentosRuntimeRoot = path.join(runtimeRoot, "agentos");
 const nodeRuntimeRoot = path.join(runtimeRoot, "node");
 const serverWrapperSource = path.join(desktopRoot, "agentos-server-wrapper.cjs");
 const serverWrapperTarget = path.join(agentosRuntimeRoot, "agentos-desktop-server.cjs");
+const bootstrapRoot = path.join(desktopRoot, "bootstrap");
+const bootstrapAssetRoot = path.join(bootstrapRoot, "assets");
 const cacheRoot = path.join(repoRoot, ".desktop-cache");
 const targetPlatform = resolveTargetPlatform();
 const targetArch = resolveTargetArch();
@@ -44,6 +46,7 @@ await mkdir(agentosRuntimeRoot, { recursive: true });
 await copyDirectoryContents(path.join(repoRoot, "packages", "agentos", "bundle"), agentosRuntimeRoot);
 await cp(serverWrapperSource, serverWrapperTarget);
 await removeRuntimeEnvironmentFiles(agentosRuntimeRoot);
+await prepareBootstrapAssets();
 
 const nodeRuntime = await resolveNodeRuntime();
 const nodeBinaryTarget = targetPlatform === "win32"
@@ -180,6 +183,22 @@ async function copyNodeLibraries(sourceDir, targetDir) {
 async function removeRuntimeEnvironmentFiles(root) {
   for (const name of [".env", ".env.local", ".env.development", ".env.development.local", ".env.production", ".env.production.local", ".env.test", ".env.test.local"]) {
     await rm(path.join(root, name), { force: true });
+  }
+}
+
+async function prepareBootstrapAssets() {
+  await mkdir(bootstrapAssetRoot, { recursive: true });
+  await cp(
+    path.join(repoRoot, "public", "assets", "pikoLoader.webm"),
+    path.join(bootstrapAssetRoot, "pikoLoader.webm")
+  );
+
+  const macAlphaSource = path.join(repoRoot, "public", "assets", "pikoLoader.hevc.mov");
+  const macAlphaTarget = path.join(bootstrapAssetRoot, "pikoLoader.hevc.mov");
+  if (await pathExists(macAlphaSource)) {
+    await cp(macAlphaSource, macAlphaTarget);
+  } else {
+    await rm(macAlphaTarget, { force: true });
   }
 }
 

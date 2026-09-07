@@ -6,24 +6,70 @@
     <title>AgentOS</title>
     <style>
       :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #090b12; color: #f8fafc; }
-      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: radial-gradient(circle at 50% 25%, #242044 0, #090b12 58%); }
-      main { width: min(28rem, calc(100vw - 3rem)); padding: 2rem; border: 1px solid rgba(255,255,255,.12); border-radius: 1rem; background: rgba(15, 18, 30, .84); box-shadow: 0 24px 80px rgba(0,0,0,.35); }
-      h1 { margin: 0 0 .75rem; font-size: 1.25rem; letter-spacing: -.02em; }
-      p { margin: 0; color: rgba(226,232,240,.72); font-size: .9rem; line-height: 1.5; }
-      [data-error] { color: #fda4af; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; overflow: hidden; background: radial-gradient(circle at 50% 25%, #242044 0, #090b12 58%); }
+      main { display: grid; place-items: center; width: 100%; min-height: 100vh; }
+      .piko { position: relative; display: grid; width: 112px; height: 112px; place-items: center; }
+      .piko::before { position: absolute; inset: 16px; border-radius: 999px; background: rgba(167, 139, 250, .2); filter: blur(24px); content: ""; }
+      .piko video { position: relative; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 18px 24px rgba(0,0,0,.5)); }
+      .piko-fallback { position: relative; display: grid; width: 72px; height: 72px; place-items: center; border: 1px solid rgba(165, 243, 252, .35); border-radius: 999px; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.28), rgba(34,211,238,.15) 42%, rgba(124,58,237,.12) 72%, transparent); box-shadow: 0 12px 30px rgba(34,211,238,.18); }
+      .piko-fallback::before { position: absolute; inset: 8px; border: 1px solid rgba(207, 250, 254, .25); border-radius: 999px; content: ""; }
+      .piko-fallback::after { width: 22px; height: 22px; border: 2px solid rgba(165,243,252,.3); border-right-color: rgba(165,243,252,.95); border-radius: 999px; content: ""; animation: spin 1s linear infinite; }
+      .hidden { display: none !important; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .piko-fallback::after { animation-duration: 2.5s; } }
+      [data-error] { width: min(28rem, calc(100vw - 3rem)); padding: 2rem; border: 1px solid rgba(255,255,255,.12); border-radius: 1rem; background: rgba(15, 18, 30, .84); box-shadow: 0 24px 80px rgba(0,0,0,.35); color: #fda4af; line-height: 1.5; }
     </style>
   </head>
   <body>
-    <main aria-live="polite">
-      <h1>AgentOS</h1>
-      <p id="status">Starting AgentOS…</p>
+    <main aria-live="polite" aria-label="Starting AgentOS">
+      <div class="piko" aria-hidden="true">
+        <video id="piko-video" autoplay loop muted playsinline preload="auto"></video>
+        <span id="piko-fallback" class="piko-fallback hidden"></span>
+      </div>
     </main>
     <script>
+      const video = document.getElementById("piko-video");
+      const fallback = document.getElementById("piko-fallback");
+      const piko = document.querySelector(".piko");
+      const platform = (navigator.userAgentData?.platform || navigator.platform || "").toLowerCase();
+      const source = platform.includes("mac")
+        ? { src: "/assets/pikoLoader.hevc.mov", type: 'video/quicktime; codecs="hvc1"' }
+        : { src: "/assets/pikoLoader.webm", type: 'video/webm; codecs="vp09.00.10.08"' };
+      const showFallback = () => {
+        video.classList.add("hidden");
+        fallback.classList.remove("hidden");
+      };
+      video.src = source.src;
+      video.setAttribute("type", source.type);
+      video.addEventListener("error", showFallback, { once: true });
+      video.play().catch(showFallback);
+
+      let frame = 0;
+      let targetX = 0;
+      let targetY = 0;
+      let currentX = 0;
+      let currentY = 0;
+      window.addEventListener("pointermove", (event) => {
+        targetX = Math.max(-20, Math.min(20, (event.clientX - window.innerWidth / 2) / 18));
+        targetY = Math.max(-16, Math.min(16, (event.clientY - window.innerHeight / 2) / 22));
+        if (!frame) frame = requestAnimationFrame(movePiko);
+      }, { passive: true });
+      function movePiko() {
+        currentX += (targetX - currentX) * 0.12;
+        currentY += (targetY - currentY) * 0.12;
+        if (piko) piko.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+        frame = Math.abs(targetX - currentX) < 0.1 && Math.abs(targetY - currentY) < 0.1
+          ? 0
+          : requestAnimationFrame(movePiko);
+      }
+
       const error = new URLSearchParams(location.search).get("error");
       if (error) {
-        const status = document.getElementById("status");
+        document.querySelector("main").innerHTML = "";
+        const status = document.createElement("div");
         status.textContent = error;
         status.dataset.error = "true";
+        document.querySelector("main").append(status);
       }
     </script>
   </body>

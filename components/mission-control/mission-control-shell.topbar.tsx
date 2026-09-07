@@ -105,7 +105,10 @@ export function CanvasTopBar({
   const settingsThemeSwitchThumbStyles = settingsThemeSwitchThumbClassName(surfaceTheme);
 
   return (
-    <div className="flex w-full items-center px-0 pt-6">
+    <div
+      data-tauri-drag-region="deep"
+      className="pointer-events-auto flex w-full items-center px-0 pt-6"
+    >
       <div ref={settingsRef} className="pointer-events-auto relative ml-auto">
         <div
           className={cn(

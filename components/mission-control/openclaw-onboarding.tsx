@@ -313,7 +313,10 @@ export function OpenClawOnboarding({
         )}
       >
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="relative px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 sm:pt-6 lg:px-10">
+          <div
+            data-tauri-drag-region="deep"
+            className="agentos-titlebar-surface relative px-4 pt-[max(1rem,env(safe-area-inset-top))] sm:px-8 sm:pt-6 lg:px-10"
+          >
             <div className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 sm:right-8 sm:top-6 lg:right-10">
               <OnboardingThemeSwitch surfaceTheme={surfaceTheme} onToggleTheme={onToggleTheme} />
             </div>

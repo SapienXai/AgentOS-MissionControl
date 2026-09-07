@@ -30,3 +30,12 @@ test("Piko renders the static spinner after a transparent-video error", async ()
   assert.match(source, /videoSource && !videoFailed/);
   assert.match(source, /<LoaderCircle className=.*animate-spin/);
 });
+
+test("desktop bootstrap keeps the Piko startup surface asset-backed", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile("apps/desktop/bootstrap/index.html", "utf8");
+
+  assert.match(source, /pikoLoader\.hevc\.mov/);
+  assert.match(source, /pikoLoader\.webm/);
+  assert.match(source, /showFallback/);
+});

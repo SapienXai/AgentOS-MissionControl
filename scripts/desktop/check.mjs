@@ -25,6 +25,7 @@ const cargoManifest = await readFile(cargoPath, "utf8");
 const runtimeMetadata = JSON.parse(await readFile(path.join(runtimeRoot, "metadata.json"), "utf8"));
 const requiredPaths = [
   path.join(desktopRoot, "bootstrap", "index.html"),
+  path.join(desktopRoot, "bootstrap", "assets", "pikoLoader.webm"),
   path.join(desktopRoot, "src-tauri", "Cargo.toml"),
   path.join(desktopRoot, "src-tauri", "src", "main.rs"),
   path.join(runtimeRoot, "agentos", "server.js"),
@@ -56,8 +57,14 @@ if (JSON.stringify(permissions).match(/shell|fs|process/i)) {
   throw new Error("Desktop security configuration must not grant shell, filesystem, or process permissions to the WebView.");
 }
 
-if (!Array.isArray(capabilities.permissions) || capabilities.permissions.length !== 0) {
-  throw new Error("The AgentOS desktop WebView must keep application-defined Tauri permissions empty.");
+const allowedCapabilityPermissions = ["core:window:allow-start-dragging"];
+if (
+  !Array.isArray(capabilities.permissions)
+  || JSON.stringify(capabilities.permissions) !== JSON.stringify(allowedCapabilityPermissions)
+) {
+  throw new Error(
+    "The AgentOS desktop WebView may only keep the native window drag permission enabled."
+  );
 }
 
 await auditTree(runtimeRoot);
