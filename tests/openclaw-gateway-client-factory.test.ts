@@ -175,7 +175,7 @@ test("official Gateway auth refresh exposes post-OAuth ChatGPT models to AgentOS
 
     const client = getOpenClawGatewayClient();
     const staleAuth = await client.call<{ providers: unknown[] }>("models.authStatus", {});
-    const refreshedAuth = await client.call<{ providers: unknown[] }>("models.authStatus", { refresh: true });
+    const refreshedAuth = await client.call<{ providers?: Array<{ provider?: string }> }>("models.authStatus", { refresh: true });
     const models = await client.listModels({ all: true, provider: "openai", refresh: true });
     const status = normalizeModelStatusPayload(refreshedAuth, models);
     const connection = buildModelStatusConnectionStatus("openai", status, []);

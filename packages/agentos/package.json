@@ -1,6 +1,6 @@
 {
   "name": "@sapienx/agentos",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "Gateway-first local AgentOS control plane for OpenClaw",
   "type": "module",
   "license": "MIT",
