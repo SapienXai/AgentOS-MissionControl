@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentOS",
+  "version": "0.7.7",
+  "identifier": "app.sapienx.agentos",
+  "build": {
+    "beforeDevCommand": {
+      "script": "pnpm dev --hostname 127.0.0.1 --port 3000",
+      "cwd": "../.."
+    },
+    "devUrl": "http://127.0.0.1:3000",
+    "frontendDist": "../bootstrap"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self' http://127.0.0.1:* http://localhost:*; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:*; script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:*; font-src 'self' data: http://127.0.0.1:* http://localhost:*"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQTc2OEM2MEEzNDU0MkYKUldRdlZEUUt4bWluWExjK2FEM0JOZG9CWDNXTy93NlRYMEo0Q1J3SWhsUlhraVdTYVZxcEhTZFYK",
+      "endpoints": [
+        "https://github.com/SapienXai/AgentOS/releases/latest/download/latest-{{target}}.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis", "appimage", "deb", "rpm"],
+    "resources": {
+      "../runtime/agentos": "agentos-runtime/agentos",
+      "../runtime/node": "agentos-runtime/node",
+      "../bootstrap": "bootstrap"
+    },
+    "icon": ["icons/icon.png"],
+    "createUpdaterArtifacts": true
+  }
+}

@@ -1,0 +1,1 @@
+{"agentos-desktop-default":{"identifier":"agentos-desktop-default","description":"The AgentOS desktop WebView has no application-defined native IPC permissions.","local":true,"windows":["main"],"permissions":[]}}

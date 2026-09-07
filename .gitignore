@@ -6,6 +6,9 @@
 /.openclaw-release-intake
 /packages/agentos/bundle
 /packages/agentos/*.tgz
+/apps/desktop/runtime
+/.desktop-cache
+/apps/desktop/src-tauri/target
 /deliverables
 package-lock.json
 tsconfig.tsbuildinfo

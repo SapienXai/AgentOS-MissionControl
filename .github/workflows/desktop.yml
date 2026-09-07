@@ -1,0 +1,81 @@
+name: AgentOS Desktop
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-22.04
+          - name: macOS
+            os: macos-14
+          - name: Windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare packaged AgentOS and Node runtime
+        run: pnpm desktop:prepare
+
+      - name: Check desktop payload and permissions
+        run: pnpm desktop:check
+
+      - name: Smoke packaged AgentOS server
+        run: pnpm desktop:smoke
+
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Run Rust shell tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      - name: Build native desktop artifact
+        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm exec tauri build --config apps/desktop/src-tauri/tauri.conf.json
+
+      - name: Build unsigned native desktop artifact
+        if: secrets.TAURI_SIGNING_PRIVATE_KEY == ''
+        run: pnpm exec tauri build --config apps/desktop/src-tauri/tauri.conf.json --config apps/desktop/src-tauri/tauri.ci.conf.json
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: agentos-desktop-${{ runner.os }}-${{ runner.arch }}
+          path: apps/desktop/src-tauri/target/release/bundle
+          if-no-files-found: warn
