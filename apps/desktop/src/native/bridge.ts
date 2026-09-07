@@ -5,6 +5,7 @@ import { check as checkForUpdate, type Update } from "@tauri-apps/plugin-updater
 
 import type { GitSummary, LocalWorkspace, OllamaStatus, TerminalOutput, TerminalSession, WorkspaceEntry } from "@/lib/agentos/local-workspace";
 import type { PlatformCapabilities } from "@/lib/agentos/platform";
+import type { DesktopPreferences, DesktopProductSnapshot } from "@/lib/agentos/product-contract";
 import type { RuntimeLogEntry, RuntimeStatus } from "@/lib/agentos/runtime-contract";
 
 export type DesktopPlatformInfo = {
@@ -32,10 +33,20 @@ export async function stopRuntime() { return invoke<RuntimeStatus>("runtime_stop
 export async function restartRuntime() { return invoke<RuntimeStatus>("runtime_restart").catch(toDesktopError); }
 export async function runRuntimeDoctor() { return invoke<{ summary: string; issues: string[]; status: RuntimeStatus }>("runtime_doctor").catch(toDesktopError); }
 export async function getRuntimeLogs() { return invoke<RuntimeLogEntry[]>("runtime_logs").catch(toDesktopError); }
+export async function getDesktopProductSnapshot() { return invoke<DesktopProductSnapshot>("product_snapshot").catch(toDesktopError); }
+export async function getDesktopPreferences() { return invoke<DesktopPreferences>("desktop_preferences").catch(toDesktopError); }
+export async function saveDesktopPreferences(preferences: DesktopPreferences) { return invoke<void>("desktop_preferences_save", { preferences }).catch(toDesktopError); }
 
 export async function subscribeToRuntimeLogs(listener: (entry: RuntimeLogEntry) => void): Promise<UnlistenFn> {
   try {
     return await listen<RuntimeLogEntry>("runtime-log", (event) => listener(event.payload));
+  } catch (error) {
+    throw toDesktopError(error);
+  }
+}
+export async function subscribeToRuntimeRefresh(listener: () => void): Promise<UnlistenFn> {
+  try {
+    return await listen("runtime-refresh-requested", () => listener());
   } catch (error) {
     throw toDesktopError(error);
   }
@@ -58,6 +69,13 @@ export async function killTerminal(sessionId: string) { return invoke<void>("ter
 export async function subscribeToTerminalOutput(listener: (output: TerminalOutput) => void): Promise<UnlistenFn> {
   try {
     return await listen<TerminalOutput>("terminal-output", (event) => listener(event.payload));
+  } catch (error) {
+    throw toDesktopError(error);
+  }
+}
+export async function subscribeToTerminalExit(listener: (sessionId: string) => void): Promise<UnlistenFn> {
+  try {
+    return await listen<string>("terminal-exit", (event) => listener(event.payload));
   } catch (error) {
     throw toDesktopError(error);
   }

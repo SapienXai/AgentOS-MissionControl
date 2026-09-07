@@ -24,7 +24,7 @@ export class OpenClawRuntimeAdapter implements AgentRuntime {
     const { capabilities } = await getPlatformInfo();
     return {
       ...capabilities,
-      browser: true,
+      browser: false,
       memory: true,
       skills: true,
       multiAgent: true,

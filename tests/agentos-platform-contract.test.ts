@@ -8,6 +8,7 @@ import {
 } from "@/lib/agentos/platform";
 import type { AgentRuntime, RuntimeStatus } from "@/lib/agentos/runtime-contract";
 import { RuntimeRegistry } from "@/lib/agentos/runtime-registry";
+import type { DesktopProductSnapshot } from "@/lib/agentos/product-contract";
 
 test("platform capabilities keep native authority out of the web surface", () => {
   assert.equal(getPlatformCapabilities("web"), WEB_PLATFORM_CAPABILITIES);
@@ -79,4 +80,35 @@ test("runtime registry only exposes explicitly registered providers", () => {
   assert.deepEqual(registry.list().map((item) => item.id), ["openclaw-local"]);
   assert.equal(registry.get("hermes-local"), undefined);
   assert.throws(() => registry.register(runtime), /already registered/);
+});
+
+test("desktop product contract requires an explicit local OpenClaw target", () => {
+  const snapshot: DesktopProductSnapshot = {
+    generatedAt: "0",
+    source: "openclaw-cli",
+    mode: "degraded",
+    reason: "Gateway readiness is not verified.",
+    issues: [],
+    agents: [],
+    missions: [],
+    approvals: [],
+    activity: [],
+    models: [],
+    skills: [],
+    memory: { available: false, indexedFiles: 0, dirty: false, reason: null },
+    executionTargets: [{
+      id: "this-computer-openclaw",
+      label: "This Computer · OpenClaw",
+      runtimeId: "openclaw-local",
+      location: "local",
+      status: "degraded",
+      capabilities: { filesystem: true, terminal: true, browser: false, memory: false, skills: false, multiAgent: false }
+    }],
+    connections: [],
+    connectivity: { cliInstalled: true, gatewayReachable: true, gatewayReady: false, reason: "Gateway is not ready." }
+  };
+
+  assert.equal(snapshot.source, "openclaw-cli");
+  assert.equal(snapshot.executionTargets[0]?.label, "This Computer · OpenClaw");
+  assert.equal(snapshot.executionTargets[0]?.capabilities.browser, false);
 });
