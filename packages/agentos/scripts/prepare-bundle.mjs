@@ -29,6 +29,10 @@ await cp(
   path.join(repoRoot, "scripts", "openclaw-windows-hide.cjs"),
   path.join(bundleDir, "scripts", "openclaw-windows-hide.cjs")
 );
+await cp(
+  path.join(repoRoot, "scripts", "openclaw-pty-runner.py"),
+  path.join(bundleDir, "scripts", "openclaw-pty-runner.py")
+);
 await removeLocalRuntimeFiles(bundleDir);
 await removeDotStoreFiles(bundleDir);
 

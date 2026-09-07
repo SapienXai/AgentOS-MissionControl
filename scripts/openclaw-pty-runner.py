@@ -87,11 +87,28 @@ try:
         if finished_pid == child_pid:
             child_status = status
 finally:
+    # PTY EOF can arrive just before waitpid reports the child's natural exit.
+    # Reap that exit before cleaning descendants so cleanup cannot turn a
+    # successfully persisted OAuth login into a failed command.
+    if child_status is None and child_pid is not None:
+        exit_deadline = time.monotonic() + 0.75
+        while time.monotonic() < exit_deadline:
+            finished_pid, status = os.waitpid(child_pid, os.WNOHANG)
+            if finished_pid == child_pid:
+                child_status = status
+                break
+            time.sleep(0.01)
+
     if child_pid is not None:
         try:
             os.killpg(child_pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin may return EPERM for the empty group of an exited child.
+            # Never suppress it while the owned child is still running.
+            if child_status is None:
+                raise
     if child_status is None and child_pid is not None:
         _, child_status = os.waitpid(child_pid, 0)
 

@@ -5,6 +5,28 @@ import { createServer } from "node:net";
 import { test } from "node:test";
 import { assertOAuthCallbackAvailable } from "@/lib/openclaw/application/oauth-callback-availability";
 
+for (const exitCode of [0, 7]) {
+  test(`PTY preserves natural exit ${exitCode} after final output`, {
+    skip: process.platform !== "darwin",
+    timeout: 10_000
+  }, async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const child = spawn("/usr/bin/python3", [
+        "scripts/openclaw-pty-runner.py", process.execPath, "-e",
+        `process.stdout.write('command finished\\n'); process.exit(${exitCode})`
+      ], { stdio: ["pipe", "pipe", "pipe"] });
+      let output = "";
+      let errors = "";
+      child.stdout.on("data", (chunk) => { output += String(chunk); });
+      child.stderr.on("data", (chunk) => { errors += String(chunk); });
+      const [code] = await once(child, "close");
+      assert.equal(code, exitCode, errors);
+      assert.match(output, /command finished/);
+      assert.equal(errors, "");
+    }
+  });
+}
+
 test("occupied callback port blocks a new OAuth attempt until released", async () => {
   const server = createServer((socket) => socket.end());
   server.listen(0, "127.0.0.1");
