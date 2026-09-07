@@ -53,6 +53,7 @@ test("browser builds keep a safe window.open fallback", async () => {
 test("packaged desktop builds route the validated URL through the narrow Tauri command", async () => {
   const originalWindow = globalThis.window;
   const calls: Array<{ command: string; args: unknown }> = [];
+  const tauriAuthorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=tauri&state=state-123";
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
@@ -67,13 +68,51 @@ test("packaged desktop builds route the validated URL through the narrow Tauri c
 
   try {
     assert.equal(isTauriDesktopRuntime(), true);
-    assert.equal(await openExternalAuthUrl(authorizationUrl), "tauri");
+    assert.equal(await openExternalAuthUrl(tauriAuthorizationUrl), "tauri");
     assert.deepEqual(calls, [
       {
         command: "open_external_auth_url",
-        args: { url: authorizationUrl }
+        args: { url: tauriAuthorizationUrl }
       }
     ]);
+  } finally {
+    if (originalWindow === undefined) {
+      delete (globalThis as { window?: unknown }).window;
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow
+      });
+    }
+  }
+});
+
+test("duplicate attempts for one authorization URL share one browser open", async () => {
+  const originalWindow = globalThis.window;
+  const calls: string[] = [];
+  const deduplicatedAuthorizationUrl = "https://auth.openai.com/oauth/authorize?client_id=dedupe&state=state-123";
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        invoke: async (_command: string, args: { url: string }) => {
+          calls.push(args.url);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      }
+    }
+  });
+
+  try {
+    assert.deepEqual(
+      await Promise.all([
+        openExternalAuthUrl(deduplicatedAuthorizationUrl),
+        openExternalAuthUrl(deduplicatedAuthorizationUrl)
+      ]),
+      ["tauri", "tauri"]
+    );
+    assert.deepEqual(calls, [deduplicatedAuthorizationUrl]);
   } finally {
     if (originalWindow === undefined) {
       delete (globalThis as { window?: unknown }).window;

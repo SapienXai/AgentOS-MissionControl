@@ -60,7 +60,10 @@ if (JSON.stringify(permissions).match(/shell|fs|process/i)) {
   throw new Error("Desktop security configuration must not grant shell, filesystem, or process permissions to the WebView.");
 }
 
-const allowedCapabilityPermissions = ["core:window:allow-start-dragging"];
+const allowedCapabilityPermissions = [
+  "core:window:allow-start-dragging",
+  "opener:allow-default-urls"
+];
 if (
   !Array.isArray(capabilities.permissions)
   || JSON.stringify(capabilities.permissions) !== JSON.stringify(allowedCapabilityPermissions)

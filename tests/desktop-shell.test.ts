@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 const repoRoot = process.cwd();
 
-test("desktop capability grants only the native drag permission", async () => {
+test("desktop capability grants only window drag and default URL permissions", async () => {
   const capability = JSON.parse(
     await readFile(
       join(repoRoot, "apps/desktop/src-tauri/capabilities/default.json"),
@@ -14,7 +14,10 @@ test("desktop capability grants only the native drag permission", async () => {
   ) as { windows: string[]; permissions: string[] };
 
   assert.deepEqual(capability.windows, ["main"]);
-  assert.deepEqual(capability.permissions, ["core:window:allow-start-dragging"]);
+  assert.deepEqual(capability.permissions, [
+    "core:window:allow-start-dragging",
+    "opener:allow-default-urls"
+  ]);
 });
 
 test("desktop startup keeps the main window hidden until the splash gate is ready", async () => {

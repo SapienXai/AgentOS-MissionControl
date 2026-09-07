@@ -34,6 +34,7 @@ import { OpenClawOnboardingProviderFlow } from "@/components/mission-control/ope
 import { formatModelLabel } from "@/lib/openclaw/presenters";
 import { isOpenClawOnboardingModelReady } from "@/lib/openclaw/readiness";
 import { isOpenClawTerminalCommand } from "@/lib/openclaw/terminal-command";
+import { openExternalAuthUrl } from "@/lib/desktop/open-external-auth-url";
 import { cn } from "@/lib/utils";
 
 export type ModelSwitchFeedback = {
@@ -622,10 +623,15 @@ function ConnectAiStage({
           </div>
 
           {chatGptBrowserAuth.browserUrl && chatGptBrowserAuth.state !== "completed" ? (
-            <a
-              href={chatGptBrowserAuth.browserUrl}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => {
+                void openExternalAuthUrl(chatGptBrowserAuth.browserUrl!).catch((error) => {
+                  toast.error("ChatGPT sign-in could not be opened.", {
+                    description: error instanceof Error ? error.message : "The system browser could not be opened."
+                  });
+                });
+              }}
               className={cn(
                 "mt-2.5 inline-flex h-8 items-center rounded-md border px-2.5 text-[10px] font-semibold transition-colors",
                 surfaceTheme === "light"
@@ -635,7 +641,7 @@ function ConnectAiStage({
             >
               Open sign-in
               <ArrowRight className="ml-1 h-3 w-3" />
-            </a>
+            </button>
           ) : null}
 
           {chatGptBrowserAuth.state === "waiting-for-redirect" ? (

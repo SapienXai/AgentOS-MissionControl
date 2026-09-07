@@ -2,6 +2,10 @@ import { validateOpenAiAuthorizationUrl } from "@/lib/openclaw/chatgpt-auth-url"
 
 export type ExternalAuthOpenMethod = "tauri" | "browser";
 
+const duplicateOpenWindowMs = 10_000;
+const inFlightOpenAttempts = new Map<string, Promise<ExternalAuthOpenMethod>>();
+const recentlyOpenedUrls = new Map<string, { method: ExternalAuthOpenMethod; openedAt: number }>();
+
 export function isTauriDesktopRuntime() {
   if (typeof window === "undefined") {
     return false;
@@ -21,6 +25,36 @@ export async function openExternalAuthUrl(value: string): Promise<ExternalAuthOp
   if (!url) {
     throw new Error("OpenClaw returned an invalid OpenAI authorization URL.");
   }
+
+  const now = Date.now();
+  for (const [recentUrl, recentEntry] of recentlyOpenedUrls) {
+    if (now - recentEntry.openedAt >= duplicateOpenWindowMs) {
+      recentlyOpenedUrls.delete(recentUrl);
+    }
+  }
+
+  const recent = recentlyOpenedUrls.get(url);
+  if (recent) {
+    return recent.method;
+  }
+
+  const inFlight = inFlightOpenAttempts.get(url);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const attempt = openValidatedAuthUrl(url).then((method) => {
+    recentlyOpenedUrls.set(url, { method, openedAt: Date.now() });
+    return method;
+  }).finally(() => {
+    inFlightOpenAttempts.delete(url);
+  });
+
+  inFlightOpenAttempts.set(url, attempt);
+  return attempt;
+}
+
+async function openValidatedAuthUrl(url: string): Promise<ExternalAuthOpenMethod> {
 
   if (isTauriDesktopRuntime()) {
     const { invoke } = await import("@tauri-apps/api/core");

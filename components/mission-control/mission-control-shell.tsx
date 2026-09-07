@@ -565,6 +565,7 @@ export function MissionControlShell({
   const modelOperationToastIdRef = useRef<string | number | null>(null);
   const modelAuthTerminalAutoOpenRef = useRef<{ command: string; openedAt: number } | null>(null);
   const modelAuthStatusPollRunRef = useRef(0);
+  const chatGptOnboardingRunRef = useRef<Promise<void> | null>(null);
   const updateOperationToastIdRef = useRef<string | number | null>(null);
   const {
     recentDispatchId,
@@ -2771,99 +2772,114 @@ export function MissionControlShell({
   };
 
   const runChatGptOnboarding = async (force = false) => {
-    setIsOnboardingForcedOpen(true);
-    setIsOnboardingDismissed(false);
-    setOnboardingStage("models");
-    setModelOnboardingRunState("running");
-    setModelOnboardingPhase("authenticating");
-    setModelOnboardingStatusMessage("Opening secure ChatGPT sign-in...");
-    setModelOnboardingResultMessage(null);
-    setModelOnboardingManualCommand(null);
-    setModelOnboardingDocsUrl(null);
-    setModelOnboardingLog("");
-    setModelSwitchFeedback(initialModelSwitchFeedback);
-    setChatGptBrowserAuth(null);
+    if (chatGptOnboardingRunRef.current) {
+      return chatGptOnboardingRunRef.current;
+    }
 
-    let authFlow: ChatGptBrowserAuthSnapshot | null = null;
-    let authUrlOpenAttempted = false;
-    let authUrlOpenError: string | null = null;
-    try {
-      authFlow = await startChatGptBrowserAuth(force);
-      setChatGptBrowserAuth(authFlow);
-
-      for (let attempt = 0; attempt < 360; attempt += 1) {
-        const currentAuthFlow = authFlow;
-        if (!currentAuthFlow) {
-          throw new Error("ChatGPT sign-in did not start.");
-        }
-
-        if (!authUrlOpenAttempted && currentAuthFlow.browserUrl) {
-          authUrlOpenAttempted = true;
-          try {
-            await openExternalAuthUrl(currentAuthFlow.browserUrl);
-          } catch (error) {
-            authUrlOpenError = error instanceof Error
-              ? error.message
-              : "Automatic browser opening was unavailable.";
-            setChatGptBrowserAuth((current) => current
-              ? {
-                  ...current,
-                  message: "The ChatGPT sign-in page is ready. Use Open sign-in to continue in your browser."
-                }
-              : current);
-          }
-        }
-
-        if (currentAuthFlow.state === "completed" || currentAuthFlow.state === "error") {
-          break;
-        }
-
-        await new Promise((resolve) => globalThis.setTimeout(resolve, 1_000));
-        authFlow = await readChatGptBrowserAuth(currentAuthFlow.sessionId);
-        if (authUrlOpenError && authFlow.browserUrl && authFlow.state === "waiting-for-redirect") {
-          authFlow = {
-            ...authFlow,
-            message: "Automatic browser opening was unavailable. Use Open sign-in to continue."
-          };
-        }
-        setChatGptBrowserAuth(authFlow);
-      }
-
-      if (!authFlow || authFlow.state !== "completed") {
-        throw new Error(authFlow?.error || "ChatGPT sign-in did not complete.");
-      }
-
-      setChatGptBrowserAuth((current) => current
-        ? {
-            ...current,
-            message: "ChatGPT sign-in completed. Refreshing the OpenClaw account and discovering models..."
-          }
-        : current);
-      setModelOnboardingPhase("refreshing");
-      setModelOnboardingStatusMessage("Refreshing ChatGPT authentication before discovering models...");
-      const result = await waitForChatGptProviderStatus();
-
-      if (!result.connection.connected) {
-        throw new Error("ChatGPT sign-in completed, but OpenClaw is still refreshing the account and model catalog. Try again in a moment.");
-      }
-
-      setChatGptBrowserAuth(null);
-      markModelProviderConnected("openai", result.connection.detail, result.snapshot, result);
-    } catch (error) {
-      const message = resolveChatGptRecoveryMessage(
-        authFlow?.state === "error"
-          ? authFlow.error
-          : error instanceof Error
-            ? error.message
-            : authUrlOpenError
-      );
-      setModelOnboardingRunState("error");
+    const run = (async () => {
+      setIsOnboardingForcedOpen(true);
+      setIsOnboardingDismissed(false);
+      setOnboardingStage("models");
+      setModelOnboardingRunState("running");
       setModelOnboardingPhase("authenticating");
-      setModelOnboardingStatusMessage(null);
-      setModelOnboardingResultMessage(message);
-      toast.error("ChatGPT connection needs attention.", {
-        description: message
-      });
+      setModelOnboardingStatusMessage("Opening secure ChatGPT sign-in...");
+      setModelOnboardingResultMessage(null);
+      setModelOnboardingManualCommand(null);
+      setModelOnboardingDocsUrl(null);
+      setModelOnboardingLog("");
+      setModelSwitchFeedback(initialModelSwitchFeedback);
+      setChatGptBrowserAuth(null);
+
+      let authFlow: ChatGptBrowserAuthSnapshot | null = null;
+      let authUrlOpenAttempted = false;
+      let authUrlOpenError: string | null = null;
+      try {
+        authFlow = await startChatGptBrowserAuth(force);
+        setChatGptBrowserAuth(authFlow);
+
+        for (let attempt = 0; attempt < 360; attempt += 1) {
+          const currentAuthFlow = authFlow;
+          if (!currentAuthFlow) {
+            throw new Error("ChatGPT sign-in did not start.");
+          }
+
+          if (!authUrlOpenAttempted && currentAuthFlow.browserUrl) {
+            authUrlOpenAttempted = true;
+            try {
+              await openExternalAuthUrl(currentAuthFlow.browserUrl);
+            } catch (error) {
+              authUrlOpenError = error instanceof Error
+                ? error.message
+                : "Automatic browser opening was unavailable.";
+              setChatGptBrowserAuth((current) => current
+                ? {
+                    ...current,
+                    message: "The ChatGPT sign-in page is ready. Use Open sign-in to continue in your browser."
+                  }
+                : current);
+            }
+          }
+
+          if (currentAuthFlow.state === "completed" || currentAuthFlow.state === "error") {
+            break;
+          }
+
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 1_000));
+          authFlow = await readChatGptBrowserAuth(currentAuthFlow.sessionId);
+          if (authUrlOpenError && authFlow.browserUrl && authFlow.state === "waiting-for-redirect") {
+            authFlow = {
+              ...authFlow,
+              message: "Automatic browser opening was unavailable. Use Open sign-in to continue."
+            };
+          }
+          setChatGptBrowserAuth(authFlow);
+        }
+
+        if (!authFlow || authFlow.state !== "completed") {
+          throw new Error(authFlow?.error || "ChatGPT sign-in did not complete.");
+        }
+
+        setChatGptBrowserAuth((current) => current
+          ? {
+              ...current,
+              message: "ChatGPT sign-in completed. Refreshing the OpenClaw account and discovering models..."
+            }
+          : current);
+        setModelOnboardingPhase("refreshing");
+        setModelOnboardingStatusMessage("Refreshing ChatGPT authentication before discovering models...");
+        const result = await waitForChatGptProviderStatus();
+
+        if (!result.connection.connected) {
+          throw new Error("ChatGPT sign-in completed, but OpenClaw is still refreshing the account and model catalog. Try again in a moment.");
+        }
+
+        setChatGptBrowserAuth(null);
+        markModelProviderConnected("openai", result.connection.detail, result.snapshot, result);
+      } catch (error) {
+        const message = resolveChatGptRecoveryMessage(
+          authFlow?.state === "error"
+            ? authFlow.error
+            : error instanceof Error
+              ? error.message
+              : authUrlOpenError
+        );
+        setModelOnboardingRunState("error");
+        setModelOnboardingPhase("authenticating");
+        setModelOnboardingStatusMessage(null);
+        setModelOnboardingResultMessage(message);
+        toast.error("ChatGPT connection needs attention.", {
+          description: message
+        });
+      }
+    })();
+
+    chatGptOnboardingRunRef.current = run;
+    try {
+      await run;
+    } finally {
+      if (chatGptOnboardingRunRef.current === run) {
+        chatGptOnboardingRunRef.current = null;
+      }
     }
   };
 

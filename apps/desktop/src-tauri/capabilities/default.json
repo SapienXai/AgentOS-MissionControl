@@ -4,6 +4,7 @@
   "description": "The AgentOS desktop WebView may start dragging its assigned native window from declared titlebar regions.",
   "windows": ["main"],
   "permissions": [
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "opener:allow-default-urls"
   ]
 }
