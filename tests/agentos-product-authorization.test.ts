@@ -18,6 +18,7 @@ const owner: AgentOsActorContext = {
 };
 const member: AgentOsActorContext = { ...owner, actorId: "00000000-0000-4000-8000-000000000002", username: "member", agentOsRole: "member" };
 const service: AgentOsActorContext = { ...owner, actorId: "service:agentos-api-token", kind: "service", username: null, displayName: null, authenticationMethod: "api-token" };
+const desktop: AgentOsActorContext = { ...owner, actorId: "operator:agentos-desktop", kind: "desktop-operator", username: null, displayName: null, authenticationMethod: "desktop-token" };
 
 test("central product policy separates owner controls from member runtime access", () => {
   assert.equal(canAgentOsActorUseProductPermission(owner, "users.manage"), true);
@@ -38,6 +39,9 @@ test("central product policy separates owner controls from member runtime access
   assert.equal(canAgentOsActorUseProductPermission(member, "automations.manage"), false);
   assert.equal(canAgentOsActorUseProductPermission(service, "users.manage"), false);
   assert.equal(canAgentOsActorUseProductPermission(service, "gateway.manage"), true);
+  assert.equal(canAgentOsActorUseProductPermission(service, "lifecycle.manage"), false);
+  assert.equal(canAgentOsActorUseProductPermission(desktop, "lifecycle.manage"), true);
+  assert.equal(canAgentOsActorUseProductPermission(desktop, "users.manage"), true);
 });
 
 test("permission matrix is bounded and explicit for service/internal actors", () => {

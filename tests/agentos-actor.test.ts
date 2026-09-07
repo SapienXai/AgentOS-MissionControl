@@ -151,6 +151,32 @@ test("API-token and internal actors are explicit and cannot be browser-forged", 
   assert.equal(typeof events[0]?.timestamp, "string");
 });
 
+test("packaged desktop API tokens resolve to a local owner operator", async () => {
+  const runtimeDir = await mkdtemp(path.join(tmpdir(), "agentos-actor-desktop-"));
+  const env = {
+    ...process.env,
+    AGENTOS_RUNTIME_DIR: runtimeDir,
+    AGENTOS_API_TOKEN: "desktop-secret",
+    AGENTOS_DESKTOP: "1",
+    AGENTOS_PACKAGE_RUNTIME: "1",
+    NODE_ENV: "production" as const
+  };
+
+  const actor = await resolveAgentOsActorContext(new Request("http://127.0.0.1/api/onboarding", {
+    headers: { authorization: "Bearer desktop-secret" }
+  }), env);
+
+  assert.deepEqual(actor, {
+    actorId: "operator:agentos-desktop",
+    kind: "desktop-operator",
+    username: null,
+    displayName: null,
+    authenticationMethod: "desktop-token",
+    authenticated: true,
+    agentOsRole: "owner"
+  });
+});
+
 test("protected instances never let an API token bypass the browser session boundary", async () => {
   const runtimeDir = await mkdtemp(path.join(tmpdir(), "agentos-actor-precedence-"));
   const env = {

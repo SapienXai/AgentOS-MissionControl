@@ -10,10 +10,11 @@ import {
 } from "@/lib/security/instance-protection";
 import { evaluateLocalOperatorRequest } from "@/lib/security/local-operator";
 
-export type AgentOsActorKind = "instance-operator" | "service" | "internal-service";
+export type AgentOsActorKind = "instance-operator" | "desktop-operator" | "service" | "internal-service";
 
 export type AgentOsAuthenticationMethod =
   | "instance-session"
+  | "desktop-token"
   | "api-token"
   | "internal-service"
   | "unprotected-local";
@@ -35,6 +36,7 @@ export type AgentOsActorResult =
   | { response: NextResponse };
 
 const API_SERVICE_ACTOR_ID = "service:agentos-api-token";
+const DESKTOP_OPERATOR_ACTOR_ID = "operator:agentos-desktop";
 const INTERNAL_SERVICE_ACTOR_ID = "service:agentos-internal";
 const UNPROTECTED_LOCAL_ACTOR_ID = "unprotected-local";
 
@@ -69,12 +71,13 @@ export async function resolveAgentOsActorContext(
   }
 
   if (hasValidAgentOsApiToken(request.headers, env)) {
+    const isPackagedDesktop = env.AGENTOS_DESKTOP === "1" && env.AGENTOS_PACKAGE_RUNTIME === "1";
     return {
-      actorId: API_SERVICE_ACTOR_ID,
-      kind: "service",
+      actorId: isPackagedDesktop ? DESKTOP_OPERATOR_ACTOR_ID : API_SERVICE_ACTOR_ID,
+      kind: isPackagedDesktop ? "desktop-operator" : "service",
       username: null,
       displayName: null,
-      authenticationMethod: "api-token",
+      authenticationMethod: isPackagedDesktop ? "desktop-token" : "api-token",
       authenticated: true,
       agentOsRole: "owner"
     };

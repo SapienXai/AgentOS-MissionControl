@@ -28,6 +28,8 @@ use tauri::{
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
+#[cfg(not(debug_assertions))]
+use uuid::Uuid;
 
 #[cfg(not(debug_assertions))]
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -211,12 +213,12 @@ fn is_external_web_url(url: &tauri::Url) -> bool {
 #[cfg(not(debug_assertions))]
 fn start_embedded_agentos(app: AppHandle, window: WebviewWindow) {
     thread::spawn(move || match spawn_agentos_server(&app) {
-        Ok((url, child_output)) => {
+        Ok((url, authenticated_url, child_output)) => {
             eprintln!("AgentOS embedded server is ready at {url}");
             if let Ok(mut output) = app.state::<DesktopState>().output.lock() {
                 *output = child_output;
             }
-            if let Ok(target) = url.parse::<tauri::Url>() {
+            if let Ok(target) = authenticated_url.parse::<tauri::Url>() {
                 if let Err(error) = window.navigate(target) {
                     eprintln!("AgentOS WebView navigation failed: {error}");
                 }
@@ -236,7 +238,7 @@ fn start_embedded_agentos(app: AppHandle, window: WebviewWindow) {
 }
 
 #[cfg(not(debug_assertions))]
-fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), String> {
+fn spawn_agentos_server(app: &AppHandle) -> Result<(String, String, VecDeque<String>), String> {
     let mut last_error = String::from("unknown startup failure");
 
     for attempt in 1..=STARTUP_ATTEMPTS {
@@ -266,7 +268,9 @@ fn spawn_agentos_server(app: &AppHandle) -> Result<(String, VecDeque<String>), S
 }
 
 #[cfg(not(debug_assertions))]
-fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String>), String> {
+fn spawn_agentos_server_once(
+    app: &AppHandle,
+) -> Result<(String, String, VecDeque<String>), String> {
     let state = app.state::<DesktopState>();
     let port = reserve_loopback_port()?;
     let resource_dir = app
@@ -299,6 +303,7 @@ fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|error| format!("could not create AgentOS data directory: {error}"))?;
 
+    let api_token = Uuid::new_v4().to_string();
     let mut child = Command::new(node_path)
         .arg(server_wrapper_path)
         .current_dir(&server_root)
@@ -308,6 +313,7 @@ fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String
         .env("AGENTOS_PACKAGE_RUNTIME", "1")
         .env("AGENTOS_DESKTOP", "1")
         .env("AGENTOS_RUNTIME_DIR", &runtime_dir)
+        .env("AGENTOS_API_TOKEN", &api_token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -328,6 +334,7 @@ fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String
     set_allowed_port(&state, Some(port));
 
     let url = format!("http://127.0.0.1:{port}/");
+    let authenticated_url = build_authenticated_url(&url, &api_token);
     let readiness_url = format!("http://127.0.0.1:{port}/api/auth/status");
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     while Instant::now() < deadline {
@@ -363,7 +370,7 @@ fn spawn_agentos_server_once(app: &AppHandle) -> Result<(String, VecDeque<String
                 .lock()
                 .map(|value| value.clone())
                 .unwrap_or_default();
-            return Ok((url, output));
+            return Ok((url, authenticated_url, output));
         }
         thread::sleep(STARTUP_POLL);
     }
@@ -489,6 +496,11 @@ fn set_allowed_port(state: &DesktopState, port: Option<u16>) {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_authenticated_url(base_url: &str, api_token: &str) -> String {
+    format!("{base_url}#agentos_token={api_token}")
+}
+
 fn shutdown_embedded_agentos(app: &AppHandle) {
     let state = app.state::<DesktopState>();
     let Ok(mut child) = state.child.lock() else {
@@ -558,7 +570,10 @@ mod tests {
     use std::process::{Child, Command};
     use std::time::Duration;
 
-    use super::{is_allowed_navigation, is_external_web_url, is_retryable_startup_error};
+    use super::{
+        build_authenticated_url, is_allowed_navigation, is_external_web_url,
+        is_retryable_startup_error,
+    };
     use super::{request_graceful_termination, wait_for_child_exit};
 
     fn spawn_test_child(command: &str) -> Child {
@@ -609,6 +624,14 @@ mod tests {
             &"http://127.0.0.1.evil.example:43123/".parse().unwrap(),
             Some(43123)
         ));
+    }
+
+    #[test]
+    fn authenticated_navigation_url_carries_only_the_api_token_fragment() {
+        assert_eq!(
+            build_authenticated_url("http://127.0.0.1:43123/", "local-test-token"),
+            "http://127.0.0.1:43123/#agentos_token=local-test-token"
+        );
     }
 
     #[test]

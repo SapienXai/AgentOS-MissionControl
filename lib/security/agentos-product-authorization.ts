@@ -114,6 +114,7 @@ export function canAgentOsActorUseProductPermission(
 ) {
   if (actor.authenticationMethod === "unprotected-local") return true;
   if (actor.kind === "internal-service") return INTERNAL_SERVICE_PERMISSIONS.has(permission);
+  if (actor.kind === "desktop-operator") return OWNER_PERMISSIONS.has(permission);
   if (actor.kind === "service") return SERVICE_PERMISSIONS.has(permission);
   if (actor.agentOsRole === "owner") return OWNER_PERMISSIONS.has(permission);
   if (actor.agentOsRole === "member") return MEMBER_PERMISSIONS.has(permission);
@@ -160,5 +161,5 @@ export function requireOwnerProductPermission(
   actor: AgentOsActorContext,
   permission: Extract<AgentOsProductPermission, "users.manage" | "automations.manage" | "gateway.manage" | "lifecycle.manage" | "updates.manage" | "migrations.manage" | "security.manage" | "secrets.manage" | "models.manage" | "openclaw.roles.manage">
 ) {
-  return actor.kind === "instance-operator" && actor.agentOsRole === "owner" && canAgentOsActorUseProductPermission(actor, permission);
+  return (actor.kind === "instance-operator" || actor.kind === "desktop-operator") && actor.agentOsRole === "owner" && canAgentOsActorUseProductPermission(actor, permission);
 }
