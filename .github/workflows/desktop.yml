@@ -62,15 +62,7 @@ jobs:
       - name: Run Rust shell tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
-      - name: Build native desktop artifact
-        if: secrets.TAURI_SIGNING_PRIVATE_KEY != ''
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm exec tauri build --config apps/desktop/src-tauri/tauri.conf.json
-
       - name: Build unsigned native desktop artifact
-        if: secrets.TAURI_SIGNING_PRIVATE_KEY == ''
         run: pnpm exec tauri build --config apps/desktop/src-tauri/tauri.conf.json --config apps/desktop/src-tauri/tauri.ci.conf.json
 
       - name: Audit packaged desktop contents
