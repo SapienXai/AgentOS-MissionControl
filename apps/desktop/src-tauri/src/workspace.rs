@@ -755,9 +755,44 @@ mod tests {
         let error =
             safe_path_for_write(&workspace, "../outside.txt").expect_err("traversal must fail");
         assert_eq!(error.code, "workspace-path-denied");
+        let absolute = std::env::temp_dir().join("outside.txt");
+        let error = safe_path_for_write(&workspace, &absolute.to_string_lossy())
+            .expect_err("absolute path must fail");
+        assert_eq!(error.code, "workspace-path-denied");
         let nested = safe_path_for_write(&workspace, "nested/file.txt").expect("nested path");
         assert!(nested.ends_with("nested/file.txt"));
         fs::remove_dir_all(root).expect("test root cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_paths_reject_symlinked_parent_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "agentos-workspace-nested-symlink-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "agentos-workspace-nested-target-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root");
+        fs::create_dir_all(&outside).expect("outside directory");
+        let root = root.canonicalize().expect("canonical test root");
+        std::os::unix::fs::symlink(&outside, root.join("linked")).expect("parent symlink");
+        let workspace = LocalWorkspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            path: root.to_string_lossy().to_string(),
+            created_at: "0".to_string(),
+        };
+
+        let error = safe_path_for_write(&workspace, "linked/escape.txt")
+            .expect_err("symlinked parent must fail");
+        assert_eq!(error.code, "workspace-path-denied");
+
+        fs::remove_file(root.join("linked")).expect("link cleanup");
+        fs::remove_dir_all(root).expect("test root cleanup");
+        fs::remove_dir_all(outside).expect("outside cleanup");
     }
 
     #[cfg(unix)]

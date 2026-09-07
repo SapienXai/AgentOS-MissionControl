@@ -14,13 +14,14 @@ use std::{
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::NativeError;
 
 const GATEWAY_PORT: &str = "18789";
 const MAX_LOG_ENTRIES: usize = 200;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
+const MAX_COMMAND_OUTPUT_CHARS: usize = 2_000_000;
 const OPENCLAW_BASELINE: &str = "2026.9.1";
 
 #[derive(Debug, Serialize, Clone)]
@@ -80,12 +81,7 @@ impl RuntimeManager {
         let binary = resolve_openclaw_binary();
         let checked_at = unix_timestamp();
         let Some(binary) = binary else {
-            return Ok(status_offline(
-                checked_at,
-                None,
-                None,
-                "OpenClaw is not installed or could not be resolved.",
-            ));
+            return Ok(status_without_binary(checked_at, managed_pid));
         };
 
         let version = run_command(&binary, &["--version"])
@@ -163,6 +159,13 @@ impl RuntimeManager {
                 false,
             )
         })?;
+        if port_is_occupied(GATEWAY_PORT) {
+            return Err(NativeError::new(
+                "runtime-port-conflict",
+                format!("OpenClaw Gateway port {GATEWAY_PORT} is already occupied by another process or an unverified Gateway."),
+                true,
+            ));
+        }
         let mut child = Command::new(&binary)
             .args([
                 "gateway",
@@ -286,11 +289,21 @@ impl RuntimeManager {
             .unwrap_or_default()
     }
 
-    pub fn shutdown(&self) {
+    pub fn shutdown(&self, app: Option<&AppHandle>) {
         if let Ok(mut process) = self.process.lock() {
             if let Some(mut child) = process.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                let graceful = app
+                    .and_then(|_app| {
+                        resolve_openclaw_binary().and_then(|binary| {
+                            run_command(&binary, &["gateway", "stop", "--json"]).ok()
+                        })
+                    })
+                    .map(|result| result.success())
+                    .unwrap_or(false);
+                if !graceful || !wait_for_child_exit(&mut child, Duration::from_secs(2)) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
             }
         }
     }
@@ -308,8 +321,14 @@ impl RuntimeManager {
             })?
             .take();
         if let Some(mut child) = child {
-            let _ = child.kill();
-            let _ = child.wait();
+            let graceful = resolve_openclaw_binary()
+                .and_then(|binary| run_command(&binary, &["gateway", "stop", "--json"]).ok())
+                .map(|result| result.success())
+                .unwrap_or(false);
+            if !graceful || !wait_for_child_exit(&mut child, Duration::from_secs(2)) {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
             self.emit_system_log(app, "Managed OpenClaw Gateway process stopped.");
             return Ok(());
         }
@@ -355,9 +374,16 @@ impl RuntimeManager {
                         app,
                         &format!("Managed OpenClaw Gateway exited ({status})."),
                     );
-                    let _ = crate::integrations::notify_event(app, "runtime-crashed");
+                    let notifications_enabled = app
+                        .try_state::<crate::preferences::PreferencesManager>()
+                        .map(|preferences| preferences.get().notifications_enabled)
+                        .unwrap_or(true);
+                    if notifications_enabled {
+                        let _ = crate::integrations::notify_event(app, "runtime-crashed");
+                    }
                 }
-                Ok(Some(pid))
+                let _ = pid;
+                Ok(None)
             }
             Err(error) => Err(NativeError::new(
                 "runtime-inspect-failed",
@@ -413,7 +439,7 @@ impl RuntimeManager {
 
 impl Drop for RuntimeManager {
     fn drop(&mut self) {
-        self.shutdown();
+        self.shutdown(None);
     }
 }
 
@@ -428,18 +454,18 @@ fn push_log(logs: &Arc<Mutex<VecDeque<RuntimeLogEntry>>>, app: &AppHandle, entry
 }
 
 #[derive(Debug)]
-struct CommandOutput {
-    stdout: String,
-    stderr: String,
+pub(crate) struct CommandOutput {
+    pub(crate) stdout: String,
+    pub(crate) stderr: String,
     status: ExitStatus,
 }
 impl CommandOutput {
-    fn success(&self) -> bool {
+    pub(crate) fn success(&self) -> bool {
         self.status.success()
     }
 }
 
-fn run_command(binary: &str, args: &[&str]) -> Result<CommandOutput, NativeError> {
+pub(crate) fn run_command(binary: &str, args: &[&str]) -> Result<CommandOutput, NativeError> {
     let mut child = Command::new(binary)
         .args(args)
         .stdout(Stdio::piped())
@@ -464,8 +490,14 @@ fn run_command(binary: &str, args: &[&str]) -> Result<CommandOutput, NativeError
                     )
                 })?;
                 return Ok(CommandOutput {
-                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                    stdout: String::from_utf8_lossy(&output.stdout)
+                        .chars()
+                        .take(MAX_COMMAND_OUTPUT_CHARS)
+                        .collect(),
+                    stderr: String::from_utf8_lossy(&output.stderr)
+                        .chars()
+                        .take(MAX_COMMAND_OUTPUT_CHARS)
+                        .collect(),
                     status,
                 });
             }
@@ -492,7 +524,7 @@ fn run_command(binary: &str, args: &[&str]) -> Result<CommandOutput, NativeError
     }
 }
 
-fn resolve_openclaw_binary() -> Option<String> {
+pub(crate) fn resolve_openclaw_binary() -> Option<String> {
     let mut candidates = Vec::<String>::new();
     if let Ok(value) = env::var("OPENCLAW_BIN") {
         if !value.trim().is_empty() {
@@ -556,10 +588,16 @@ fn resolve_openclaw_binary() -> Option<String> {
         .find(|candidate| candidate == "openclaw" || PathBuf::from(candidate).is_file())
 }
 
-fn parse_json(output: &str) -> Option<Value> {
+pub(crate) fn parse_json(output: &str) -> Option<Value> {
     serde_json::from_str(output.trim()).ok().or_else(|| {
-        let start = output.find('{')?;
-        let end = output.rfind('}')?;
+        let object_start = output.find('{');
+        let array_start = output.find('[');
+        let (start, end) = match (object_start, array_start) {
+            (Some(object), Some(array)) if array < object => (array, output.rfind(']')?),
+            (Some(object), _) => (object, output.rfind('}')?),
+            (None, Some(array)) => (array, output.rfind(']')?),
+            (None, None) => return None,
+        };
         serde_json::from_str(&output[start..=end]).ok()
     })
 }
@@ -614,7 +652,7 @@ fn is_gateway_running(value: &Value) -> bool {
             .map(|value| value == "busy")
             .unwrap_or(false)
 }
-fn is_gateway_ready(value: &Value) -> bool {
+pub(crate) fn is_gateway_ready(value: &Value) -> bool {
     pointer(value, &["rpc", "ok"])
         .and_then(Value::as_bool)
         .unwrap_or(false)
@@ -663,7 +701,35 @@ fn status_offline(
         checked_at,
     }
 }
-fn sanitize_text(value: &str) -> String {
+
+fn status_without_binary(checked_at: String, pid: Option<u32>) -> RuntimeStatus {
+    if let Some(pid) = pid {
+        return RuntimeStatus {
+            runtime_id: "openclaw-local".to_string(),
+            kind: "openclaw".to_string(),
+            display_name: "OpenClaw".to_string(),
+            connection: "local".to_string(),
+            installed: false,
+            running: true,
+            ready: false,
+            health: "unknown".to_string(),
+            version: None,
+            pid: Some(pid),
+            reason: Some(
+                "The managed OpenClaw process is running, but its binary is no longer resolvable."
+                    .to_string(),
+            ),
+            checked_at,
+        };
+    }
+    status_offline(
+        checked_at,
+        None,
+        None,
+        "OpenClaw is not installed or could not be resolved.",
+    )
+}
+pub(crate) fn sanitize_text(value: &str) -> String {
     let lower = value.to_ascii_lowercase();
     if [
         "token",
@@ -681,12 +747,35 @@ fn sanitize_text(value: &str) -> String {
     }
     value.chars().take(2_000).collect()
 }
-fn unix_timestamp() -> String {
+pub(crate) fn unix_timestamp() -> String {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     format!("{seconds}")
+}
+
+fn port_is_occupied(port: &str) -> bool {
+    std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{port}")
+            .parse::<std::net::SocketAddr>()
+            .unwrap_or_else(|_| "127.0.0.1:0".parse().expect("loopback address")),
+        Duration::from_millis(150),
+    )
+    .is_ok()
+}
+
+fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> bool {
+    let started = SystemTime::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if started.elapsed().unwrap_or_default() < timeout => {
+                thread::sleep(Duration::from_millis(40));
+            }
+            _ => return false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -703,6 +792,12 @@ mod tests {
     }
 
     #[test]
+    fn json_arrays_are_parsed_from_cli_output() {
+        let value = parse_json("warning\n[{\"id\":\"main\"}]\n").expect("array payload");
+        assert_eq!(value[0]["id"], "main");
+    }
+
+    #[test]
     fn sensitive_runtime_output_is_redacted() {
         assert_eq!(
             sanitize_text("token=secret-value"),
@@ -716,5 +811,31 @@ mod tests {
         assert!(compare_versions("2026.9.2", OPENCLAW_BASELINE) > 0);
         assert_eq!(compare_versions("2026.9.1", OPENCLAW_BASELINE), 0);
         assert!(compare_versions("2026.8.9", OPENCLAW_BASELINE) < 0);
+    }
+
+    #[test]
+    fn exited_managed_process_is_not_reported_as_running() {
+        let manager = RuntimeManager::new();
+        let child = if cfg!(windows) {
+            Command::new("cmd")
+                .args(["/C", "exit", "0"])
+                .spawn()
+                .expect("spawn test process")
+        } else {
+            Command::new("sh")
+                .args(["-c", "exit 0"])
+                .spawn()
+                .expect("spawn test process")
+        };
+        let expected_pid = child.id();
+        thread::sleep(Duration::from_millis(80));
+        *manager.process.lock().expect("process lock") = Some(child);
+
+        assert_eq!(
+            manager.refresh_managed_process(None).expect("refresh"),
+            None
+        );
+        assert!(manager.process.lock().expect("process lock").is_none());
+        let _ = expected_pid;
     }
 }

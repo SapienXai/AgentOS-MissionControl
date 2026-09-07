@@ -140,6 +140,10 @@ pub fn notify_event<R: Runtime>(app: &AppHandle<R>, event: &str) -> Result<(), N
 }
 
 pub fn validate_deep_link(value: &str) -> Option<String> {
+    let raw = value.to_ascii_lowercase();
+    if raw.contains("/../") || raw.ends_with("/..") || raw.contains("%2e") {
+        return None;
+    }
     let url = value.parse::<tauri::Url>().ok()?;
     if url.scheme() != "agentos"
         || url.username() != ""
@@ -153,7 +157,9 @@ pub fn validate_deep_link(value: &str) -> Option<String> {
     let segments = url.path_segments()?.filter(|segment| !segment.is_empty());
     let segments = segments.collect::<Vec<_>>();
     match host {
-        "agents" | "missions" if segments.len() == 1 && is_safe_segment(segments[0]) => {
+        "agents" | "missions" | "approvals" | "workspaces"
+            if segments.len() == 1 && is_safe_segment(segments[0]) =>
+        {
             Some(format!("{host}/{}", segments[0]))
         }
         "settings" if segments.as_slice() == ["runtime"] => Some("runtime".to_string()),
@@ -184,10 +190,19 @@ mod tests {
             Some("missions/mission-1".to_string())
         );
         assert_eq!(
+            validate_deep_link("agentos://approvals/approval-1"),
+            Some("approvals/approval-1".to_string())
+        );
+        assert_eq!(
+            validate_deep_link("agentos://workspaces/workspace-1"),
+            Some("workspaces/workspace-1".to_string())
+        );
+        assert_eq!(
             validate_deep_link("agentos://settings/runtime?command=quit"),
             None
         );
         assert_eq!(validate_deep_link("agentos://shell/quit"), None);
+        assert_eq!(validate_deep_link("agentos://agents/../secrets"), None);
         assert_eq!(
             validate_deep_link("https://agentos.ai/missions/mission-1"),
             None

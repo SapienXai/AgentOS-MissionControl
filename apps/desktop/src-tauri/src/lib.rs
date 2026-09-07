@@ -4,12 +4,16 @@ use tauri::{Emitter, Manager, State, WindowEvent};
 mod error;
 mod integrations;
 mod native;
+mod preferences;
+mod product;
 mod runtime;
 mod terminal;
 mod workspace;
 
 use error::NativeError;
 use native::platform_capabilities;
+use preferences::PreferencesManager;
+use product::ProductManager;
 use runtime::{RuntimeDoctorResult, RuntimeLogEntry, RuntimeManager, RuntimeStatus};
 use terminal::TerminalManager;
 use workspace::WorkspaceManager;
@@ -104,15 +108,24 @@ pub fn run() {
                 .map_err(|error| format!("Unable to create AgentOS data directory: {error}"))?;
             app.manage(RuntimeManager::new());
             app.manage(TerminalManager::new());
-            app.manage(WorkspaceManager::new(data_dir));
+            app.manage(WorkspaceManager::new(data_dir.clone()));
+            app.manage(PreferencesManager::new(data_dir));
+            app.manage(ProductManager::new());
             integrations::register_deep_link_listener(app.handle());
             integrations::register_tray(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                let close_to_tray = window
+                    .app_handle()
+                    .try_state::<PreferencesManager>()
+                    .map(|preferences| preferences.close_to_tray())
+                    .unwrap_or(true);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         });
 
@@ -128,6 +141,9 @@ pub fn run() {
             runtime_restart,
             runtime_doctor,
             runtime_logs,
+            preferences::desktop_preferences,
+            preferences::desktop_preferences_save,
+            product::product_snapshot,
             workspace::workspace_list,
             workspace::workspace_choose,
             workspace::workspace_list_directory,
@@ -150,11 +166,16 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building AgentOS desktop");
-    app.run(|app, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
+    app.run(|app, event| match event {
+        tauri::RunEvent::Resumed => {
+            let _ = app.emit("runtime-refresh-requested", ());
+        }
+        tauri::RunEvent::Exit => {
             if let Some(runtime) = app.try_state::<RuntimeManager>() {
-                runtime.shutdown();
+                let _ = runtime.stop(app);
+                runtime.shutdown(Some(app));
             }
         }
+        _ => {}
     });
 }

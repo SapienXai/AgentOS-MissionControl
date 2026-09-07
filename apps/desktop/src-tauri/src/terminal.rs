@@ -2,18 +2,23 @@ use std::{
     collections::HashMap,
     env,
     io::{Read, Write},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     thread,
 };
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use uuid::Uuid;
 
 use crate::{error::NativeError, workspace::WorkspaceManager};
 
 const MAX_TERMINAL_INPUT_BYTES: usize = 8 * 1024;
 const MAX_TERMINAL_DIMENSION: u16 = 500;
+const MAX_TERMINAL_OUTPUT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +42,7 @@ struct SessionState {
 }
 
 pub struct TerminalManager {
-    sessions: Mutex<HashMap<String, SessionState>>,
+    sessions: Arc<Mutex<HashMap<String, SessionState>>>,
 }
 
 impl Drop for TerminalManager {
@@ -55,7 +60,7 @@ impl Drop for TerminalManager {
 impl TerminalManager {
     pub fn new() -> Self {
         Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -106,18 +111,13 @@ impl TerminalManager {
                 true,
             )
         })?;
-        let id = format!(
-            "terminal-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        );
+        let id = format!("terminal-{}", Uuid::new_v4());
         let session = TerminalSession {
             id: id.clone(),
             workspace_id: workspace_id.to_string(),
             shell,
         };
+        let output_bytes = Arc::new(AtomicUsize::new(0));
         let state = SessionState {
             master: Arc::new(Mutex::new(pty.master)),
             writer: Arc::new(Mutex::new(writer)),
@@ -127,13 +127,18 @@ impl TerminalManager {
             .lock()
             .map_err(|_| NativeError::new("terminal-lock", "Terminal state is unavailable.", true))?
             .insert(id.clone(), state);
-        spawn_reader(app.clone(), id, reader);
+        spawn_reader(
+            app.clone(),
+            Arc::clone(&self.sessions),
+            id,
+            reader,
+            output_bytes,
+        );
         Ok(session)
     }
 
     fn write(&self, session_id: &str, data: &str) -> Result<(), NativeError> {
-        if session_id.trim().is_empty() || data.is_empty() || data.len() > MAX_TERMINAL_INPUT_BYTES
-        {
+        if !valid_terminal_input(session_id, data) {
             return Err(NativeError::new(
                 "terminal-input-invalid",
                 "Terminal input is empty or exceeds the safe input limit.",
@@ -176,8 +181,7 @@ impl TerminalManager {
     }
 
     fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), NativeError> {
-        if cols == 0 || rows == 0 || cols > MAX_TERMINAL_DIMENSION || rows > MAX_TERMINAL_DIMENSION
-        {
+        if !valid_terminal_dimensions(cols, rows) {
             return Err(NativeError::new(
                 "terminal-size-invalid",
                 "Terminal dimensions are outside the allowed range.",
@@ -297,22 +301,57 @@ pub fn terminal_kill(
     state.kill(&session_id)
 }
 
-fn spawn_reader<R: Read + Send + 'static>(app: AppHandle, session_id: String, mut reader: R) {
+fn spawn_reader<R: Read + Send + 'static>(
+    app: AppHandle,
+    sessions: Arc<Mutex<HashMap<String, SessionState>>>,
+    session_id: String,
+    mut reader: R,
+    output_bytes: Arc<AtomicUsize>,
+) {
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
                 Ok(size) => {
+                    let used = output_bytes.load(Ordering::Relaxed);
+                    let emit_size = bounded_output_size(used, size);
+                    if emit_size == 0 {
+                        break;
+                    }
+                    output_bytes.fetch_add(emit_size, Ordering::Relaxed);
                     let output = TerminalOutput {
                         session_id: session_id.clone(),
-                        data: String::from_utf8_lossy(&buffer[..size]).into_owned(),
+                        data: String::from_utf8_lossy(&buffer[..emit_size]).into_owned(),
                     };
                     let _ = app.emit("terminal-output", output);
+                    if emit_size < size {
+                        break;
+                    }
                 }
             }
         }
+        if let Ok(mut sessions) = sessions.lock() {
+            if let Some(state) = sessions.remove(&session_id) {
+                if let Ok(mut child) = state.child.lock() {
+                    let _ = child.kill();
+                }
+            }
+        }
+        let _ = app.emit("terminal-exit", session_id);
     });
+}
+
+fn valid_terminal_input(session_id: &str, data: &str) -> bool {
+    !session_id.trim().is_empty() && !data.is_empty() && data.len() <= MAX_TERMINAL_INPUT_BYTES
+}
+
+fn valid_terminal_dimensions(cols: u16, rows: u16) -> bool {
+    cols > 0 && rows > 0 && cols <= MAX_TERMINAL_DIMENSION && rows <= MAX_TERMINAL_DIMENSION
+}
+
+fn bounded_output_size(used: usize, requested: usize) -> usize {
+    requested.min(MAX_TERMINAL_OUTPUT_BYTES.saturating_sub(used))
 }
 
 fn default_shell() -> Result<String, NativeError> {
@@ -332,4 +371,35 @@ fn default_shell() -> Result<String, NativeError> {
         ));
     }
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_input_and_dimensions_are_bounded() {
+        assert!(valid_terminal_input("terminal-id", "echo hi"));
+        assert!(!valid_terminal_input("", "echo hi"));
+        assert!(!valid_terminal_input(
+            "terminal-id",
+            &"x".repeat(MAX_TERMINAL_INPUT_BYTES + 1)
+        ));
+        assert!(valid_terminal_dimensions(120, 32));
+        assert!(!valid_terminal_dimensions(0, 32));
+        assert!(!valid_terminal_dimensions(MAX_TERMINAL_DIMENSION + 1, 32));
+    }
+
+    #[test]
+    fn terminal_output_is_capped_per_session() {
+        assert_eq!(bounded_output_size(0, 4096), 4096);
+        assert_eq!(bounded_output_size(MAX_TERMINAL_OUTPUT_BYTES - 3, 4096), 3);
+        assert_eq!(bounded_output_size(MAX_TERMINAL_OUTPUT_BYTES, 4096), 0);
+    }
+
+    #[test]
+    fn terminal_session_ids_are_uuid_backed() {
+        let id = format!("terminal-{}", Uuid::new_v4());
+        assert!(Uuid::parse_str(id.strip_prefix("terminal-").expect("prefix")).is_ok());
+    }
 }
