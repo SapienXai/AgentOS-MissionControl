@@ -61,14 +61,15 @@ if (JSON.stringify(permissions).match(/shell|fs|process/i)) {
 }
 
 const allowedCapabilityPermissions = [
-  "core:window:allow-start-dragging"
+  "core:window:allow-start-dragging",
+  "core:window:allow-internal-toggle-maximize"
 ];
 if (
   !Array.isArray(capabilities.permissions)
   || JSON.stringify(capabilities.permissions) !== JSON.stringify(allowedCapabilityPermissions)
 ) {
   throw new Error(
-    "The AgentOS desktop WebView may only keep the native window drag permission enabled."
+    "The AgentOS desktop WebView may only keep the native window interaction permissions enabled."
   );
 }
 

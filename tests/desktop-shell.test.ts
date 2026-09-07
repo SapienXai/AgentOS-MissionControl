@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 const repoRoot = process.cwd();
 
-test("desktop capability grants only the native window drag permission", async () => {
+test("desktop capability grants only the native window interaction permissions", async () => {
   const capability = JSON.parse(
     await readFile(
       join(repoRoot, "apps/desktop/src-tauri/capabilities/default.json"),
@@ -15,7 +15,8 @@ test("desktop capability grants only the native window drag permission", async (
 
   assert.deepEqual(capability.windows, ["main"]);
   assert.deepEqual(capability.permissions, [
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize"
   ]);
 });
 
