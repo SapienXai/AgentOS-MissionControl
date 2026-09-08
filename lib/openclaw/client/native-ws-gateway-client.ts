@@ -25,6 +25,7 @@ import {
   getRecentOpenClawGatewayFallbackDiagnostics as readRecentOpenClawGatewayFallbackDiagnostics,
   NativeGatewayError,
   NativeGatewayRequestError,
+  isGatewayConfigConflictError,
   normalizeClientError,
   OpenClawGatewayClientError,
   recordGatewayFallbackDiagnostic,
@@ -878,16 +879,19 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
   }
 
   setModelAuthOrder(input: OpenClawModelAuthOrderSetInput, options: OpenClawCommandOptions = {}) {
-    return this.gatewayFirstCompatible(
-      "modelAuthOrder",
-      {
-        provider: input.provider,
-        agentId: input.agentId,
-        profileIds: input.profileIds
-      },
+    return this.retryAfterGatewayConfigConflict(
       options,
-      commandResultFromGatewayPayload,
-      () => this.fallback.setModelAuthOrder(input, options)
+      () => this.gatewayFirstCompatible(
+        "modelAuthOrder",
+        {
+          provider: input.provider,
+          agentId: input.agentId,
+          profileIds: input.profileIds
+        },
+        options,
+        commandResultFromGatewayPayload,
+        () => this.fallback.setModelAuthOrder(input, options)
+      )
     );
   }
 
@@ -2165,7 +2169,10 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
     }
 
     try {
-      const payload = await this.runAgentTurnNative(input, options);
+      const payload = await this.retryAfterGatewayConfigConflict(
+        options,
+        () => this.runAgentTurnNative(input, options)
+      );
       clearGatewayFallbackDiagnostic("chat.send");
       clearGatewayFallbackDiagnostic("sessions.send");
       this.clearNativeFailure("chat.send");
@@ -2174,7 +2181,10 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         return payload;
       }
 
-      const waitedPayload = await this.waitForAgentTurnNative(input, payload, options);
+      const waitedPayload = await this.retryAfterGatewayConfigConflict(
+        options,
+        () => this.waitForAgentTurnNative(input, payload, options)
+      );
       return waitedPayload
         ? {
             ...payload,
@@ -2336,7 +2346,10 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         options
       );
 
-      const dispatchPayload = await this.runAgentTurnNative(input, options);
+      const dispatchPayload = await this.retryAfterGatewayConfigConflict(
+        options,
+        () => this.runAgentTurnNative(input, options)
+      );
       dispatchedRunId = dispatchPayload.runId ?? null;
       clearGatewayFallbackDiagnostic("streamAgentTurn");
       this.clearNativeFailure("streamAgentTurn");
@@ -2351,7 +2364,10 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         return settledPayload;
       }
 
-      return await this.waitForAgentTurnNative(input, dispatchPayload, options) ?? dispatchPayload;
+      return await this.retryAfterGatewayConfigConflict(
+        options,
+        () => this.waitForAgentTurnNative(input, dispatchPayload, options)
+      ) ?? dispatchPayload;
     } catch (error) {
       this.options.onNativeFailure?.(error, "streamAgentTurn");
       const method = error instanceof NativeGatewayRequestError ? error.method : "streamAgentTurn";
@@ -2440,6 +2456,35 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
       sessionKey: payload.sessionKey ?? createdSession?.sessionKey,
       sessionId: payload.sessionId ?? createdSession?.sessionId ?? undefined
     }, sessionKey, idempotencyKey));
+  }
+
+  private async retryAfterGatewayConfigConflict<T>(
+    options: OpenClawCommandOptions,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isGatewayConfigConflictError(error)) {
+        throw error;
+      }
+
+      // OAuth and other OpenClaw-side config changes can invalidate the
+      // Gateway's in-memory snapshot while the native connection stays open.
+      // Refresh that snapshot once, then retry the same idempotent operation.
+      this.requestPolicy.invalidateReadCache();
+      try {
+        await this.callNative<unknown>("config.get", {}, options, {
+          safety: "read",
+          timeoutMs: options.timeoutMs,
+          allowCliFallback: false
+        });
+      } catch {
+        throw error;
+      }
+
+      return operation();
+    }
   }
 
   private async checkGatewayAgentRegistry(

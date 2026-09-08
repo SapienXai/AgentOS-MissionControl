@@ -3911,6 +3911,125 @@ test("native WS gateway client keeps direct chat moving when session creation pa
   assert.deepEqual(fallback.calls, []);
 });
 
+test("native WS gateway client refreshes config and retries chat after a Gateway config conflict", async () => {
+  const fallback = new FallbackGatewayClient();
+  let chatAttempts = 0;
+  const { transport, sentFrames } = createFakeGatewayTransport((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      if (frame.method === "chat.send") {
+        chatAttempts += 1;
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: chatAttempts > 1,
+          payload: chatAttempts > 1 ? { runId: "run-1", status: "started" } : undefined,
+          error: chatAttempts === 1
+            ? { message: "config changed since last load; re-run config.get and retry" }
+            : undefined
+        });
+        return;
+      }
+
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "config.get"
+            ? { exists: true, valid: true, hash: "fresh-hash", config: {} }
+            : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    transport,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.runAgentTurn({
+    agentId: "agent-1",
+    message: "hello",
+    idempotencyKey: "chat-1"
+  });
+
+  assert.equal(result.runId, "run-1");
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "chat.send",
+    "config.get",
+    "chat.send"
+  ]);
+  assert.deepEqual(
+    sentFrames.filter((frame) => frame.method === "chat.send").map((frame) => frame.params.idempotencyKey),
+    ["chat-1", "chat-1"]
+  );
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client applies config-conflict recovery to streamed chat", async () => {
+  const fallback = new FallbackGatewayClient();
+  let chatAttempts = 0;
+  const { transport, sentFrames } = createFakeGatewayTransport((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      if (frame.method === "chat.send") {
+        chatAttempts += 1;
+        socket.emitMessage({
+          type: "res",
+          id: frame.id,
+          ok: chatAttempts > 1,
+          payload: chatAttempts > 1 ? { runId: "run-2", status: "started" } : undefined,
+          error: chatAttempts === 1
+            ? { message: "config changed since last load; re-run config.get and retry" }
+            : undefined
+        });
+        return;
+      }
+
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? {
+              protocol: 4,
+              features: {
+                methods: ["chat.send", "sessions.subscribe", "sessions.messages.subscribe"]
+              }
+            }
+          : frame.method === "config.get"
+            ? { exists: true, valid: true, hash: "fresh-hash", config: {} }
+            : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    transport,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.streamAgentTurn(
+    { agentId: "agent-1", message: "hello", idempotencyKey: "stream-chat-1" },
+    {},
+    { timeoutMs: 25 }
+  );
+
+  assert.equal(result.runId, "run-2");
+  assert.deepEqual(sentFrames.map((frame) => frame.method), [
+    "connect",
+    "sessions.subscribe",
+    "sessions.messages.subscribe",
+    "chat.send",
+    "config.get",
+    "chat.send"
+  ]);
+  assert.deepEqual(fallback.calls, []);
+});
+
 test("native WS gateway client keeps agent creation on the native lifecycle", async () => {
   clearOpenClawGatewayFallbackDiagnosticsForTesting();
   const fallback = new FallbackGatewayClient();

@@ -140,6 +140,11 @@ export function normalizeClientError(error: unknown) {
   });
 }
 
+export function isGatewayConfigConflictError(error: unknown) {
+  const normalized = normalizeClientError(error);
+  return normalized.kind === "conflict" && /\bconfig(?:uration)?\b/i.test(normalized.message);
+}
+
 /**
  * Classify a native mutation without treating message text as delivery proof.
  * Request errors carry the official transport's sent bit; all unstructured
@@ -207,7 +212,7 @@ export function classifyGatewayError(message: string, cause?: unknown): OpenClaw
     return "scope-limited";
   }
 
-  if (/base\s*hash|basehash|conflict|stale|precondition|version mismatch|already changed/i.test(message)) {
+  if (/base\s*hash|basehash|conflict|stale|precondition|version mismatch|already changed|config(?:uration)?\s+changed|changed since last load/i.test(message)) {
     return "conflict";
   }
 

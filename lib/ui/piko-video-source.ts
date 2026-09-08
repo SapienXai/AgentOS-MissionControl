@@ -1,3 +1,5 @@
+import { resolveTauriDesktopPlatform } from "@/lib/desktop/window-platform";
+
 export type PikoVideoPlatform = "macos" | "chromium" | "other";
 
 export type PikoVideoSource = {
@@ -52,23 +54,38 @@ export function resolvePikoVideoSource(
   return source;
 }
 
+export function resolvePikoBrowserVideoPlatform(input?: {
+  userAgent?: string;
+  canPlayHevc?: boolean;
+}): PikoVideoPlatform {
+  const userAgent = input?.userAgent ?? "";
+  const isAppleWebKitBrowser =
+    /AppleWebKit/i.test(userAgent) &&
+    !/(Chrome|Chromium|CriOS|Edg|OPR)/i.test(userAgent);
+
+  if (isAppleWebKitBrowser) {
+    return input?.canPlayHevc ? "macos" : "other";
+  }
+
+  return "chromium";
+}
+
 export function detectPikoVideoPlatform(): PikoVideoPlatform {
   if (typeof navigator === "undefined") {
     return "other";
   }
 
-  const navigatorWithPlatform = navigator as Navigator & {
-    userAgentData?: { platform?: string };
-  };
-  const platform = resolvePikoVideoPlatform({
-    platform: navigator.platform,
-    userAgentDataPlatform: navigatorWithPlatform.userAgentData?.platform
-  });
-
-  if (platform !== "other") {
-    return platform;
+  const tauriPlatform = resolveTauriDesktopPlatform();
+  if (tauriPlatform === "macos") {
+    return "macos";
+  }
+  if (tauriPlatform) {
+    return "chromium";
   }
 
   const video = document.createElement("video");
-  return video.canPlayType(PIKO_VIDEO_SOURCES.macos.type) ? "macos" : "other";
+  return resolvePikoBrowserVideoPlatform({
+    userAgent: navigator.userAgent,
+    canPlayHevc: Boolean(video.canPlayType(PIKO_VIDEO_SOURCES.macos.type))
+  });
 }

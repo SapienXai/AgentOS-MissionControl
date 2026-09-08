@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   PIKO_VIDEO_SOURCES,
+  resolvePikoBrowserVideoPlatform,
   resolvePikoVideoPlatform,
   resolvePikoVideoSource
 } from "@/lib/ui/piko-video-source";
@@ -14,6 +15,19 @@ test("Piko selects the macOS alpha asset and Chromium selects WebM alpha", () =>
   assert.equal(resolvePikoVideoPlatform({ platform: "Linux x86_64" }), "chromium");
   assert.equal(resolvePikoVideoSource("macos")?.src, PIKO_VIDEO_SOURCES.macos.src);
   assert.equal(resolvePikoVideoSource("chromium")?.src, PIKO_VIDEO_SOURCES.chromium.src);
+});
+
+test("Piko keeps macOS Chrome on WebM and reserves HEVC for Apple WebKit", () => {
+  const chromeOnMac =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+  const safariOnMac =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+    "(KHTML, like Gecko) Version/18.6 Safari/605.1.15";
+
+  assert.equal(resolvePikoBrowserVideoPlatform({ userAgent: chromeOnMac, canPlayHevc: true }), "chromium");
+  assert.equal(resolvePikoBrowserVideoPlatform({ userAgent: safariOnMac, canPlayHevc: true }), "macos");
+  assert.equal(resolvePikoBrowserVideoPlatform({ userAgent: safariOnMac, canPlayHevc: false }), "other");
 });
 
 test("Piko falls back when the selected transparent video cannot play", () => {
