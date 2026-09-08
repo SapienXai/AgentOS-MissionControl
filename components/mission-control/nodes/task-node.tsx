@@ -835,7 +835,15 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
               aria-expanded={expanded}
               aria-controls={feedPanelId}
               className={cn("nodrag nopan ml-auto inline-flex h-8 w-8 items-center justify-center rounded-[9px] border transition-colors", surfaceTone.subtleButton)}
-              aria-label={expanded ? "Collapse monitor details" : systemOwnedMonitor ? "Expand monitor details" : "Show activity and details"}
+              aria-label={
+                expanded
+                  ? systemOwnedMonitor
+                    ? "Collapse monitor details"
+                    : "Hide activity and details"
+                  : systemOwnedMonitor
+                    ? "Expand monitor details"
+                    : "Show activity and details"
+              }
               title={expanded ? "Hide activity" : systemOwnedMonitor ? "Expand monitor details" : "Show activity and details"}
               onClick={(event) => {
                 event.stopPropagation();
