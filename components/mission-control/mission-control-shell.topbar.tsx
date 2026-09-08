@@ -15,7 +15,6 @@ import {
   resolveDiagnosticHealthDotClasses,
   type SurfaceTheme
 } from "@/components/mission-control/surface-visual-tones";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MissionControlSnapshot } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
@@ -198,7 +197,7 @@ export function CanvasTopBar({
                 className={cn("h-2 w-2 rounded-full shadow-[0_0_12px_currentColor]", resolveDiagnosticHealthDotClasses(displayHealth))}
               />
               {healthLabel}
-              {isCliFallbackActive ? <CliFallbackInfoTooltip surfaceTheme={surfaceTheme} /> : null}
+              {isCliFallbackActive ? <CliFallbackInfo surfaceTheme={surfaceTheme} /> : null}
             </span>
           )}
           <RuntimeIssueIndicator
@@ -237,34 +236,18 @@ export function CanvasTopBar({
   );
 }
 
-function CliFallbackInfoTooltip({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
+function CliFallbackInfo({ surfaceTheme }: { surfaceTheme: SurfaceTheme }) {
   return (
-    <TooltipProvider delayDuration={120}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            tabIndex={0}
-            aria-label="CLI fallback active"
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50"
-          >
-            <Info className="h-3 w-3 opacity-75" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent
-          side="bottom"
-          align="center"
-          sideOffset={8}
-          className={cn(
-            "rounded-[10px] px-2.5 py-1.5 text-[10px] font-medium leading-none tracking-[0.12em] whitespace-nowrap shadow-[0_16px_40px_rgba(0,0,0,0.32)]",
-            surfaceTheme === "light"
-              ? "border border-slate-200/80 bg-white/96 text-slate-900 shadow-[0_16px_40px_rgba(15,23,42,0.18)]"
-              : "border border-white/10 bg-slate-950/92 text-slate-100"
-          )}
-        >
-          CLI fallback active
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <span
+      aria-label="CLI fallback active"
+      title="CLI fallback active"
+      className={cn(
+        "inline-flex h-4 w-4 items-center justify-center rounded-full",
+        surfaceTheme === "light" ? "text-emerald-700" : "text-emerald-200"
+      )}
+    >
+      <Info className="h-3 w-3 opacity-75" />
+    </span>
   );
 }
 

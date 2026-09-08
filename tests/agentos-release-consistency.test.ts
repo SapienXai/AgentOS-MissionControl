@@ -69,7 +69,7 @@ test("AgentOS release check rejects missing root Node engine", async () => {
   const result = runReleaseCheck(tempRoot);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /package\.json: engines\.node is undefined, expected ">=24\.16\.0"/);
+  assert.match(result.stderr, /package\.json: engines\.node is undefined, expected ">=24\.16\.0 <25 \|\| >=26\.1\.0"/);
 });
 
 test("AgentOS release check rejects vague README Node prerequisites", async () => {
