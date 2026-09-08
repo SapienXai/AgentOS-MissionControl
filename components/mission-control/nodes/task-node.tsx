@@ -398,8 +398,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
     ? activityPreview || cardSummary
     : cardSummary;
   const isCompactMonitor = systemOwnedMonitor !== null && !expanded && !composerExpanded;
-  const monitorTitle = systemOwnedMonitor === "heartbeat" ? "Heartbeat monitor" : "Skill Workshop review";
-  const monitorSubtitle = systemOwnedMonitor === "heartbeat" ? "Native background heartbeat" : "Native background skill review";
+  const monitorTitle = systemOwnedMonitor === "heartbeat" ? "Heartbeat" : "Skill Workshop";
 
   useEffect(() => {
     if (!expanded && !composerExpanded) {
@@ -494,7 +493,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
       }
       className={cn(
         "group relative max-w-[calc(100vw-32px)] origin-center transform-gpu overflow-visible rounded-[18px] border p-1.5 backdrop-blur-xl transition-[border-color,box-shadow,opacity,transform,width] duration-200",
-        isCompactMonitor ? "w-[248px] rounded-[15px]" : "w-[400px] rounded-[18px]",
+        isCompactMonitor ? "w-[206px] rounded-[13px] p-1" : "w-[400px] rounded-[18px]",
         surfaceTone.outer,
         data.emphasis ? "opacity-100" : "opacity-76",
         (composerExpanded || expanded) && "z-30 shadow-[0_22px_58px_rgba(0,0,0,0.3)]"
@@ -533,7 +532,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
           className={cn("!h-2.5 !w-2.5 !border-0", visualTone.handle)}
         />
 
-        <div className={cn("relative z-20 rounded-[13px] border px-3 py-2.5", isCompactMonitor && "px-2.5 py-2", surfaceTone.panel)}>
+        <div className={cn("relative z-20 rounded-[13px] border px-3 py-2.5", isCompactMonitor && "rounded-[11px] px-2 py-1.5", surfaceTone.panel)}>
           <div className="min-w-0">
           <div className="flex items-start justify-between gap-2.5">
             <div className="min-w-0">
@@ -541,24 +540,26 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
                 <span
                   className={cn(
                     "flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] border",
+                    isCompactMonitor && "h-6 w-6 rounded-[7px]",
                     resolveTaskIconClass(visualTone.key, surfaceTheme)
                   )}
                 >
-                  {systemOwnedMonitor ? <RefreshCw className="h-3.5 w-3.5" /> : <ClipboardList className="h-3.5 w-3.5" />}
+                  {systemOwnedMonitor ? <RefreshCw className={cn("h-3.5 w-3.5", isCompactMonitor && "h-3 w-3")} /> : <ClipboardList className="h-3.5 w-3.5" />}
                 </span>
                 <span
                   className={cn(
                     "inline-flex h-1.5 w-1.5 shrink-0 rounded-full",
+                    isCompactMonitor && "h-1 w-1",
                     visualTone.dot,
                     showsLiveActivity && "motion-safe:animate-pulse"
                   )}
                 />
-                <span className={cn("truncate text-[10px] font-semibold uppercase tracking-[0.16em]", surfaceTone.mutedText)}>
+                <span className={cn("truncate text-[10px] font-semibold uppercase tracking-[0.16em]", isCompactMonitor && "text-[8px] tracking-[0.12em]", surfaceTone.mutedText)}>
                   {systemOwnedMonitor ? "Monitor" : activeFollowUp ? "Follow-up" : "Task"} · <span className={cn("normal-case tracking-normal", surfaceTone.text)}>{displayTask.primaryAgentName || "OpenClaw"}</span>
                 </span>
                 {data.locked ? <Lock className={cn("h-3 w-3", surfaceTone.mutedText)} /> : null}
               </div>
-            <p className={cn("mt-0.5 truncate text-[10px] leading-4", surfaceTone.mutedText)}>{isCompactMonitor ? monitorSubtitle : activityLabel}</p>
+            {!isCompactMonitor ? <p className={cn("mt-0.5 truncate text-[10px] leading-4", surfaceTone.mutedText)}>{activityLabel}</p> : null}
             </div>
 
             <div className="nodrag nopan relative flex shrink-0 items-center gap-1.5" ref={menuRef}>
@@ -704,7 +705,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             </div>
           </div>
 
-          <h3 className={cn("mt-2.5 line-clamp-2 font-display text-[1rem] font-semibold leading-[1.28]", isCompactMonitor && "mt-2 text-[0.9rem] line-clamp-1", surfaceTone.text)}>
+          <h3 className={cn("mt-2.5 line-clamp-2 font-display text-[1rem] font-semibold leading-[1.28]", isCompactMonitor && "mt-1.5 text-[0.8rem] leading-4 line-clamp-1", surfaceTone.text)}>
             {isCompactMonitor ? monitorTitle : displayPromptText}
           </h3>
 
@@ -739,7 +740,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             </span>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <div className={cn("mt-2 flex flex-wrap items-center gap-1.5", isCompactMonitor && "mt-1")}>
             {displayTask.warningCount > 0 && !hasReviewResolution ? (
               <Badge variant="warning" className="rounded-[8px] px-2 py-1 text-[9px]">
                 {displayTask.warningCount} review{displayTask.warningCount === 1 ? "" : "s"}
@@ -761,14 +762,16 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
               </button>
             ) : null}
             {operationSchedule ? (
-              <span className={cn("inline-flex max-w-full items-center gap-1 rounded-[8px] border px-2 py-1 text-[9px]", surfaceTone.subtleButton)} title={operationSchedule}>
+              <span className={cn("inline-flex max-w-full items-center gap-1 rounded-[8px] border px-2 py-1 text-[9px]", isCompactMonitor && "rounded-[6px] px-1.5 py-0.5 text-[8px]", surfaceTone.subtleButton)} title={operationSchedule}>
                 <CalendarClock className="h-3 w-3 shrink-0" />
                 <span className="truncate">{operationSchedule}</span>
               </span>
             ) : null}
-            <span className={cn("text-[9px] uppercase tracking-[0.14em]", tone, surfaceTheme === "light" && resolveLightTaskStatusTextClass(visualTone.key))}>
-              {footerLabel}
-            </span>
+            {!isCompactMonitor ? (
+              <span className={cn("text-[9px] uppercase tracking-[0.14em]", tone, surfaceTheme === "light" && resolveLightTaskStatusTextClass(visualTone.key))}>
+                {footerLabel}
+              </span>
+            ) : null}
           </div>
 
           <div className={cn("mt-2", isCompactMonitor && "hidden")}>
@@ -780,7 +783,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
             </p>
           </div>
 
-          <div className={cn("mt-3 flex items-center gap-1.5", isCompactMonitor && "mt-2") }>
+          <div className={cn("mt-3 flex items-center gap-1.5", isCompactMonitor && "mt-1")}>
             {!isCompactMonitor ? <button
               type="button"
               className={cn("nodrag nopan inline-flex h-8 items-center rounded-[9px] px-2.5 text-[10px] font-semibold transition-colors", resolvePrimaryActionClass(primaryAction, surfaceTheme))}
@@ -834,7 +837,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
               type="button"
               aria-expanded={expanded}
               aria-controls={feedPanelId}
-              className={cn("nodrag nopan ml-auto inline-flex h-8 w-8 items-center justify-center rounded-[9px] border transition-colors", surfaceTone.subtleButton)}
+              className={cn("nodrag nopan ml-auto inline-flex h-8 w-8 items-center justify-center rounded-[9px] border transition-colors", isCompactMonitor && "h-6 w-6 rounded-[7px]", surfaceTone.subtleButton)}
               aria-label={
                 expanded
                   ? systemOwnedMonitor
@@ -851,7 +854,7 @@ export function TaskNode({ data, selected }: NodeProps<TaskFlowNode>) {
               }}
               onPointerDown={(event) => event.stopPropagation()}
             >
-              {expanded ? <X className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {expanded ? <X className="h-3.5 w-3.5" /> : <ChevronDown className={cn("h-3.5 w-3.5", isCompactMonitor && "h-3 w-3")} />}
             </button>
           </div>
 

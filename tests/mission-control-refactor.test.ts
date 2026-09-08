@@ -1022,6 +1022,16 @@ test("Mission Control shell delegates operator workflow state to focused hooks",
   assert.doesNotMatch(source, /const \[resetRunState, setResetRunState\] = useState/);
 });
 
+test("Mission Control keeps model assignment in the agent connection menu and monitor cards compact", () => {
+  const agentNodeSource = readFileSync(path.join(rootDir, "components/mission-control/nodes/agent-node.tsx"), "utf8");
+  const taskNodeSource = readFileSync(path.join(rootDir, "components/mission-control/nodes/task-node.tsx"), "utf8");
+
+  assert.match(agentNodeSource, /label="Change Model"/);
+  assert.match(agentNodeSource, /data\.onConfigureModel\?\.\(data\.agent\.id\)/);
+  assert.match(taskNodeSource, /isCompactMonitor \? "w-\[206px\]/);
+  assert.match(taskNodeSource, /aria-label=\{[\s\S]*?"Expand monitor details"/);
+});
+
 test("Context Engine follows the Mission Control surface theme with semantic contrast tokens", () => {
   const shellSource = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
   const dialogSource = readFileSync(path.join(rootDir, "components/mission-control/context-engine-dialog.tsx"), "utf8");
@@ -1079,9 +1089,10 @@ test("agent chat exposes real OpenClaw activity as a subdued live feed", () => {
   const routeSource = readFileSync(path.join(rootDir, "app/api/agents/[agentId]/chat/route.ts"), "utf8");
 
   assert.match(drawerSource, /role="status"[\s\S]*aria-live="polite"/);
-  assert.match(drawerSource, /Live activity/);
+  assert.match(drawerSource, /currentActivity/);
+  assert.match(drawerSource, /previousActivity/);
   assert.match(drawerSource, /statusHistory=\{runSnapshot\.statusHistory\}/);
-  assert.doesNotMatch(drawerSource, /Show details|Reading your message/);
+  assert.doesNotMatch(drawerSource, /Show details|Reading your message|Live activity/);
   assert.match(runnerSource, /statusHistory: string\[\]/);
   assert.match(runnerSource, /maxAgentChatStatusHistory = 5/);
   assert.match(routeSource, /latestItem\?\.role === "toolCall"/);

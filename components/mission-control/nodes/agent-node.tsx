@@ -3,7 +3,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Handle, Position, type Node as FlowNode, type NodeProps } from "@xyflow/react";
-import { BrainCircuit, ChevronDown, KeyRound, Layers3, LocateFixed, MessageCircle, MoreHorizontal, Plus, SendHorizontal, Sparkles, Wrench } from "lucide-react";
+import { BrainCircuit, ChevronDown, Cpu, KeyRound, Layers3, LocateFixed, MessageCircle, MoreHorizontal, Plus, SendHorizontal, Sparkles, Wrench } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 import { AccountIcon } from "@/components/mission-control/account-icon";
@@ -441,8 +441,9 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const canOpenWorkspaceChannels = Boolean(data.onOpenWorkspaceChannels);
   const canOpenAccounts = !isPendingCreation && Boolean(data.onOpenAccounts);
   const canConfigureCapabilities = !isPendingCreation && Boolean(data.onConfigureCapabilities);
+  const canConfigureModel = !isPendingCreation && Boolean(data.onConfigureModel);
   const canOpenContextEngine = !isPendingCreation && Boolean(data.onOpenContextEngine);
-  const canOpenConnectionMenu = canOpenWorkspaceChannels || canOpenAccounts || canConfigureCapabilities || canOpenContextEngine;
+  const canOpenConnectionMenu = canConfigureModel || canOpenWorkspaceChannels || canOpenAccounts || canConfigureCapabilities || canOpenContextEngine;
   const canMessage = !isPendingCreation && Boolean(data.onMessage);
   const isMessageActive = Boolean(data.chatOpen) || hasUnreadChat;
   const canCreateTask = !isPendingCreation && Boolean(data.onCreateTask);
@@ -1090,6 +1091,16 @@ export function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
 
                   <div className="relative overflow-hidden rounded-[18px] border border-violet-200/20 bg-[linear-gradient(135deg,rgba(18,20,30,0.98),rgba(37,22,53,0.96)_58%,rgba(9,12,20,0.98))] p-1.5 shadow-[0_22px_55px_rgba(8,10,18,0.46),0_0_34px_rgba(168,85,247,0.24)] backdrop-blur-2xl">
                     <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(250,204,21,0.18),transparent_34%),radial-gradient(circle_at_94%_16%,rgba(168,85,247,0.28),transparent_36%)]" />
+                    <ConnectionMenuButton
+                      icon={<Cpu className="h-[17px] w-[17px]" />}
+                      label="Change Model"
+                      description="Agent model"
+                      disabled={!canConfigureModel}
+                      onClick={() => {
+                        data.onConfigureModel?.(data.agent.id);
+                        setConnectionMenuOpen(false);
+                      }}
+                    />
                     <ConnectionMenuButton
                       icon={<BrainCircuit className="h-[17px] w-[17px]" />}
                       label="Context Engine"
