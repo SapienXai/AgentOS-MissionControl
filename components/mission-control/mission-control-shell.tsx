@@ -2735,6 +2735,14 @@ export function MissionControlShell({
       return;
     }
 
+    if (providerId === "ollama") {
+      setIsOnboardingForcedOpen(false);
+      setShowOnboardingReadyState(false);
+      setIsOnboardingDismissed(true);
+      openAddModelsDialog(providerId);
+      return;
+    }
+
     setIsOnboardingForcedOpen(true);
 
     const snapshotProvider = snapshot.diagnostics.modelReadiness.authProviders.find(

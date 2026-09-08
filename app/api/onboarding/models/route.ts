@@ -13,7 +13,10 @@ import {
   ensureOpenClawRuntimeSmokeTest,
   getMissionControlSnapshot
 } from "@/lib/agentos/control-plane";
-import { setOpenClawDefaultModel } from "@/lib/openclaw/application/model-provider-state-service";
+import {
+  ensureOpenClawOllamaLocalCredential,
+  setOpenClawDefaultModel
+} from "@/lib/openclaw/application/model-provider-state-service";
 import {
   buildGatewayAuthBlockedMessage,
   isGatewayAuthSetupRecoveryError,
@@ -515,6 +518,7 @@ export async function POST(request: Request) {
 
       const runProviderLogin = async (provider: string) => {
         if (provider.trim().toLowerCase() === "ollama") {
+          await ensureOpenClawOllamaLocalCredential();
           await send({
             type: "status",
             phase: "verifying",

@@ -790,7 +790,7 @@ export function AgentChatDrawer({
                           )}
                         >
                           <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-                          Connect {authAction.label}
+                          {authAction.cta}
                         </Button>
                       ) : null}
                       {gatewayRepairAction ? (
@@ -832,7 +832,7 @@ export function AgentChatDrawer({
                         )}
                       >
                         <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-                        Connect {authAction.label}
+                        {authAction.cta}
                       </Button>
                     </div>
                   ) : null}

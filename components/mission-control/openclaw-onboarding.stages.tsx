@@ -352,11 +352,13 @@ export function ModelStage({
     : snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
       snapshot.diagnostics.modelReadiness.defaultModel ||
       null;
+  const selectedProvider = (selectedModelId.trim() || defaultModelId || "").split("/", 1)[0]?.toLowerCase() || null;
+  const isLocalOllamaSelected = selectedProvider === "ollama";
   const modelReady = isOpenClawOnboardingModelReady(snapshot);
   const chatGptState = resolveChatGptOnboardingState({
     runState: run.runState,
     phase: modelPhase,
-    modelReady: isChatGptConnectionReady(snapshot),
+    modelReady: isOpenClawOnboardingModelReady(snapshot),
     chatGptConnected: isChatGptProviderConnected(snapshot)
   });
   const defaultModelLabel = resolveModelDisplayLabel(defaultModelId, availableModels);
@@ -425,6 +427,7 @@ export function ModelStage({
           onOpenAddModels={onOpenAddModels}
           onSnapshotChange={onSnapshotChange}
           onUseAnotherProvider={() => onAdvancedProviderFlowOpenChange(true)}
+          isLocalOllamaSelected={isLocalOllamaSelected}
         />
       ) : (
         <>
@@ -530,7 +533,8 @@ function ConnectAiStage({
   onSelectedThinkingChange,
   onOpenAddModels,
   onSnapshotChange,
-  onUseAnotherProvider
+  onUseAnotherProvider,
+  isLocalOllamaSelected
 }: {
   surfaceTheme: SurfaceTheme;
   state: ReturnType<typeof resolveChatGptOnboardingState>;
@@ -551,6 +555,7 @@ function ConnectAiStage({
   onOpenAddModels: (provider?: AddModelsProviderId | null) => void;
   onSnapshotChange?: (snapshot: MissionControlSnapshot) => void;
   onUseAnotherProvider: () => void;
+  isLocalOllamaSelected: boolean;
 }) {
   const isBusy = state === "connecting" || state === "verifying";
   const isReady = state === "ready";
@@ -559,7 +564,11 @@ function ConnectAiStage({
   const isError = state === "error";
   const browserAuthBusy = Boolean(chatGptBrowserAuth && !["completed", "error"].includes(chatGptBrowserAuth.state));
   const browserAuthError = chatGptBrowserAuth?.state === "error";
-  const connectedTitle = chatGptReady || chatGptAttempted || needsModelSelection ? "ChatGPT connected" : "AI connected";
+  const connectedTitle = isLocalOllamaSelected
+    ? "Ollama connected"
+    : chatGptReady || chatGptAttempted || needsModelSelection
+      ? "ChatGPT connected"
+      : "AI connected";
   const [redirectUrl, setRedirectUrl] = useState("");
   const handleModelContinue = () => {
     const targetModelId = selectedModelId.trim();
@@ -596,10 +605,14 @@ function ConnectAiStage({
       </h2>
       <p className={cn("mt-2 max-w-[420px] text-[12px] leading-5", surfaceTheme === "light" ? "text-[#705b4d]" : "text-slate-400")}>
         {showModelSelection
-          ? "Your ChatGPT account is connected. Select a model or continue with the current default."
+          ? isLocalOllamaSelected
+            ? "Your local Ollama runtime is connected. Select a model or continue with the current default."
+            : "Your ChatGPT account is connected. Select a model or continue with the current default."
           : chatGptBrowserAuth
             ? "Complete sign-in in the browser, then return here."
-            : "Connect your ChatGPT account to power your agents and start using AgentOS."}
+            : isLocalOllamaSelected
+              ? "Use the Ollama model detected on this machine to power your agents locally."
+              : "Connect your ChatGPT account to power your agents and start using AgentOS."}
       </p>
 
       {chatGptBrowserAuth ? (
@@ -732,7 +745,7 @@ function ConnectAiStage({
               {resolveChatGptProgressCopy(state === "connecting" ? "authenticating" : "verifying", statusMessage)}
             </div>
           ) : null}
-          {!chatGptBrowserAuth || browserAuthError ? (
+          {!isLocalOllamaSelected && (!chatGptBrowserAuth || browserAuthError) ? (
             <Button
               type="button"
               onClick={() => onConnectChatGPT(isError)}
@@ -742,6 +755,24 @@ function ConnectAiStage({
               <span className="relative z-10 inline-flex items-center gap-2">
                 <ProviderLogo provider="openai" className="h-5 w-5 rounded-md border-slate-200/80 bg-white" />
                 <span>{isError ? "Reconnect ChatGPT" : "Continue with ChatGPT"}</span>
+              </span>
+            </Button>
+          ) : null}
+          {isLocalOllamaSelected ? (
+            <Button
+              type="button"
+              onClick={onUseAnotherProvider}
+              disabled={isBusy}
+              className={cn(
+                "group relative mt-6 h-10 min-w-[220px] rounded-md border px-4 text-[12px] font-semibold",
+                surfaceTheme === "light"
+                  ? "border-violet-200 bg-violet-50 text-violet-900 hover:bg-violet-100"
+                  : "border-violet-300/25 bg-violet-300/10 text-violet-100 hover:bg-violet-300/15"
+              )}
+            >
+              <span className="inline-flex items-center gap-2">
+                <ProviderLogo provider="ollama" className="h-5 w-5 rounded-md" />
+                Configure Ollama
               </span>
             </Button>
           ) : null}

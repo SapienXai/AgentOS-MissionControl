@@ -25,6 +25,26 @@ const missionControlRootPath = path.join(/*turbopackIgnore: true*/ process.cwd()
 const agentChatSessionsPath = path.join(missionControlRootPath, "agent-chat-sessions.json");
 const maxAgentChatSessionRecords = 200;
 const maxAgentChatSessionAgeMs = 14 * 24 * 60 * 60 * 1000;
+const activeAgentChatSessionKeys = new Set<string>();
+
+export function markAgentChatSessionActive(input: { agentId: string; sessionId: string }) {
+  const key = createAgentChatSessionKey(input.agentId.trim(), input.sessionId.trim());
+
+  if (key !== ":") {
+    activeAgentChatSessionKeys.add(key);
+  }
+}
+
+export function markAgentChatSessionInactive(input: { agentId: string; sessionId: string }) {
+  activeAgentChatSessionKeys.delete(createAgentChatSessionKey(input.agentId.trim(), input.sessionId.trim()));
+}
+
+export function isAgentChatSessionActive(input: { agentId?: string | null; sessionId?: string | null }) {
+  const agentId = input.agentId?.trim();
+  const sessionId = input.sessionId?.trim();
+
+  return Boolean(agentId && sessionId && activeAgentChatSessionKeys.has(createAgentChatSessionKey(agentId, sessionId)));
+}
 
 export async function recordAgentChatSession(input: {
   agentId: string;

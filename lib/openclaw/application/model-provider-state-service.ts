@@ -124,6 +124,8 @@ const openClawAuthProfilesPath = path.join(
 const gatewayConfigPatchRetryDelaysMs = [750, 1_500, 3_000];
 const maxInlineGatewayConfigRateLimitRetryMs = 3_000;
 const googleGenerativeAiBaseUrl = "https://generativelanguage.googleapis.com/v1beta";
+const ollamaLocalBaseUrl = "http://127.0.0.1:11434";
+export const OLLAMA_LOCAL_API_KEY_MARKER = "ollama-local";
 
 type OpenClawAgentDefaultsConfig = NonNullable<NonNullable<OpenClawConfigPayload["agents"]>["defaults"]>;
 
@@ -463,6 +465,40 @@ export async function updateOpenClawProviderSettings(
   }
 
   return readOpenClawProviderConfigSummary(provider);
+}
+
+/**
+ * OpenClaw uses a non-secret marker to authenticate local Ollama endpoints.
+ * The provider is still local-only; this value only prevents the Gateway from
+ * treating the provider as an unconfigured remote API.
+ */
+export async function ensureOpenClawOllamaLocalCredential() {
+  const adapter = getOpenClawAdapter();
+  const providerConfig = await readOpenClawExplicitProviderConfig("ollama");
+  const configuredBaseUrl = providerConfig ? readProviderConfigBaseUrl(providerConfig) : null;
+  const isLocalProvider = !configuredBaseUrl || isLoopbackProviderUrl(configuredBaseUrl);
+  let configured = false;
+
+  if (!configuredBaseUrl) {
+    await adapter.setConfig("models.providers.ollama.baseUrl", ollamaLocalBaseUrl, { timeoutMs: 5_000 });
+    configured = true;
+  }
+
+  if (!providerConfig?.api?.trim()) {
+    await adapter.setConfig("models.providers.ollama.api", "ollama", { timeoutMs: 5_000 });
+    configured = true;
+  }
+
+  if (isLocalProvider && (!providerConfig || !isConfiguredCredentialValue(providerConfig.apiKey))) {
+    await adapter.setConfig(
+      "models.providers.ollama.apiKey",
+      OLLAMA_LOCAL_API_KEY_MARKER,
+      { timeoutMs: 5_000 }
+    );
+    configured = true;
+  }
+
+  return { configured };
 }
 
 export async function removeOpenClawProviderCredential(provider: AddModelsProviderId) {
@@ -1057,8 +1093,10 @@ async function removeOpenClawConfiguredModelViaGatewayOnce(
     changed = await removeProviderModelEntryViaGateway(adapter, provider, canonicalModelId, requestedModelId) || changed;
   }
 
+  // Rewrite the object once through the native Gateway instead of issuing one
+  // config.unset per model key. Besides being less chatty, this avoids the
+  // CLI-only fallback path for quoted/dynamic keys when the Gateway is healthy.
   for (const modelId of matchingModelIds) {
-    await adapter.unsetConfig(buildQuotedConfigKeyPath("agents.defaults.models", modelId), { timeoutMs: 5_000 });
     delete nextModels[modelId];
     changed = true;
   }
@@ -1126,7 +1164,15 @@ async function removeProviderModelEntryViaGateway(
     return false;
   }
 
-  await adapter.unsetConfig(`models.providers.${configProvider}.models[${modelIndex}]`, { timeoutMs: 5_000 });
+  // OpenClaw's config.patch uses JSON Merge Patch semantics; nulling an array
+  // slot does not remove that slot and can fail schema validation. Replace only
+  // the models array so redacted provider credentials are never written back.
+  const modelsPath = `models.providers.${configProvider}.models`;
+  await adapter.setConfig(
+    modelsPath,
+    (providerConfig?.models ?? []).filter((_, index) => index !== modelIndex),
+    { timeoutMs: 5_000, replacePaths: [modelsPath] }
+  );
   return true;
 }
 
@@ -1363,6 +1409,11 @@ async function ensureProviderModelRegistryViaGateway(
   );
   let changed = false;
 
+  if (provider === "ollama" && !isConfiguredCredentialValue(nextProviderConfig.apiKey)) {
+    nextProviderConfig.apiKey = OLLAMA_LOCAL_API_KEY_MARKER;
+    changed = true;
+  }
+
   for (const id of modelEntries) {
     if (!existingIds.has(id)) {
       nextProviderConfig.models = [...(nextProviderConfig.models ?? []), { id, name: id }];
@@ -1426,6 +1477,15 @@ function readProviderConfigBaseUrl(entry: OpenClawProviderModelsEntry) {
     : typeof entry.baseURL === "string" && entry.baseURL.trim()
       ? entry.baseURL.trim()
       : null;
+}
+
+function isLoopbackProviderUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function mergeProviderModelEntries(

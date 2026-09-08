@@ -316,8 +316,8 @@ export function AgentModelPickerDialog({
       });
       const payload = (await response.json()) as AddModelsProviderActionResult & { error?: string };
 
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || "Unable to inspect model removal impact.");
+      if (!response.ok || payload.error || payload.ok === false) {
+        throw new Error(payload.error || payload.message || "Unable to inspect model removal impact.");
       }
 
       setDeleteImpact(payload.modelRemoveImpact ?? null);
@@ -353,7 +353,7 @@ export function AgentModelPickerDialog({
       const payload = (await response.json()) as AddModelsProviderActionResult & { error?: string };
 
       if (!response.ok || payload.error || payload.ok === false) {
-        throw new Error(payload.error || "Unable to remove the model.");
+        throw new Error(payload.error || payload.message || "Unable to remove the model.");
       }
 
       const removedModelId = normalizeOpenAiModelId(deleteTargetModel.id);

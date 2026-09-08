@@ -101,7 +101,7 @@ export function OpenClawOnboardingProviderFlow({
 }) {
   const isLight = surfaceTheme === "light";
   const [activeProviderId, setActiveProviderId] = useState<AddModelsProviderId>(() =>
-    compactSelection ? "openai" : resolveInitialOnboardingProviderId(snapshot, selectedModelId)
+    resolveInitialOnboardingProviderId(snapshot, selectedModelId)
   );
   const [providerDrafts, setProviderDrafts] = useState<Partial<Record<AddModelsProviderId, ProviderDraft>>>(
     {}
@@ -203,7 +203,7 @@ export function OpenClawOnboardingProviderFlow({
   );
 
   useEffect(() => {
-    if (!compactSelection && selectedProviderId) {
+    if (selectedProviderId) {
       setActiveProviderId((currentProviderId) =>
         currentProviderId === selectedProviderId ? currentProviderId : selectedProviderId
       );

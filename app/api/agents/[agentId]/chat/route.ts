@@ -21,6 +21,7 @@ import {
   extractAgentChatMessagesFromSessionHistory,
   extractLatestAssistantTextFromSessionHistory,
   isCompletedEmptyAgentChatResponse,
+  recoverStreamedAgentChatResponse,
   resolveAgentChatRuntimeFailureMessage,
   sanitizeAgentChatReplyText,
   sanitizeAgentChatVisibleText
@@ -35,6 +36,8 @@ import { ensureOpenAiAuthOrderForAgent } from "@/lib/openclaw/application/model-
 import { isOpenAiBackedModel } from "@/lib/openclaw/domains/model-provider-connection";
 import {
   forgetAgentChatSession,
+  markAgentChatSessionActive,
+  markAgentChatSessionInactive,
   readAgentChatSessionsForAgent,
   recordAgentChatSession,
   resolveAgentChatSessionId
@@ -523,6 +526,7 @@ export async function POST(
             sessionId,
             workspacePath: agent.workspacePath
           });
+          markAgentChatSessionActive({ agentId, sessionId });
           const commandPromise = getOpenClawAdapter().streamAgentTurn(
             {
               agentId,
@@ -586,6 +590,7 @@ export async function POST(
               ]
             };
           }
+          response = recoverStreamedAgentChatResponse(response, latestAssistantText);
           const emptyResponseDiagnosticMessage = resolveEmptyAgentChatDiagnosticMessage(result, {
             modelId: activeAgentModelId
           });
@@ -634,6 +639,7 @@ export async function POST(
             response: applyMissionControlActionMetadata(response, action)
           });
         } finally {
+          markAgentChatSessionInactive({ agentId, sessionId });
           releaseAgentChatSessionTurnLock(inFlightKey, inFlightLock);
         }
       } catch (error) {

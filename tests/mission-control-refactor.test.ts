@@ -88,6 +88,20 @@ test("onboarding model selection follows live OpenClaw readiness metadata", () =
     ),
     OPENAI_ONBOARDING_DEFAULT_MODEL_ID
   );
+  assert.equal(
+    resolveOnboardingModelSelection(
+      {
+        resolvedDefaultModel: "ollama/jonathan-qwen38-q4:latest",
+        recommendedModelId: OPENAI_ONBOARDING_DEFAULT_MODEL_ID,
+        defaultModel: "ollama/jonathan-qwen38-q4:latest"
+      },
+      [
+        { id: OPENAI_ONBOARDING_DEFAULT_MODEL_ID },
+        { id: "ollama/jonathan-qwen38-q4:latest" }
+      ]
+    ),
+    "ollama/jonathan-qwen38-q4:latest"
+  );
 });
 
 test("ChatGPT onboarding exposes a recoverable Codex plugin setup error", () => {
@@ -656,6 +670,30 @@ test("onboarding prefers the live Luna model and xhigh reasoning defaults", () =
 
   assert.equal(resolveInitialOnboardingModelId(snapshot), OPENAI_ONBOARDING_DEFAULT_MODEL_ID);
   assert.equal(ONBOARDING_DEFAULT_THINKING, "xhigh");
+});
+
+test("initial onboarding preserves a configured local Ollama default", () => {
+  const snapshot = {
+    models: [{
+      id: "ollama/jonathan-qwen38-q4:latest",
+      provider: "ollama",
+      local: true,
+      available: true,
+      missing: false
+    }],
+    workspaces: [],
+    diagnostics: {
+      modelReadiness: {
+        resolvedDefaultModel: "ollama/jonathan-qwen38-q4:latest",
+        defaultModel: "ollama/jonathan-qwen38-q4:latest",
+        defaultModelReady: false,
+        recommendedModelId: OPENAI_ONBOARDING_DEFAULT_MODEL_ID,
+        authProviders: [{ provider: "ollama", connected: true, canLogin: false }]
+      }
+    }
+  } as unknown as MissionControlSnapshot;
+
+  assert.equal(resolveInitialOnboardingModelId(snapshot), "ollama/jonathan-qwen38-q4:latest");
 });
 
 test("onboarding launchpad requires confirmed setup or a workspace-backed model", () => {

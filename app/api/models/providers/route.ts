@@ -34,6 +34,7 @@ import {
   addOpenClawModelsToConfig,
   addOpenClawExplicitProviderModelsToConfig,
   buildOpenClawFileBasedProviderConnectionStatus,
+  ensureOpenClawOllamaLocalCredential,
   readOpenClawExplicitProviderConfig,
   persistOpenClawExplicitProviderConfig,
   readOpenClawOpenAiProviderConfig,
@@ -1204,6 +1205,10 @@ async function removeProviderModel(
 async function discoverProviderModels(
   provider: AddModelsProviderId
 ): Promise<AddModelsProviderActionResult> {
+  if (provider === "ollama") {
+    await ensureOpenClawOllamaLocalCredential();
+  }
+
   const { connection, ollamaState, configuredModelIds } = await readProviderConnectionContext(provider);
   const isCustomOpenAiEndpoint = provider === "openai" && isCustomOpenAiEndpointConnection(connection);
   let models: AddModelsCatalogModel[];

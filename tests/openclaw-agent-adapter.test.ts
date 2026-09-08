@@ -6,6 +6,10 @@ import {
   buildAgentPayloadsFromGatewayList
 } from "@/lib/openclaw/adapter/agent-adapter";
 import { buildSnapshotAgentEntry } from "@/lib/openclaw/adapter/agent-snapshot-adapter";
+import {
+  markAgentChatSessionActive,
+  markAgentChatSessionInactive
+} from "@/lib/openclaw/domains/agent-chat-sessions";
 
 test("agent adapter suppresses legacy native-create duplicates in config fallback", () => {
   const agents = buildAgentPayloadsFromConfig([
@@ -264,4 +268,168 @@ test("snapshot adapter derives display name from workspace scoped ids when metad
 
   assert.equal(entry.agent.name, "Hulk AK");
   assert.equal(entry.agent.identityName, "Hulk AK");
+});
+
+test("snapshot adapter does not treat stale Gateway events as active agent runtimes", () => {
+  const entry = buildSnapshotAgentEntry({
+    rawAgent: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    configured: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    identityOverrides: null,
+    workspaceId: "project",
+    sessionList: [],
+    manifestAgent: null,
+    agentRuntimes: [
+      {
+        id: "stale-chat-event",
+        source: "turn",
+        key: "chat-1",
+        title: "Gateway runtime event",
+        subtitle: "chat",
+        status: "running",
+        updatedAt: Date.now() - 10 * 60 * 1000,
+        ageMs: 10 * 60 * 1000,
+        agentId: "agent-1",
+        metadata: { origin: "openclaw-gateway-event", event: "chat" }
+      },
+      {
+        id: "recent-chat-event",
+        source: "turn",
+        key: "chat-2",
+        title: "Gateway runtime event",
+        subtitle: "chat",
+        status: "running",
+        updatedAt: Date.now() - 5_000,
+        ageMs: 5_000,
+        agentId: "agent-1",
+        metadata: { origin: "openclaw-gateway-event", event: "chat" }
+      }
+    ],
+    gatewayRpcOk: true,
+    heartbeat: null,
+    profile: {
+      purpose: null,
+      operatingInstructions: [],
+      responseStyle: [],
+      outputPreference: null,
+      sourceFiles: []
+    }
+  });
+
+  assert.deepEqual(entry.agent.activeRuntimeIds, ["recent-chat-event"]);
+  assert.equal(entry.agent.status, "engaged");
+});
+
+test("snapshot adapter leaves an agent ready when only stale Gateway events remain", () => {
+  const entry = buildSnapshotAgentEntry({
+    rawAgent: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    configured: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    identityOverrides: null,
+    workspaceId: "project",
+    sessionList: [],
+    manifestAgent: null,
+    agentRuntimes: [{
+      id: "stale-chat-event",
+      source: "turn",
+      key: "chat-1",
+      title: "Gateway runtime event",
+      subtitle: "chat",
+      status: "running",
+      updatedAt: Date.now() - 10 * 60 * 1000,
+      ageMs: 10 * 60 * 1000,
+      agentId: "agent-1",
+      metadata: { origin: "openclaw-gateway-event", event: "chat" }
+    }],
+    gatewayRpcOk: true,
+    heartbeat: null,
+    profile: {
+      purpose: null,
+      operatingInstructions: [],
+      responseStyle: [],
+      outputPreference: null,
+      sourceFiles: []
+    }
+  });
+
+  assert.deepEqual(entry.agent.activeRuntimeIds, []);
+  assert.equal(entry.agent.status, "standby");
+});
+
+test("snapshot adapter ignores completed direct-chat events but keeps an in-flight chat active", () => {
+  const sessionId = "chat-session-1";
+  const runtime = {
+    id: "stale-agent-chat",
+    source: "turn" as const,
+    key: "chat-1",
+    title: "Agent chat session",
+    subtitle: "direct chat",
+    status: "running" as const,
+    updatedAt: Date.now() - 10 * 60 * 1000,
+    ageMs: 10 * 60 * 1000,
+    agentId: "agent-1",
+    sessionId,
+    metadata: { origin: "agent-chat", agentChatSessionId: sessionId }
+  };
+  const input = {
+    rawAgent: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    configured: {
+      id: "agent-1",
+      name: "agent-1",
+      workspace: "/Users/example/project",
+      agentDir: "/Users/example/project/.openclaw/agents/agent-1/agent",
+      model: "ollama/local"
+    },
+    identityOverrides: null,
+    workspaceId: "project",
+    sessionList: [],
+    manifestAgent: null,
+    agentRuntimes: [runtime],
+    gatewayRpcOk: true,
+    heartbeat: null,
+    profile: {
+      purpose: null,
+      operatingInstructions: [],
+      responseStyle: [],
+      outputPreference: null,
+      sourceFiles: []
+    }
+  };
+
+  assert.deepEqual(buildSnapshotAgentEntry(input).agent.activeRuntimeIds, []);
+
+  markAgentChatSessionActive({ agentId: "agent-1", sessionId });
+  try {
+    assert.deepEqual(buildSnapshotAgentEntry(input).agent.activeRuntimeIds, ["stale-agent-chat"]);
+  } finally {
+    markAgentChatSessionInactive({ agentId: "agent-1", sessionId });
+  }
 });

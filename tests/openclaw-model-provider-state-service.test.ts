@@ -11,6 +11,7 @@ import {
   addOpenClawExplicitProviderModelsToConfig,
   addOpenClawModelsToConfig,
   ensureOpenClawModelRuntimeConfig,
+  ensureOpenClawOllamaLocalCredential,
   persistOpenClawProviderToken,
   readOpenClawProviderConfigSummary,
   readOpenClawProviderModelStatus,
@@ -147,6 +148,60 @@ test("provider credential registry resolves Anthropic, Gemini, and xAI config ta
     "gemini-test",
     "xai-test"
   ]);
+});
+
+test("local Ollama credential repair writes the non-secret OpenClaw marker", async () => {
+  const calls: Array<{ path: string; value?: unknown }> = [];
+  let providerConfig: unknown = {
+    models: [{ id: "qwen3.5:9b" }]
+  };
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      return path === "models.providers.ollama" ? providerConfig : null;
+    },
+    async setConfig(path: string, value: unknown) {
+      calls.push({ path, value });
+      providerConfig = {
+        ...(providerConfig as object),
+        ...(path.endsWith(".baseUrl") ? { baseUrl: value } : {}),
+        ...(path.endsWith(".api") ? { api: value } : {}),
+        ...(path.endsWith(".apiKey") ? { apiKey: value } : {})
+      };
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  } as unknown as OpenClawAdapter);
+
+  assert.deepEqual(await ensureOpenClawOllamaLocalCredential(), { configured: true });
+  assert.deepEqual(await ensureOpenClawOllamaLocalCredential(), { configured: false });
+  assert.deepEqual(calls, [
+    { path: "models.providers.ollama.baseUrl", value: "http://127.0.0.1:11434" },
+    { path: "models.providers.ollama.api", value: "ollama" },
+    { path: "models.providers.ollama.apiKey", value: "ollama-local" }
+  ]);
+});
+
+test("local Ollama credential repair preserves an existing provider credential", async () => {
+  let setConfigCalled = false;
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      return path === "models.providers.ollama"
+        ? {
+            apiKey: "ollama-local",
+            baseUrl: "http://127.0.0.1:11434",
+            api: "ollama",
+            models: [{ id: "qwen3.5:9b" }]
+          }
+        : null;
+    },
+    async setConfig() {
+      setConfigCalled = true;
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  } as unknown as OpenClawAdapter);
+
+  assert.deepEqual(await ensureOpenClawOllamaLocalCredential(), { configured: false });
+  assert.equal(setConfigCalled, false);
 });
 
 test("provider credential persistence rejects malformed endpoint overrides before config mutation", async () => {
@@ -436,7 +491,7 @@ test("credential disconnect removes only the Gateway credential path", async () 
   assert.deepEqual(result, { removed: true, credentialCleanup: "removed" });
 });
 
-test("model removal unsets the exact configured model key before rewriting defaults", async () => {
+test("model removal rewrites Gateway config without config.unset fallbacks", async () => {
   const calls: string[] = [];
   const defaults: {
     model: { primary: string };
@@ -487,11 +542,87 @@ test("model removal unsets the exact configured model key before rewriting defau
   });
 
   assert.deepEqual(calls, [
-    'unset:agents.defaults.models["anthropic/claude-sonnet-4-6"]',
     "set:agents.defaults"
   ]);
   assert.equal("anthropic/claude-sonnet-4-6" in defaults.models, false);
   assert.equal("openai/o4-mini" in defaults.models, true);
+});
+
+test("Ollama model removal updates only the provider models array and defaults", async () => {
+  const calls: Array<{ path: string; value?: unknown }> = [];
+  const replacePaths: string[][] = [];
+  const providerConfig = {
+    apiKey: "ollama-local",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    models: [
+      { id: "jonathan-qwen38-q4:latest", name: "jonathan-qwen38-q4:latest" },
+      { id: "llama3:8b", name: "llama3:8b" }
+    ]
+  };
+  const defaults = {
+    model: { primary: "ollama/jonathan-qwen38-q4:latest" },
+    models: {
+      "ollama/jonathan-qwen38-q4:latest": {},
+      "ollama/llama3:8b": {}
+    }
+  };
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      if (path === "models.providers.ollama") {
+        return structuredClone(providerConfig) as never;
+      }
+
+      if (path === "agents.defaults") {
+        return structuredClone(defaults) as never;
+      }
+
+      if (path === "agents.defaults.models") {
+        return structuredClone(defaults.models) as never;
+      }
+
+      return null;
+    },
+    async setConfig(path: string, value: unknown, options?: { replacePaths?: string[] }) {
+      calls.push({ path, value });
+      if (options?.replacePaths) {
+        replacePaths.push(options.replacePaths);
+      }
+
+      if (path === "models.providers.ollama.models") {
+        providerConfig.models = value as typeof providerConfig.models;
+      }
+
+      if (path === "agents.defaults") {
+        Object.assign(defaults, value);
+      }
+
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  } as unknown as OpenClawAdapter);
+
+  await removeOpenClawConfiguredModelFromConfig("ollama/jonathan-qwen38-q4:latest", {
+    provider: "ollama"
+  });
+
+  assert.deepEqual(calls, [
+    {
+      path: "models.providers.ollama.models",
+      value: [{ id: "llama3:8b", name: "llama3:8b" }]
+    },
+    {
+      path: "agents.defaults",
+      value: {
+        model: { primary: "ollama/llama3:8b" },
+        models: {
+          "ollama/llama3:8b": {}
+        }
+      }
+    }
+  ]);
+  assert.deepEqual(replacePaths, [["models.providers.ollama.models"]]);
+  assert.deepEqual(providerConfig.models, [{ id: "llama3:8b", name: "llama3:8b" }]);
+  assert.equal("ollama/jonathan-qwen38-q4:latest" in defaults.models, false);
 });
 
 test("custom provider connect writes an explicit OpenClaw provider and namespaces discovered models", async () => {
@@ -1170,6 +1301,7 @@ test("setting an Ollama default model registers the provider model before changi
     "set:agents.defaults"
   ]);
   assert.deepEqual(values.get("models.providers.ollama"), {
+    apiKey: "ollama-local",
     models: [
       {
         id: "llama3:8b",
@@ -1193,6 +1325,7 @@ test("setting an Ollama default model registers the provider model before changi
 
 test("setting an already registered Ollama default model avoids duplicate provider config writes", async () => {
   const calls: string[] = [];
+  const values = new Map<string, unknown>();
 
   setOpenClawAdapterForTesting({
     async getConfig(path: string) {
@@ -1214,8 +1347,9 @@ test("setting an already registered Ollama default model avoids duplicate provid
 
       return null;
     },
-    async setConfig(path: string) {
+    async setConfig(path: string, value: unknown) {
       calls.push(`set:${path}`);
+      values.set(path, value);
       return { stdout: JSON.stringify({ ok: true }), stderr: "" };
     }
   } as unknown as OpenClawAdapter);
@@ -1226,9 +1360,19 @@ test("setting an already registered Ollama default model avoids duplicate provid
 
   assert.deepEqual(calls, [
     "get:models.providers.ollama",
+    "set:models.providers.ollama",
     "get:agents.defaults",
     "set:agents.defaults"
   ]);
+  assert.deepEqual(values.get("models.providers.ollama"), {
+    apiKey: "ollama-local",
+    models: [
+      {
+        id: "qwen3.5:9b",
+        name: "qwen3.5:9b"
+      }
+    ]
+  });
 });
 
 test("adding a Gemini model registers the Google provider model before AgentOS defaults", async () => {

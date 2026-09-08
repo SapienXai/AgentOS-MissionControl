@@ -2,6 +2,7 @@ import {
   extractMissionControlAction,
   MISSION_CONTROL_ACTION_TAG
 } from "@/lib/openclaw/chat-actions";
+import type { MissionResponse } from "@/lib/openclaw/types";
 
 export const emptyAgentChatResponseMessage =
   "OpenClaw finished the chat turn, but AgentOS could not find assistant text in the Gateway stream, session history, or transcript. This means the runtime did not expose a reply back to AgentOS, even if workspace changes were already applied. Refresh state, ask the agent for a summary, or inspect Gateway diagnostics if it repeats.";
@@ -128,6 +129,32 @@ export function isCompletedEmptyAgentChatResponse(payload: { meta?: Record<strin
     payload?.meta?.emptyAgentChatResponse === true &&
     payload.meta.emptyAgentChatStatus === "completed"
   );
+}
+
+export function recoverStreamedAgentChatResponse(response: MissionResponse, assistantText: string) {
+  const visibleText = assistantText.trim();
+
+  if (!visibleText || response.meta?.emptyAgentChatResponse !== true) {
+    return response;
+  }
+
+  return {
+    ...response,
+    status: "completed" as const,
+    summary: visibleText,
+    payloads: [
+      {
+        text: visibleText,
+        mediaUrl: null
+      }
+    ],
+    meta: {
+      ...response.meta,
+      emptyAgentChatResponse: false,
+      emptyAgentChatStatus: "completed",
+      emptyAgentChatCompletedWithoutText: false
+    }
+  };
 }
 
 export function resolveAgentChatRuntimeFailureMessage(rawFailure: string) {

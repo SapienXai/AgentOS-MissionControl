@@ -688,17 +688,26 @@ export function resolveOnboardingModelSelection(
   const normalizedModelIds = new Map(
     models.map((model) => [model.id.trim().toLowerCase(), model.id])
   );
-  const preferredModelId = normalizedModelIds.get(OPENAI_ONBOARDING_DEFAULT_MODEL_ID);
-
-  if (preferredModelId) {
-    return preferredModelId;
-  }
-
   const candidates = [
     modelReadiness.resolvedDefaultModel,
     modelReadiness.recommendedModelId,
     modelReadiness.defaultModel
   ];
+
+  const localCandidate = candidates.find((candidate) => {
+    const normalizedCandidate = candidate?.trim().toLowerCase();
+    return normalizedCandidate?.startsWith("ollama/") && normalizedModelIds.has(normalizedCandidate);
+  });
+
+  if (localCandidate) {
+    return normalizedModelIds.get(localCandidate.trim().toLowerCase()) ?? null;
+  }
+
+  const preferredModelId = normalizedModelIds.get(OPENAI_ONBOARDING_DEFAULT_MODEL_ID);
+
+  if (preferredModelId) {
+    return preferredModelId;
+  }
 
   for (const candidate of candidates) {
     const normalizedCandidate = candidate?.trim().toLowerCase();
@@ -713,6 +722,21 @@ export function resolveOnboardingModelSelection(
 }
 
 export function resolveInitialOnboardingModelId(snapshot: MissionControlSnapshot) {
+  const configuredDefaultModelId =
+    snapshot.diagnostics.modelReadiness.resolvedDefaultModel ||
+    snapshot.diagnostics.modelReadiness.defaultModel ||
+    null;
+  const configuredDefaultModel = configuredDefaultModelId
+    ? (snapshot.models ?? []).find((model) => model.id.trim().toLowerCase() === configuredDefaultModelId.trim().toLowerCase())
+    : null;
+
+  if (
+    configuredDefaultModel &&
+    (configuredDefaultModel.provider === "ollama" || configuredDefaultModel.local === true)
+  ) {
+    return configuredDefaultModel.id;
+  }
+
   const preferredModel = (snapshot.models ?? []).find(
     (model) =>
       model.id.trim().toLowerCase() === OPENAI_ONBOARDING_DEFAULT_MODEL_ID &&

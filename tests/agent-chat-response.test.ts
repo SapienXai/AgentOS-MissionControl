@@ -11,6 +11,7 @@ import {
   extractLatestAssistantTextFromSessionHistory,
   incompleteAgentChatConfirmationMessage,
   isCompletedEmptyAgentChatResponse,
+  recoverStreamedAgentChatResponse,
   resolveAgentChatRuntimeFailureMessage,
   sanitizeAgentChatReplyText,
   sanitizeAgentChatVisibleText
@@ -203,6 +204,28 @@ test("agent chat response helper detects completed turns without assistant text"
     }),
     false
   );
+});
+
+test("agent chat response helper preserves streamed text over an empty completion diagnostic", () => {
+  const recovered = recoverStreamedAgentChatResponse(
+    {
+      runId: "run-1",
+      agentId: "agent-1",
+      status: "stalled",
+      summary: "",
+      payloads: [],
+      meta: {
+        emptyAgentChatResponse: true,
+        emptyAgentChatStatus: "completed"
+      }
+    },
+    "OLLAMA_OK"
+  );
+
+  assert.equal(recovered.status, "completed");
+  assert.equal(recovered.summary, "OLLAMA_OK");
+  assert.deepEqual(recovered.payloads, [{ text: "OLLAMA_OK", mediaUrl: null }]);
+  assert.equal(recovered.meta?.emptyAgentChatResponse, false);
 });
 
 test("agent chat response helper extracts diagnostics from empty turn payloads", () => {

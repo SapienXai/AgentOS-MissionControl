@@ -55,6 +55,16 @@ test("agent chat auth action reads provider from OpenClaw auth command", () => {
   assert.equal(action?.provider, "openrouter");
 });
 
+test("agent chat auth action uses local recovery for Ollama instead of login", () => {
+  const action = resolveAgentChatAuthAction(
+    'No API key found for provider "ollama".',
+    "ollama/jonathan-qwen38-q4:latest"
+  );
+
+  assert.equal(action?.provider, "ollama");
+  assert.equal(action?.cta, "Repair Ollama");
+});
+
 test("agent chat auth action falls back to the agent model provider", () => {
   const action = resolveAgentChatAuthAction(
     "Provider token expired with status 401. Please reconnect before retrying.",

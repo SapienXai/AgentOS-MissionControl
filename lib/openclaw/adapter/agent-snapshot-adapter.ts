@@ -10,6 +10,7 @@ import {
   unique
 } from "@/lib/openclaw/domains/control-plane-normalization";
 import { sortRuntimesByUpdatedAtDesc } from "@/lib/openclaw/domains/runtime-history";
+import { isAgentChatSessionActive } from "@/lib/openclaw/domains/agent-chat-sessions";
 import type {
   AgentConfigPayload,
   AgentPayload
@@ -30,6 +31,8 @@ type AgentIdentityOverrides = {
   theme?: string | null;
   avatar?: string | null;
 } | null;
+
+const gatewayEventActiveWindowMs = 2 * 60 * 1000;
 
 export type SnapshotAgentEntry = {
   agent: OpenClawAgent;
@@ -106,8 +109,9 @@ export function buildSnapshotAgentEntry(input: {
   const primaryModel = input.configured?.model || input.manifestAgent?.modelId || input.rawAgent.model || "unassigned";
   const agentRuntimes = input.agentRuntimes.sort(sortRuntimesByUpdatedAtDesc);
   const observedToolNames = unique(agentRuntimes.flatMap((runtime) => runtime.toolNames ?? []));
-  const activeRuntimeIds = agentRuntimes.map((runtime) => runtime.id);
-  const latestRuntime = agentRuntimes[0];
+  const liveRuntimes = agentRuntimes.filter(isCurrentlyActiveRuntime);
+  const activeRuntimeIds = liveRuntimes.map((runtime) => runtime.id);
+  const latestRuntime = agentRuntimes.find((runtime) => runtime.metadata.origin !== "openclaw-gateway-event");
   const heartbeat = input.heartbeat ?? (
     input.configured?.heartbeat?.every
       ? {
@@ -124,7 +128,7 @@ export function buildSnapshotAgentEntry(input: {
       .at(0) || null;
   const statusValue = resolveAgentStatus({
     rpcOk: input.gatewayRpcOk,
-    activeRuntime: latestRuntime,
+    activeRuntime: liveRuntimes[0],
     heartbeatEnabled: Boolean(heartbeat?.enabled),
     lastActiveAt
   });
@@ -233,6 +237,34 @@ export function buildSnapshotAgentEntry(input: {
     activeRuntimeIds,
     relationships
   } satisfies SnapshotAgentEntry;
+}
+
+function isCurrentlyActiveRuntime(runtime: RuntimeRecord) {
+  if (runtime.metadata.historical === true || (runtime.status !== "running" && runtime.status !== "queued")) {
+    return false;
+  }
+
+  const runtimeOrigin = typeof runtime.metadata.origin === "string" ? runtime.metadata.origin : "";
+  if (runtimeOrigin === "agent-chat") {
+    const sessionId =
+      typeof runtime.metadata.agentChatSessionId === "string"
+        ? runtime.metadata.agentChatSessionId
+        : runtime.sessionId;
+
+    return (
+      isAgentChatSessionActive({ agentId: runtime.agentId, sessionId })
+    );
+  }
+
+  if (runtimeOrigin !== "openclaw-gateway-event") {
+    return true;
+  }
+
+  if (runtime.metadata.gatewayObjectKind === "task" || runtime.taskId) {
+    return true;
+  }
+
+  return typeof runtime.ageMs === "number" && runtime.ageMs <= gatewayEventActiveWindowMs;
 }
 
 function mergeWorkerProfileProjection(

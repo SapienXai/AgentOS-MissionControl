@@ -13,6 +13,7 @@ export type AgentChatAuthAction = {
   provider: AddModelsProviderId;
   label: string;
   detail: string;
+  cta: string;
 };
 
 export type AgentChatGatewayRepairAction = GatewayAuthRepairAction;
@@ -37,11 +38,15 @@ export function resolveAgentChatAuthAction(
   }
 
   const label = formatModelProviderLabel(provider);
+  const isLocalOllama = provider === "ollama";
 
   return {
     provider,
     label,
-    detail: `Connect ${label}, then retry this chat message.`
+    detail: isLocalOllama
+      ? "Repair the local Ollama provider configuration, then retry this chat message."
+      : `Connect ${label}, then retry this chat message.`,
+    cta: isLocalOllama ? "Repair Ollama" : `Connect ${label}`
   };
 }
 
