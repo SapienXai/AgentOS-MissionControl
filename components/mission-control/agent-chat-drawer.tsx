@@ -94,88 +94,95 @@ function shouldShowChatDateSeparator(previousTimestamp: number | undefined, time
 
 function AssistantThinkingActivity({
   statusMessage,
-  expanded,
-  onToggle,
+  statusHistory,
   surfaceTheme
 }: {
   statusMessage: string | null;
-  expanded: boolean;
-  onToggle: () => void;
+  statusHistory: string[];
   surfaceTheme: "dark" | "light";
 }) {
-  const previewLines = resolveAssistantThinkingPreview(statusMessage);
-  const detailLines = resolveAssistantThinkingDetails(statusMessage);
+  const activityLines = (statusHistory.length > 0 ? statusHistory : statusMessage ? [statusMessage] : []).slice(-5);
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
       className={cn(
-        "mt-2 overflow-hidden rounded-[14px] border px-3 py-2",
+        "mt-2 overflow-hidden rounded-[14px] border px-3 py-2.5",
         surfaceTheme === "light"
           ? "border-[#e7d8cc] bg-[#fff7f1]/70"
           : "border-cyan-300/10 bg-slate-950/24"
       )}
     >
-      <div className="space-y-1.5">
-        {previewLines.map((line, index) => (
-          <motion.div
-            key={line}
-            animate={{ opacity: [0.48, 0.92, 0.48] }}
-            transition={{ duration: 1.8, repeat: Infinity, delay: index * 0.18, ease: "easeInOut" }}
+      <div className="flex items-center gap-2">
+        <motion.span
+          aria-hidden="true"
+          animate={{ opacity: [0.35, 0.9, 0.35] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+          className={cn(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            surfaceTheme === "light" ? "bg-[#b28f78]" : "bg-cyan-300/75"
+          )}
+        />
+        <span
+          className={cn(
+            "text-[8px] font-medium uppercase tracking-[0.18em]",
+            surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/65"
+          )}
+        >
+          Live activity
+        </span>
+      </div>
+
+      <ol className="mt-2 space-y-1">
+        {activityLines.length > 0 ? (
+          activityLines.map((line, index) => {
+            const isCurrent = index === activityLines.length - 1;
+
+            return (
+              <li key={`${line}-${index}`} className="flex min-w-0 items-start gap-2 text-[11px] leading-4">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "mt-[6px] h-1 w-1 shrink-0 rounded-full",
+                    isCurrent
+                      ? surfaceTheme === "light"
+                        ? "bg-[#b28f78]"
+                        : "bg-cyan-300/70"
+                      : surfaceTheme === "light"
+                        ? "bg-[#b28f78]/35"
+                        : "bg-cyan-300/25"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "min-w-0 truncate",
+                    isCurrent
+                      ? surfaceTheme === "light"
+                        ? "text-[#6f584a]/85"
+                        : "text-slate-300/80"
+                      : surfaceTheme === "light"
+                        ? "text-[#8b7262]/48"
+                        : "text-slate-500/65"
+                  )}
+                >
+                  {line}
+                </span>
+              </li>
+            );
+          })
+        ) : (
+          <li
             className={cn(
-              "h-3.5 rounded-full",
-              surfaceTheme === "light"
-                ? "bg-[linear-gradient(90deg,rgba(139,114,98,0.16),rgba(139,114,98,0.34),rgba(139,114,98,0.14))]"
-                : "bg-[linear-gradient(90deg,rgba(125,211,252,0.10),rgba(125,211,252,0.27),rgba(125,211,252,0.08))]",
-              index === 0 ? "w-[72%]" : "w-[54%]"
+              "text-[11px] leading-4",
+              surfaceTheme === "light" ? "text-[#8b7262]/70" : "text-slate-500"
             )}
           >
-            <span
-              className={cn(
-                "block truncate px-2 text-[10px] leading-3.5",
-                surfaceTheme === "light" ? "text-[#7d6556]/78" : "text-slate-300/72"
-              )}
-            >
-              {line}
-            </span>
-          </motion.div>
-        ))}
-      </div>
-
-      <div className="mt-2 flex justify-end">
-        <button
-          type="button"
-          onClick={onToggle}
-          className={cn(
-            "text-[8px] uppercase tracking-[0.18em] transition hover:opacity-80",
-            surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/70"
-          )}
-        >
-          {expanded ? "Hide details" : "Show details"}
-        </button>
-      </div>
-
-      {expanded ? (
-        <motion.ul
-          initial={{ opacity: 0, y: -3 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={cn(
-            "mt-2 space-y-1 border-t pt-2 text-[11px] leading-4",
-            surfaceTheme === "light" ? "border-[#e7d8cc] text-[#7d6556]" : "border-white/[0.07] text-slate-400"
-          )}
-        >
-          {detailLines.map((line) => (
-            <li key={line} className="flex gap-2">
-              <span
-                className={cn(
-                  "mt-[7px] h-1 w-1 shrink-0 rounded-full",
-                  surfaceTheme === "light" ? "bg-[#b28f78]" : "bg-cyan-300/70"
-                )}
-              />
-              <span>{line}</span>
-            </li>
-          ))}
-        </motion.ul>
-      ) : null}
+            Waiting for OpenClaw status...
+          </li>
+        )}
+      </ol>
     </div>
   );
 }
@@ -261,7 +268,6 @@ export function AgentChatDrawer({
   const [runSnapshot, setRunSnapshot] = useState<AgentChatRunSnapshot>(() => getAgentChatRunSnapshot(agent.id));
   const [revealingAssistantId, setRevealingAssistantId] = useState<string | null>(null);
   const [revealedAssistantTextById, setRevealedAssistantTextById] = useState<Record<string, string>>({});
-  const [expandedThinkingById, setExpandedThinkingById] = useState<Record<string, boolean>>({});
   const [repairingGatewayMessageId, setRepairingGatewayMessageId] = useState<string | null>(null);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [hasUnreadBelow, setHasUnreadBelow] = useState(false);
@@ -355,7 +361,6 @@ export function AgentChatDrawer({
     setDraft("");
     setRevealingAssistantId(null);
     setRevealedAssistantTextById({});
-    setExpandedThinkingById({});
     isNearBottomRef.current = true;
     setIsNearBottom(true);
     setHasUnreadBelow(false);
@@ -718,13 +723,7 @@ export function AgentChatDrawer({
                     {isPendingAssistant ? (
                       <AssistantThinkingActivity
                         statusMessage={runSnapshot.statusMessage}
-                        expanded={Boolean(expandedThinkingById[entry.id])}
-                        onToggle={() =>
-                          setExpandedThinkingById((current) => ({
-                            ...current,
-                            [entry.id]: !current[entry.id]
-                          }))
-                        }
+                        statusHistory={runSnapshot.statusHistory}
                         surfaceTheme={surfaceTheme}
                       />
                     ) : (
@@ -910,7 +909,7 @@ export function AgentChatDrawer({
           aria-label={runSnapshot.isRunning ? "Agent is responding" : "Send message"}
           disabled={!canSend}
           className={cn(
-            "absolute bottom-1.5 right-1.5 h-10 w-10 rounded-full p-0 shadow-none lg:bottom-auto lg:right-3 lg:top-3 lg:h-8 lg:w-auto lg:px-3",
+            "absolute bottom-1.5 right-1.5 h-10 w-10 rounded-full p-0 shadow-none lg:bottom-3 lg:right-3 lg:h-8 lg:w-auto lg:px-3",
             surfaceTheme === "light"
               ? "bg-[#4a382c] text-[#fffaf6] hover:bg-[#3f2f24]"
               : "bg-white text-slate-950 hover:bg-white/92"
@@ -1002,92 +1001,6 @@ function agentChatMessagesEqual(left: readonly AgentChatMessage[], right: readon
         message.runId === other.runId
     );
   });
-}
-
-function resolveAssistantThinkingHint(statusMessage: string | null) {
-  const normalizedStatus = statusMessage?.toLowerCase() ?? "";
-
-  if (normalizedStatus.includes("final confirmation")) {
-    return "Waiting for OpenClaw to confirm the turn is complete.";
-  }
-
-  if (normalizedStatus.includes("still working") || normalizedStatus.includes("start the reply")) {
-    return "OpenClaw is still running the direct chat turn.";
-  }
-
-  if (normalizedStatus.includes("finalizing") || normalizedStatus.includes("drafting")) {
-    return "Shaping the reply before it appears here.";
-  }
-
-  if (normalizedStatus.includes("thinking")) {
-    return "Checking recent context before answering.";
-  }
-
-  return "Reading your message and preparing a reply.";
-}
-
-function resolveAssistantThinkingPreview(statusMessage: string | null) {
-  const hint = resolveAssistantThinkingHint(statusMessage);
-
-  if (hint.includes("Shaping")) {
-    return ["Shaping the reply", "Preparing the final wording"];
-  }
-
-  if (hint.includes("confirm")) {
-    return ["Reply signal received", "Waiting for final confirmation"];
-  }
-
-  if (hint.includes("still running")) {
-    return ["OpenClaw is still working", "Waiting for reply text"];
-  }
-
-  if (hint.includes("Checking")) {
-    return ["Reading your message", "Checking recent context"];
-  }
-
-  return ["Reading your message", "Preparing a reply"];
-}
-
-function resolveAssistantThinkingDetails(statusMessage: string | null) {
-  const normalizedStatus = statusMessage?.toLowerCase() ?? "";
-
-  if (normalizedStatus.includes("final confirmation")) {
-    return [
-      "AgentOS has not received the final turn-complete confirmation from OpenClaw yet.",
-      "If reply text already arrived, AgentOS is waiting to verify that the turn was saved.",
-      "If this later fails, refresh state or ask the agent for a summary of any completed work."
-    ];
-  }
-
-  if (normalizedStatus.includes("still working") || normalizedStatus.includes("start the reply")) {
-    return [
-      "OpenClaw accepted the direct chat turn and is still working.",
-      "AgentOS has not received assistant reply text yet.",
-      "Long waits usually mean the runtime is busy, the model is slow, or the Gateway has not exposed the reply."
-    ];
-  }
-
-  if (normalizedStatus.includes("finalizing") || normalizedStatus.includes("drafting")) {
-    return [
-      "The agent has enough context to answer.",
-      "It is tightening the response before showing it here.",
-      "Raw reasoning stays hidden; only the final reply is saved."
-    ];
-  }
-
-  if (normalizedStatus.includes("thinking")) {
-    return [
-      "The agent is reading the direct message.",
-      "It is checking recent chat and workspace context.",
-      "It will replace this activity card with the final reply."
-    ];
-  }
-
-  return [
-    "The message was sent to the selected agent.",
-    "AgentOS is waiting for the first response signal.",
-    "This activity is temporary and is not saved to chat history."
-  ];
 }
 
 function revealNextAssistantText(targetText: string, currentText: string) {

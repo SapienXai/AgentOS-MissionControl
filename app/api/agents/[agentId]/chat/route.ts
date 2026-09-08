@@ -808,11 +808,31 @@ function resolveChatStatusMessage(turn: TranscriptTurn) {
     return "Agent reply was cancelled.";
   }
 
+  const latestItem = turn.items.at(-1);
+
+  if (latestItem?.role === "toolCall") {
+    return `Agent is using ${formatAgentChatToolName(latestItem.toolName)}...`;
+  }
+
+  if (latestItem?.role === "toolResult") {
+    return `Agent received a result from ${formatAgentChatToolName(latestItem.toolName)}.`;
+  }
+
   if (turn.finalText && turn.finalText.trim().length > 0) {
     return "Agent is finalizing the reply...";
   }
 
   return "Agent is thinking...";
+}
+
+function formatAgentChatToolName(toolName: string | undefined) {
+  const normalized = toolName?.trim().replace(/[_-]+/g, " ");
+
+  if (!normalized) {
+    return "a tool";
+  }
+
+  return `the ${normalized} tool`;
 }
 
 function sanitizePolledAssistantText(value: string) {

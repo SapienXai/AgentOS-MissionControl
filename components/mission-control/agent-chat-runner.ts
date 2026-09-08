@@ -36,6 +36,7 @@ type ActiveAgentChatRun = {
   userMessageId: string;
   assistantMessageId: string;
   statusMessage: string | null;
+  statusHistory: string[];
   promise: Promise<void>;
 };
 
@@ -44,6 +45,7 @@ export type AgentChatRunSnapshot = {
   userMessageId: string | null;
   assistantMessageId: string | null;
   statusMessage: string | null;
+  statusHistory: string[];
 };
 
 export type SendAgentChatMessageOptions = {
@@ -65,7 +67,8 @@ export function getAgentChatRunSnapshot(agentId: string): AgentChatRunSnapshot {
     isRunning: Boolean(run),
     userMessageId: run?.userMessageId ?? null,
     assistantMessageId: run?.assistantMessageId ?? null,
-    statusMessage: run?.statusMessage ?? null
+    statusMessage: run?.statusMessage ?? null,
+    statusHistory: run?.statusHistory ?? []
   };
 }
 
@@ -114,6 +117,7 @@ export function sendAgentChatMessage({
     userMessageId,
     assistantMessageId,
     statusMessage: "Starting agent turn...",
+    statusHistory: ["Starting agent turn..."],
     promise: Promise.resolve()
   };
 
@@ -204,8 +208,7 @@ async function runAgentChatTurn({
     }
 
     heartbeatIndex += 1;
-    run.statusMessage = resolveAgentChatWaitStatusMessage(threshold, assistantTextReceived);
-    dispatchAgentChatStateChange(agentId);
+    updateAgentChatStatus(agentId, run, resolveAgentChatWaitStatusMessage(threshold, assistantTextReceived));
   }, 1000);
 
   try {
@@ -225,8 +228,7 @@ async function runAgentChatTurn({
 
     await consumeNdjsonStream<AgentChatStreamEvent>(response, async (event) => {
       if (event.type === "status") {
-        run.statusMessage = event.message;
-        dispatchAgentChatStateChange(agentId);
+        updateAgentChatStatus(agentId, run, event.message);
         return;
       }
 
@@ -236,26 +238,23 @@ async function runAgentChatTurn({
         const isStaleIdentityRecovery =
           isDirectAgentIdentityQuestion(payload.rawMessage) && isStaleAgentChatContextRecoveryText(eventText);
         if (!eventText) {
-          run.statusMessage = "Agent is thinking...";
-          dispatchAgentChatStateChange(agentId);
+          updateAgentChatStatus(agentId, run, "Agent is thinking...");
           return;
         }
 
         if (isStaleIdentityRecovery) {
-          run.statusMessage = "Agent is drafting a reply...";
-          dispatchAgentChatStateChange(agentId);
+          updateAgentChatStatus(agentId, run, "Agent is drafting a reply...");
           return;
         }
 
         if (!assistantTextReceived && normalizedEventText && previousAssistantTexts.has(normalizedEventText)) {
-          run.statusMessage = "Agent is drafting a reply...";
-          dispatchAgentChatStateChange(agentId);
+          updateAgentChatStatus(agentId, run, "Agent is drafting a reply...");
           return;
         }
 
         assistantTextReceived = true;
         latestAssistantText = eventText;
-        run.statusMessage = "Agent is drafting a reply...";
+        updateAgentChatStatus(agentId, run, "Agent is drafting a reply...");
 
         updateAgentChatMessages(agentId, (current) =>
           current.map((entry) => {
@@ -362,6 +361,22 @@ function updateAgentChatMessages(
   updater: (current: AgentChatMessage[]) => AgentChatMessage[]
 ) {
   writeAgentChatMessages(agentId, updater(readAgentChatMessages(agentId)).slice(-maxAgentChatMessages));
+}
+
+const maxAgentChatStatusHistory = 5;
+
+function updateAgentChatStatus(agentId: string, run: ActiveAgentChatRun, message: string) {
+  const nextMessage = typeof message === "string" ? message.trim() : "";
+
+  if (!nextMessage || nextMessage === run.statusMessage) {
+    return;
+  }
+
+  run.statusMessage = nextMessage;
+  run.statusHistory = [...run.statusHistory.filter((entry) => entry !== nextMessage), nextMessage].slice(
+    -maxAgentChatStatusHistory
+  );
+  dispatchAgentChatStateChange(agentId);
 }
 
 function renderAgentReplyText(result: MissionResponse) {

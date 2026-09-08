@@ -270,6 +270,14 @@ function InspectorPanelContent({
     { id: "agent", label: "Agent", icon: Bot },
     { id: "tasks", label: "Tasks", icon: ClipboardList }
   ] satisfies Array<{ id: InspectorScopeShortcut; label: string; icon: LucideIcon }>;
+  const handleScopeClick = (scope: InspectorScopeShortcut) => {
+    if (!collapsed && activeScope === scope) {
+      onToggleCollapsed();
+      return;
+    }
+
+    onSelectScope(scope);
+  };
   const isLight = surfaceTheme === "light";
   const surfaceTone = resolveInspectorSurfaceTone(surfaceTheme);
 
@@ -283,53 +291,41 @@ function InspectorPanelContent({
         isLight && "mission-inspector-light"
       )}
     >
-      <div
-        className={cn(
-          "hidden h-full shrink-0 flex-col items-center px-1.5 py-3 lg:flex",
-          surfaceTone.rail,
-          collapsed ? "w-full lg:rounded-l-[22px]" : "w-[52px] border-l"
-        )}
-      >
-        <div className="flex flex-1 flex-col items-center gap-1.5">
-          {scopeItems.map((item) => (
-            <InspectorRailButton
-              key={item.id}
-              icon={item.icon}
-              label={item.label}
-              active={activeScope === item.id}
-              surfaceTheme={surfaceTheme}
-              tooltipSide="left"
-              onClick={() => {
-                if (!collapsed && activeScope === item.id) {
-                  onToggleCollapsed();
-                  return;
-                }
+      {collapsed ? (
+        <div
+          className={cn(
+            "hidden h-full shrink-0 flex-col items-center px-1.5 py-3 lg:flex",
+            surfaceTone.rail,
+            "w-full lg:rounded-l-[22px]"
+          )}
+        >
+          <div className="flex flex-1 flex-col items-center gap-1.5">
+            {scopeItems.map((item) => (
+              <InspectorRailButton
+                key={item.id}
+                icon={item.icon}
+                label={item.label}
+                active={activeScope === item.id}
+                surfaceTheme={surfaceTheme}
+                tooltipSide="left"
+                onClick={() => handleScopeClick(item.id)}
+              />
+            ))}
+          </div>
 
-                if (collapsed) {
-                  onSelectScope(item.id);
-                  return;
-                }
-
-                onSelectScope(item.id);
-              }}
-            />
-          ))}
-        </div>
-
-        <div className="mt-2.5 flex flex-col items-center gap-1">
-          <Badge
-            variant="muted"
-            className="h-5 min-w-[34px] rounded-full px-1.5 py-0 text-[8px] leading-none tracking-[0.14em]"
-          >
-            {selectedEntity ? "live" : "idle"}
-          </Badge>
-          {collapsed ? (
+          <div className="mt-2.5 flex flex-col items-center gap-1">
+            <Badge
+              variant="muted"
+              className="h-5 min-w-[34px] rounded-full px-1.5 py-0 text-[8px] leading-none tracking-[0.14em]"
+            >
+              {selectedEntity ? "live" : "idle"}
+            </Badge>
             <p className="max-w-[44px] truncate text-center text-[8px] uppercase tracking-[0.14em] text-slate-500">
               {selectedDetail}
             </p>
-          ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {!collapsed ? (
         <div className={cn("min-w-0 flex-1", surfaceTone.content)}>
@@ -410,6 +406,23 @@ function InspectorPanelContent({
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1">
+                  <div
+                    aria-label="Inspector scope"
+                    className="hidden items-center gap-1 lg:flex"
+                  >
+                    {scopeItems.map((item) => (
+                      <InspectorRailButton
+                        key={item.id}
+                        icon={item.icon}
+                        label={item.label}
+                        active={activeScope === item.id}
+                        surfaceTheme={surfaceTheme}
+                        tooltipSide="bottom"
+                        size="header"
+                        onClick={() => handleScopeClick(item.id)}
+                      />
+                    ))}
+                  </div>
                   {!isChatView ? (
                     <button
                     type="button"
@@ -3586,6 +3599,7 @@ function InspectorRailButton({
   active,
   surfaceTheme,
   tooltipSide,
+  size = "rail",
   disabled = false,
   onClick
 }: {
@@ -3593,7 +3607,8 @@ function InspectorRailButton({
   label: string;
   active: boolean;
   surfaceTheme: "dark" | "light";
-  tooltipSide: "left" | "right";
+  tooltipSide: "left" | "right" | "bottom";
+  size?: "rail" | "header";
   disabled?: boolean;
   onClick: () => void;
 }) {
@@ -3606,11 +3621,13 @@ function InspectorRailButton({
       <button
         type="button"
         aria-label={label}
+        aria-pressed={active}
         aria-disabled={disabled}
         tabIndex={disabled ? -1 : 0}
         onClick={onClick}
         className={cn(
-          "inline-flex h-9 w-9 items-center justify-center rounded-[11px] border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all",
+          "inline-flex items-center justify-center border shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-all",
+          size === "header" ? "h-8 w-8 rounded-[9px]" : "h-9 w-9 rounded-[11px]",
           disabled
             ? "border-white/[0.05] bg-white/[0.02] text-slate-600"
             : active

@@ -5,7 +5,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveAccountAccessDecision } from "@/lib/agentos/application/account-access-policy-service";
-import type { OperationAction, OperationAuditEntry, OperationJob, OperationJobInput, OperationResult, OperationRun, OperationsSnapshot } from "@/lib/agentos/operations/types";
+import type { OperationAction, OperationAuditEntry, OperationJob, OperationJobInput, OperationResult, OperationRun, OperationsSnapshot, SystemOwnedMonitorKind } from "@/lib/agentos/operations/types";
 import { extractAgentChatMessagesFromSessionHistory } from "@/lib/openclaw/agent-chat-response";
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { getOpenClawCapabilityMatrix } from "@/lib/openclaw/application/capability-matrix-service";
@@ -211,6 +211,7 @@ export function buildOpenClawCronAddParams(input: OperationJobInput) {
 
 export function normalizeOpenClawOperationJob(value: unknown, sidecar: Registry["jobs"], mutable: boolean, history: boolean): OperationJob {
   const raw = record(value); const id = string(raw.id) ?? string(raw.jobId) ?? "unknown"; const schedule = record(raw.schedule); const state = record(raw.state); const payload = record(raw.payload); const side = sidecar[id];
+  const systemOwnedMonitor = resolveSystemOwnedMonitorKind(raw.declarationKey);
   const trigger = schedule.kind === "at" && string(schedule.at) ? { kind: "at" as const, at: string(schedule.at)!, timezone: null } : schedule.kind === "every" && number(schedule.everyMs) ? { kind: "every" as const, everyMs: number(schedule.everyMs)! } : schedule.kind === "cron" && string(schedule.expr) ? { kind: "cron" as const, expression: string(schedule.expr)!, timezone: string(schedule.tz) } : null;
   const enabled = raw.enabled !== false; const rawStatus = string(raw.status) ?? string(state.lastRunStatus);
   const identity = automationExecutionIdentityFromCron({
@@ -222,7 +223,7 @@ export function normalizeOpenClawOperationJob(value: unknown, sidecar: Registry[
     provenance: id === "unknown" ? "heuristic" : "authoritative",
     sourceOfTruth: id === "unknown" ? "compatibility" : "openclaw.cron.job"
   });
-  return { id, automationId: identity.automationId, cronJobId: identity.cronJobId, name: string(raw.name) ?? id, description: string(raw.description), enabled, status: status(rawStatus, enabled, number(state.runningAtMs), trigger), agentId: string(raw.agentId), workspaceId: side?.workspaceId ?? null, prompt: string(payload.message), model: string(payload.model), thinking: string(payload.thinking), trigger, nextRunAt: iso(raw.nextRunAtMs) ?? iso(state.nextRunAtMs), lastRunAt: iso(state.lastRunAtMs), lastRunStatus: rawStatus ?? null, sessionKey: identity.sessionKey, sessionId: string(raw.sessionId), sessionTarget: string(raw.sessionTarget), safety: side?.safety ?? null, health: { consecutiveFailures: number(state.consecutiveErrors) ?? 0, successRate: null, degraded: (number(state.consecutiveErrors) ?? 0) > 0 }, capabilities: { readable: true, mutable, runHistory: history, reason: mutable ? null : "Gateway cron mutations are not advertised." } };
+  return { id, systemOwnedMonitor, automationId: identity.automationId, cronJobId: identity.cronJobId, name: string(raw.name) ?? id, description: string(raw.description), enabled, status: status(rawStatus, enabled, number(state.runningAtMs), trigger), agentId: string(raw.agentId), workspaceId: side?.workspaceId ?? null, prompt: string(payload.message), model: string(payload.model), thinking: string(payload.thinking), trigger, nextRunAt: iso(raw.nextRunAtMs) ?? iso(state.nextRunAtMs), lastRunAt: iso(state.lastRunAtMs), lastRunStatus: rawStatus ?? null, sessionKey: identity.sessionKey, sessionId: string(raw.sessionId), sessionTarget: string(raw.sessionTarget), safety: side?.safety ?? null, health: { consecutiveFailures: number(state.consecutiveErrors) ?? 0, successRate: null, degraded: (number(state.consecutiveErrors) ?? 0) > 0 }, capabilities: { readable: true, mutable, runHistory: history, reason: mutable ? null : "Gateway cron mutations are not advertised." } };
 }
 export function normalizeOpenClawOperationRuns(value: unknown, jobId: string): OperationRun[] {
   const raw = record(value);
@@ -376,6 +377,12 @@ function operationResultTimestamp(value: string | number | null) {
 function healthFor(job: OperationJob, runs: OperationRun[]) { const terminal = runs.filter((run) => run.status === "ok" || run.status === "error" || run.status === "skipped"); let failures = 0; for (const run of runs) { if (run.status === "error") failures += 1; else if (run.status === "ok") break; } return { consecutiveFailures: failures, successRate: terminal.length ? terminal.filter((run) => run.status === "ok").length / terminal.length : null, degraded: failures >= 2 || job.status === "failed" }; }
 function status(value: string | null, enabled: boolean, running: number | null, trigger: OperationJob["trigger"]): OperationJob["status"] { if (running) return "running"; if (!enabled && trigger?.kind === "at" && value === "ok") return "completed"; if (!enabled && trigger?.kind === "at" && value === "error") return "failed"; if (!enabled) return "paused"; if (value === "ok") return trigger?.kind === "at" ? "completed" : "scheduled"; if (value === "error") return "failed"; if (value === "skipped") return "scheduled"; return "active"; }
 function runStatus(value: string | null): OperationRun["status"] { return value === "ok" || value === "error" || value === "skipped" || value === "queued" || value === "running" ? value : "unknown"; }
+function resolveSystemOwnedMonitorKind(value: unknown): SystemOwnedMonitorKind | null {
+  const declarationKey = string(value);
+  if (declarationKey?.startsWith("heartbeat:")) return "heartbeat";
+  if (declarationKey?.startsWith("skill-collection-review:")) return "skill-collection-review";
+  return null;
+}
 function normalizeSafety(input: OperationJobInput["safety"]): NonNullable<OperationJob["safety"]> { return { accountTargetId: input?.accountTargetId?.trim() || null, requiresApproval: input?.requiresApproval === true, fileLease: input?.fileLease?.trim() || null, concurrency: input?.concurrency ?? "forbid" }; }
 function unavailableSnapshot(audit: OperationAuditEntry[], detail: string): OperationsSnapshot { return { generatedAt: new Date().toISOString(), source: "unavailable", scheduler: { enabled: null, nextWakeAt: null, state: "unsupported" }, jobs: [], runs: [], audit, notices: [{ severity: "warning", title: "Operations unavailable", detail }] }; }
 function audit(action: OperationAction, jobId: string | null, outcome: OperationAuditEntry["outcome"], detail: string, requestId: string, context: OperationRequestContext = {}): OperationAuditEntry {

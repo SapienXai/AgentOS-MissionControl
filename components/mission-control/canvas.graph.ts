@@ -27,6 +27,7 @@ import {
 } from "@/components/mission-control/pending-agent-projection";
 import { resolveAgentThemeRgb } from "@/components/mission-control/agent-profile-visuals";
 import { getSurfaceCatalogEntry } from "@/lib/openclaw/surface-catalog";
+import { isSystemOwnedMonitorTask } from "@/lib/openclaw/domains/operation-task-projection";
 import { resolveAgentModelLabel } from "@/lib/openclaw/presenters";
 import type {
   MissionControlSnapshot,
@@ -34,6 +35,8 @@ import type {
   WorkspaceRecord,
   WorkItemRecord
 } from "@/lib/agentos/contracts";
+
+export { isSystemOwnedMonitorTask };
 import type { AccountAccessRuleView } from "@/lib/agentos/account-access-policy-types";
 import type { AccountLoginTargetView } from "@/lib/agentos/account-login-target-types";
 
@@ -155,16 +158,19 @@ export function buildCanvasGraph(
       ...workspaceAgents.map((agent) => agent.modelId).filter((modelId): modelId is string => Boolean(modelId))
     ]);
     const workspaceModels = snapshot.models.filter((model) => workspaceModelIds.has(model.id));
-    const workspaceTaskRecords = isFocusMode
+    const workspaceTaskRecords = (isFocusMode
       ? snapshot.tasks.filter(
           (task) =>
             resolveTaskWorkspaceId(task, snapshot.agents) === workspace.id &&
             task.primaryAgentId === focusedAgentId
         )
-      : snapshot.tasks.filter((task) => resolveTaskWorkspaceId(task, snapshot.agents) === workspace.id);
+      : snapshot.tasks.filter((task) => resolveTaskWorkspaceId(task, snapshot.agents) === workspace.id)
+    );
     const workspaceToggleTasks = isFocusMode
       ? []
-      : workspaceTaskRecords.filter((task) => !safeLockedTaskKeys.includes(task.key));
+      : workspaceTaskRecords.filter(
+          (task) => !isSystemOwnedMonitorTask(task) && !safeLockedTaskKeys.includes(task.key)
+        );
     const workspaceTaskCardsHidden =
       !isFocusMode &&
       workspaceToggleTasks.length > 0 &&
@@ -196,12 +202,13 @@ export function buildCanvasGraph(
       const agentTasks = workspaceTasks
         .filter((task) => resolveTaskOwnerId(task) === agent.id)
         .sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0));
+      const agentOperatorTasks = agentTasks.filter((task) => !isSystemOwnedMonitorTask(task));
       const agentX = groupX + agentGridStartX + (agentIndex % 3) * agentStackOffsetX;
       const agentY = groupY + workspaceHeaderOffsetY + agentIndex * agentStackOffsetY;
       const isComposerHighlightedAgent = isComposerActive && composerTargetAgentId === agent.id;
-      const hasJustCreatedTask = agentTasks.some((task) => justCreatedTaskIds.includes(task.id));
+      const hasJustCreatedTask = agentOperatorTasks.some((task) => justCreatedTaskIds.includes(task.id));
       const isTaskFocusedAgent = selectedTaskAgentId === agent.id || hasJustCreatedTask;
-      const activeTaskCount = agentTasks.filter((task) => isLiveTask(task)).length;
+      const activeTaskCount = agentOperatorTasks.filter((task) => isLiveTask(task)).length;
       const isAgentChatOpen = activeChatAgentId === agent.id;
       const agentInboxItems = (snapshot.agentInbox ?? []).filter((item) => item.agentId === agent.id);
       const isPendingCreation = pendingWorkspaceAgentIds.has(agent.id);
@@ -698,9 +705,11 @@ export function filterWorkspaceTasksForCanvas(
   tasks: WorkItemRecord[],
   filter: WorkspaceTaskCardFilter
 ) {
-  if (filter === "hidden") return [];
-  if (filter === "active") return tasks.filter(isActiveTaskForCanvas);
-  return tasks;
+  const monitorTasks = tasks.filter(isSystemOwnedMonitorTask);
+  const operatorTasks = tasks.filter((task) => !isSystemOwnedMonitorTask(task));
+  if (filter === "hidden") return monitorTasks;
+  if (filter === "active") return [...operatorTasks.filter(isActiveTaskForCanvas), ...monitorTasks];
+  return [...operatorTasks, ...monitorTasks];
 }
 
 function resolveStackOffset(itemCount: number, preferredOffset: number, availableSpan: number) {

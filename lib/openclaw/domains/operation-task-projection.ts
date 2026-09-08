@@ -7,6 +7,11 @@ export function buildOperationTaskProjections(snapshot: OperationsSnapshot, agen
   return snapshot.jobs.map((job) => buildOperationTaskProjection(job, agentNames, snapshot.runs));
 }
 
+/** System-owned OpenClaw monitors stay authoritative but are not operator task cards. */
+export function isSystemOwnedMonitorTask(task: Pick<TaskRecord, "metadata">) {
+  return task.metadata?.systemOwnedMonitor === "heartbeat" || task.metadata?.systemOwnedMonitor === "skill-collection-review";
+}
+
 /**
  * Reconciles a Gateway runtime task with its cron job projection. A cron run is
  * represented by both data sources, but operators must see one card and the
@@ -108,7 +113,7 @@ function operationMetadata(job: OperationJob, runs: OperationRun[]) {
     operationRuns.push({ id: `last-error:${job.id}:${job.lastRunAt}`, timestamp: job.lastRunAt, status: "error", output: null, error: null, durationMs: null, tokens: null });
   }
   const latestRun = latestOperationRun(runs, job.id);
-  return { source: "openclaw-cron", operationJobId: job.id, automationId: job.automationId ?? null, cronJobId: job.cronJobId ?? job.id, cronRunId: latestRun?.cronRunId ?? null, identityProvenance: latestRun?.identityProvenance ?? (job.cronJobId ? "authoritative" : "heuristic"), sourceOfTruth: latestRun?.sourceOfTruth ?? (job.cronJobId ? "openclaw.cron.job" : "compatibility"), scheduleLabel: describeSchedule(job), scheduledAt: job.nextRunAt,
+  return { source: "openclaw-cron", operationJobId: job.id, automationId: job.automationId ?? null, cronJobId: job.cronJobId ?? job.id, cronRunId: latestRun?.cronRunId ?? null, systemOwnedMonitor: job.systemOwnedMonitor ?? null, identityProvenance: latestRun?.identityProvenance ?? (job.cronJobId ? "authoritative" : "heuristic"), sourceOfTruth: latestRun?.sourceOfTruth ?? (job.cronJobId ? "openclaw.cron.job" : "compatibility"), scheduleLabel: describeSchedule(job), scheduledAt: job.nextRunAt,
     dueLabel: job.nextRunAt ? `Next run ${new Date(job.nextRunAt).toLocaleString()}` : "No next run reported", cronExpression: job.trigger?.kind === "cron" ? job.trigger.expression : null,
     timezone: job.trigger?.kind === "cron" ? job.trigger.timezone : null, lastRunStatus: job.lastRunStatus, operationStatus: job.status,
     recurrence: job.trigger?.kind ?? null, concurrency: job.safety?.concurrency ?? null, nextRunAt: job.nextRunAt,

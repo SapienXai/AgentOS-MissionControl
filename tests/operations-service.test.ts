@@ -37,6 +37,36 @@ test("operations projects runtime job state without becoming a scheduler", () =>
   assert.equal(job.capabilities.mutable, true);
 });
 
+test("operations preserves native system-owned monitor classification without classifying AgentOS jobs", () => {
+  const heartbeat = normalizeOpenClawOperationJob({
+    id: "heartbeat-job", declarationKey: "heartbeat:main", name: "heartbeat-main", enabled: true, agentId: "main",
+    schedule: { kind: "every", everyMs: 1_800_000 }, payload: { kind: "heartbeat" }
+  }, {}, true, true);
+  const review = normalizeOpenClawOperationJob({
+    id: "review-job", declarationKey: "skill-collection-review:main", name: "skill-collection-review-main", enabled: true, agentId: "main",
+    schedule: { kind: "every", everyMs: 604_800_000 }, payload: { message: "Review skills." }
+  }, {}, true, true);
+  const operatorJob = normalizeOpenClawOperationJob({
+    id: "operator-job", declarationKey: "agentos:automation:brief", name: "Brief", enabled: true, agentId: "main",
+    schedule: { kind: "every", everyMs: 3_600_000 }, payload: { message: "Report." }
+  }, {}, true, true);
+
+  assert.equal(heartbeat.systemOwnedMonitor, "heartbeat");
+  assert.equal(review.systemOwnedMonitor, "skill-collection-review");
+  assert.equal(operatorJob.systemOwnedMonitor, null);
+
+  const [projection] = buildOperationTaskProjections({
+    generatedAt: "2026-07-11T00:00:00.000Z",
+    source: "openclaw.cron",
+    scheduler: { enabled: true, nextWakeAt: null, state: "available" },
+    jobs: [heartbeat],
+    runs: [],
+    audit: [],
+    notices: []
+  }, []);
+  assert.equal(projection?.metadata.systemOwnedMonitor, "heartbeat");
+});
+
 test("recurring jobs remain scheduled after an individual run succeeds", () => {
   const job = normalizeOpenClawOperationJob({
     jobId: "job-recurring", name: "Recurring", enabled: true, status: "ok", agentId: "ops",

@@ -52,6 +52,7 @@ import type {
 } from "@/components/mission-control/canvas-types";
 import type { PendingAgentProjection } from "@/components/mission-control/pending-agent-projection";
 import { resolveRelativeTimeReferenceMs } from "@/lib/openclaw/presenters";
+import { isSystemOwnedMonitorTask } from "@/lib/openclaw/domains/operation-task-projection";
 import type { MissionControlSnapshot, WorkItemRecord } from "@/lib/agentos/contracts";
 import type { AccountAccessRuleView } from "@/lib/agentos/account-access-policy-types";
 import type { AccountLoginTargetView } from "@/lib/agentos/account-login-target-types";
@@ -204,7 +205,7 @@ export function MissionCanvas({
 
   const handleWorkspaceTaskCardFilterChange = useCallback((workspaceId: string, filter: WorkspaceTaskCardFilter) => {
     const workspaceTasks = snapshot.tasks.filter(
-      (task) => resolveTaskWorkspaceId(task, snapshot.agents) === workspaceId
+      (task) => resolveTaskWorkspaceId(task, snapshot.agents) === workspaceId && !isSystemOwnedMonitorTask(task)
     );
     const toggleableTasks = workspaceTasks.filter((task) => !lockedTaskKeys.includes(task.key));
     const allHidden = toggleableTasks.length > 0 && toggleableTasks.every(
@@ -624,6 +625,7 @@ export function MissionCanvas({
       .filter(
         (task) =>
           !isTaskHidden(task, hiddenRuntimeIds, hiddenTaskKeys, lockedTaskKeys) &&
+          !isSystemOwnedMonitorTask(task) &&
           task.dispatchId === recentDispatchId &&
           task.metadata.optimistic !== true
       )

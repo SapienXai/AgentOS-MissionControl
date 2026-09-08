@@ -1036,13 +1036,16 @@ test("Context Engine follows the Mission Control surface theme with semantic con
   assert.match(dialogSource, /style=\{contextEngineThemeStyles\[surfaceTheme\]\}/);
 });
 
-test("mobile inspector moves scope controls into the header and reserves the rail for desktop", () => {
+test("inspector moves desktop scope controls into the header and keeps the rail as a collapsed launcher", () => {
   const source = readFileSync(path.join(rootDir, "components/mission-control/inspector-panel.tsx"), "utf8");
   const visualsSource = readFileSync(path.join(rootDir, "components/mission-control/inspector-visuals.ts"), "utf8");
   const globalStyles = readFileSync(path.join(rootDir, "app/globals.css"), "utf8");
   const shellSource = readFileSync(path.join(rootDir, "components/mission-control/mission-control-shell.tsx"), "utf8");
 
   assert.match(source, /hidden h-full shrink-0 flex-col items-center px-1\.5 py-3 lg:flex/);
+  assert.match(source, /collapsed \? \([\s\S]*InspectorRailButton/);
+  assert.match(source, /aria-label="Inspector scope"[\s\S]*hidden items-center gap-1 lg:flex/);
+  assert.match(source, /tooltipSide="bottom"[\s\S]*size="header"/);
   assert.match(source, /aria-label="Inspector scope"/);
   assert.match(source, /mt-3 grid-cols-3 gap-1 rounded-\[10px\] border p-1 lg:hidden/);
   assert.match(source, /isChatView \? "hidden" : "grid"/);
@@ -1058,6 +1061,31 @@ test("mobile inspector moves scope controls into the header and reserves the rai
   assert.match(shellSource, /!isInspectorOpen \? \([\s\S]*fixed inset-x-0 top-3 z-\[60\]/);
   assert.doesNotMatch(shellSource, /h-\[min\(78dvh,720px\)\]/);
   assert.doesNotMatch(shellSource, /rounded-t-\[24px\]/);
+});
+
+test("agent chat keeps the send action in the composer bottom-right", () => {
+  const source = readFileSync(path.join(rootDir, "components/mission-control/agent-chat-drawer.tsx"), "utf8");
+
+  assert.match(
+    source,
+    /absolute bottom-1\.5 right-1\.5 h-10 w-10 rounded-full p-0 shadow-none lg:bottom-3 lg:right-3 lg:h-8 lg:w-auto lg:px-3/
+  );
+  assert.doesNotMatch(source, /absolute bottom-1\.5 right-1\.5[\s\S]*lg:top-3/);
+});
+
+test("agent chat exposes real OpenClaw activity as a subdued live feed", () => {
+  const drawerSource = readFileSync(path.join(rootDir, "components/mission-control/agent-chat-drawer.tsx"), "utf8");
+  const runnerSource = readFileSync(path.join(rootDir, "components/mission-control/agent-chat-runner.ts"), "utf8");
+  const routeSource = readFileSync(path.join(rootDir, "app/api/agents/[agentId]/chat/route.ts"), "utf8");
+
+  assert.match(drawerSource, /role="status"[\s\S]*aria-live="polite"/);
+  assert.match(drawerSource, /Live activity/);
+  assert.match(drawerSource, /statusHistory=\{runSnapshot\.statusHistory\}/);
+  assert.doesNotMatch(drawerSource, /Show details|Reading your message/);
+  assert.match(runnerSource, /statusHistory: string\[\]/);
+  assert.match(runnerSource, /maxAgentChatStatusHistory = 5/);
+  assert.match(routeSource, /latestItem\?\.role === "toolCall"/);
+  assert.match(routeSource, /latestItem\?\.role === "toolResult"/);
 });
 
 test("mobile light sidebar uses an opaque surface and hides its launcher while open", () => {

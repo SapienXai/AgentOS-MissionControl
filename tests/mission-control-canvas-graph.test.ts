@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   buildCanvasGraph,
   filterWorkspaceTasksForCanvas,
-  isActiveTaskForCanvas
+  isActiveTaskForCanvas,
+  isSystemOwnedMonitorTask
 } from "@/components/mission-control/canvas.graph";
 import type { MissionControlSnapshot, WorkItemRecord } from "@/lib/agentos/contracts";
 
@@ -20,6 +21,20 @@ test("Active Runs keeps scheduled, running, and review tasks only", () => {
   assert.equal(tasks.filter(isActiveTaskForCanvas).length, 3);
   assert.equal(filterWorkspaceTasksForCanvas(tasks, "all").length, 6);
   assert.equal(filterWorkspaceTasksForCanvas(tasks, "hidden").length, 0);
+});
+
+test("Mission Control keeps native OpenClaw monitors compact and outside normal task filters", () => {
+  const monitor = {
+    id: "heartbeat-main",
+    metadata: { systemOwnedMonitor: "heartbeat" }
+  } as unknown as WorkItemRecord;
+  const operatorTask = { id: "operator-task", status: "queued", metadata: {} } as unknown as WorkItemRecord;
+
+  assert.equal(isSystemOwnedMonitorTask(monitor), true);
+  assert.equal(isSystemOwnedMonitorTask(operatorTask), false);
+  assert.deepEqual(filterWorkspaceTasksForCanvas([monitor, operatorTask], "all").map((task) => task.id), ["operator-task", "heartbeat-main"]);
+  assert.deepEqual(filterWorkspaceTasksForCanvas([monitor, operatorTask], "active").map((task) => task.id), ["operator-task", "heartbeat-main"]);
+  assert.deepEqual(filterWorkspaceTasksForCanvas([monitor, operatorTask], "hidden").map((task) => task.id), ["heartbeat-main"]);
 });
 
 test("canvas places agent-owned tasks when task workspace id is missing", () => {

@@ -5,6 +5,8 @@ export type OperationTrigger =
 
 export type OperationAction = "create" | "update" | "run" | "pause" | "resume" | "cancel" | "retry" | "disable" | "delete";
 
+export type SystemOwnedMonitorKind = "heartbeat" | "skill-collection-review";
+
 export type OperationSafety = {
   accountTargetId?: string | null;
   requiresApproval?: boolean;
@@ -14,6 +16,8 @@ export type OperationSafety = {
 
 export type OperationJob = {
   id: string;
+  /** Native OpenClaw monitor ownership, when the Gateway declares it. */
+  systemOwnedMonitor?: SystemOwnedMonitorKind | null;
   /** AgentOS-side stable automation key, when the job was provisioned by AgentOS. */
   automationId?: string | null;
   /** Exact OpenClaw cron job identity. Kept separate from the AgentOS key. */
