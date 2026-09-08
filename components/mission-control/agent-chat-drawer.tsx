@@ -102,87 +102,61 @@ function AssistantThinkingActivity({
   surfaceTheme: "dark" | "light";
 }) {
   const activityLines = (statusHistory.length > 0 ? statusHistory : statusMessage ? [statusMessage] : []).slice(-5);
+  const recentActivityLines = activityLines.slice(-3);
+  const currentActivity = recentActivityLines.at(-1) || "Waiting for OpenClaw status...";
+  const previousActivity = recentActivityLines.slice(0, -1);
 
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="false"
-      className={cn(
-        "mt-2 overflow-hidden rounded-[14px] border px-3 py-2.5",
-        surfaceTheme === "light"
-          ? "border-[#e7d8cc] bg-[#fff7f1]/70"
-          : "border-cyan-300/10 bg-slate-950/24"
-      )}
+      className="mt-1 max-w-full py-1"
     >
       <div className="flex items-center gap-2">
-        <motion.span
+        <span
           aria-hidden="true"
-          animate={{ opacity: [0.35, 0.9, 0.35] }}
-          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
-          className={cn(
-            "h-1.5 w-1.5 shrink-0 rounded-full",
-            surfaceTheme === "light" ? "bg-[#b28f78]" : "bg-cyan-300/75"
-          )}
-        />
+          className="relative flex h-3 w-3 shrink-0 items-center justify-center"
+        >
+          <motion.span
+            animate={{ scale: [0.72, 1.15, 0.72], opacity: [0.18, 0.42, 0.18] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+            className={cn(
+              "absolute inset-0 rounded-full border",
+              surfaceTheme === "light" ? "border-[#b28f78]/45" : "border-cyan-300/35"
+            )}
+          />
+          <span
+            className={cn(
+              "relative h-1.5 w-1.5 rounded-full",
+              surfaceTheme === "light" ? "bg-[#b28f78]" : "bg-cyan-300/80"
+            )}
+          />
+        </span>
         <span
           className={cn(
-            "text-[8px] font-medium uppercase tracking-[0.18em]",
-            surfaceTheme === "light" ? "text-[#8b7262]" : "text-cyan-200/65"
+            "min-w-0 truncate text-[12px] leading-5",
+            surfaceTheme === "light" ? "text-[#6f584a]/82" : "text-slate-300/82"
           )}
         >
-          Live activity
+          {currentActivity}
         </span>
       </div>
 
-      <ol className="mt-2 space-y-1">
-        {activityLines.length > 0 ? (
-          activityLines.map((line, index) => {
-            const isCurrent = index === activityLines.length - 1;
-
-            return (
-              <li key={`${line}-${index}`} className="flex min-w-0 items-start gap-2 text-[11px] leading-4">
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "mt-[6px] h-1 w-1 shrink-0 rounded-full",
-                    isCurrent
-                      ? surfaceTheme === "light"
-                        ? "bg-[#b28f78]"
-                        : "bg-cyan-300/70"
-                      : surfaceTheme === "light"
-                        ? "bg-[#b28f78]/35"
-                        : "bg-cyan-300/25"
-                  )}
-                />
-                <span
-                  className={cn(
-                    "min-w-0 truncate",
-                    isCurrent
-                      ? surfaceTheme === "light"
-                        ? "text-[#6f584a]/85"
-                        : "text-slate-300/80"
-                      : surfaceTheme === "light"
-                        ? "text-[#8b7262]/48"
-                        : "text-slate-500/65"
-                  )}
-                >
-                  {line}
-                </span>
-              </li>
-            );
-          })
-        ) : (
-          <li
-            className={cn(
-              "text-[11px] leading-4",
-              surfaceTheme === "light" ? "text-[#8b7262]/70" : "text-slate-500"
-            )}
-          >
-            Waiting for OpenClaw status...
-          </li>
-        )}
-      </ol>
+      {previousActivity.length > 0 ? (
+        <div
+          className={cn(
+            "ml-1.5 mt-1 border-l pl-3 text-[10px] leading-4",
+            surfaceTheme === "light" ? "border-[#e3d4c8]/80 text-[#8b7262]/45" : "border-white/[0.08] text-slate-500/60"
+          )}
+        >
+          {previousActivity.map((line, index) => (
+            <div key={`${line}-${index}`} className="truncate">
+              {line}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -705,19 +679,25 @@ export function AgentChatDrawer({
                 <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
                   <div
                     className={cn(
-                      "min-w-0 text-[15px] leading-6 lg:max-w-[92%] lg:rounded-[18px] lg:border lg:px-3 lg:py-2 lg:text-[13px] lg:leading-5 lg:shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
-                      isPendingUser && "opacity-85",
-                      isSystem
+                      isPendingAssistant
                         ? surfaceTheme === "light"
-                          ? "max-w-full rounded-[16px] border border-[#e3d4c8] bg-[#fffaf6] px-3 py-2 text-[#6c5647]"
-                          : "max-w-full rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-slate-400"
-                        : isUser
-                          ? surfaceTheme === "light"
-                            ? "max-w-[82%] rounded-[22px] bg-[#eee7e2] px-4 py-2.5 text-[#35271f] lg:border-[#e3d4c8] lg:bg-[#fff3f6]"
-                            : "max-w-[82%] rounded-[22px] bg-white/[0.12] px-4 py-2.5 text-slate-50 lg:border-white/[0.08] lg:bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))]"
-                          : surfaceTheme === "light"
-                            ? "max-w-full bg-transparent px-0 py-1 text-[#35271f] lg:border-[#e3d4c8] lg:bg-[#fffaf6] lg:text-[#4a382c]"
-                            : "max-w-full bg-transparent px-0 py-1 text-slate-100 lg:border-cyan-300/12 lg:bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))]"
+                          ? "min-w-0 max-w-full bg-transparent px-0 py-0 text-[#4a382c] lg:max-w-full lg:rounded-none lg:border-0 lg:px-0 lg:py-0 lg:text-[13px] lg:leading-5 lg:shadow-none"
+                          : "min-w-0 max-w-full bg-transparent px-0 py-0 text-slate-100 lg:max-w-full lg:rounded-none lg:border-0 lg:px-0 lg:py-0 lg:text-[13px] lg:leading-5 lg:shadow-none"
+                        : cn(
+                            "min-w-0 text-[15px] leading-6 lg:max-w-[92%] lg:rounded-[18px] lg:border lg:px-3 lg:py-2 lg:text-[13px] lg:leading-5 lg:shadow-[0_14px_34px_rgba(0,0,0,0.14)]",
+                            isPendingUser && "opacity-85",
+                            isSystem
+                              ? surfaceTheme === "light"
+                                ? "max-w-full rounded-[16px] border border-[#e3d4c8] bg-[#fffaf6] px-3 py-2 text-[#6c5647]"
+                                : "max-w-full rounded-[16px] border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-slate-400"
+                              : isUser
+                                ? surfaceTheme === "light"
+                                  ? "max-w-[82%] rounded-[22px] bg-[#eee7e2] px-4 py-2.5 text-[#35271f] lg:border-[#e3d4c8] lg:bg-[#fff3f6]"
+                                  : "max-w-[82%] rounded-[22px] bg-white/[0.12] px-4 py-2.5 text-slate-50 lg:border-white/[0.08] lg:bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))]"
+                                : surfaceTheme === "light"
+                                  ? "max-w-full bg-transparent px-0 py-1 text-[#35271f] lg:border-[#e3d4c8] lg:bg-[#fffaf6] lg:text-[#4a382c]"
+                                  : "max-w-full bg-transparent px-0 py-1 text-slate-100 lg:border-cyan-300/12 lg:bg-[linear-gradient(180deg,rgba(34,211,238,0.10),rgba(59,130,246,0.06))]"
+                          )
                     )}
                   >
                     {isPendingAssistant ? (

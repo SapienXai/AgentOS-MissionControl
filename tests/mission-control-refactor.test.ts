@@ -1092,6 +1092,8 @@ test("agent chat exposes real OpenClaw activity as a subdued live feed", () => {
   assert.match(drawerSource, /currentActivity/);
   assert.match(drawerSource, /previousActivity/);
   assert.match(drawerSource, /statusHistory=\{runSnapshot\.statusHistory\}/);
+  assert.match(drawerSource, /isPendingAssistant[\s\S]*lg:border-0[\s\S]*lg:shadow-none/);
+  assert.doesNotMatch(drawerSource, /rounded-\[14px\] border px-3 py-2\.5/);
   assert.doesNotMatch(drawerSource, /Show details|Reading your message|Live activity/);
   assert.match(runnerSource, /statusHistory: string\[\]/);
   assert.match(runnerSource, /maxAgentChatStatusHistory = 5/);
