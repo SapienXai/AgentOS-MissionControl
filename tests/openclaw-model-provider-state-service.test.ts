@@ -1090,6 +1090,59 @@ test("adding provider models retries transient Gateway restart during config upd
   });
 });
 
+test("adding an Ollama model preserves redacted provider credentials", async () => {
+  const calls: Array<{ path: string; value: unknown; replacePaths?: string[] }> = [];
+
+  setOpenClawAdapterForTesting({
+    async getConfig(path: string) {
+      if (path === "models.providers.ollama") {
+        return {
+          apiKey: "__OPENCLAW_REDACTED__",
+          baseUrl: "http://127.0.0.1:11434",
+          api: "ollama",
+          models: [{ id: "llama3:8b", name: "llama3:8b" }]
+        };
+      }
+
+      if (path === "agents.defaults") {
+        return { models: {} };
+      }
+
+      return null;
+    },
+    async setConfig(path: string, value: unknown, options?: { replacePaths?: string[] }) {
+      calls.push({ path, value, replacePaths: options?.replacePaths });
+      assert.doesNotMatch(JSON.stringify(value), /__OPENCLAW_REDACTED__/);
+      return { stdout: JSON.stringify({ ok: true, value }), stderr: "" };
+    }
+  } as unknown as OpenClawAdapter);
+
+  await addOpenClawModelsToConfig("ollama", ["ollama/qwen3.5:9b"]);
+
+  assert.deepEqual(calls, [
+    {
+      path: "models.providers.ollama.models",
+      value: [
+        { id: "llama3:8b", name: "llama3:8b" },
+        { id: "qwen3.5:9b", name: "qwen3.5:9b" }
+      ],
+      replacePaths: ["models.providers.ollama.models"]
+    },
+    {
+      path: "agents.defaults",
+      value: {
+        models: {
+          "ollama/qwen3.5:9b": {}
+        },
+        model: {
+          primary: "ollama/qwen3.5:9b"
+        }
+      },
+      replacePaths: undefined
+    }
+  ]);
+});
+
 test("setting the default model retries and starts Gateway after transient connect failures", async () => {
   const calls: string[] = [];
   let defaultsReads = 0;

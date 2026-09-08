@@ -7,6 +7,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
 import { normalizeModelStatusPayload } from "@/lib/openclaw/client/native-ws-gateway-payloads";
+import { containsRedactedOpenClawSecret } from "@/lib/openclaw/client/native-ws-gateway-utils";
 import { getOpenClawLifecycleService } from "@/lib/openclaw/lifecycle/service";
 import {
   isGatewayConfigRateLimitError,
@@ -1423,7 +1424,19 @@ async function ensureProviderModelRegistryViaGateway(
   }
 
   if (changed) {
-    await adapter.setConfig(`models.providers.${configProvider}`, nextProviderConfig, { timeoutMs: 5_000 });
+    if (containsRedactedOpenClawSecret(existingProviderConfig)) {
+      // OpenClaw intentionally redacts provider credentials in config reads.
+      // Update only the model registry so the redacted secret never becomes
+      // part of a subsequent config mutation.
+      const modelsPath = `models.providers.${configProvider}.models`;
+      await adapter.setConfig(
+        modelsPath,
+        nextProviderConfig.models ?? [],
+        { timeoutMs: 5_000, replacePaths: [modelsPath] }
+      );
+    } else {
+      await adapter.setConfig(`models.providers.${configProvider}`, nextProviderConfig, { timeoutMs: 5_000 });
+    }
   }
 }
 
