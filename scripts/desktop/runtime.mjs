@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 
-export const DESKTOP_NODE_VERSION = process.env.AGENTOS_DESKTOP_NODE_VERSION?.trim() || "24.15.0";
+export const DESKTOP_NODE_VERSION = process.env.AGENTOS_DESKTOP_NODE_VERSION?.trim() || "24.20.0";
 
 export function resolveTargetPlatform(value = process.env.AGENTOS_DESKTOP_TARGET_PLATFORM || process.platform) {
   if (value === "darwin" || value === "linux" || value === "win32") return value;

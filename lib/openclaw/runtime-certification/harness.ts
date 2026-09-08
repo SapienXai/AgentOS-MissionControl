@@ -200,7 +200,7 @@ export async function executeOpenClawRuntimeProbe(input: {
         }),
         responseShape: "invalid",
         errorCode: null,
-        errorMessage: "The Gateway response did not match the certification shape check.",
+        errorMessage: `The Gateway response did not match the certification shape check${shape.evidence ? `: ${shape.evidence}` : "."}`,
         failureKind: "response-shape-mismatch",
         retryable: false,
         evidence: [shape.evidence ?? "Response shape validation failed.", ...(probe.evidence ?? [])]

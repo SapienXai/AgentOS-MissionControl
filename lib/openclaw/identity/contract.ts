@@ -3,8 +3,8 @@ import { OPENCLAW_NATIVE_CONTRACT_VERSION } from "@/lib/openclaw/versions";
 
 export const OPENCLAW_IDENTITY_CONTRACT_SCHEMA_VERSION = 1;
 export const OPENCLAW_IDENTITY_CONTRACT_VERSION = OPENCLAW_NATIVE_CONTRACT_VERSION;
-export const OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT = "3928bad9badfcb6c7d140530435e806fb8092190";
-export const OPENCLAW_IDENTITY_CONTRACT_BUILD = "2026.9.2-release-3928bad9badf-2026-09-05T15-22-41.651Z";
+export const OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT = "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7";
+export const OPENCLAW_IDENTITY_CONTRACT_BUILD = "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z";
 
 export const OPENCLAW_OPERATOR_ROLES = ["operator", "node"] as const;
 
@@ -104,7 +104,7 @@ export const OPENCLAW_8_2_IDENTITY_INVENTORY = [
     methodOrField: "users.self",
     payloadShape: "closed empty params object",
     responseShape: "the authenticated UserProfile record",
-    requiredStaticScopes: ["operator.write"],
+    requiredStaticScopes: ["operator.read"],
     dynamicAuthorization: true,
     targetDependent: true,
     connectionLocal: false,
@@ -399,7 +399,7 @@ export const OPENCLAW_STATIC_METHOD_SCOPES: Record<string, readonly string[]> = 
   "environments.destroy": ["operator.admin"],
   "sessions.reclaim": ["operator.write"],
   "users.list": ["operator.read"],
-  "users.self": ["operator.write"],
+  "users.self": ["operator.read"],
   "users.setDisplayName": ["operator.write"],
   "users.setAvatar": ["operator.write"],
   "users.linkEmail": ["operator.admin"],

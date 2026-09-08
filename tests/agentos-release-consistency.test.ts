@@ -59,7 +59,7 @@ test("AgentOS release check rejects stale README version references", async () =
   );
 });
 
-test("AgentOS release check rejects missing root Node 24 engine", async () => {
+test("AgentOS release check rejects missing root Node engine", async () => {
   const tempRoot = await copyReleaseCheckFixture();
   const packageJsonPath = path.join(tempRoot, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as { engines?: Record<string, string> };
@@ -69,19 +69,19 @@ test("AgentOS release check rejects missing root Node 24 engine", async () => {
   const result = runReleaseCheck(tempRoot);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /package\.json: engines\.node is undefined, expected ">=24\.0\.0"/);
+  assert.match(result.stderr, /package\.json: engines\.node is undefined, expected ">=24\.16\.0"/);
 });
 
 test("AgentOS release check rejects vague README Node prerequisites", async () => {
   const tempRoot = await copyReleaseCheckFixture();
   const readmePath = path.join(tempRoot, "README.md");
   const readme = await readFile(readmePath, "utf8");
-  await writeFile(readmePath, readme.replaceAll("- Node.js 24 or newer", "- A recent Node.js runtime"), "utf8");
+  await writeFile(readmePath, readme.replaceAll("- Node.js 24.16.0+ or 26.1.0+", "- A recent Node.js runtime"), "utf8");
 
   const result = runReleaseCheck(tempRoot);
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /README\.md: Expected to find "- Node\.js 24 or newer"/);
+  assert.match(result.stderr, /README\.md: Expected to find "- Node\.js 24\.16\.0\+ or 26\.1\.0\+"/);
 });
 
 test("AgentOS release check keeps recommended and supported OpenClaw versions distinct", async () => {
@@ -96,9 +96,9 @@ test("AgentOS release check keeps recommended and supported OpenClaw versions di
     const filePath = path.join(tempRoot, relativePath);
     const contents = await readFile(filePath, "utf8");
     await writeFile(filePath, contents
-      .replaceAll("Recommended OpenClaw: `2026.9.2`", "OpenClaw 2026.9.2 or newer")
-      .replaceAll("Recommended OpenClaw: 2026.9.2", "OpenClaw 2026.9.2 or newer")
-      .replaceAll("recommended OpenClaw 2026.9.2", "OpenClaw 2026.9.2 or newer"), "utf8");
+      .replaceAll("Recommended OpenClaw: `2026.9.3`", "OpenClaw 2026.9.3 or newer")
+      .replaceAll("Recommended OpenClaw: 2026.9.3", "OpenClaw 2026.9.3 or newer")
+      .replaceAll("recommended OpenClaw 2026.9.3", "OpenClaw 2026.9.3 or newer"), "utf8");
   }
 
   const result = runReleaseCheck(tempRoot);

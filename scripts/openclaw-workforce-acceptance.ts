@@ -25,6 +25,7 @@ const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_WORKFORCE_PACKAGE?.trim();
 const OUTPUT_PATH = path.resolve(process.env.OPENCLAW_WORKFORCE_OUTPUT?.trim() || `docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-workforce-acceptance.json`);
 const TIMEOUT_MS = 10_000;
+const LIVE_EVIDENCE_CLASS = `LIVE_DISPOSABLE_${OPENCLAW_IDENTITY_CONTRACT_VERSION.replaceAll(".", "_")}`;
 
 type GatewayClient = ReturnType<typeof createOfficialBackedOpenClawGatewayClient>;
 type CheckStatus = "PASS" | "SKIPPED";
@@ -96,7 +97,7 @@ async function main() {
       isolatedState: true,
       securityDefaults: "tools.sessions.visibility=tree; tools.agentToAgent.enabled=false; tools.agentToAgent.allow=[]"
     };
-    evidence.checks["runtime-identity"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2" };
+    evidence.checks["runtime-identity"] = { status: "PASS", evidence: LIVE_EVIDENCE_CLASS };
 
     const requestId = `workforce-product-path-${Date.now()}`;
     const productMission = await submitMission({
@@ -125,7 +126,7 @@ async function main() {
     assert.ok(missionDetail);
     assert.equal(missionDetail.id, productMission.dispatchId);
     const finalResult = resolveMissionDispatchResultText(dispatchRecord);
-    assert.equal(finalResult, "AGENTOS_FIXTURE_FIRST_REPLY");
+    assert.equal(finalResult, "AGENTOS_FIXTURE_FIRST_REPLY", JSON.stringify({ fixturePrompt: fixture.stats.lastPrompt }));
     assert.equal(missionDetail.result, finalResult);
     assert.equal(listedMission.state, missionDetail.state);
     assert.equal(dispatchRecord.status, "completed");
@@ -143,10 +144,10 @@ async function main() {
       sessionKey: dispatchRecord.result?.sessionKey ?? null,
       runId: dispatchRecord.result?.runId ?? null
     };
-    evidence.checks["product-path-mission-create"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Canonical submitMission created and persisted the dispatch; the native Gateway populated runtime identity." };
-    evidence.checks["product-path-api-list"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission list discovered the persisted dispatch and matched detail state from the same snapshot." };
-    evidence.checks["product-path-api-detail"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission detail resolved by dispatch id from persisted sidecar plus current native snapshot." };
-    evidence.checks["mission-basic"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Real AgentOS submission reached one native session/run and completed with authoritative output." };
+    evidence.checks["product-path-mission-create"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Canonical submitMission created and persisted the dispatch; the native Gateway populated runtime identity." };
+    evidence.checks["product-path-api-list"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Mission list discovered the persisted dispatch and matched detail state from the same snapshot." };
+    evidence.checks["product-path-api-detail"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Mission detail resolved by dispatch id from persisted sidecar plus current native snapshot." };
+    evidence.checks["mission-basic"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Real AgentOS submission reached one native session/run and completed with authoritative output." };
 
     const completionCountBeforeReplay = fixture.stats.completionCount;
     const replay = await submitMission({ mission: "WORKFORCE_ACCEPTANCE_FIRST", requestId, agentId: "main", thinking: "off" }, mutationOptions());
@@ -158,8 +159,8 @@ async function main() {
     );
     const persistedRecords = await readMissionDispatchRecords();
     assert.equal(persistedRecords.filter((record) => record.clientRequestId === requestId).length, 1);
-    evidence.checks["product-path-idempotency"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Replay returned the same persisted dispatch without a second native model completion; altered request identity failed closed." };
-    evidence.checks["result-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Final output came from the native Gateway result persisted by the canonical Mission workflow and reconstructed in Mission detail." };
+    evidence.checks["product-path-idempotency"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Replay returned the same persisted dispatch without a second native model completion; altered request identity failed closed." };
+    evidence.checks["result-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Final output came from the native Gateway result persisted by the canonical Mission workflow and reconstructed in Mission detail." };
 
     const artifactRequestId = `workforce-artifact-${Date.now()}`;
     const artifactMission = await submitMission({
@@ -177,11 +178,11 @@ async function main() {
     const artifactDetail = await getWorkforceMissionDetail(artifactDispatchId, { snapshot: artifactSnapshot });
     assert.ok(artifactDetail);
     assert.equal(artifactRecord.status, "completed");
-    assert.equal(resolveMissionDispatchResultText(artifactRecord), "AGENTOS_FIXTURE_ARTIFACT_REPLY");
+    assert.equal(resolveMissionDispatchResultText(artifactRecord), "AGENTOS_FIXTURE_ARTIFACT_REPLY", JSON.stringify({ fixturePrompt: fixture.stats.lastPrompt }));
     const artifactPaths = artifactDetail.artifacts.map((artifact) => artifact.path || artifact.displayPath).filter(Boolean);
     evidence.checks.artifacts = artifactPaths.includes("deliverables/acceptance-result.txt")
-      ? { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "OpenClaw executed the native write tool and Workforce projected the bounded runtime-created artifact." }
-      : { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The product-path mission completed, but no bounded runtime-created artifact was exposed by the native task/session projection." };
+      ? { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "OpenClaw executed the native write tool and Workforce projected the bounded runtime-created artifact." }
+      : { status: "SKIPPED", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "The product-path mission completed, but no bounded runtime-created artifact was exposed by the native task/session projection." };
 
     const delegationRequestId = `workforce-delegation-${Date.now()}`;
     const delegationPromise = submitMission({
@@ -216,13 +217,13 @@ async function main() {
     });
     const delegationChildRuntimes = delegationTaskRuntimes.filter((runtime) => typeof runtime.metadata.parentTaskId === "string" && runtime.metadata.parentTaskId.length > 0);
     if (delegationChildRuntimes.length > 0) {
-      evidence.checks.delegation = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Native sessions_spawn produced a task row with exact parentTaskId evidence through the AgentOS Mission path." };
+      evidence.checks.delegation = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Native sessions_spawn produced a task row with exact parentTaskId evidence through the AgentOS Mission path." };
       evidence.checks["waiting-worker"] = observedWaitingWorker
-        ? { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Mission list and detail both observed the parent-idle/child-running state as waiting-worker." }
-        : { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Native child evidence was present, but the bounded observation did not capture a stable parent-idle/child-running interval." };
+        ? { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Mission list and detail both observed the parent-idle/child-running state as waiting-worker." }
+        : { status: "SKIPPED", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Native child evidence was present, but the bounded observation did not capture a stable parent-idle/child-running interval." };
     } else {
-      evidence.checks.delegation = { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The deterministic sessions_spawn attempt completed without an exposed native task/child row; no synthetic delegation was created." };
-      evidence.checks["waiting-worker"] = { status: "SKIPPED", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The exact runtime exposed no native child task to drive this state." };
+      evidence.checks.delegation = { status: "SKIPPED", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "The deterministic sessions_spawn attempt completed without an exposed native task/child row; no synthetic delegation was created." };
+      evidence.checks["waiting-worker"] = { status: "SKIPPED", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "The exact runtime exposed no native child task to drive this state." };
     }
 
     const nativeTasks = buildTaskRecords(delegationTaskRuntimes, []);
@@ -237,7 +238,7 @@ async function main() {
     await runHumanControlJourneys(client, evidence, cleanupRefs);
     evidence.checks["human-control-product-path"] = {
       status: "SKIPPED",
-      evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"],
+      evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS],
       detail: "Native Human Control projection and resolution passed, but the safe fixture did not expose a mission-linked task/session request for the AgentOS mutation path. No unrelated approval was relabelled as Mission-linked evidence."
     };
 
@@ -254,15 +255,15 @@ async function main() {
     assert.equal(recovered.length, 1);
     const postRestartHistory = await readHistory(client, sessionKey, 1);
     assert.ok(postRestartHistory.some((message) => message.includes("AGENTOS_FIXTURE_FIRST_REPLY")));
-    evidence.checks["gateway-reconnect"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "The product-path Mission retained the same exact session key and history across disposable Gateway restart." };
+    evidence.checks["gateway-reconnect"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "The product-path Mission retained the same exact session key and history across disposable Gateway restart." };
     const rebuiltSnapshot = await getMissionControlSnapshot({ force: true });
     const rebuiltDetail = await getWorkforceMissionDetail(productMission.dispatchId, { snapshot: rebuiltSnapshot });
     assert.equal(rebuiltDetail?.state, "completed");
     assert.equal(rebuiltDetail?.result, finalResult);
-    evidence.checks["agentos-restart-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", "LIVE_DISPOSABLE_9_2"], detail: "Workforce projection rebuilt from the persisted product-path dispatch and native session after Gateway restart." };
+    evidence.checks["agentos-restart-projection"] = { status: "PASS", evidence: ["APPLICATION_PATH", LIVE_EVIDENCE_CLASS], detail: "Workforce projection rebuilt from the persisted product-path dispatch and native session after Gateway restart." };
 
-    evidence.checks["cancellation"] = { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "No native task identity was exposed by this turn, so no unrelated session was cancelled." };
-    evidence.checks["child-failure"] = { status: "SKIPPED", evidence: "LIVE_DISPOSABLE_9_2", detail: "No native child task was exposed by the safe deterministic turn." };
+    evidence.checks["cancellation"] = { status: "SKIPPED", evidence: LIVE_EVIDENCE_CLASS, detail: "No native task identity was exposed by this turn, so no unrelated session was cancelled." };
+    evidence.checks["child-failure"] = { status: "SKIPPED", evidence: LIVE_EVIDENCE_CLASS, detail: "No native child task was exposed by the safe deterministic turn." };
   } finally {
     if (client && cleanupRefs.approvalId) await client.callNative("exec.approval.resolve", { id: cleanupRefs.approvalId, decision: "deny" }, mutationOptions()).catch(() => {});
     if (client) {
@@ -309,7 +310,7 @@ async function runHumanControlJourneys(client: GatewayClient, evidence: ReturnTy
   const oneRemaining = await client.callNative<{ questions: Array<Record<string, unknown>> }>("question.list", {}, readOptions());
   assert.equal(oneRemaining.questions.filter((question) => questionIds.includes(readString(question.id) ?? "") && question.status === "pending").length, 1);
   await client.callNative("question.resolve", { id: questionIds[1], answers: { answers: { workforce_two: ["Narrow"] } } }, mutationOptions());
-  evidence.checks["multiple-human-control"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Two native questions remained independently pending until both were resolved." };
+  evidence.checks["multiple-human-control"] = { status: "PASS", evidence: LIVE_EVIDENCE_CLASS, detail: "Two native questions remained independently pending until both were resolved." };
 
   const createdApproval = await client.callNative<Record<string, unknown>>("exec.approval.request", {
     command: "echo AGENTOS_WORKFORCE_SAFE_APPROVAL",
@@ -328,7 +329,7 @@ async function runHumanControlJourneys(client: GatewayClient, evidence: ReturnTy
   await client.callNative("exec.approval.resolve", { id: approvalId, decision: "deny" }, mutationOptions());
   const resolvedApprovals = await client.callNative<unknown[]>("exec.approval.list", {}, readOptions());
   assert.equal(resolvedApprovals.some((entry) => asRecord(entry)?.id === approvalId), false);
-  evidence.checks["approval-resolution"] = { status: "PASS", evidence: "LIVE_DISPOSABLE_9_2", detail: "Native approval was projected, denied safely, and disappeared from the pending inventory." };
+  evidence.checks["approval-resolution"] = { status: "PASS", evidence: LIVE_EVIDENCE_CLASS, detail: "Native approval was projected, denied safely, and disappeared from the pending inventory." };
 }
 
 function createEvidence(identity: { version: string; sourceCommit: string; buildId: string; packageHash: string }, agentosCommit: string) {
@@ -336,7 +337,7 @@ function createEvidence(identity: { version: string; sourceCommit: string; build
     schemaVersion: 1,
     artifactType: "openclaw-workforce-acceptance",
     generatedAt: new Date().toISOString(),
-    provenance: { repository: "SapienXai/AgentOS", agentosCommit, openClaw: identity, evidenceClasses: ["LIVE_DISPOSABLE_9_2", "DETERMINISTIC_NATIVE_FIXTURE"] },
+    provenance: { repository: "SapienXai/AgentOS", agentosCommit, openClaw: identity, evidenceClasses: [LIVE_EVIDENCE_CLASS, "DETERMINISTIC_NATIVE_FIXTURE"] },
     runtime: null as Record<string, unknown> | null,
     productPath: null as Record<string, unknown> | null,
     checks: {} as Record<string, { status: CheckStatus; evidence: string | string[]; detail?: string }>,

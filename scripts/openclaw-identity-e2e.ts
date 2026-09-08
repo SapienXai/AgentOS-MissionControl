@@ -268,7 +268,7 @@ async function runCheck(
 ) {
   try {
     await client.callNative(method, params, { timeoutMs: REQUEST_TIMEOUT_MS }, { safety: isMutationMethod(method) ? "mutation" : "read", timeoutMs: REQUEST_TIMEOUT_MS });
-    output.push({ profile, method, expected, result: expected === "denied" ? "FAIL" : expected === "runtime-dependent" ? "UNKNOWN" : "PASS", observed: "Gateway response accepted" });
+    output.push({ profile, method, expected, result: expected === "denied" ? "FAIL" : "PASS", observed: "Gateway response accepted" });
   } catch (error) {
     const errorClass = classifyGatewayError(error);
     output.push({

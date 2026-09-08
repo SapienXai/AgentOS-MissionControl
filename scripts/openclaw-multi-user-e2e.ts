@@ -38,7 +38,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_INPUT = process.env.OPENCLAW_MULTI_USER_E2E_PACKAGE?.trim();
-const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_E2E_OUTPUT?.trim() || path.resolve("docs/evidence/openclaw-2026.9.2-multi-user.json");
+const OUTPUT_PATH = process.env.OPENCLAW_MULTI_USER_E2E_OUTPUT?.trim() || path.resolve(`docs/evidence/openclaw-${OPENCLAW_IDENTITY_CONTRACT_VERSION}-multi-user.json`);
 const REQUEST_TIMEOUT_MS = 10_000;
 
 type IdentitySummary = {
@@ -54,7 +54,7 @@ type IdentitySummary = {
 };
 
 async function main() {
-  if (!PACKAGE_INPUT) throw new Error("Set OPENCLAW_MULTI_USER_E2E_PACKAGE to an exact OpenClaw 2026.9.2 package root.");
+  if (!PACKAGE_INPUT) throw new Error(`Set OPENCLAW_MULTI_USER_E2E_PACKAGE to an exact OpenClaw ${OPENCLAW_IDENTITY_CONTRACT_VERSION} package root.`);
   const packageRoot = path.resolve(PACKAGE_INPUT);
   const packageIdentity = await readPackageIdentity(packageRoot);
   assert.equal(packageIdentity.version, OPENCLAW_IDENTITY_CONTRACT_VERSION);
@@ -107,7 +107,7 @@ async function main() {
     roles: getAgentOsProductPermissionMatrix(),
     productPermissionMatrix: getAgentOsProductPermissionMatrix(),
     openClawProfileProvisioning: {
-      usersCreateMethod: "not-exposed-in-9.2",
+      usersCreateMethod: `not-exposed-in-${OPENCLAW_IDENTITY_CONTRACT_VERSION}`,
       verifiedProfileCreation: "trusted-proxy or Tailscale verified identity creates/resolves a durable profile",
       sharedTokenProfileCreation: "not available; shared token/password does not establish a human profile",
       AgentOsLocalPasswordDelegation: "blocked/deferred",
@@ -143,7 +143,7 @@ async function main() {
     },
     securityChecks: [] as Array<Record<string, unknown>>,
     cleanup: { status: "pending", disposableRootRemoved: false, gatewayProcessStopped: false },
-    gate: "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: FAIL",
+    gate: `AGENTOS / OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} MULTI-USER GATE: FAIL`,
     success: false
   };
 
@@ -192,7 +192,7 @@ async function main() {
     assert.deepEqual(agentToAgentAllow, []);
     evidence.hardening.sessionSecurityDefaults = "PASS";
     evidence.securityChecks.push({
-      check: "explicit 9.2 session-security defaults",
+      check: `explicit ${OPENCLAW_IDENTITY_CONTRACT_VERSION} session-security defaults`,
       result: "PASS",
       visibility: sessionVisibility,
       agentToAgentEnabled,
@@ -311,15 +311,15 @@ async function main() {
     evidence.cleanup.disposableRootRemoved = !(await pathExists(disposableRoot));
     evidence.cleanup.gatewayProcessStopped = gateway.exitCode !== null;
     evidence.gate = success && evidence.cleanup.status === "complete" && evidence.cleanup.disposableRootRemoved && evidence.cleanup.gatewayProcessStopped
-      ? "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: PASS"
-      : "AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: FAIL";
+      ? `AGENTOS / OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} MULTI-USER GATE: PASS`
+      : `AGENTOS / OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} MULTI-USER GATE: FAIL`;
     evidence.success = evidence.gate.endsWith("PASS");
     await mkdir(path.dirname(OUTPUT_PATH), { recursive: true });
     await writeFile(OUTPUT_PATH, `${JSON.stringify(sanitizeEvidence(evidence), null, 2)}\n`, { mode: 0o600 });
   }
 
   if (!evidence.success) throw new Error(`Multi-user authorization certification failed. Evidence: ${OUTPUT_PATH}`);
-  console.log("AGENTOS / OPENCLAW 9.2 MULTI-USER GATE: PASS");
+  console.log(`AGENTOS / OPENCLAW ${OPENCLAW_IDENTITY_CONTRACT_VERSION} MULTI-USER GATE: PASS`);
   console.log(`Evidence: ${OUTPUT_PATH}`);
 }
 

@@ -24,16 +24,19 @@ function check(
 }
 
 test("OpenClaw compatibility smoke marks supported Node versions", () => {
-  assert.equal(classifyOpenClawNodeVersion("24.1.0").status, "supported");
-  assert.match(classifyOpenClawNodeVersion("24.1.0").summary, /AgentOS' required runtime/i);
+  assert.equal(classifyOpenClawNodeVersion("24.16.0").status, "supported");
+  assert.equal(classifyOpenClawNodeVersion("26.1.0").status, "supported");
+  assert.match(classifyOpenClawNodeVersion("24.16.0").summary, /supported AgentOS\/OpenClaw runtime floors/i);
 });
 
 test("OpenClaw compatibility smoke rejects old Node versions", () => {
-  const result = classifyOpenClawNodeVersion("22.19.0");
+  const result = classifyOpenClawNodeVersion("24.15.0");
 
   assert.equal(result.status, "unsupported");
-  assert.match(result.summary, /below/i);
-  assert.match(result.recovery ?? "", /24\.0\.0/);
+  assert.match(result.summary, /outside the supported/i);
+  assert.match(result.recovery ?? "", /24\.16\.0/);
+  assert.equal(classifyOpenClawNodeVersion("25.0.0").status, "unsupported");
+  assert.equal(classifyOpenClawNodeVersion("26.0.0").status, "unsupported");
 });
 
 test("OpenClaw compatibility outcome requires all required checks and model readiness", () => {

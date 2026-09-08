@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: 24.20.0
           cache: pnpm
 
       - name: Install dependencies
@@ -142,7 +142,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: 24.20.0
           cache: pnpm
 
       - name: Install dependencies
@@ -281,7 +281,7 @@ jobs:
 
           ## Upgrade notes
 
-          - Requires Node.js 24 or newer.
+          - Requires Node.js 24.16.0+ or 26.1.0+.
           - Use the installer commands below or the attached tarball for your platform.
 
           ## Install

@@ -9,6 +9,7 @@ export type OpenClawRuntimeProviderFixture = {
     requestCount: number;
     completionCount: number;
     streamingCompletionCount: number;
+    lastPrompt: string;
   };
   close: () => Promise<void>;
 };
@@ -32,7 +33,8 @@ export async function createOpenClawRuntimeProviderFixture(input: {
   const stats = {
     requestCount: 0,
     completionCount: 0,
-    streamingCompletionCount: 0
+    streamingCompletionCount: 0,
+    lastPrompt: ""
   };
 
   const server = createServer((request, response) => {
@@ -92,6 +94,7 @@ async function handleRequest(
     const payload = JSON.parse(await readBody(request)) as { stream?: boolean; messages?: unknown };
     const stream = payload.stream === true;
     const prompt = readLastUserMessage(payload.messages);
+    stats.lastPrompt = prompt;
     const fixtureResponse = resolveFixtureResponse(prompt, payload.messages);
     stats.completionCount += 1;
     if (stream) stats.streamingCompletionCount += 1;
@@ -150,7 +153,7 @@ function resolveFixtureResponse(prompt: string, messages: unknown): FixtureRespo
         name: "write",
         arguments: {
           path: "deliverables/acceptance-result.txt",
-          content: "AgentOS Workforce 2026.9.2 artifact acceptance.\n"
+          content: "AgentOS Workforce 2026.9.3 artifact acceptance.\n"
         }
       }
     };
@@ -191,12 +194,28 @@ function resolveFixtureResponse(prompt: string, messages: unknown): FixtureRespo
 
 function readLastUserMessage(messages: unknown): string {
   if (!Array.isArray(messages)) return "";
-  const message = [...messages].reverse().find((entry) => {
-    if (!entry || typeof entry !== "object") return false;
-    return (entry as { role?: unknown }).role === "user";
-  });
-  const content = message && typeof message === "object" ? (message as { content?: unknown }).content : null;
-  return typeof content === "string" ? content : "";
+  const userMessages = messages.filter((entry) => (
+    entry && typeof entry === "object" && (entry as { role?: unknown }).role === "user"
+  ));
+  const content = userMessages.map((message) => readMessageContent(message && typeof message === "object" ? (message as { content?: unknown }).content : null)).filter(Boolean).join("\n");
+  return content;
+}
+
+function readMessageContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      const record = part as { text?: unknown; value?: unknown };
+      return typeof record.text === "string" ? record.text : typeof record.value === "string" ? record.value : "";
+    }).join(" ");
+  }
+  if (content && typeof content === "object") {
+    const record = content as { text?: unknown; value?: unknown };
+    return typeof record.text === "string" ? record.text : typeof record.value === "string" ? record.value : "";
+  }
+  return "";
 }
 
 function writeStreamingResponse(response: ServerResponse, modelId: string, fixtureResponse: FixtureResponse) {

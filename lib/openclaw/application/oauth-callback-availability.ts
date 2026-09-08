@@ -1,6 +1,6 @@
 import { createConnection } from "node:net";
 
-// OpenClaw 2026.9.2 falls back to manual input on bind failure but still opens
+// OpenClaw 2026.9.3 falls back to manual input on bind failure but still opens
 // the browser. A stale listener would then receive the new session's callback.
 // Probe both loopback families without sending any HTTP or OAuth data.
 export async function assertOAuthCallbackAvailable(port = 1455) {

@@ -129,7 +129,7 @@ test("official identity verification fails closed when npm and GitHub disagree",
 
   const mismatch = await verifyOfficialOpenClawRelease({
     version: "2026.9.3",
-    fetchImpl: identityFetch({ packageVersion: "2026.9.99" })
+    fetchImpl: identityFetch({ packageVersion: "2026.9.99", requestVersion: "2026.9.3" })
   });
   assert.equal(mismatch.identity.status, "identity-mismatch");
   assert.match(mismatch.identity.mismatches.join("\n"), /npm package version/i);
@@ -328,14 +328,14 @@ test("runner returns intake-blocked and writes incomplete evidence for an author
   const outputDir = await mkdtemp(join(tmpdir(), "agentos-openclaw-watch-"));
   const result = await runOpenClawReleaseWatch({
     mode: "manual",
-    targetVersion: "2026.9.3",
+    targetVersion: "2026.9.4",
     dryRun: true,
     forceRefresh: true,
     outputDir,
     agentosCommit: "c".repeat(40),
     agentosVersion: "0.8.0",
     now: () => new Date("2026-09-06T00:00:00.000Z"),
-    fetchImpl: releaseWatchIncompleteContractFetch()
+    fetchImpl: releaseWatchIncompleteContractFetch("2026.9.4")
   });
 
   assert.equal(result.status, "intake-blocked");
@@ -391,7 +391,7 @@ test("issue rendering is deduplicated across open and closed issues and surfaces
 
 test("unmanifested releases remain blocked from normal updates and watcher code has no mutation path", () => {
   const decision = resolveOpenClawUpdateDecision({
-    targetVersion: "2026.9.3",
+    targetVersion: "2026.9.4",
     agentOsVersion: "0.8.0",
     manifest: LOCAL_OPENCLAW_COMPATIBILITY_MANIFEST,
     mode: "recommended"
@@ -423,7 +423,7 @@ test("an exact certified target is not re-intaken while candidate and blocked ta
   };
   assert.deepEqual(
     selectOpenClawReleasesForIntake(releases, manifest).map((release) => release.version),
-    ["2026.9.3", "2026.9.10"]
+    ["2026.9.2", "2026.9.10"]
   );
 });
 
@@ -569,51 +569,52 @@ function jsonFetch(records: Record<string, unknown>) {
   };
 }
 
-function identityFetch(input: { packageVersion: string }) {
+function identityFetch(input: { packageVersion: string; requestVersion?: string }) {
+  const version = input.requestVersion ?? input.packageVersion;
   const sourceCommit = "a".repeat(40);
   const integrity = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
   return jsonFetch({
-    "https://registry.npmjs.org/openclaw/2026.9.3": {
+    [`https://registry.npmjs.org/openclaw/${version}`]: {
       version: input.packageVersion,
       dist: { integrity },
-      time: { "2026.9.3": "2026-09-03T00:00:00.000Z" }
+      time: { [version]: "2026-09-03T00:00:00.000Z" }
     },
-    "https://registry.npmjs.org/%40openclaw%2Fgateway-protocol/2026.9.3": { version: "2026.9.3", dist: { integrity } },
-    "https://registry.npmjs.org/%40openclaw%2Fgateway-client/2026.9.3": { version: "2026.9.3", dist: { integrity } },
-    "https://api.github.com/repos/openclaw/openclaw/releases/tags/v2026.9.3": {
-      tag_name: "v2026.9.3",
-      html_url: "https://github.com/openclaw/openclaw/releases/tag/v2026.9.3",
+    [`https://registry.npmjs.org/%40openclaw%2Fgateway-protocol/${version}`]: { version, dist: { integrity } },
+    [`https://registry.npmjs.org/%40openclaw%2Fgateway-client/${version}`]: { version, dist: { integrity } },
+    [`https://api.github.com/repos/openclaw/openclaw/releases/tags/v${version}`]: {
+      tag_name: `v${version}`,
+      html_url: `https://github.com/openclaw/openclaw/releases/tag/v${version}`,
       published_at: "2026-09-03T00:00:00.000Z",
       body: "Security session update changes."
     },
-    "https://api.github.com/repos/openclaw/openclaw/git/ref/tags/v2026.9.3": {
+    [`https://api.github.com/repos/openclaw/openclaw/git/ref/tags/v${version}`]: {
       object: { sha: sourceCommit, type: "commit" }
     },
-    "https://raw.githubusercontent.com/openclaw/openclaw/v2026.9.3/dist/build-info.json": {
-      buildId: "build-2026.9.3",
-      version: "2026.9.3",
+    [`https://raw.githubusercontent.com/openclaw/openclaw/v${version}/dist/build-info.json`]: {
+      buildId: `build-${version}`,
+      version,
       commit: sourceCommit
     }
   });
 }
 
-function releaseWatchIncompleteContractFetch() {
-  const verifiedSource = identityFetch({ packageVersion: "2026.9.3" });
+function releaseWatchIncompleteContractFetch(version: string) {
+  const verifiedSource = identityFetch({ packageVersion: version });
   return async (input: string | URL | Request) => {
     const url = String(input);
     if (url === npmDistTagsEndpoint) {
-      return jsonResponse({ latest: "2026.9.3" });
+      return jsonResponse({ latest: version });
     }
     if (url === npmPackumentEndpoint) {
       return jsonResponse({
-        versions: { "2026.9.2": {}, "2026.9.3": {} },
-        time: { "2026.9.3": "2026-09-03T00:00:00.000Z" }
+        versions: { "2026.9.2": {}, [version]: {} },
+        time: { [version]: "2026-09-03T00:00:00.000Z" }
       });
     }
     if (url === releaseEndpoint) {
-      return jsonResponse([releaseRecord("2026.9.3")]);
+      return jsonResponse([releaseRecord(version)]);
     }
-    if (url.includes("/src/gateway/methods/core-descriptors.ts") || url.includes("/compare/v2026.9.2...v2026.9.3")) {
+    if (url.includes("/src/gateway/methods/core-descriptors.ts") || url.includes(`/compare/v2026.9.3...v${version}`)) {
       return new Response(null, { status: 404 });
     }
     return verifiedSource(input);

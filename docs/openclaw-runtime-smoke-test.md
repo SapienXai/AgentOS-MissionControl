@@ -16,8 +16,8 @@ Latest production-readiness validation update: 2026-05-03.
 2026-06-02 post-0.6.1 integration smoke strategy:
 
 - Run the automated quality gates first: `pnpm lint`, `pnpm typegen`, `pnpm typecheck`, `pnpm test`, `pnpm build`, `pnpm check:release`, and `pnpm smoke:agentos-package`.
-- Use Node.js 24 or newer for every local, CI, release, and package-manager smoke run.
-- Use recommended OpenClaw 2026.9.2, start its Gateway on loopback, and verify `openclaw gateway status --deep --json` reports protocol v4, operator auth, and approved operator scopes. OpenClaw 2026.9.1 remains the supported minimum when its security-sensitive session configuration is explicit.
+- Use Node.js 24.16.0+ or 26.1.0+ for every local, CI, release, and package-manager smoke run.
+- Use recommended OpenClaw 2026.9.3, start its Gateway on loopback, and verify `openclaw gateway status --deep --json` reports protocol v4, operator auth, and approved operator scopes. OpenClaw 2026.9.1 remains the supported minimum when its security-sensitive session configuration is explicit.
 - Run `agentos doctor` before starting the UI. It should report install/runtime basics without deep compatibility noise.
 - Run `agentos doctor --deep` before starting the UI. It should report OpenClaw version, Gateway protocol, required method discovery, scopes, config access, channel status, model readiness, fallback count, and last native failure. Fallback count and last native failure may be disabled until AgentOS is running.
 - Start AgentOS from the packaged CLI or a clean source checkout, then compare `agentos doctor --deep`, `/api/diagnostics`, and the in-app diagnostics panel for protocol, version, method drift, scopes, fallback count, and last native failure.

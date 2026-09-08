@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@openclaw/gateway-client':
-        specifier: 2026.9.2
-        version: 2026.9.2
+        specifier: 2026.9.3
+        version: 2026.9.3
       '@openclaw/gateway-protocol':
-        specifier: 2026.9.2
-        version: 2026.9.2
+        specifier: 2026.9.3
+        version: 2026.9.3
       '@radix-ui/react-avatar':
         specifier: ^1.1.3
         version: 1.1.11(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -91,7 +91,7 @@ importers:
         specifier: ^2.8.4
         version: 2.11.4
       '@types/node':
-        specifier: ^24.0.0
+        specifier: ^24.1.0
         version: 24.12.4
       '@types/qrcode':
         specifier: ^1.5.6
@@ -529,12 +529,12 @@ packages:
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
 
-  '@openclaw/gateway-client@2026.9.2':
-    resolution: {integrity: sha512-mjV9uIEGCd4+Rvwp37B72cG/12xf+AxEUsyVWGmQz4ttwK1JFFEwVJ6HjzxFfnBGeFJGwgPAjnTwkByyrwnrPQ==}
+  '@openclaw/gateway-client@2026.9.3':
+    resolution: {integrity: sha512-NfBXoINz2cOWfMGKwNIU1xGwtla7nKgaxA4cslwBnJaKTs/Y2IUYkafn9GCxxcLHTI760edlD8epYFgmk07NPA==}
     engines: {node: '>=22.19.0'}
 
-  '@openclaw/gateway-protocol@2026.9.2':
-    resolution: {integrity: sha512-zq4rFrTnmzjIHD2Pq/cxUqT3nzYjYxXizRKO7IqtHwnHQP0MaJA+Uthlt4f5Y/FLatAqpoI81SzN7mfQ0sifWQ==}
+  '@openclaw/gateway-protocol@2026.9.3':
+    resolution: {integrity: sha512-v1+ljByJj8kttGxt1lU0UXhNLUcJ3CB+T4tiupcCzLhzLcfdAGe7Be/+M45KONecZjHq2SnMram6nOgLKMR1Og==}
     engines: {node: '>=22.19.0'}
 
   '@radix-ui/number@1.1.1':
@@ -3217,16 +3217,16 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
-  '@openclaw/gateway-client@2026.9.2':
+  '@openclaw/gateway-client@2026.9.3':
     dependencies:
-      '@openclaw/gateway-protocol': 2026.9.2
+      '@openclaw/gateway-protocol': 2026.9.3
       ipaddr.js: 2.5.0
       ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
 
-  '@openclaw/gateway-protocol@2026.9.2':
+  '@openclaw/gateway-protocol@2026.9.3':
     dependencies:
       typebox: 1.3.18
 

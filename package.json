@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=24.16.0 <25 || >=26.1.0"
   },
   "packageManager": "pnpm@10.30.3",
   "scripts": {
@@ -39,12 +39,13 @@
     "openclaw:skills-capabilities-cert": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-skills-effective-capabilities-certification.ts",
     "openclaw:native-memory-cert": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-native-memory-certification.ts",
     "openclaw:native-doctor-cert": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-native-doctor-certification.ts",
-    "openclaw:native-doctor-hardening-cert": "OPENCLAW_NATIVE_DOCTOR_HARDENING=1 OPENCLAW_NATIVE_DOCTOR_OUTPUT=docs/evidence/openclaw-2026.9.2-doctor-update-recovery-hardening.json node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-native-doctor-certification.ts",
+    "openclaw:native-doctor-hardening-cert": "OPENCLAW_NATIVE_DOCTOR_HARDENING=1 OPENCLAW_NATIVE_DOCTOR_OUTPUT=docs/evidence/openclaw-2026.9.3-doctor-update-recovery-hardening.json node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-native-doctor-certification.ts",
     "openclaw:human-control-cert": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-human-control-certification.ts",
     "openclaw:capability-truthfulness-skills-cert": "OPENCLAW_SKILLS_EFFECTIVE_SEED=1 node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-skills-effective-capabilities-certification.ts",
     "openclaw:fresh-baseline-e2e": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-fresh-baseline-e2e.ts",
     "openclaw:migration-e2e": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-migration-e2e.ts",
-    "openclaw:final-certification": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-final-certification.ts",
+    "openclaw:migration-9-3-e2e": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-2026-9-2-to-9-3-migration-e2e.ts",
+    "openclaw:final-certification": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-2026-9-3-final-certification.ts",
     "start": "next start",
     "lint": "eslint .",
     "openclaw:compat": "node -r ./tests/register-paths.cjs -r jiti/register.js scripts/openclaw-compat.ts",
@@ -55,8 +56,8 @@
     "publish:agentos": "pnpm check:release && npm publish ./packages/agentos --access public --cache /tmp/agentos-npm-cache"
   },
   "dependencies": {
-    "@openclaw/gateway-client": "2026.9.2",
-    "@openclaw/gateway-protocol": "2026.9.2",
+    "@openclaw/gateway-client": "2026.9.3",
+    "@openclaw/gateway-protocol": "2026.9.3",
     "@radix-ui/react-avatar": "^1.1.3",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-label": "^2.1.2",
@@ -84,7 +85,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.1.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",

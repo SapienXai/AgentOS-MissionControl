@@ -227,7 +227,7 @@ async function main() {
       outputDirRelative: null,
       notesDirRelative: null
     });
-    const firstTurn = await runTurn(client, sessionKey, "AGENTOS_SYNTHETIC_FIRST_PROMPT", 1);
+    const firstTurn = await runTurn(client, sessionKey, "AGENTOS_SYNTHETIC_FIRST_PROMPT", 1, fixture);
     const observedDispatchRecord = {
       ...dispatchRecord,
       status: "completed" as const,
@@ -299,7 +299,7 @@ async function main() {
       }
     }
 
-    const continuation = await runTurn(client, sessionKey, "AGENTOS_SYNTHETIC_SECOND_CONTINUITY_PROMPT", 2);
+    const continuation = await runTurn(client, sessionKey, "AGENTOS_SYNTHETIC_SECOND_CONTINUITY_PROMPT", 2, fixture);
     assert.ok(continuation.historyAssistantCount >= 2);
     evidence.followUpContinue = {
       canonicalReuse: "PASS",
@@ -363,7 +363,7 @@ async function main() {
     const reconnectIdentity = await reconnected.getOperatorIdentity({ timeoutMs: REQUEST_TIMEOUT_MS });
     const sessionsAfterRestart = await reconnected.listSessions({ search: sessionKey }, { timeoutMs: REQUEST_TIMEOUT_MS });
     const recovered = sessionsAfterRestart.sessions.find((entry) => entry.key === sessionKey) ?? null;
-    const restartedContinuation = await runTurn(reconnected, sessionKey, "AGENTOS_SYNTHETIC_POST_RESTART_CONTINUITY_PROMPT", 3);
+    const restartedContinuation = await runTurn(reconnected, sessionKey, "AGENTOS_SYNTHETIC_POST_RESTART_CONTINUITY_PROMPT", 3, fixture);
     assert.ok(restartedContinuation.historyAssistantCount >= 3);
     evidence.restartContinuity.push({
       handshake: reconnectIdentity.authenticated ? "PASS" : "FAIL",
@@ -407,7 +407,8 @@ async function runTurn(
   client: OfficialBackedGatewayClient,
   sessionKey: string,
   message: string,
-  minimumAssistantMessages: number
+  minimumAssistantMessages: number,
+  fixture: Awaited<ReturnType<typeof createOpenClawRuntimeProviderFixture>>
 ) {
   const frames: GatewayEventFrame[] = [];
   const subscription = await client.subscribeNativeEvents(
@@ -430,7 +431,7 @@ async function runTurn(
     const expectedReply = /SECOND|CONTINUITY/i.test(message)
       ? "AGENTOS_FIXTURE_SECOND_REPLY"
       : "AGENTOS_FIXTURE_FIRST_REPLY";
-    assert.ok(assistantMessages.some((entry) => entry.includes(expectedReply)));
+    assert.ok(assistantMessages.some((entry) => entry.includes(expectedReply)), JSON.stringify({ expectedReply, assistantMessages, fixturePrompt: fixture.stats.lastPrompt }));
     assert.ok(frames.some((frame) => normalizeGatewayTurnEvent(frame, sessionKey, runId)?.done));
     return { runId, historyAssistantCount: assistantMessages.length };
   } finally {

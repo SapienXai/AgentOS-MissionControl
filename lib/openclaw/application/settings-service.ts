@@ -29,6 +29,7 @@ import {
 import {
   isCliGatewayClientForcedByEnv
 } from "@/lib/openclaw/client/native-ws-gateway-policy";
+import { readOpenClawChangedPaths } from "@/lib/openclaw/client/native-ws-gateway-config";
 import {
   createOpenClawGatewayClient,
   resetOpenClawGatewayClient
@@ -123,7 +124,7 @@ type GatewayAuthConfigSnapshotResult = {
   invalidConfig: boolean;
 };
 
-type GatewayConfigCommandResult = {
+export type GatewayConfigCommandResult = {
   stdout?: string;
   metadata?: Record<string, unknown>;
 };
@@ -1112,11 +1113,17 @@ async function syncLocalOpenClawDeviceAuthTokenFromPairing(): Promise<GatewayDev
   };
 }
 
-function shouldRestartAfterGatewayConfigMutations(mutations: Array<[string, GatewayConfigCommandResult]>) {
+export function shouldRestartAfterGatewayConfigMutations(mutations: Array<[string, GatewayConfigCommandResult]>) {
   let restartRequired = false;
 
   for (const [path, result] of mutations) {
-    if (gatewayConfigPathMustRestart(path)) {
+    const changedPaths = readGatewayConfigChangedPaths(result);
+    if (changedPaths?.length === 0) {
+      continue;
+    }
+
+    const effectivePaths = changedPaths ?? [path];
+    if (effectivePaths.some((effectivePath) => gatewayConfigPathMustRestart(effectivePath))) {
       return true;
     }
 
@@ -1126,12 +1133,27 @@ function shouldRestartAfterGatewayConfigMutations(mutations: Array<[string, Gate
       return true;
     }
 
-    if (reloadKind === "unknown" && gatewayConfigPathUsuallyRequiresRestart(path)) {
+    if (reloadKind === "unknown" && effectivePaths.some((effectivePath) => gatewayConfigPathUsuallyRequiresRestart(effectivePath))) {
       restartRequired = true;
     }
   }
 
   return restartRequired;
+}
+
+function readGatewayConfigChangedPaths(result: GatewayConfigCommandResult) {
+  const metadata = result.metadata?.openClawConfig;
+  const fromMetadata = readOpenClawChangedPaths(metadata);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout || "{}");
+    return readOpenClawChangedPaths(parsed?.configMutation);
+  } catch {
+    return undefined;
+  }
 }
 
 function gatewayConfigPathMustRestart(path: string) {

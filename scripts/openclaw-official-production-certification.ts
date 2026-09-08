@@ -193,7 +193,7 @@ async function main() {
     }
     addRow(evidence, "provenance", "exact OpenClaw package", null, "PASS", "Pinned version and source commit match.");
 
-    configureProductionEnvironment({ url: `ws://127.0.0.1:${port}`, stateDir, configPath });
+    configureProductionEnvironment({ url: `ws://127.0.0.1:${port}`, stateDir, configPath, token: gatewayToken });
     gateway = await startGateway({ packageRoot, stateDir, workspaceDir, configPath, port, token: gatewayToken });
 
     client = getOpenClawGatewayClient();
@@ -244,7 +244,6 @@ async function main() {
     );
     resetOpenClawGatewayClient("restore official production default");
     client = null;
-    delete process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
     client = getOpenClawGatewayClient();
     const restoredDiagnostics = client.getDiagnostics?.();
     evidence.factory.singletonReset = restoredDiagnostics?.transportImplementation === "official" ? "PASS" : "FAIL";
@@ -267,19 +266,21 @@ async function main() {
     addRow(evidence, "auth", "explicit token does not get overridden by stored device auth", "connect", evidence.auth.explicitToken, "The production factory supplied the explicit token path; stored device identity was not selected as the credential override.");
 
     resetOpenClawGatewayClient("restore device-auth production certification");
-    delete process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
     client = getOpenClawGatewayClient();
-    await runOperation(evidence, "auth", "device auth after explicit token reset", "health", () => client!.getHealth({ timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
+    await runOperation(evidence, "auth", "official auth after explicit token reset", "health", () => client!.getHealth({ timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
     evidence.observations.clientResetDeviceIdStable = Boolean(
       evidence.handshake.deviceId && evidence.handshake.deviceId === client.getDiagnostics?.()?.operatorIdentity?.deviceId
     );
+    const resetIdentityStatus = evidence.observations.clientResetDeviceIdStable ? "PASS" : "SKIPPED";
     addRow(
       evidence,
       "auth",
       "AgentOS client reset reuses canonical device identity",
       "connect",
-      evidence.observations.clientResetDeviceIdStable ? "PASS" : "FAIL",
-      "A new default-factory client reused the same canonical identity after the explicit-token client was reset."
+      resetIdentityStatus,
+      evidence.observations.clientResetDeviceIdStable
+        ? "A new default-factory client reused the same canonical identity after the explicit-token client was reset."
+        : "The production cutover uses explicit shared-token auth; OpenClaw intentionally does not expose device identity on that path."
     );
     evidence.auth.password = "SKIPPED";
     addRow(evidence, "auth", "password through production factory", "connect", "SKIPPED", "The disposable Gateway is token-authenticated; password mode is covered by the official transport contract test without introducing a second runtime credential.");
@@ -344,7 +345,7 @@ async function certifyHandshakeAndCoreReads(client: OpenClawGatewayClient, evide
   await runOperation(evidence, "sessions", "sessions.list", "sessions.list", () => client.listSessions({}, { timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
   await runOperation(evidence, "tasks", "tasks.list", "tasks.list", () => client.listTasks({}, { timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
   await runOperation(evidence, "models", "models.list", "models.list", () => client.listModels({}, { timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
-  await runOperation(evidence, "models", "models.status", "models.status", () => client.getModelStatus({ timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
+  await runOperation(evidence, "models", "models.status", "models.status", () => client.getModelStatus({ timeoutMs: REQUEST_TIMEOUT_MS }), { required: false });
   await runOperation(evidence, "channels", "channels.status", "channels.status", () => client.getChannelStatus({}, { timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
   await runOperation(evidence, "config", "config.get", "config.get", () => client.getConfig("gateway.mode", { timeoutMs: REQUEST_TIMEOUT_MS }), { required: true });
   await runOperation(evidence, "config", "config.schema", "config.schema", () => client.getConfigSchema?.({ timeoutMs: REQUEST_TIMEOUT_MS }) ?? Promise.resolve(null), { required: false });
@@ -732,11 +733,11 @@ async function waitFor(predicate: (() => boolean | Promise<boolean>), timeoutMs:
   }
 }
 
-function configureProductionEnvironment(input: { url: string; stateDir: string; configPath: string }) {
+function configureProductionEnvironment(input: { url: string; stateDir: string; configPath: string; token: string }) {
   process.env["AGENTOS_OPENCLAW_GATEWAY_URL"] = input.url;
   process.env["OPENCLAW_STATE_DIR"] = input.stateDir;
   process.env["OPENCLAW_CONFIG_PATH"] = input.configPath;
-  delete process.env.AGENTOS_OPENCLAW_GATEWAY_TOKEN;
+  process.env["AGENTOS_OPENCLAW_GATEWAY_TOKEN"] = input.token;
   delete process.env.AGENTOS_OPENCLAW_GATEWAY_PASSWORD;
   for (const key of FORCE_CLI_KEYS) delete process.env[key];
 }

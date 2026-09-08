@@ -11,6 +11,7 @@ import { OPENCLAW_RECOMMENDED_VERSION } from "@/lib/openclaw/versions";
 
 const rootDir = process.cwd();
 const realCliPath = path.join(rootDir, "packages", "agentos", "bin", "agentos.js");
+const realNodeRuntimePath = path.join(rootDir, "packages", "agentos", "bin", "node-runtime.js");
 const realTerminalBootPath = path.join(rootDir, "packages", "agentos", "bin", "terminal-boot.js");
 const realPackageJsonPath = path.join(rootDir, "packages", "agentos", "package.json");
 const packageJson = JSON.parse(readFileSync(realPackageJsonPath, "utf8")) as {
@@ -38,7 +39,7 @@ test("agentos doctor prints deterministic package, install, node, platform, bund
   assert.match(result.stdout, /AGENTOS DOCTOR/);
   assert.match(result.stdout, new RegExp(`Package\\s+✓ OK\\s+${escapeRegExp(packageJson.name)}@${escapeRegExp(packageJson.version)}`));
   assert.match(result.stdout, /Install\s+✓ OK\s+source checkout/);
-  assert.match(result.stdout, /Node\.js\s+✓ OK\s+v\d+\.\d+\.\d+ \(required >= 24\.0\.0\)/);
+  assert.match(result.stdout, /Node\.js\s+✓ OK\s+v\d+\.\d+\.\d+ \(required 24\.16\.0\+ or 26\.1\.0\+\)/);
   assert.match(result.stdout, /Platform\s+✓ OK\s+/);
   assert.match(result.stdout, /Bundle\s+✓ OK\s+ready at /);
   assert.match(result.stdout, /Target URL\s+✓ OK\s+http:\/\/localhost:3000/);
@@ -465,6 +466,7 @@ async function createCliFixture(options: { packageDir?: string } = {}) {
   await mkdir(path.join(packageDir, "bin"), { recursive: true });
   await mkdir(path.join(packageDir, "bundle"), { recursive: true });
   await cp(realCliPath, cliPath);
+  await cp(realNodeRuntimePath, path.join(packageDir, "bin", "node-runtime.js"));
   await cp(realTerminalBootPath, path.join(packageDir, "bin", "terminal-boot.js"));
   await writeFile(path.join(packageDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
   await writeFile(path.join(packageDir, "bundle", "server.js"), renderStubServer(), "utf8");

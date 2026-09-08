@@ -614,9 +614,9 @@ test("selected public OpenClaw mutation routes require preflight and pass server
   assert.match(mobilePairingSource, /device\.pair\.setup"\s*\+\s*"Code/);
 });
 
-test("identity inventory pins the 9.2 contract and current AgentOS use", () => {
-  assert.equal(OPENCLAW_IDENTITY_CONTRACT_VERSION, "2026.9.2");
-  assert.equal(OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, "3928bad9badfcb6c7d140530435e806fb8092190");
+test("identity inventory pins the 9.3 contract and current AgentOS use", () => {
+  assert.equal(OPENCLAW_IDENTITY_CONTRACT_VERSION, "2026.9.3");
+  assert.equal(OPENCLAW_IDENTITY_CONTRACT_SOURCE_COMMIT, "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7");
   assert.deepEqual(OPENCLAW_CAPABILITY_SCOPES.canUseTalkSecrets, ["operator.talk.secrets"]);
   assert.ok(OPENCLAW_8_2_IDENTITY_INVENTORY.some((entry) => entry.methodOrField === "users.list"));
   assert.ok(OPENCLAW_8_2_IDENTITY_INVENTORY.some((entry) => entry.methodOrField === "sessions.create/patch/delete/dispatch" && entry.dynamicAuthorization));

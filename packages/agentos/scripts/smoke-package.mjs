@@ -110,6 +110,7 @@ function assertPackageTarballContents(tarballPath) {
     "package/package.json",
     "package/README.md",
     "package/bin/agentos.js",
+    "package/bin/node-runtime.js",
     "package/bin/terminal-boot.js",
     "package/bundle/server.js"
   ];

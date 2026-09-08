@@ -11,6 +11,9 @@ import {
 } from "@/lib/openclaw/client/native-ws-gateway-utils";
 import type { OpenClawConfigReloadKind } from "@/lib/openclaw/client/types";
 
+const MAX_OPENCLAW_CHANGED_PATHS = 256;
+const MAX_OPENCLAW_CHANGED_PATH_LENGTH = 1024;
+
 export function buildMergePatchForConfigPath(path: string, value: unknown) {
   const segments = parseConfigPath(path);
 
@@ -82,6 +85,32 @@ export function normalizeConfigReloadKind(value: unknown): OpenClawConfigReloadK
   }
 
   return "unknown";
+}
+
+/**
+ * Read only the bounded, path-only metadata OpenClaw exposes after a validated
+ * config mutation. Values and secret contents are intentionally rejected.
+ */
+export function readOpenClawChangedPaths(value: unknown): string[] | undefined {
+  if (!isObjectRecord(value) || !Array.isArray(value.changedPaths)) {
+    return undefined;
+  }
+
+  if (value.changedPaths.length > MAX_OPENCLAW_CHANGED_PATHS) {
+    return undefined;
+  }
+
+  const paths = value.changedPaths as unknown[];
+  if (paths.some((path) => (
+    typeof path !== "string" ||
+    path.length === 0 ||
+    path.length > MAX_OPENCLAW_CHANGED_PATH_LENGTH ||
+    /[\u0000-\u001f\u007f]/.test(path)
+  ))) {
+    return undefined;
+  }
+
+  return paths as string[];
 }
 
 export function readConfigReloadKindFromSchemaLookup(payload: unknown): OpenClawConfigReloadKind {

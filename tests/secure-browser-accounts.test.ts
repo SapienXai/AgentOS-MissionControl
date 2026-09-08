@@ -785,10 +785,20 @@ test("browser worker restart immediately fences active accounts and task binding
 });
 
 test("OpenClaw policy plugin binds by trusted session key and fails managed profiles closed", async () => {
-  const source = await readFile(
-    path.join(process.cwd(), "openclaw-plugins/agentos-browser-policy/index.js"),
-    "utf8"
-  );
+  const [source, packageJson] = await Promise.all([
+    readFile(path.join(process.cwd(), "openclaw-plugins/agentos-browser-policy/index.js"), "utf8"),
+    readFile(path.join(process.cwd(), "openclaw-plugins/agentos-browser-policy/package.json"), "utf8")
+  ]);
+  const metadata = JSON.parse(packageJson) as {
+    openclaw?: { build?: { openclawVersion?: string; pluginSdkVersion?: string }; compat?: { pluginApi?: string; minGatewayVersion?: string } }
+  };
+  assert.equal(metadata.openclaw?.build?.openclawVersion, "2026.9.3");
+  assert.equal(metadata.openclaw?.build?.pluginSdkVersion, "2026.9.3");
+  assert.equal(metadata.openclaw?.compat?.pluginApi, ">=2026.9.1");
+  assert.equal(metadata.openclaw?.compat?.minGatewayVersion, "2026.9.1");
+  assert.equal((source.match(/definePluginEntry\(/g) ?? []).length, 1);
+  assert.equal((source.match(/register\(api\)/g) ?? []).length, 1);
+  assert.match(source, /openclaw\/plugin-sdk\/plugin-entry/);
   assert.match(source, /entry\?\.openClawSessionKey === sessionKey/);
   assert.match(source, /profile: binding\.openClawProfileName/);
   assert.match(source, /isAllowedUrl\(targetUrl, binding\.allowedDomains\)/);

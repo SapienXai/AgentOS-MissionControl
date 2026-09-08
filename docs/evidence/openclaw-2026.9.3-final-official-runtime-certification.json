@@ -1,0 +1,657 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-08T19:09:57.829Z",
+  "provenance": {
+    "repository": "SapienXai/AgentOS",
+    "agentosHead": "ea53f26931303aefcc6ef052aa3d44b90f313a0b",
+    "certifiedCodeHead": "ea53f26931303aefcc6ef052aa3d44b90f313a0b",
+    "branch": "main",
+    "workingTreeClean": true,
+    "repositoryDirtyFilesCount": 0,
+    "gitDescribe": "agentos-v0.7.8-3-gea53f26",
+    "openClaw": {
+      "version": "2026.9.3",
+      "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+      "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+      "packageHash": "399006c505bd8a48003267ebd7a12766090cef8564479e96425593e5dd24915e",
+      "protocol": 4,
+      "packageRoot": "[DISPOSABLE_EXACT_PACKAGE]"
+    },
+    "environment": {
+      "node": "v24.20.0",
+      "nodeMajor": 24,
+      "platform": "darwin arm64"
+    }
+  },
+  "runtime": {
+    "packageMode": "exact-openclaw-package-fixture",
+    "gatewayPort": "[DISPOSABLE_LOOPBACK]",
+    "stateRoot": "[DISPOSABLE_ROOT]",
+    "configRoot": "[DISPOSABLE_ROOT]",
+    "stateIsolation": true,
+    "configIsolation": true,
+    "userGatewayUntouched": true,
+    "managedStateMode": "managed-write"
+  },
+  "factory": {
+    "default": "PASS",
+    "forcedCli": "PASS",
+    "singletonReset": "PASS",
+    "selectedTransport": "official",
+    "noMixedDualTransport": "PASS"
+  },
+  "handshake": {
+    "status": "PASS",
+    "protocol": 4,
+    "clientId": "gateway-client",
+    "mode": "backend",
+    "role": "operator",
+    "requestedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write",
+      "operator.approvals",
+      "operator.questions",
+      "operator.pairing",
+      "operator.talk",
+      "operator.talk.secrets"
+    ],
+    "grantedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write",
+      "operator.approvals",
+      "operator.questions",
+      "operator.pairing",
+      "operator.talk",
+      "operator.talk.secrets"
+    ],
+    "capabilities": [
+      "board-widget-put-canvas-doc",
+      "chat-send-routing-contract",
+      "gateway-restart-target-safe-v1",
+      "node-worker-bundle-retention-v1",
+      "node-worker-bundle-status-v1",
+      "node-worker-environment-session-v1",
+      "node-worker-portal-stream-v1",
+      "progress-card-agent-scope-v1",
+      "session-scoped-chat-metadata",
+      "session-unread-ack-contract",
+      "session-goal-start-v1",
+      "session-settings-contract",
+      "session-settings-cas-v1",
+      "openclaw-chat-wizard-cancel",
+      "openclaw-setup-model-ref",
+      "taskSuggestions.acceptModes"
+    ],
+    "connectionId": "c7a63b3e-5006-40fc-9e9d-bc0f69c5e808",
+    "deviceId": null
+  },
+  "auth": {
+    "defaultSharedStateMode": "managed-write",
+    "deviceIdentitySource": "canonical OpenClaw SQLite state",
+    "deviceTokenSource": "canonical OpenClaw SQLite state",
+    "tokenPersistence": "PASS",
+    "tokenClearRecovery": "PASS",
+    "staleWriterProtection": "PASS",
+    "explicitToken": "PASS",
+    "password": "SKIPPED",
+    "signedChallenge": "PASS",
+    "challengeTimestamp": "PASS",
+    "storedDeviceToken": "PASS",
+    "managedWritePersistence": "PASS",
+    "reconnectWithDeviceAuth": "PASS",
+    "serverSideTokenRotationObserved": "NO",
+    "harnessRotationPath": "PASS"
+  },
+  "matrix": [
+    {
+      "surface": "provenance",
+      "operation": "exact OpenClaw package",
+      "method": null,
+      "status": "PASS",
+      "reason": "Pinned version and source commit match."
+    },
+    {
+      "surface": "factory",
+      "operation": "default factory selects official-backed client",
+      "method": null,
+      "status": "PASS",
+      "reason": "getOpenClawGatewayClient() selected official."
+    },
+    {
+      "surface": "core",
+      "operation": "health",
+      "method": "health",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "core",
+      "operation": "status",
+      "method": "status",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "core",
+      "operation": "Gateway status",
+      "method": "gateway.status",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "core",
+      "operation": "update status",
+      "method": "update.status",
+      "status": "SKIPPED",
+      "reason": "AgentOS CLI fallback was used; native official production proof is unavailable for this operation.",
+      "fallbackTotal": 1
+    },
+    {
+      "surface": "agents",
+      "operation": "agents.list",
+      "method": "agents.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 1
+    },
+    {
+      "surface": "sessions",
+      "operation": "sessions.list",
+      "method": "sessions.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 1
+    },
+    {
+      "surface": "tasks",
+      "operation": "tasks.list",
+      "method": "tasks.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 1
+    },
+    {
+      "surface": "models",
+      "operation": "models.list",
+      "method": "models.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 1
+    },
+    {
+      "surface": "models",
+      "operation": "models.status",
+      "method": "models.status",
+      "status": "SKIPPED",
+      "reason": "AgentOS CLI fallback was used; native official production proof is unavailable for this operation.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "channels",
+      "operation": "channels.status",
+      "method": "channels.status",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "config",
+      "operation": "config.get",
+      "method": "config.get",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "config",
+      "operation": "config.schema",
+      "method": "config.schema",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "config",
+      "operation": "config.schema.lookup",
+      "method": "config.schema.lookup",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.status",
+      "method": "cron.status",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.list",
+      "method": "cron.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "skills",
+      "operation": "skills.list",
+      "method": "skills.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "plugins",
+      "operation": "plugins.list",
+      "method": "plugins.list",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 2
+    },
+    {
+      "surface": "protocol",
+      "operation": "official v4 handshake and operator identity",
+      "method": "connect",
+      "status": "PASS",
+      "reason": "Handshake metadata came from the live production-selected client."
+    },
+    {
+      "surface": "agents",
+      "operation": "agent model/status",
+      "method": "models.status",
+      "status": "SKIPPED",
+      "reason": "AgentOS CLI fallback was used; native official production proof is unavailable for this operation.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "agents",
+      "operation": "create disposable agent",
+      "method": "agents.add",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "agents",
+      "operation": "update disposable agent",
+      "method": "agents.update",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "agents",
+      "operation": "delete disposable agent",
+      "method": "agents.delete",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "sessions",
+      "operation": "sessions.describe",
+      "method": "sessions.describe",
+      "status": "SKIPPED",
+      "reason": "The isolated Gateway returned no disposable session target."
+    },
+    {
+      "surface": "sessions",
+      "operation": "sessions.history",
+      "method": "sessions.history",
+      "status": "SKIPPED",
+      "reason": "The isolated Gateway returned no disposable session target."
+    },
+    {
+      "surface": "sessions",
+      "operation": "sessions.patch",
+      "method": "sessions.patch",
+      "status": "SKIPPED",
+      "reason": "The isolated Gateway returned no disposable session target."
+    },
+    {
+      "surface": "tasks",
+      "operation": "task get",
+      "method": "tasks.get",
+      "status": "SKIPPED",
+      "reason": "The isolated Gateway returned no disposable task target."
+    },
+    {
+      "surface": "tasks",
+      "operation": "task cancel",
+      "method": "tasks.cancel",
+      "status": "SKIPPED",
+      "reason": "The isolated Gateway returned no disposable task target."
+    },
+    {
+      "surface": "tasks",
+      "operation": "tasks.subscribe absent",
+      "method": "tasks.subscribe",
+      "status": "PASS",
+      "reason": "The final client and official coordinator do not send tasks.subscribe."
+    },
+    {
+      "surface": "events",
+      "operation": "event bridge subscription",
+      "method": "sessions.subscribe",
+      "status": "PASS",
+      "reason": "Runtime subscription established through the production-selected official client."
+    },
+    {
+      "surface": "lifecycle",
+      "operation": "Gateway restart enters reconnecting",
+      "method": "connect",
+      "status": "PASS",
+      "reason": "Official connection lifecycle reported reconnecting after isolated Gateway stop."
+    },
+    {
+      "surface": "events",
+      "operation": "subscription replay after Gateway restart",
+      "method": "sessions.subscribe",
+      "status": "PASS",
+      "reason": "The official coordinator replayed the existing subscription intent after hello-ok."
+    },
+    {
+      "surface": "lifecycle",
+      "operation": "subsequent RPC after reconnect",
+      "method": "health",
+      "status": "PASS",
+      "reason": "The shared production-selected client completed a post-reconnect read."
+    },
+    {
+      "surface": "auth",
+      "operation": "device identity survives Gateway restart",
+      "method": "connect",
+      "status": "SKIPPED",
+      "reason": "The selected auth mode did not expose a device identity."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "300ms read cache through default factory",
+      "method": "config.get",
+      "status": "PASS",
+      "reason": "The production-selected client exposed a cached read after concurrent requests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "generation/read policy remains active",
+      "method": "config.get",
+      "status": "PASS",
+      "reason": "Request policy diagnostics remained available on the official production path; detailed wire-count invariants are covered by focused harness tests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "TTL expiry",
+      "method": null,
+      "status": "PASS",
+      "reason": "Covered by the shared AgentOS policy contract tests and official transport regression tests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "mutation invalidation",
+      "method": null,
+      "status": "PASS",
+      "reason": "Covered by the shared AgentOS policy contract tests and official transport regression tests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "sent ambiguous mutation",
+      "method": null,
+      "status": "PASS",
+      "reason": "Covered by the shared AgentOS policy contract tests and official transport regression tests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "AbortSignal isolation",
+      "method": null,
+      "status": "PASS",
+      "reason": "Covered by the shared AgentOS policy contract tests and official transport regression tests."
+    },
+    {
+      "surface": "request-policy",
+      "operation": "old generation fencing",
+      "method": null,
+      "status": "PASS",
+      "reason": "Covered by the shared AgentOS policy contract tests and official transport regression tests."
+    },
+    {
+      "surface": "config",
+      "operation": "disposable config.set",
+      "method": "config.set",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "config",
+      "operation": "disposable config.unset",
+      "method": "config.unset",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 3
+    },
+    {
+      "surface": "cron",
+      "operation": "disposable cron mutation",
+      "method": "cron.add",
+      "status": "SKIPPED",
+      "reason": "No disposable scheduled job was created because exact runtime scheduling side effects are not required for transport cutover proof."
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.get",
+      "method": "cron.get",
+      "status": "SKIPPED",
+      "reason": "No disposable cron job target was created."
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.run",
+      "method": "cron.run",
+      "status": "SKIPPED",
+      "reason": "No disposable cron job target was created."
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.runs/history",
+      "method": "cron.runs/history",
+      "status": "SKIPPED",
+      "reason": "No disposable cron job target was created."
+    },
+    {
+      "surface": "cron",
+      "operation": "cron.delete",
+      "method": "cron.delete",
+      "status": "SKIPPED",
+      "reason": "No disposable cron job target was created."
+    },
+    {
+      "surface": "models",
+      "operation": "provider/auth projection",
+      "method": "models.status",
+      "status": "SKIPPED",
+      "reason": "The isolated runtime did not expose a provider status result."
+    },
+    {
+      "surface": "channels",
+      "operation": "Telegram projection",
+      "method": "Telegram projection",
+      "status": "SKIPPED",
+      "reason": "No disposable channel account was provisioned; no real channel credentials or login were touched."
+    },
+    {
+      "surface": "channels",
+      "operation": "WhatsApp projection",
+      "method": "WhatsApp projection",
+      "status": "SKIPPED",
+      "reason": "No disposable channel account was provisioned; no real channel credentials or login were touched."
+    },
+    {
+      "surface": "channels",
+      "operation": "channel start",
+      "method": "channel start",
+      "status": "SKIPPED",
+      "reason": "No disposable channel account was provisioned; no real channel credentials or login were touched."
+    },
+    {
+      "surface": "channels",
+      "operation": "channel stop",
+      "method": "channel stop",
+      "status": "SKIPPED",
+      "reason": "No disposable channel account was provisioned; no real channel credentials or login were touched."
+    },
+    {
+      "surface": "channels",
+      "operation": "channel logout",
+      "method": "channel logout",
+      "status": "SKIPPED",
+      "reason": "No disposable channel account was provisioned; no real channel credentials or login were touched."
+    },
+    {
+      "surface": "chat",
+      "operation": "run turn",
+      "method": "chat.send",
+      "status": "SKIPPED",
+      "reason": "No external model/provider credentials are supplied to this isolated certification runtime; transport/protocol certification is recorded separately."
+    },
+    {
+      "surface": "chat",
+      "operation": "stream turn",
+      "method": "chat.send",
+      "status": "SKIPPED",
+      "reason": "No external model/provider credentials are supplied to this isolated certification runtime; transport/protocol certification is recorded separately."
+    },
+    {
+      "surface": "chat",
+      "operation": "abort",
+      "method": "chat.send",
+      "status": "SKIPPED",
+      "reason": "No external model/provider credentials are supplied to this isolated certification runtime; transport/protocol certification is recorded separately."
+    },
+    {
+      "surface": "chat",
+      "operation": "steer",
+      "method": "chat.send",
+      "status": "SKIPPED",
+      "reason": "No external model/provider credentials are supplied to this isolated certification runtime; transport/protocol certification is recorded separately."
+    },
+    {
+      "surface": "chat",
+      "operation": "inject",
+      "method": "chat.send",
+      "status": "SKIPPED",
+      "reason": "No external model/provider credentials are supplied to this isolated certification runtime; transport/protocol certification is recorded separately."
+    },
+    {
+      "surface": "approvals",
+      "operation": "reduced-scope authorization denial",
+      "method": "operator.write",
+      "status": "EXPECTED-DENIAL",
+      "reason": "Reduced-scope denial remains covered by the official auth/authorization contract tests; production certification does not widen scopes."
+    },
+    {
+      "surface": "auth",
+      "operation": "explicit token/password behavior",
+      "method": null,
+      "status": "PASS",
+      "reason": "Explicit credentials remain supported by the official transport; no credential values are recorded in evidence."
+    },
+    {
+      "surface": "factory",
+      "operation": "no mixed dual transport",
+      "method": null,
+      "status": "PASS",
+      "reason": "The native factory creates only the official transport; CLI is a separate forced client."
+    },
+    {
+      "surface": "factory",
+      "operation": "singleton reset restores official default",
+      "method": null,
+      "status": "PASS",
+      "reason": "A new singleton selected official."
+    },
+    {
+      "surface": "factory",
+      "operation": "restored official health read",
+      "method": "health",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "auth",
+      "operation": "explicit token through production factory",
+      "method": "health",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "auth",
+      "operation": "explicit token does not get overridden by stored device auth",
+      "method": "connect",
+      "status": "PASS",
+      "reason": "The production factory supplied the explicit token path; stored device identity was not selected as the credential override."
+    },
+    {
+      "surface": "auth",
+      "operation": "official auth after explicit token reset",
+      "method": "health",
+      "status": "PASS",
+      "reason": "Native production-selected Gateway operation completed.",
+      "fallbackTotal": 0
+    },
+    {
+      "surface": "auth",
+      "operation": "AgentOS client reset reuses canonical device identity",
+      "method": "connect",
+      "status": "SKIPPED",
+      "reason": "The production cutover uses explicit shared-token auth; OpenClaw intentionally does not expose device identity on that path."
+    },
+    {
+      "surface": "auth",
+      "operation": "password through production factory",
+      "method": "connect",
+      "status": "SKIPPED",
+      "reason": "The disposable Gateway is token-authenticated; password mode is covered by the official transport contract test without introducing a second runtime credential."
+    },
+    {
+      "surface": "factory",
+      "operation": "forced CLI override",
+      "method": null,
+      "status": "PASS",
+      "reason": "The existing explicit CLI override remains authoritative."
+    }
+  ],
+  "observations": {
+    "firstConnectionId": "c7a63b3e-5006-40fc-9e9d-bc0f69c5e808",
+    "reconnectConnectionId": "ab128922-f203-4cc5-819e-4a1977976690",
+    "deviceIdStableAcrossRestart": false,
+    "eventBridgeStarted": true,
+    "eventBridgeReconnected": true,
+    "clientResetDeviceIdStable": false,
+    "requestPolicyCacheObserved": true,
+    "requestPolicyInvalidationObserved": true,
+    "fallbackTotalAfterDefaultCertification": 0
+  },
+  "cleanup": {
+    "status": "complete",
+    "gatewayProcessesStopped": true,
+    "disposableRootRemoved": true
+  },
+  "summary": {
+    "total": 71,
+    "passed": 43,
+    "failed": 0,
+    "skipped": 27,
+    "expectedDenials": 1,
+    "notApplicable": 0
+  },
+  "success": true
+}

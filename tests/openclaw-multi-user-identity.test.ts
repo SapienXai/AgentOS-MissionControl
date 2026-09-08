@@ -31,10 +31,10 @@ const profile = (profileId: string, role = "operator"): OpenClawUserProfile => (
   role
 });
 
-test("the exact 9.1 user and collaboration descriptor scopes are independently verified", () => {
+test("the exact 9.3 user and collaboration descriptor scopes are independently verified", () => {
   const descriptors = `
     ["users.list", "users", "operator.read", "<=2026.7"],
-    ["users.self", "users", "operator.write", "<=2026.7"],
+    ["users.self", "users", "operator.read", "<=2026.7"],
     ["users.setDisplayName", "users", "operator.write", "<=2026.7"],
     ["users.setAvatar", "users", "operator.write", "<=2026.7"],
     ["users.linkEmail", "users", "operator.admin", "<=2026.7"],

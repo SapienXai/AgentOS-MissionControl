@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "openclaw-final-certification",
+  "generatedAt": "2026-09-08T19:26:58.492Z",
+  "provenance": {
+    "repository": "SapienXai/AgentOS",
+    "agentosCodeHead": "1bbbf59c10e971c23890f14f4f0ae7cc0331e9df",
+    "branch": "main",
+    "node": "v24.20.0",
+    "openClaw": {
+      "version": "2026.9.3",
+      "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+      "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+      "packageHash": "399006c505bd8a48003267ebd7a12766090cef8564479e96425593e5dd24915e"
+    },
+    "expectedOpenClaw": {
+      "version": "2026.9.3",
+      "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+      "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+      "gatewayProtocol": 4,
+      "stateSchema": 16,
+      "agentSchema": 19,
+      "gatewayClient": "2026.9.3",
+      "gatewayProtocolPackage": "2026.9.3"
+    },
+    "supportedBaseline": "2026.9.1",
+    "nativeContract": "2026.9.3"
+  },
+  "matrix": {
+    "contract-diff": {
+      "path": "docs/evidence/openclaw-2026.9.2-to-2026.9.3-contract-diff.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "fresh-baseline": {
+      "path": "docs/evidence/openclaw-2026.9.3-fresh-baseline.json",
+      "status": "PASS",
+      "skips": 12,
+      "expectedDenials": 13
+    },
+    "runtime": {
+      "path": "docs/evidence/openclaw-2026.9.3-runtime-certification.json",
+      "status": "PASS",
+      "skips": 23,
+      "expectedDenials": 21
+    },
+    "migration": {
+      "path": "docs/evidence/openclaw-2026.9.2-to-2026.9.3-migration.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "lifecycle": {
+      "path": "docs/evidence/openclaw-2026.9.3-lifecycle-certification.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "identity": {
+      "path": "docs/evidence/openclaw-2026.9.3-identity-authorization.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 14
+    },
+    "multi-user": {
+      "path": "docs/evidence/openclaw-2026.9.3-multi-user.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "multi-user-collaboration": {
+      "path": "docs/evidence/openclaw-2026.9.3-multi-user-identity-collaboration.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "automation": {
+      "path": "docs/evidence/openclaw-2026.9.3-automation-cron-alignment.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "session-task": {
+      "path": "docs/evidence/openclaw-2026.9.3-session-task-alignment.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "workforce": {
+      "path": "docs/evidence/openclaw-2026.9.3-workforce-acceptance.json",
+      "status": "PASS",
+      "skips": 5,
+      "expectedDenials": 0
+    },
+    "official-transport": {
+      "path": "docs/evidence/openclaw-2026.9.3-official-transport-certification.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "official-lifecycle": {
+      "path": "docs/evidence/openclaw-2026.9.3-official-gateway-lifecycle-certification.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "official-production": {
+      "path": "docs/evidence/openclaw-2026.9.3-final-official-runtime-certification.json",
+      "status": "PASS",
+      "skips": 27,
+      "expectedDenials": 1
+    },
+    "native-work": {
+      "path": "docs/evidence/openclaw-2026.9.3-native-work-hardening.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "skills": {
+      "path": "docs/evidence/openclaw-2026.9.3-skills-effective-capabilities.json",
+      "status": "PASS",
+      "skips": 1,
+      "expectedDenials": 0
+    },
+    "memory": {
+      "path": "docs/evidence/openclaw-2026.9.3-native-memory.json",
+      "status": "PASS",
+      "skips": 0,
+      "expectedDenials": 0
+    },
+    "doctor": {
+      "path": "docs/evidence/openclaw-2026.9.3-doctor-update-recovery.json",
+      "status": "PASS",
+      "skips": 4,
+      "expectedDenials": 0
+    },
+    "doctor-hardening": {
+      "path": "docs/evidence/openclaw-2026.9.3-doctor-update-recovery-hardening.json",
+      "status": "PASS",
+      "skips": 4,
+      "expectedDenials": 0
+    },
+    "human-control": {
+      "path": "docs/evidence/openclaw-2026.9.3-human-control-inbox.json",
+      "status": "PASS",
+      "skips": 2,
+      "expectedDenials": 0
+    }
+  },
+  "classification": {
+    "environmentalSkips": 78,
+    "expectedAuthorizationDenials": 49,
+    "unknownOutcomes": 0,
+    "productionGatewayTouched": false,
+    "realCredentialsAccessed": false
+  },
+  "promotion": {
+    "recommendedVersion": "2026.9.3",
+    "nativeContractVersion": "2026.9.3",
+    "supportedBaseline": "2026.9.1",
+    "decision": "PROMOTE"
+  },
+  "failures": [],
+  "success": true
+}

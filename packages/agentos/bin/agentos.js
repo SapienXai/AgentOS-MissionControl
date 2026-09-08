@@ -10,6 +10,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { createTerminalBoot, renderDoctorReport, renderStatusDashboard } from "./terminal-boot.js";
+import { isSupportedAgentOsNodeVersion } from "./node-runtime.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, "..");
@@ -421,7 +422,7 @@ async function runDoctor(rawArgs) {
     {
       state: isSupportedNodeVersion(process.versions.node) ? "ok" : "failed",
       label: "Node.js",
-      detail: `${process.version} (required >= 24.0.0)`
+      detail: `${process.version} (required 24.16.0+ or 26.1.0+)`
     },
     {
       state: "ok",
@@ -2539,14 +2540,7 @@ function resolveCommandPath(command) {
 }
 
 function isSupportedNodeVersion(version) {
-  const [majorText] = version.split(".");
-  const major = Number(majorText);
-
-  if (!Number.isFinite(major)) {
-    return false;
-  }
-
-  return major >= 24;
+  return isSupportedAgentOsNodeVersion(version);
 }
 
 function parseBooleanEnv(value) {

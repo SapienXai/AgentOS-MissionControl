@@ -55,4 +55,4 @@ Approval details, question content, suggestion text, runtime messages, and skill
 
 ## Certification boundary
 
-Exact OpenClaw `2026.9.1` certification uses an isolated disposable runtime and official Gateway methods only. A fixture may seed disposable native state through an official contract for certification, but fixture-only methods are not marked product-integrated. If identity, profile ownership, or runtime prerequisites prevent safe creation of an approval/question fixture, the evidence records `SKIPPED` or `EXPECTED-DENIAL` with the exact reason instead of fabricating a successful proof.
+Exact OpenClaw `2026.9.3` certification uses an isolated disposable runtime and official Gateway methods only. A fixture may seed disposable native state through an official contract for certification, but fixture-only methods are not marked product-integrated. If identity, profile ownership, or runtime prerequisites prevent safe creation of an approval/question fixture, the evidence records `SKIPPED` or `EXPECTED-DENIAL` with the exact reason instead of fabricating a successful proof.

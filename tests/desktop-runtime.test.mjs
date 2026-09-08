@@ -10,7 +10,7 @@ import {
   verifySha256File
 } from "../scripts/desktop/runtime.mjs";
 
-const archiveName = "node-v24.15.0-darwin-arm64.tar.gz";
+const archiveName = "node-v24.20.0-darwin-arm64.tar.gz";
 
 test("accepts a valid official checksum manifest entry", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "agentos-desktop-integrity-"));
@@ -44,7 +44,7 @@ test("rejects an invalid checksum", async () => {
 
 test("reports a missing checksum manifest entry", () => {
   assert.equal(
-    parseSha256Manifest(`${"a".repeat(64)}  node-v24.15.0-linux-x64.tar.gz\n`, archiveName),
+  parseSha256Manifest(`${"a".repeat(64)}  node-v24.20.0-linux-x64.tar.gz\n`, archiveName),
     null
   );
 });

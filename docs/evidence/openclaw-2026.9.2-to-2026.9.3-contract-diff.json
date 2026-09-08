@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "comparison": {
+    "from": {
+      "openclawVersion": "2026.9.2",
+      "sourceTag": "v2026.9.2",
+      "sourceCommit": "3928bad9badfcb6c7d140530435e806fb8092190",
+      "stateSchema": 15,
+      "agentSchema": 19,
+      "gatewayProtocol": 4,
+      "gatewayClient": "2026.9.2",
+      "gatewayProtocolPackage": "2026.9.2"
+    },
+    "to": {
+      "openclawVersion": "2026.9.3",
+      "sourceTag": "v2026.9.3",
+      "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+      "tagObject": "a69d657b4b74556017f2d0ef98b0c64aeabb3643",
+      "stateSchema": 16,
+      "agentSchema": 19,
+      "gatewayProtocol": 4,
+      "gatewayClient": "2026.9.3",
+      "gatewayProtocolPackage": "2026.9.3",
+      "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+      "nodeEngines": ">=24.16.0 <25 || >=26.1.0"
+    }
+  },
+  "packageIdentity": {
+    "openclawNpmTarballSha256": "d1c63366833f8ae4a6ab4f3b60b1aa84ca82d03dba13d3d3eba989aa159e2449",
+    "gatewayClientNpmTarballSha256": "fbb848d7b9e41457cfac5b46142137aa3726a7da9b3b41db37f42960e6842e5c",
+    "gatewayProtocolNpmTarballSha256": "582f893360acdc60979064fe18aad9365df2cd78206be718c57bae2820472443",
+    "gatewayClientDistIntegrity": "sha512-NfBXoINz2cOWfMGKwNIU1xGwtla7nKgaxA4cslwBnJaKTs/Y2IUYkafn9GCxxcLHTI760edlD8epYFgmk07NPA==",
+    "gatewayProtocolDistIntegrity": "sha512-v1+ljByJj8kttGxt1lU0UXhNLUcJ3CB+T4tiupcCzLhzLcfdAGe7Be/+M45KONecZjHq2SnMram6nOgLKMR1Og==",
+    "openclawDistIntegrity": "sha512-CzDHMeHdnjlIZ76ZyBb1lvLO4H/yBIMYXupFGGBN87x0853y3hg5nLAnKfxSKqLzqhbUKqy9ebDRAWWV4t8aew=="
+  },
+  "domains": [
+    {
+      "domain": "runtime",
+      "status": "changed",
+      "upstreamEvidence": ["package.json:engines", "node-version.mjs"],
+      "finding": "Node 24 support is restricted to 24.16.0+; the alternate supported line starts at 26.1.0.",
+      "agentOsDecision": "Require 24.16.0+ on the Node 24 line and reject Node 24.0 through 24.15, Node 25, and Node 26.0."
+    },
+    {
+      "domain": "config",
+      "status": "changed",
+      "upstreamEvidence": ["src/config/io.write.ts", "src/gateway/server-methods/config.ts"],
+      "finding": "Successful config.patch responses expose authoritative changedPaths after validation and secret restoration; a no-op returns changedPaths [].",
+      "agentOsDecision": "Carry bounded path-only changedPaths through the typed mutation result and use effective paths for restart decisions, with legacy fallback when absent."
+    },
+    {
+      "domain": "method-scopes",
+      "status": "changed",
+      "upstreamEvidence": ["src/gateway/methods/core-descriptors.ts"],
+      "finding": "The 9.3 descriptor keeps users.self as a read operation (operator.read); the prior AgentOS mirror incorrectly required operator.write.",
+      "agentOsDecision": "Align the static AgentOS scope contract and collaboration certification with the exact 9.3 descriptor; users.self remains discovery-only and does not authorize profile mutation."
+    },
+    {
+      "domain": "state-and-skills",
+      "status": "changed",
+      "upstreamEvidence": ["package.json:openclaw.schemaVersions", "src/state/openclaw-state-db-schema-repair.ts", "src/skills/workshop"],
+      "finding": "State schema advances 15 to 16 while agent schema remains 19. The Skill Workshop ownership migration is Doctor/runtime-owned and moves the collection to persistent agent ownership.",
+      "agentOsDecision": "Do not implement a parallel Workshop store. Gate promotion on a real disposable 9.2 state migration and project native skill ownership."
+    },
+    {
+      "domain": "updater",
+      "status": "strengthened",
+      "upstreamEvidence": ["src/infra/update*", "src/commands/update*", "src/infra/update-managed-service-handoff*"],
+      "finding": "The native updater adds candidate rehearsal, bounded repair, activation and service/version/build/plugin/channel/HTTP readiness verification, rollback/recovery, durable continuity, and abandoned-update recovery.",
+      "agentOsDecision": "Keep OpenClaw update.status/update.run/update.runs.* authoritative; AgentOS only applies policy, presents bounded phases, reconnects, and independently verifies."
+    },
+    {
+      "domain": "models-and-providers",
+      "status": "changed",
+      "upstreamEvidence": ["src/agents", "src/providers", "src/gateway/server-methods/models.ts", "src/gateway/server-methods/provider-auth.ts"],
+      "finding": "Provider account add/remove and priority/order, fallback selection, OAuth recovery, and local provider/model discovery are native 9.3 surfaces.",
+      "agentOsDecision": "Retain AgentOS projections and onboarding policy, but do not duplicate native provider/account state or add unrelated UI."
+    },
+    {
+      "domain": "sessions-and-delegation",
+      "status": "changed",
+      "upstreamEvidence": ["src/agents", "src/sessions", "src/gateway/server-methods/sessions.ts", "src/gateway/server-methods/subagents.ts"],
+      "finding": "Spawned sessions are persistent and recursive delegation is bounded by native depth/concurrency/session ownership rules.",
+      "agentOsDecision": "Preserve native parent/child/session visibility and keep AgentOS authorization and presentation as a projection."
+    },
+    {
+      "domain": "cli-agents",
+      "status": "changed",
+      "upstreamEvidence": ["src/gateway/server-methods/models.ts", "src/agents/cli-agents*", "src/config"],
+      "finding": "Supported create-capable CLI agents may appear in the new-session catalog when gateway.cliAgents.enabled is active by default.",
+      "agentOsDecision": "Parse and project CLI-agent entries distinctly from provider models; do not force the native setting off."
+    },
+    {
+      "domain": "plugin-sdk",
+      "status": "changed",
+      "upstreamEvidence": ["package.json:exports", "CHANGELOG.md"],
+      "finding": "Several retired SDK contracts are removed or relocated. The AgentOS browser-policy plugin continues to use openclaw/plugin-sdk/plugin-entry.",
+      "agentOsDecision": "Repository-wide retired-usage audit must remain zero; no compatibility shim is added for unused APIs."
+    },
+    {
+      "domain": "protocol-and-gateway",
+      "status": "unchanged",
+      "upstreamEvidence": ["src/gateway/protocol", "@openclaw/gateway-client@2026.9.3", "@openclaw/gateway-protocol@2026.9.3"],
+      "finding": "Gateway protocol remains v4; the existing typed Gateway-first transport remains the native path.",
+      "agentOsDecision": "No transport rewrite, REST proxy, CLI substitution, or parallel AgentOS runtime state."
+    },
+    {
+      "domain": "security",
+      "status": "unchanged-by-agentos",
+      "upstreamEvidence": ["src/config", "src/gateway/server-methods/sessions.ts"],
+      "finding": "New security-sensitive transcript-link capability is not required for compatibility and is not automatically surfaced.",
+      "agentOsDecision": "Keep explicit sessions.visibility=tree, agentToAgent.enabled=false, and agentToAgent.allow=[] for AgentOS-managed Gateways; preserve explicit operator values and do not mutate externally owned config."
+    }
+  ],
+  "retiredSdkUsageAudit": {
+    "status": "pass",
+    "matches": 0,
+    "patterns": [
+      "infra-runtime exec policy helpers",
+      "old approval account/filter helpers",
+      "old generic forwarding evaluator",
+      "buildChannelTurnMediaPayload",
+      "AbortAndDrainAgentHarnessRunResult",
+      "details.truncation.content",
+      "LsToolDetails truncation/entryLimitReached",
+      "retired Workshop ownership/config fields"
+    ]
+  },
+  "promotion": {
+    "recommendedVersion": "2026.9.3",
+    "nativeContractVersion": "2026.9.3",
+    "supportedBaselineVersion": "2026.9.1",
+    "status": "candidate-until-all-certification-gates-pass"
+  }
+}

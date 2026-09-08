@@ -6,10 +6,10 @@ authentication, availability, selection, fallback execution, and runtime
 resolution. AgentOS does not create a model registry, provider registry,
 credential store, fallback engine, or session-model lifecycle.
 
-## Exact 2026.9.1 contract
+## Exact 2026.9.3 contract
 
-The Phase 4 integration is based on OpenClaw `2026.9.1`, source
-`ad6fe23aecb9b833d68139b0ddc9f239b894d2f1`, Gateway protocol `v4`, and the
+The Phase 4 integration is based on OpenClaw `2026.9.3`, source
+`1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`, Gateway protocol `v4`, and the
 matching `@openclaw/gateway-client` and `@openclaw/gateway-protocol` packages.
 
 The native model contract used by AgentOS is:

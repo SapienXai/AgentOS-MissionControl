@@ -75,10 +75,10 @@ Security:
 
 Compatibility:
 
-- Requires Node.js 24 or newer.
-- Recommended OpenClaw: 2026.9.2.
+- Requires Node.js 24.16.0+ or 26.1.0+.
+- Recommended OpenClaw: 2026.9.3.
 - Supported minimum: OpenClaw 2026.9.1 after explicit session-security reconciliation.
-- Native contract target: OpenClaw 2026.9.2.
+- Native contract target: OpenClaw 2026.9.3.
 - Uses OpenClaw Gateway-first transport by default, with explicit CLI fallback for install, recovery, Gateway process control, older or unsupported Gateway methods, malformed responses, scope limits, and unavailable native auth.
 - Run `agentos doctor --deep` and check in-app diagnostics to verify OpenClaw version, Gateway protocol compatibility, native auth, scopes, fallback activity, and model readiness before the first mission.
 - Account-target browser-profile dispatch is an MVP bridge until OpenClaw exposes typed browser-profile dispatch. AgentOS enforces access rules before task launch and passes selected profile/session context; `requires_approval` rules remain blocked until approval dispatch exists.

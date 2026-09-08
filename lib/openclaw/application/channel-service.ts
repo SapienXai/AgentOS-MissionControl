@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { getOpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
+import { readOpenClawChangedPaths } from "@/lib/openclaw/client/native-ws-gateway-config";
 import {
   getMissionControlSnapshot,
   invalidateMissionControlSnapshotCache
@@ -1342,7 +1343,8 @@ function readSurfaceConfigMutation(path: string, result: OpenClawConfigCommandRe
     ...(typeof source.baseHash === "string" && source.baseHash.trim() ? { baseHash: source.baseHash } : {}),
     ...(typeof source.reloadKind === "string" && source.reloadKind.trim() ? { reloadKind: source.reloadKind } : {}),
     ...(typeof source.restartRequired === "boolean" ? { restartRequired: source.restartRequired } : {}),
-    ...(typeof source.hotReloaded === "boolean" ? { hotReloaded: source.hotReloaded } : {})
+    ...(typeof source.hotReloaded === "boolean" ? { hotReloaded: source.hotReloaded } : {}),
+    ...(readOpenClawChangedPaths(source) ? { changedPaths: readOpenClawChangedPaths(source) } : {})
   };
 }
 

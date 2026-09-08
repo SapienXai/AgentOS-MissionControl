@@ -145,6 +145,25 @@ test("models.list keeps the 9.1 provider and capability metadata", () => {
   });
 });
 
+test("models.list keeps CLI-agent runtime metadata distinct from provider readiness", () => {
+  const payload = normalizeModelsPayload({
+    models: [{
+      id: "claude-sonnet",
+      provider: "claude-cli",
+      name: "Claude Sonnet CLI",
+      input: ["text"],
+      available: null,
+      agentRuntime: { id: "claude-cli", source: "cli", fallback: "none" },
+      tags: ["cli-agent"]
+    }]
+  });
+
+  assert.equal(payload.models[0]?.provider, "claude-cli");
+  assert.equal(payload.models[0]?.available, null);
+  assert.deepEqual(payload.models[0]?.agentRuntime, { id: "claude-cli", source: "cli", fallback: "none" });
+  assert.deepEqual(payload.models[0]?.tags, ["cli-agent"]);
+});
+
 test("post-onboarding management reads OpenClaw provider and auth metadata", () => {
   const serviceSource = readFileSync(
     path.join(rootDir, "lib/openclaw/application/model-management-service.ts"),

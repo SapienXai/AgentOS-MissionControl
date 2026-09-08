@@ -36,6 +36,8 @@ export type OpenClawConfigMutationMetadata = {
   hotReloaded: boolean;
   appliedVia: "config.patch" | "config.apply" | "config.set" | "noop";
   baseHash?: string;
+  /** Authoritative effective paths returned by OpenClaw 2026.9.3+. */
+  changedPaths?: string[];
 };
 
 export type OpenClawGatewayConnectionState =

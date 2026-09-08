@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-08T19:10:47.425Z",
+  "provenance": {
+    "repository": "SapienXai/AgentOS",
+    "branch": "main",
+    "codeCommitUnderTest": "ea53f26931303aefcc6ef052aa3d44b90f313a0b",
+    "evidenceCommit": null,
+    "openClawPackageVersion": "2026.9.3",
+    "openClawSourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "openClawBuild": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+    "openClawPackageHash": "399006c505bd8a48003267ebd7a12766090cef8564479e96425593e5dd24915e"
+  },
+  "openClaw": {
+    "version": "2026.9.3",
+    "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "build": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+    "packageMode": "exact-npm-package-fixture",
+    "gatewayPortIsDisposable": true,
+    "noRealProviderCredentials": true
+  },
+  "exactSessionModel": {
+    "list": "sessions.list",
+    "create": "sessions.create",
+    "describe": "sessions.describe",
+    "send": "sessions.send",
+    "abort": "sessions.abort",
+    "creatorField": "createdActor",
+    "ownerField": "owner",
+    "sharingFields": [
+      "participants",
+      "sharingRole",
+      "visibility"
+    ],
+    "exactIdentityRule": "AgentOS correlates only exact keys/session IDs returned by Gateway or created by the request."
+  },
+  "exactTaskModel": {
+    "list": "tasks.list",
+    "get": "tasks.get",
+    "cancel": "tasks.cancel",
+    "assignment": "unsupported in exact 2026.9.3",
+    "taskSummaryFields": [
+      "id",
+      "status",
+      "agentId",
+      "sessionKey",
+      "runId",
+      "parentTaskId",
+      "sourceId"
+    ]
+  },
+  "sourceOfTruthMatrix": [
+    {
+      "surface": "session identity",
+      "source": "OpenClaw sessions.list/describe",
+      "projection": "AgentOS runtime/session projection",
+      "sidecar": "dispatch only correlates bootstrap"
+    },
+    {
+      "surface": "task identity/status",
+      "source": "OpenClaw tasks.list/get",
+      "projection": "AgentOS task card",
+      "sidecar": "dispatch only until native task evidence exists"
+    },
+    {
+      "surface": "task cancellation",
+      "source": "OpenClaw tasks.cancel",
+      "projection": "AgentOS abort response",
+      "sidecar": "none"
+    },
+    {
+      "surface": "mission submission",
+      "source": "OpenClaw chat.send/sessions.send",
+      "projection": "AgentOS dispatch record",
+      "sidecar": "dispatch record is non-authoritative"
+    }
+  ],
+  "executionIdentity": {
+    "requestedRole": "operator",
+    "grantedRole": "operator",
+    "requestedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write"
+    ],
+    "grantedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write"
+    ],
+    "connectionIdPresent": true,
+    "taskIdentityProvenance": "native-handshake"
+  },
+  "missionDispatch": {
+    "dispatchSidecar": "AgentOS bootstrap correlation only; native task/session remains authoritative",
+    "dispatchIdClassification": "disposable AgentOS correlation ID; never used as OpenClaw task/session identity",
+    "nativeMissionTurn": "PASS",
+    "fallback": "not used",
+    "modelFixture": "loopback-http-fixture",
+    "dispatchIdPresent": true,
+    "runIdPresent": true
+  },
+  "sessionCorrelation": [
+    {
+      "operation": "sessions.create",
+      "result": "PASS",
+      "requestedKeyPresent": true,
+      "returnedKeyPresent": true,
+      "sessionIdPresent": true,
+      "createdActorExposed": false,
+      "ownerExposed": false,
+      "createdPayloadFields": [
+        "key",
+        "sessionId",
+        "runStarted"
+      ]
+    },
+    {
+      "operation": "sessions.describe",
+      "result": "PASS",
+      "exactKey": true
+    },
+    {
+      "operation": "native mission turn",
+      "result": "PASS",
+      "dispatchIdClassification": "AgentOS bootstrap correlation only",
+      "runIdPresent": true,
+      "historyAssistantCount": 1
+    }
+  ],
+  "nativeTaskIntegration": {
+    "taskListRequest": "PASS",
+    "taskIds": [],
+    "taskGetChecks": [],
+    "taskCancelChecks": [],
+    "emptyLedgerExplanation": "The exact 2026.9.3 runtime completed the loopback model turn but exposed no task ledger row for this session; no task ID was fabricated."
+  },
+  "taskProjection": [
+    {
+      "taskIdPresent": false,
+      "status": "completed",
+      "sourceOfTruth": "agentos-dispatch-or-runtime",
+      "identityProvenance": "correlated"
+    }
+  ],
+  "taskControlSemantics": {
+    "continue": "reuses exact sessionKey/sessionId when a projected task exposes one",
+    "abort": "uses tasks.cancel for an exact task ID; otherwise sessions.abort for exact run/session",
+    "assignment": "unsupported and fails closed without transport",
+    "taskCancelProbe": {
+      "result": "PASS",
+      "found": false,
+      "cancelled": false
+    },
+    "separateAbortProbe": {
+      "result": "PASS",
+      "responseShape": [
+        "abortedRunId",
+        "ok",
+        "status"
+      ]
+    },
+    "steer": "not observed after the bounded loopback turn completed",
+    "inject": "covered by focused Gateway contract tests"
+  },
+  "followUpContinue": {
+    "canonicalReuse": "PASS",
+    "duplicateSessionCreation": false,
+    "historyAssistantCount": 2,
+    "sameSession": true
+  },
+  "restartContinuity": [
+    {
+      "handshake": "PASS",
+      "exactSessionKeyReused": true,
+      "duplicateSessionCreated": false,
+      "continuationAfterRestart": "PASS"
+    }
+  ],
+  "multiUserSemantics": {
+    "connectionStrategy": "shared trusted service",
+    "OpenClawAttribution": "shared service operator; no per-human credential is claimed",
+    "AgentOsHumanAttribution": "not exercised in this runtime-only harness"
+  },
+  "sidecarAudit": {
+    "dispatchIsAuthoritativeRuntimeState": false,
+    "syntheticSessionIdsAcceptedAsCanonical": false,
+    "taskStatusMayBeOverriddenByDispatchWhenNativeStatusExists": false
+  },
+  "staleStateHandling": {
+    "nativeTaskStatusWinsStaleRuntime": true,
+    "nativeTaskStatusWinsStaleDispatch": true,
+    "exactSessionReListAfterRestart": true
+  },
+  "duplicateProjectionAudit": {
+    "nativeTaskAndRuntimeDedupe": "covered by focused unit contract",
+    "taskListProjectionInput": "PASS",
+    "taskAssign": "unsupported/no call"
+  },
+  "cleanup": {
+    "status": "complete",
+    "disposableRootRemoved": true,
+    "gatewayProcessStopped": true
+  },
+  "gate": "OPENCLAW 2026.9.3 SESSION/TASK ALIGNMENT GATE: PASS",
+  "success": true
+}

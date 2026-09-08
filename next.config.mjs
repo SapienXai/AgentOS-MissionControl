@@ -11,6 +11,11 @@ const defaultAllowedDevOrigins = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   allowedDevOrigins: defaultAllowedDevOrigins,
+  // OpenClaw's official Gateway client owns its Node WebSocket dependency and
+  // resolves it from its package boundary. Keep that native client external
+  // so Turbopack does not rewrite its runtime resolver into a build-machine
+  // absolute path.
+  serverExternalPackages: ["@openclaw/gateway-client"],
   output: "standalone",
   async headers() {
     return [

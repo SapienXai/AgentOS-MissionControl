@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-08T19:00:13.045Z",
+  "target": {
+    "version": "2026.9.3",
+    "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+    "packageHash": "399006c505bd8a48003267ebd7a12766090cef8564479e96425593e5dd24915e",
+    "packageRoot": "[DISPOSABLE_EXACT_PACKAGE]",
+    "protocol": 4
+  },
+  "runtime": {
+    "packageMode": "exact-openclaw-package-fixture",
+    "gatewayPort": "[DISPOSABLE_LOOPBACK]",
+    "stateRoot": "[DISPOSABLE_ROOT]",
+    "configRoot": "[DISPOSABLE_ROOT]",
+    "tokenAuth": true,
+    "deviceAuth": true
+  },
+  "checks": {
+    "exactPackage": true,
+    "officialHandshake": true,
+    "deviceSignatureRoundTrip": true,
+    "deviceTokenPersistence": true,
+    "officialBackedDomainReads": true,
+    "reconnectAfterRuntimeRestart": true,
+    "noParallelReconnectOwner": true
+  },
+  "observations": {
+    "protocol": 4,
+    "serverVersion": "2026.9.3",
+    "connectionCount": 2,
+    "helloCount": 2,
+    "grantedRole": "operator",
+    "grantedScopes": [
+      "operator.admin",
+      "operator.read",
+      "operator.write",
+      "operator.approvals",
+      "operator.questions",
+      "operator.pairing",
+      "operator.talk",
+      "operator.talk.secrets"
+    ],
+    "deviceId": "0c1846ba44c2a5f0fbe7154cecb79cd23e39bf94b1dd6cb79704bd76513c2481",
+    "transportDeviceIdPresent": true,
+    "canonicalIdentityPresent": true,
+    "canonicalIdentityIdMatches": true,
+    "canonicalDeviceTokenPresent": true,
+    "canonicalDeviceTokenChanged": false
+  },
+  "cleanup": {
+    "status": "complete",
+    "disposableRootRemoved": true,
+    "gatewayProcessesStopped": true
+  },
+  "success": true
+}

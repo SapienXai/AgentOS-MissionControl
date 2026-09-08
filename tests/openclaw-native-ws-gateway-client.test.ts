@@ -2765,7 +2765,7 @@ test("native WS gateway client returns config reload metadata from schema lookup
             ? { exists: true, valid: true, hash: "hash-1", config: { gateway: { auth: {} } } }
             : frame.method === "config.schema.lookup"
               ? { path: "gateway.auth.token", reloadKind: "restart" }
-              : { ok: true }
+              : { ok: true, changedPaths: ["gateway.auth.token"] }
       });
     });
   });
@@ -2784,6 +2784,73 @@ test("native WS gateway client returns config reload metadata from schema lookup
     : null, "restart");
   assert.equal(payload.configMutation.reloadKind, "restart");
   assert.equal(payload.configMutation.restartRequired, true);
+  assert.deepEqual(payload.configMutation.changedPaths, ["gateway.auth.token"]);
+  assert.deepEqual(result.metadata?.openClawConfig && typeof result.metadata.openClawConfig === "object"
+    ? (result.metadata.openClawConfig as { changedPaths?: unknown }).changedPaths
+    : null, ["gateway.auth.token"]);
+  assert.doesNotMatch(result.stdout, /secret-token/);
+});
+
+test("native WS gateway client reports an authoritative empty changedPaths list for a no-op", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { transport, sentFrames } = createFakeGatewayTransport((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "config.get"
+            ? { exists: true, valid: true, hash: "hash-noop", config: { logging: { level: "info" } } }
+            : { ok: true }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    transport,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.setConfig("logging.level", "info");
+  const payload = JSON.parse(result.stdout);
+
+  assert.deepEqual(sentFrames.map((frame) => frame.method), ["connect", "config.get"]);
+  assert.deepEqual(payload.configMutation.changedPaths, []);
+  assert.deepEqual((result.metadata?.openClawConfig as { changedPaths?: unknown }).changedPaths, []);
+  assert.deepEqual(fallback.calls, []);
+});
+
+test("native WS gateway client preserves authoritative unrelated changed paths without inventing requested paths", async () => {
+  const fallback = new FallbackGatewayClient();
+  const { transport } = createFakeGatewayTransport((socket, frame) => {
+    globalThis.queueMicrotask(() => {
+      socket.emitMessage({
+        type: "res",
+        id: frame.id,
+        ok: true,
+        payload: frame.method === "connect"
+          ? { protocol: 4 }
+          : frame.method === "config.get"
+            ? { exists: true, valid: true, hash: "hash-unrelated", config: { agents: {} } }
+            : { ok: true, changedPaths: ["logging.level"] }
+      });
+    });
+  });
+  const client = new NativeWsOpenClawGatewayClient({
+    fallback,
+    transport,
+    url: "ws://127.0.0.1:18789",
+    timeoutMs: 250
+  });
+
+  const result = await client.setConfig("agents.list", [{ id: "agent-1", workspace: "/workspace" }], { strictJson: true });
+  const payload = JSON.parse(result.stdout);
+
+  assert.deepEqual(payload.configMutation.changedPaths, ["logging.level"]);
+  assert.doesNotMatch(result.stdout, /agent-1|workspace/);
 });
 
 test("native WS gateway client closes persistent connection after Gateway auth URL config mutation", async () => {

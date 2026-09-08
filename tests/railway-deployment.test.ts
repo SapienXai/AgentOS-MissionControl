@@ -46,7 +46,7 @@ test("README and Railway guide describe the same published two-service template"
 test("Railway image pins OpenClaw, avoids service-bound cache mounts, and maps every mutable runtime root to the volume", async () => {
   const dockerfile = await read("Dockerfile.railway");
 
-  assert.match(dockerfile, /ghcr\.io\/openclaw\/openclaw:2026\.9\.2@sha256:[a-f0-9]{64}/);
+  assert.match(dockerfile, /ghcr\.io\/openclaw\/openclaw:2026\.9\.3@sha256:[a-f0-9]{64}/);
   assert.doesNotMatch(dockerfile, /--mount=type=cache/);
   assert.match(dockerfile, /AGENTOS_RUNTIME_DIR=\/data\/agentos/);
   assert.match(dockerfile, /AGENTOS_SUPERVISOR_SOCKET_PATH=\/tmp\/agentos-supervisor\.sock/);

@@ -37,7 +37,7 @@ The effective capability projection is not persisted as mutable authority.
 
 ## Native Skills Library integration
 
-The exact OpenClaw 2026.9.2 library contract includes:
+The exact OpenClaw 2026.9.3 library contract includes:
 
 | Method | Scope | Phase 2 use |
 | --- | --- | --- |
@@ -158,7 +158,7 @@ is used for `skills.library.*`, `tools.catalog`, or `tools.effective`.
 The product integration registry remains granular: only
 `skills.library.list`, `skills.library.read`, and `skills.library.activate`
 are marked as consumed for this phase. The remaining library methods remain
-discovery-only even though their exact 2026.9.2 contracts are audited.
+discovery-only even though their exact 2026.9.3 contracts are audited.
 
 ## Phase 2.1 hardening
 
@@ -171,7 +171,7 @@ an unsuccessful selection read leaves activation unknown. The latest revision
 never replaces the session revision.
 
 The runtime certification harness may seed one disposable skill through the
-official native `skills.library.save` method in an isolated exact 2026.9.2
+official native `skills.library.save` method in an isolated exact 2026.9.3
 Gateway. This is certification-only fixture setup; save, mutate, import, and
 upload remain discovery-only product methods. The fixture is removed through
 the official native mutation contract, and no OpenClaw internal storage is

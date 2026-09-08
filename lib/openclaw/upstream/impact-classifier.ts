@@ -170,7 +170,7 @@ export function buildCertificationPlan(input: {
       id: "shared-gateway-trust-review",
       label: "Review shared-Gateway trust boundary",
       reason: "The shared Gateway must remain a trusted-team boundary unless upstream identity policy proves stronger tenant isolation.",
-      commands: ["docs/openclaw-2026.9.2-compatibility-audit.md"]
+      commands: ["docs/openclaw-2026.9.3-compatibility-audit.md"]
     });
   }
 

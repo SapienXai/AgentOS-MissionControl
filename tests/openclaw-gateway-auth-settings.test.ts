@@ -10,7 +10,8 @@ import {
   getGatewayBindMode,
   getGatewayNativeAuthStatus,
   repairGatewayNativeDeviceAccess,
-  saveGatewayNativeAuthCredential
+  saveGatewayNativeAuthCredential,
+  shouldRestartAfterGatewayConfigMutations
 } from "@/lib/openclaw/application/settings-service";
 import {
   setOpenClawAdapterForTesting,
@@ -481,6 +482,39 @@ test("Gateway native auth token generation restarts even when auth config report
   assert.equal(result.restarted, true);
   assert.deepEqual(controlActions, [{ action: "restart", force: true }]);
   assert.deepEqual(setConfigPaths, ["gateway.auth.mode", "gateway.auth.token"]);
+});
+
+test("Gateway config restart decisions use authoritative changedPaths when OpenClaw provides them", () => {
+  const result = (changedPaths: string[], reloadKind: "restart" | "hot" | "none" | "unknown") => ({
+    stdout: JSON.stringify({ configMutation: { changedPaths, reloadKind } }),
+    metadata: { openClawConfig: { changedPaths, reloadKind } }
+  });
+
+  assert.equal(
+    shouldRestartAfterGatewayConfigMutations([["gateway.auth.token", result([], "restart")]]),
+    false,
+    "a validated no-op must not restart even when the requested path normally requires it"
+  );
+  assert.equal(
+    shouldRestartAfterGatewayConfigMutations([["gateway.auth.token", result(["logging.level"], "unknown")]]),
+    false,
+    "redacted or unrelated requested paths must not be treated as effective changes"
+  );
+  assert.equal(
+    shouldRestartAfterGatewayConfigMutations([["channels.telegram.default", result(["channels.telegram.default"], "hot")]]),
+    false,
+    "channel hot reload remains hot"
+  );
+  assert.equal(
+    shouldRestartAfterGatewayConfigMutations([["gateway.mode", result(["gateway.mode"], "unknown")]]),
+    true,
+    "effective gateway lifecycle changes remain restart-required"
+  );
+  assert.equal(
+    shouldRestartAfterGatewayConfigMutations([["gateway.auth.token", result(["gateway.auth.token"], "restart")]]),
+    true,
+    "an effective auth change remains restart-required"
+  );
 });
 
 test("Gateway native auth token generation stop-start cycles when forced restart does not verify", async () => {

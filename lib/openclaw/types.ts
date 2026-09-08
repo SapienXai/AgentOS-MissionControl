@@ -989,6 +989,7 @@ export interface SurfaceConfigRepairMutation {
   reloadKind?: string;
   restartRequired?: boolean;
   hotReloaded?: boolean;
+  changedPaths?: string[];
 }
 
 export interface OpenClawAgent {

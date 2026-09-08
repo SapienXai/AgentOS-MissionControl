@@ -38,9 +38,9 @@ import type {
   OpenClawSmokeTestCheckStatus
 } from "@/lib/openclaw/types";
 
-export const AGENTOS_REQUIRED_NODE_VERSION = "24.0.0";
-export const OPENCLAW_REQUIRED_NODE_VERSION = "22.19.0";
-export const OPENCLAW_RECOMMENDED_NODE_VERSION = "24.x";
+export const AGENTOS_REQUIRED_NODE_VERSION = "24.16.0";
+export const OPENCLAW_REQUIRED_NODE_VERSION = "24.16.0 or 26.1.0";
+export const OPENCLAW_RECOMMENDED_NODE_VERSION = "24.20.0";
 export const OPENCLAW_REQUIRED_GATEWAY_PROTOCOL_VERSION = "4";
 
 const requiredNativeTimeoutMs = 5_000;
@@ -666,19 +666,22 @@ export function classifyOpenClawNodeVersion(version: string | null | undefined):
     };
   }
 
-  if (compareVersionStrings(normalized, AGENTOS_REQUIRED_NODE_VERSION) < 0) {
+  const [majorText, minorText] = normalized.split(".");
+  const major = Number(majorText);
+  const minor = Number(minorText);
+  const supported = (major === 24 && minor >= 16) || (major >= 26 && compareVersionStrings(normalized, "26.1.0") >= 0);
+
+  if (!supported) {
     return {
       status: "unsupported",
-      summary: `Node.js ${normalized} is below AgentOS' required ${AGENTOS_REQUIRED_NODE_VERSION}.`,
-      recovery: `Install Node.js ${AGENTOS_REQUIRED_NODE_VERSION} or newer. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended.`
+      summary: `Node.js ${normalized} is outside the supported AgentOS/OpenClaw runtime floors (${OPENCLAW_REQUIRED_NODE_VERSION}).`,
+      recovery: `Install Node.js ${AGENTOS_REQUIRED_NODE_VERSION}+ or Node.js 26.1.0+. Node ${OPENCLAW_RECOMMENDED_NODE_VERSION} is recommended.`
     };
   }
 
   return {
     status: "supported",
-    summary: Number(normalized.split(".", 1)[0] ?? "0") >= 24
-      ? `Node.js ${normalized} matches AgentOS' required runtime family and OpenClaw's recommended runtime family.`
-      : `Node.js ${normalized} is supported by OpenClaw, but AgentOS requires ${AGENTOS_REQUIRED_NODE_VERSION}.`,
+    summary: `Node.js ${normalized} satisfies the supported AgentOS/OpenClaw runtime floors.`,
     recovery: null
   };
 }

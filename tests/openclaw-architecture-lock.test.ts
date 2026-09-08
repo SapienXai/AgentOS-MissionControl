@@ -90,14 +90,14 @@ test("AgentOS policy and event layers remain above the official transport", asyn
   assert.match(bridge, /onConnectionStateChange/);
 });
 
-test("the exact OpenClaw 2026.9.2 package and protocol remain authoritative", async () => {
+test("the exact OpenClaw 2026.9.3 package and protocol remain authoritative", async () => {
   const packageJson = JSON.parse(await source("package.json")) as { dependencies?: Record<string, string> };
   const lockfile = await source("pnpm-lock.yaml");
 
-  assert.equal(packageJson.dependencies?.["@openclaw/gateway-client"], "2026.9.2");
-  assert.equal(packageJson.dependencies?.["@openclaw/gateway-protocol"], "2026.9.2");
-  assert.match(lockfile, /'@openclaw\/gateway-client':\n\s+specifier: 2026\.9\.2\n\s+version: 2026\.9\.2/);
-  assert.match(lockfile, /'@openclaw\/gateway-protocol':\n\s+specifier: 2026\.9\.2\n\s+version: 2026\.9\.2/);
+  assert.equal(packageJson.dependencies?.["@openclaw/gateway-client"], "2026.9.3");
+  assert.equal(packageJson.dependencies?.["@openclaw/gateway-protocol"], "2026.9.3");
+  assert.match(lockfile, /'@openclaw\/gateway-client':\n\s+specifier: 2026\.9\.3\n\s+version: 2026\.9\.3/);
+  assert.match(lockfile, /'@openclaw\/gateway-protocol':\n\s+specifier: 2026\.9\.3\n\s+version: 2026\.9\.3/);
   assert.deepEqual(OPENCLAW_GATEWAY_PROTOCOL_RANGE, { min: 4, max: 4 });
 });
 

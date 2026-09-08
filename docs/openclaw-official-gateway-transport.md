@@ -1,11 +1,11 @@
 # Official OpenClaw Gateway transport
 
 The AgentOS OpenClaw Gateway migration is complete. The native production path
-uses the exact OpenClaw 2026.9.2 packages and Gateway protocol v4:
+uses the exact OpenClaw 2026.9.3 packages and Gateway protocol v4:
 
-- `@openclaw/gateway-client@2026.9.2`
-- `@openclaw/gateway-protocol@2026.9.2`
-- OpenClaw source commit `3928bad9badfcb6c7d140530435e806fb8092190`
+- `@openclaw/gateway-client@2026.9.3`
+- `@openclaw/gateway-protocol@2026.9.3`
+- OpenClaw source commit `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`
 - Gateway protocol range `{ min: 4, max: 4 }`
 
 There is one native Gateway transport architecture. The custom AgentOS

@@ -1,7 +1,7 @@
 # OpenClaw Native Doctor, Update, and Recovery
 
 AgentOS presents operational OpenClaw state without becoming a second runtime or
-repair engine. OpenClaw 2026.9.2 remains authoritative for health, configuration
+repair engine. OpenClaw 2026.9.3 remains authoritative for health, configuration
 application, updates, restart coordination, suspension, authorization, and
 reconnect behavior. AgentOS normalizes those native facts for the existing
 Settings, Diagnostics, Gateway, and Updates surfaces.
@@ -9,7 +9,7 @@ Settings, Diagnostics, Gateway, and Updates surfaces.
 ## Native contract
 
 The online operational projection uses the official Gateway transport and these
-2026.9.2 methods:
+2026.9.3 methods:
 
 | Surface | Native methods | AgentOS use |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ authorization remains final.
 
 ### Phase 6.1 — Truthfulness and recovery reconciliation
 
-The exact OpenClaw 2026.9.2 descriptor protects `update.status` with
+The exact OpenClaw 2026.9.3 descriptor protects `update.status` with
 `operator.admin`, even though the method is read-shaped. AgentOS therefore
 keeps the health, status, diagnostics, and config portions of Doctor usable for
 read-capable operators while projecting update status as forbidden/unavailable
@@ -133,7 +133,7 @@ update` only when `update.status` reports an automatic campaign in the native
 `waiting-for-idle` or `countdown` state and no hold is already active. Native
 campaign or rollout hold state is projected as `Update held`; AgentOS does not
 create a parallel hold lifecycle or silently clear an OpenClaw hold. No fixed
-duration is shown because the 2026.9.2 contract does not define one in the
+duration is shown because the 2026.9.3 contract does not define one in the
 request; OpenClaw owns the resulting `holdUntilMs`.
 
 ## Advanced compatibility path
@@ -161,7 +161,7 @@ and can fail or become stale without blocking native status or native update
 execution. It never supplies installed-version truth, channel truth, update
 availability, or an update target.
 
-The pinned 2026.9.2 `update.status` response exposes bounded availability,
+The pinned 2026.9.3 `update.status` response exposes bounded availability,
 channel, automatic schedule, and durable `activeRun`/`lastRun` records. AgentOS
 projects only the run ID, phase/status, target/before/after versions, bounded
 steps, verification facts, and timing. Origin session identifiers, process
@@ -177,7 +177,7 @@ link. Native Doctor and Diagnostics report update health and recovery evidence,
 but link to the canonical Updates page instead of exposing a second normal
 update action. Rollback remains a recovery operation for advanced operators.
 
-The pinned OpenClaw 2026.9.2 Gateway contract does not expose an
+The pinned OpenClaw 2026.9.3 Gateway contract does not expose an
 `update.repair` method, so AgentOS does not invent a Repair button or guess CLI
 flags. Unknown or failed native outcomes remain recoverable through the
 existing supervisor/reconnect evidence, Runtime Inbox guidance, and advanced
@@ -219,8 +219,8 @@ claim verification that the reconnecting Gateway has not provided.
 
 ## Phase 6 certification note
 
-The 2026.9.2 certification is recorded in
-[`openclaw-2026.9.2-compatibility-audit.md`](./openclaw-2026.9.2-compatibility-audit.md).
+The 2026.9.3 certification is recorded in
+[`openclaw-2026.9.3-compatibility-audit.md`](./openclaw-2026.9.3-compatibility-audit.md).
 The closeout also attempted the official native Git update in an isolated 9.1
 checkout targeting the official 9.2 release. The first run replaced the
 checkout but ended with the official `doctor-failed` outcome because a

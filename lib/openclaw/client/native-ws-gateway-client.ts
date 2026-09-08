@@ -16,7 +16,8 @@ import {
   canFallbackGatewayAuthConfigRepair,
   buildMergePatchForConfigPath,
   isGatewayTransportConfigPath,
-  readConfigReloadKindFromSchemaLookup
+  readConfigReloadKindFromSchemaLookup,
+  readOpenClawChangedPaths
 } from "@/lib/openclaw/client/native-ws-gateway-config";
 import { AgentOsGatewayRequestPolicy } from "@/lib/openclaw/client/gateway-request-policy";
 import {
@@ -3204,6 +3205,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
           restartRequired: false,
           hotReloaded: false,
           appliedVia: "noop",
+          changedPaths: [],
           ...(typeof snapshot.hash === "string" && snapshot.hash.trim() ? { baseHash: snapshot.hash } : {})
         };
 
@@ -3309,6 +3311,7 @@ export class NativeWsOpenClawGatewayClient implements OpenClawGatewayClient {
         restartRequired: reloadKind === "restart",
         hotReloaded: reloadKind === "hot",
         appliedVia,
+        ...(readOpenClawChangedPaths(payload) ? { changedPaths: readOpenClawChangedPaths(payload) } : {}),
         ...(baseHash ? { baseHash } : {})
       };
 

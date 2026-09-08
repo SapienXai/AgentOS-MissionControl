@@ -18,8 +18,9 @@ const RELEASE_NOTES_TEMPLATE = "docs/release-notes-agentos-template.md";
 const RELEASE_TAG_PREFIX = "agentos-v";
 const INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.sh | bash";
 const WINDOWS_INSTALL_COMMAND = "iwr https://raw.githubusercontent.com/SapienXai/AgentOS/main/install.ps1 | iex";
-const REQUIRED_NODE_ENGINE = ">=24.0.0";
-const REQUIRED_NODE_MAJOR = "24";
+const REQUIRED_NODE_ENGINE = ">=24.16.0 <25 || >=26.1.0";
+const REQUIRED_NODE_RUNTIME_COPY = "Node.js 24.16.0+ or 26.1.0+";
+const REQUIRED_NODE_WORKFLOW_VERSION = "24.20.0";
 const OPENCLAW_VERSIONS_FILE = "lib/openclaw/versions.ts";
 const RELEASE_ASSETS = [
   "agentos-darwin-arm64.tgz",
@@ -257,8 +258,8 @@ function validateInstallers(context, installSh, installPs1) {
     expectIncludes(context, "install.sh", installSh, 'ARTIFACT_NAME="agentos-${ASSET_PLATFORM}-${ASSET_ARCH}.tgz"');
     expectIncludes(context, "install.sh", installSh, 'CHECKSUM_NAME="${ARTIFACT_NAME}.sha256"');
     expectIncludes(context, "install.sh", installSh, 'REPO="${AGENTOS_REPO:-SapienXai/AgentOS}"');
-    expectIncludes(context, "install.sh", installSh, `major >= ${REQUIRED_NODE_MAJOR}`);
-    expectIncludes(context, "install.sh", installSh, `AgentOS requires Node.js ${REQUIRED_NODE_MAJOR} or newer.`);
+    expectIncludes(context, "install.sh", installSh, "major === 24 && minor >= 16");
+    expectIncludes(context, "install.sh", installSh, `AgentOS requires ${REQUIRED_NODE_RUNTIME_COPY}.`);
   }
 
   if (installPs1) {
@@ -268,8 +269,8 @@ function validateInstallers(context, installSh, installPs1) {
     expectIncludes(context, "install.ps1", installPs1, '$artifactName = "agentos-$assetPlatform-$assetArch.tgz"');
     expectIncludes(context, "install.ps1", installPs1, '$checksumUrl = "$artifactUrl.sha256"');
     expectIncludes(context, "install.ps1", installPs1, '"SapienXai/AgentOS"');
-    expectIncludes(context, "install.ps1", installPs1, `major >= ${REQUIRED_NODE_MAJOR}`);
-    expectIncludes(context, "install.ps1", installPs1, `AgentOS requires Node.js ${REQUIRED_NODE_MAJOR} or newer.`);
+    expectIncludes(context, "install.ps1", installPs1, "major === 24 && minor >= 16");
+    expectIncludes(context, "install.ps1", installPs1, `AgentOS requires ${REQUIRED_NODE_RUNTIME_COPY}.`);
   }
 }
 
@@ -298,8 +299,8 @@ function validateReadmes(context, readme, packageReadme, agentosPackage, openCla
     expectIncludes(context, "README.md", readme, "pnpm smoke:agentos-package");
     expectIncludes(context, "README.md", readme, "docs/agentos-clean-install-smoke-checklist.md");
     expectIncludes(context, "README.md", readme, "packages/agentos/package.json");
-    expectIncludes(context, "README.md", readme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
-    expectIncludes(context, "README.md", readme, `- Node.js ${REQUIRED_NODE_MAJOR} or newer`);
+    expectIncludes(context, "README.md", readme, REQUIRED_NODE_RUNTIME_COPY);
+    expectIncludes(context, "README.md", readme, `- ${REQUIRED_NODE_RUNTIME_COPY}`);
     if (recommendedCopy) expectIncludes(context, "README.md", readme, recommendedCopy);
     if (supportedMinimumCopy) expectIncludes(context, "README.md", readme, supportedMinimumCopy);
     if (openClawVersionPolicy.recommended) expectIncludes(context, "README.md", readme, `Native contract target: \`${openClawVersionPolicy.recommended}\``);
@@ -338,7 +339,7 @@ function validateReadmes(context, readme, packageReadme, agentosPackage, openCla
   if (packageReadme) {
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "pnpm add -g @sapienx/agentos");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "agentos update --check");
-    expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
+    expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, REQUIRED_NODE_RUNTIME_COPY);
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "Packaged AgentOS uses API token authentication");
     expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, "AGENTOS_ALLOW_REMOTE_GATEWAY_URL=1");
     if (packageRecommendedCopy) expectIncludes(context, `${AGENTOS_PACKAGE_DIR}/README.md`, packageReadme, packageRecommendedCopy);
@@ -360,7 +361,7 @@ function validateSecurityDocs(context, security, cleanInstallChecklist, openClaw
   }
 
   if (cleanInstallChecklist) {
-    expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `Node.js ${REQUIRED_NODE_MAJOR} or newer`);
+  expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, REQUIRED_NODE_RUNTIME_COPY);
     if (openClawVersionPolicy.recommended && openClawVersionPolicy.supportedBaseline) {
       expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `recommended OpenClaw ${openClawVersionPolicy.recommended}`);
       expectIncludes(context, "docs/agentos-clean-install-smoke-checklist.md", cleanInstallChecklist, `supported minimum is OpenClaw ${openClawVersionPolicy.supportedBaseline}`);
@@ -476,7 +477,7 @@ function validateCiWorkflow(context, workflow) {
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "pull_request:");
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "branches:");
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "- main");
-  expectIncludes(context, ".github/workflows/ci.yml", workflow, `node-version: ${REQUIRED_NODE_MAJOR}`);
+  expectIncludes(context, ".github/workflows/ci.yml", workflow, `node-version: ${REQUIRED_NODE_WORKFLOW_VERSION}`);
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "pnpm install --frozen-lockfile");
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "pnpm lint");
   expectIncludes(context, ".github/workflows/ci.yml", workflow, "pnpm typegen");
@@ -518,7 +519,7 @@ function validateReleaseWorkflow(context, workflow, agentosPackage) {
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "npm pack ./packages/agentos --pack-destination dist");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "install.sh");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "install.ps1");
-  expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, `node-version: ${REQUIRED_NODE_MAJOR}`);
+  expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, `node-version: ${REQUIRED_NODE_WORKFLOW_VERSION}`);
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "${{ needs.validate-release.outputs.version }}");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "## Highlights");
   expectIncludes(context, ".github/workflows/release-agentos.yml", workflow, "## OpenClaw compatibility impact");

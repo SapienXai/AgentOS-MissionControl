@@ -1,0 +1,323 @@
+{
+  "schemaVersion": 1,
+  "artifactType": "openclaw-native-doctor-update-recovery-hardening-certification",
+  "generatedAt": "2026-09-08T19:00:54.482Z",
+  "certifiedCodeHead": "9022bd5f891665af7c7a93b7180460805f7e9f85",
+  "openClaw": {
+    "release": "2026.9.3",
+    "source": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "gatewayProtocol": 4,
+    "gatewayClient": "2026.9.3",
+    "gatewayProtocolPackage": "2026.9.3",
+    "buildId": "2026.9.3-release-1391f7cd2d40-2026-09-08T07-46-00.264Z",
+    "packageHash": "399006c505bd8a48003267ebd7a12766090cef8564479e96425593e5dd24915e",
+    "packageRoot": "[DISPOSABLE_EXACT_PACKAGE]"
+  },
+  "methods": {
+    "health": {
+      "scope": "operator.read",
+      "params": "{}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "healthProbe": {
+      "scope": "operator.read",
+      "params": "{probe:true}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "status": {
+      "scope": "operator.read",
+      "params": "{}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "diagnostics.stability": {
+      "scope": "operator.read",
+      "params": "{}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "config.get": {
+      "scope": "operator.read",
+      "params": "{}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "update.status": {
+      "scope": "operator.admin",
+      "params": "{refreshCheckout?:boolean}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "update.hold": {
+      "scope": "operator.admin",
+      "params": "{}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "update.run": {
+      "scope": "operator.admin",
+      "params": "{sessionKey?,note?,target?}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "SKIPPED",
+      "result": "Not executed: update.run can install packages or hand off to an external supervisor."
+    },
+    "gateway.restart.preflight": {
+      "scope": "operator.read",
+      "params": "{}",
+      "productIntegration": "compatibility-only",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "native response shape accepted"
+    },
+    "gateway.restart.request": {
+      "scope": "operator.admin",
+      "params": "{reason?,skipDeferral?}",
+      "productIntegration": "integrated",
+      "authority": "OpenClaw-native",
+      "status": "SKIPPED",
+      "result": "Not executed: restart.request intentionally terminates the disposable Gateway before final probes."
+    },
+    "gateway.suspend.prepare": {
+      "scope": "operator.admin",
+      "params": "{requestId,terminalPolicy?,drain?}",
+      "productIntegration": "typed-only",
+      "authority": "OpenClaw-native",
+      "status": "PASS",
+      "result": "busy"
+    },
+    "gateway.suspend.status": {
+      "scope": "operator.read",
+      "params": "{suspensionId}",
+      "productIntegration": "typed-only",
+      "authority": "OpenClaw-native",
+      "status": "SKIPPED",
+      "result": "No suspension lease was issued by the disposable runtime."
+    },
+    "gateway.suspend.resume": {
+      "scope": "operator.admin",
+      "params": "{suspensionId}",
+      "productIntegration": "typed-only",
+      "authority": "OpenClaw-native",
+      "status": "SKIPPED",
+      "result": "No suspension lease was issued by the disposable runtime."
+    }
+  },
+  "runtime": {
+    "packageMode": "exact-openclaw-package-fixture",
+    "gatewayPlacement": "disposable-loopback",
+    "isolatedState": true,
+    "isolatedConfig": true,
+    "handshake": "PASS",
+    "nativeTransport": true,
+    "userGatewayTouched": false,
+    "realInstallationUpdated": false,
+    "realCredentialsAccessed": false
+  },
+  "observations": {
+    "savedVsAppliedUsesNativeHashes": "PASS",
+    "rawConfigHashUsedAsAppliedHash": false,
+    "healthReadFailureIsHealthy": false,
+    "transportFailureIsUnavailable": false,
+    "updateStatusRefreshForcedOnNormalRead": false,
+    "externalVersionLookup": false,
+    "acceptedRestartMeansCompleted": false,
+    "identityContinuity": "SKIPPED",
+    "noCliFallback": "PASS"
+  },
+  "projections": {
+    "health": "native ok=true is healthy; ok=false is degraded; failed read is unknown",
+    "status": "native status remains separate from reachability/health",
+    "stability": "bounded native diagnostics fields only",
+    "configApplication": "configRevisionHash equals appliedConfigHash => applied; known mismatch => restart-required; missing evidence => unknown",
+    "update": "native update.status owns availability, channel, schedule, and sentinel",
+    "recovery": "deterministic AgentOS projection; no independent diagnosis or healing loop"
+  },
+  "recoveryActions": {
+    "native": [
+      "health",
+      "status",
+      "diagnostics.stability",
+      "config.get",
+      "update.status",
+      "update.hold",
+      "update.run",
+      "gateway.restart.request",
+      "gateway.suspend.prepare",
+      "gateway.suspend.status",
+      "gateway.suspend.resume"
+    ],
+    "confirmationRequired": [
+      "update.run",
+      "gateway.restart.request",
+      "gateway.suspend.prepare",
+      "gateway.suspend.resume"
+    ],
+    "normalUserSuspensionButton": false,
+    "arbitraryShellOrProcessControl": false
+  },
+  "authorization": {
+    "exactScopes": "PASS",
+    "upstreamScopeSource": {
+      "kind": "pinned-openclaw-source-descriptor",
+      "path": "src/gateway/methods/core-descriptors.ts",
+      "sourceCommit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+      "descriptorSha256": "9e462c968d58beb3d7ecd86dd3ff2451b61e912767e17c718f1aeab4ac97373b"
+    },
+    "upstreamScopes": {
+      "health": "operator.read",
+      "status": "operator.read",
+      "diagnostics.stability": "operator.read",
+      "config.get": "operator.read",
+      "update.status": "operator.admin",
+      "update.hold": "operator.admin",
+      "update.run": "operator.admin",
+      "gateway.restart.preflight": "operator.read",
+      "gateway.restart.request": "operator.admin",
+      "gateway.suspend.prepare": "operator.admin",
+      "gateway.suspend.status": "operator.read",
+      "gateway.suspend.resume": "operator.admin"
+    },
+    "agentOsProductPermissions": true,
+    "gatewayFinalAuthority": true,
+    "scopeWidening": false
+  },
+  "ambiguity": {
+    "updateRun": "unknown until reconnect and fresh health/status/update.status reconciliation",
+    "restartRequest": "accepted or intentional disconnect is not completed verification",
+    "suspensionPrepare": "use gateway.suspend.status only when native suspensionId is known",
+    "blindRetry": false,
+    "reconciliationOwner": "existing AgentOS request policy, reconnect owner, and native reads"
+  },
+  "boundaries": {
+    "online": "native OpenClaw Gateway control plane",
+    "offline": "existing verified AgentOS supervisor boundary",
+    "cliCompatibility": "legacy/offline recovery only; no online native fallback",
+    "competingLifecycleAuthority": false,
+    "noPolling": true,
+    "noNewGatewaySubscription": true,
+    "noNewReconnectOwner": true
+  },
+  "security": {
+    "arbitraryShellExposed": false,
+    "pidControlsExposed": false,
+    "filesystemUpdateTargetExposed": false,
+    "secretConfigExposed": false,
+    "diagnosticPayloadTrustedAsInstruction": false,
+    "centralRedaction": true
+  },
+  "performance": {
+    "rootDashboardExtraDoctorRpcCount": 0,
+    "detailReads": "bounded parallel native reads",
+    "updateStatusNormalRead": "one lazy native read; refreshCheckout only on explicit fresh check",
+    "organizationWideFanout": false,
+    "perWorkerHealthFanout": false,
+    "requestCoalescing": "existing AgentOsGatewayRequestPolicy"
+  },
+  "rpcCounts": {
+    "health": 2,
+    "status": 1,
+    "diagnostics.stability": 1,
+    "config.get": 1,
+    "update.status": 1,
+    "gateway.restart.preflight": 1,
+    "update.hold": 1,
+    "gateway.suspend.prepare": 1
+  },
+  "cleanup": {
+    "status": "complete",
+    "gatewayProcessStopped": true,
+    "disposableRootRemoved": true
+  },
+  "hardening": {
+    "exactUpstreamScopeCertification": {
+      "source": "pinned OpenClaw source descriptor",
+      "descriptorPath": "src/gateway/methods/core-descriptors.ts",
+      "agentOsLocalMirrorIsSoleAuthority": false,
+      "result": "PASS"
+    },
+    "partialDoctorAuthorization": {
+      "readOnlyHealthStatusConfigRemainUsable": true,
+      "updateStatusRequires": "operator.admin",
+      "forbiddenUpdateStatusDoesNotFailWholeSnapshot": true
+    },
+    "updateRunNormalization": {
+      "nativeResultStatusAuthoritative": true,
+      "statuses": [
+        "ok",
+        "error",
+        "skipped"
+      ],
+      "managedHandoffPreserved": true,
+      "transportSuccessAloneIsNotSuccess": true
+    },
+    "updateSkippedBehavior": {
+      "skippedPreserved": true,
+      "reasonPreserved": true,
+      "entersReconnectVerification": false,
+      "blindRetry": false
+    },
+    "auditTruthfulness": {
+      "unknownOutcome": "unknown",
+      "failedOutcome": "failed",
+      "skippedOutcome": "succeeded"
+    },
+    "restartVerification": {
+      "acceptedIsNotVerified": true,
+      "requiresFreshGeneration": true,
+      "requiresDeviceIdentityContinuity": true,
+      "requiresFreshHealthAndStatus": true,
+      "configHashesComparedWhenRestartRequired": true,
+      "existingReconnectOwnerReused": true,
+      "blindRetry": false
+    },
+    "updateVerification": {
+      "successfulNativeReread": true,
+      "skippedOrErrorNotVerified": true,
+      "externalVersionLookup": false,
+      "blindRetry": false
+    },
+    "runtimeCertification": {
+      "updateStatus": "PASS",
+      "updateRunLive": "SKIPPED",
+      "updateRunDeterministicNormalization": "PASS",
+      "gatewayRestartRequestLive": "SKIPPED",
+      "restartVerificationDeterministic": "PASS",
+      "identityContinuityLive": "SKIPPED",
+      "configHashVerificationDeterministic": "PASS",
+      "cleanup": "PASS"
+    },
+    "intentionalSkips": [
+      "update.run not executed because it can install packages or hand off to an external supervisor",
+      "gateway.restart.request not executed because it intentionally terminates the disposable Gateway before final probes"
+    ],
+    "evidenceSafety": {
+      "userGatewayTouched": false,
+      "realInstallationUpdated": false,
+      "realCredentialsAccessed": false,
+      "secretsIncluded": false,
+      "absolutePathsIncluded": false
+    }
+  },
+  "skips": [
+    "update.run live mutation: intentionally not executed because it can install packages or hand off to an external supervisor.",
+    "gateway.restart.request live mutation: intentionally not executed because it terminates the disposable Gateway before final probes."
+  ],
+  "success": true
+}
