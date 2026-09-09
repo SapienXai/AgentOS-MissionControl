@@ -135,8 +135,8 @@ function AssistantThinkingActivity({
         </span>
         <span
           className={cn(
-            "min-w-0 truncate text-[12px] leading-5",
-            surfaceTheme === "light" ? "text-[#6f584a]/82" : "text-slate-300/82"
+            "agent-chat-activity-label min-w-0 truncate text-[12px] leading-5",
+            surfaceTheme === "light" ? "agent-chat-activity-label--light" : "agent-chat-activity-label--dark"
           )}
         >
           {currentActivity}

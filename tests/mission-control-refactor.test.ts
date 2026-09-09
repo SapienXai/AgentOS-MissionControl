@@ -1087,10 +1087,12 @@ test("agent chat exposes real OpenClaw activity as a subdued live feed", () => {
   const drawerSource = readFileSync(path.join(rootDir, "components/mission-control/agent-chat-drawer.tsx"), "utf8");
   const runnerSource = readFileSync(path.join(rootDir, "components/mission-control/agent-chat-runner.ts"), "utf8");
   const routeSource = readFileSync(path.join(rootDir, "app/api/agents/[agentId]/chat/route.ts"), "utf8");
+  const globalStyles = readFileSync(path.join(rootDir, "app/globals.css"), "utf8");
 
   assert.match(drawerSource, /role="status"[\s\S]*aria-live="polite"/);
   assert.match(drawerSource, /currentActivity/);
   assert.match(drawerSource, /previousActivity/);
+  assert.match(drawerSource, /agent-chat-activity-label/);
   assert.match(drawerSource, /statusHistory=\{runSnapshot\.statusHistory\}/);
   assert.match(drawerSource, /isPendingAssistant[\s\S]*lg:border-0[\s\S]*lg:shadow-none/);
   assert.doesNotMatch(drawerSource, /rounded-\[14px\] border px-3 py-2\.5/);
@@ -1099,6 +1101,9 @@ test("agent chat exposes real OpenClaw activity as a subdued live feed", () => {
   assert.match(runnerSource, /maxAgentChatStatusHistory = 5/);
   assert.match(routeSource, /latestItem\?\.role === "toolCall"/);
   assert.match(routeSource, /latestItem\?\.role === "toolResult"/);
+  assert.match(globalStyles, /@keyframes agent-chat-activity-shimmer/);
+  assert.match(globalStyles, /background-color: var\(--agent-chat-activity-base\)/);
+  assert.match(globalStyles, /prefers-reduced-motion: reduce[\s\S]*agent-chat-activity-label/);
 });
 
 test("mobile light sidebar uses an opaque surface and hides its launcher while open", () => {
