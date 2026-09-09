@@ -46,6 +46,7 @@ import {
 } from "@/lib/openclaw/domains/agent-provisioning";
 import {
   parseWorkspaceProjectManifestAgent,
+  serializeWorkspaceProjectManifestRecord,
   type WorkspaceProjectManifestAgent
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
@@ -928,13 +929,14 @@ async function upsertWorkspaceProjectAgentMetadata(
     : [];
 
   agents.push(nextAgent);
-  parsed.version = typeof parsed.version === "number" ? parsed.version : 1;
   parsed.slug = typeof parsed.slug === "string" ? parsed.slug : slugify(path.basename(workspacePath));
   parsed.name = typeof parsed.name === "string" ? parsed.name : path.basename(workspacePath);
-  parsed.updatedAt = new Date().toISOString();
-  parsed.agents = agents;
+  const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+    updatedAt: new Date().toISOString(),
+    agents
+  });
 
-  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
+  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`);
 }
 
 async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentId: string) {
@@ -969,10 +971,12 @@ async function removeWorkspaceProjectAgentMetadata(workspacePath: string, agentI
     };
   }
 
-  parsed.updatedAt = new Date().toISOString();
-  parsed.agents = nextAgents;
+  const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+    updatedAt: new Date().toISOString(),
+    agents: nextAgents
+  });
 
-  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`);
+  await writeTextFileEnsured(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`);
 }
 
 function uniqueStrings(values: string[]) {

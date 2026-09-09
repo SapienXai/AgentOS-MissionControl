@@ -1,4 +1,6 @@
 import { renderWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document";
+import type { WorkspaceMaterialization } from "@/lib/agentos/domains/workspace-materialization";
+import type { WorkspaceKnowledgeSource } from "@/lib/agentos/domains/workspace-knowledge";
 import {
   OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS,
   OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS
@@ -54,7 +56,8 @@ export interface WorkspaceScaffoldDocumentContext {
   name: string;
   brief?: string;
   template: WorkspaceTemplate;
-  sourceMode: WorkspaceSourceMode;
+  sourceMode?: WorkspaceSourceMode;
+  materialization?: WorkspaceMaterialization;
   rules: WorkspaceCreateRules;
   agents?: Array<Pick<PlannerPersistentAgentSpec, "role" | "name" | "skillId" | "skillIds"> & { policy?: AgentPolicy }>;
   toolExamples?: string[];
@@ -62,6 +65,7 @@ export interface WorkspaceScaffoldDocumentContext {
   contextSources?: Array<
     Pick<PlannerContextSource, "kind" | "label" | "summary" | "confidence" | "url" | "status">
   >;
+  knowledgeSources?: WorkspaceKnowledgeSource[];
 }
 
 export interface WorkspaceScaffoldDocument {
@@ -272,11 +276,16 @@ export function buildWorkspaceContextManifest(
 }
 
 export function buildWorkspaceScaffoldDocuments(context: WorkspaceScaffoldDocumentContext) {
+  const renderContext: WorkspaceScaffoldDocumentContext = {
+    ...context,
+    sourceMode: context.materialization?.mode ?? context.sourceMode ?? "empty",
+    contextSources: context.contextSources ?? context.knowledgeSources?.map(knowledgeSourceToLegacyContextSource)
+  };
   const specs = buildWorkspaceScaffoldDocumentSpecs(context.template, context.rules);
   const overrideMap = new Map(normalizeWorkspaceDocOverrides(context.docOverrides).map((entry) => [entry.path, entry.content]));
 
   return specs.map((spec) => {
-    const baseContent = spec.render(context);
+      const baseContent = spec.render(renderContext);
     const hasOverride = overrideMap.has(spec.path);
 
     return {
@@ -504,9 +513,9 @@ function buildWorkspaceScaffoldDocumentSpecs(
     {
       path: "docs/brief.md",
       title: "docs/brief.md",
-      description: "Objective, source mode, and success signals.",
+      description: "Objective, materialization, and declared sources.",
       category: "docs",
-      render: ({ name, template, brief, sourceMode, contextSources }) =>
+      render: ({ name, template, brief, sourceMode = "empty", contextSources }) =>
         renderBriefMarkdown(name, template, brief, sourceMode, contextSources)
     },
     {
@@ -589,7 +598,7 @@ function renderAgentsMarkdown({
   name,
   brief,
   template,
-  sourceMode,
+  sourceMode = "empty",
   rules,
   agents = [],
   toolExamples = []
@@ -726,7 +735,7 @@ function renderBriefMarkdown(
 ## Template
 ${TEMPLATE_LABELS[template]}
 
-## Source mode
+## Materialization
 ${sourceMode}
 
 ## Objective
@@ -815,7 +824,7 @@ function renderContextSourceNotes(contextSources?: WorkspaceScaffoldDocumentCont
       source.kind === "website"
         ? "Website"
         : source.kind === "repo"
-          ? "Repo"
+          ? "Repository"
           : source.kind === "folder"
             ? "Folder"
             : "Prompt";
@@ -827,12 +836,30 @@ function renderContextSourceNotes(contextSources?: WorkspaceScaffoldDocumentCont
   const sections: string[] = [];
 
   if (evidenceSources.length > 0) {
-    sections.push(`## Evidence\n${evidenceSources.map(formatLine).join("\n")}`);
+    sections.push(`## Declared sources\n${evidenceSources.map(formatLine).join("\n")}`);
   }
 
   if (assumptionSources.length > 0) {
-    sections.push(`## Assumptions\n${assumptionSources.map(formatLine).join("\n")}`);
+    sections.push(`## Declared sources needing confirmation\n${assumptionSources.map(formatLine).join("\n")}`);
   }
 
   return sections.length > 0 ? `\n${sections.join("\n\n")}\n` : "";
+}
+
+function knowledgeSourceToLegacyContextSource(source: WorkspaceKnowledgeSource): Pick<PlannerContextSource, "kind" | "label" | "summary" | "confidence" | "url" | "status"> {
+  const url = source.locator.kind === "website"
+    ? source.locator.url
+    : source.locator.kind === "repository"
+      ? source.locator.remoteUrl ?? source.locator.localPath
+      : source.locator.kind === "file" || source.locator.kind === "folder"
+        ? source.locator.path
+        : undefined;
+  return {
+    kind: source.kind === "repository" ? "repo" : source.kind === "connector" || source.kind === "file" ? "prompt" : source.kind,
+    label: source.label,
+    summary: source.summary,
+    ...(source.confidence !== undefined ? { confidence: source.confidence } : {}),
+    ...(url ? { url } : {}),
+    status: source.status
+  };
 }

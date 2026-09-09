@@ -215,11 +215,20 @@ export function buildWorkspaceWizardPathPreview(
 }
 
 export function extractBasicDraftFromWorkspacePlan(plan: WorkspacePlan): WorkspaceWizardBasicDraft {
+  const materializationSource = plan.workspace.materialization.mode === "clone"
+    ? plan.workspace.materialization.repoUrl
+    : plan.workspace.materialization.mode === "existing"
+      ? plan.workspace.materialization.existingPath
+      : "";
+  const knowledgeSource = plan.knowledge.sources.find((entry) => entry.kind === "website") ??
+    plan.knowledge.sources.find((entry) => entry.kind === "prompt") ??
+    plan.knowledge.sources[0];
   const source =
-    plan.workspace.repoUrl?.trim() ||
-    plan.workspace.existingPath?.trim() ||
-    plan.intake.sources.find((entry) => entry.kind === "website")?.url ||
-    plan.intake.sources.find((entry) => entry.kind === "prompt")?.summary ||
+    materializationSource?.trim() ||
+    (knowledgeSource?.locator.kind === "website" ? knowledgeSource.locator.url : undefined) ||
+    (knowledgeSource?.locator.kind === "prompt" ? knowledgeSource.locator.text : undefined) ||
+    (knowledgeSource?.locator.kind === "repository" ? knowledgeSource.locator.remoteUrl ?? knowledgeSource.locator.localPath : undefined) ||
+    (knowledgeSource?.locator.kind === "folder" || knowledgeSource?.locator.kind === "file" ? knowledgeSource.locator.path : undefined) ||
     "";
 
   return {

@@ -9,43 +9,50 @@ export const OPENCLAW_NATIVE_WORKSPACE_BOOTSTRAP_FILES = [
   {
     path: "AGENTS.md",
     kind: "context",
-    optional: false,
+    requirement: "required",
+    lifecycle: "persistent",
     generatedByAgentOS: true
   },
   {
     path: "SOUL.md",
     kind: "context",
-    optional: false,
+    requirement: "optional",
+    lifecycle: "persistent",
     generatedByAgentOS: true
   },
   {
     path: "IDENTITY.md",
     kind: "context",
-    optional: false,
+    requirement: "optional",
+    lifecycle: "persistent",
     generatedByAgentOS: true
   },
   {
     path: "USER.md",
     kind: "context",
-    optional: true,
+    requirement: "optional",
+    lifecycle: "persistent",
     generatedByAgentOS: true
   },
   {
     path: "BOOT.md",
     kind: "hook",
-    optional: true,
+    requirement: "optional",
+    lifecycle: "hook",
     generatedByAgentOS: false
   },
   {
     path: "BOOTSTRAP.md",
     kind: "first-run",
-    optional: true,
+    requirement: "first-run-required",
+    lifecycle: "first-run",
     generatedByAgentOS: false
   },
   {
     path: "MEMORY.md",
     kind: "memory",
-    optional: true,
+    requirement: "optional",
+    lifecycle: "persistent",
     generatedByAgentOS: true
   }
 ] as const;

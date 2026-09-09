@@ -73,7 +73,14 @@ import {
   writeAgentConfigList,
   upsertAgentConfigEntry
 } from "@/lib/openclaw/domains/agent-config";
-import { readWorkspaceProjectManifest } from "@/lib/openclaw/domains/workspace-manifest";
+import {
+  readWorkspaceProjectManifest,
+  serializeWorkspaceProjectManifestRecord
+} from "@/lib/openclaw/domains/workspace-manifest";
+import {
+  materializationToWorkspaceSourceMode,
+  workspaceMaterializationsEqual
+} from "@/lib/agentos/domains/workspace-materialization";
 import type { WorkspaceProjectManifestAgent } from "@/lib/openclaw/domains/workspace-manifest";
 import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
 import {
@@ -248,8 +255,7 @@ async function createWorkspaceProjectInternal(
   await progress.addActivity("source", describeWorkspaceSourceActivity(normalized.sourceMode, normalized), "active");
   await materializeWorkspaceSource({
     targetDir,
-    sourceMode: normalized.sourceMode,
-    repoUrl: normalized.repoUrl
+    materialization: normalized.materialization
   });
   await progress.completeStep("source", describeWorkspaceSourceCompletion(normalized.sourceMode, targetDir));
 
@@ -263,9 +269,10 @@ async function createWorkspaceProjectInternal(
     modelProfile: normalized.modelProfile,
     rules: normalized.rules,
     docOverrides: normalized.docOverrides,
+    materialization: normalized.materialization,
     sourceMode: normalized.sourceMode,
     agents: enabledAgents,
-    contextSources: normalized.contextSources
+    knowledgeSources: normalized.knowledgeSources
   });
   await progress.completeStep("scaffold", "Workspace files and starter docs are in place.");
 
@@ -554,7 +561,8 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
   const configuredSkills = uniqueStrings(workspaceAgents.flatMap((agent) => agent.skills));
   const configuredTools = uniqueStrings(workspaceAgents.flatMap((agent) => agent.tools));
   const template = manifest.template ?? workspace.bootstrap.template ?? "software";
-  const sourceMode = manifest.sourceMode ?? workspace.bootstrap.sourceMode ?? "empty";
+  const materialization = manifest.materialization ?? { mode: "empty" as const };
+  const sourceMode = materializationToWorkspaceSourceMode(materialization);
   const teamPreset = manifest.teamPreset ?? (workspaceAgents.length <= 1 ? "solo" : "core");
   const modelProfile = manifest.modelProfile ?? "balanced";
   const rules = manifest.rules ?? DEFAULT_WORKSPACE_RULES;
@@ -607,11 +615,12 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
     brief: bootstrapProfile.purpose || displayName,
     template,
     sourceMode,
+    materialization,
     rules,
     agents,
     toolExamples: await detectWorkspaceToolExamples(workspace.path),
     docOverrides: [],
-    contextSources: manifest.contextSources ?? []
+    knowledgeSources: manifest.knowledgeSources
   });
   const docOverrides: WorkspaceDocOverride[] = [];
   const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
@@ -658,6 +667,7 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
     name: displayName,
     directory: workspace.path,
     template,
+    materialization,
     sourceMode,
     teamPreset,
     modelProfile,
@@ -666,7 +676,7 @@ export async function readWorkspaceEditSeed(workspaceId: string): Promise<Worksp
     docOverrides,
     agents,
     brief: bootstrapProfile.purpose || displayName,
-    contextSources: manifest.contextSources ?? []
+    knowledgeSources: manifest.knowledgeSources
   };
 }
 
@@ -728,7 +738,7 @@ async function applyWorkspacePlanEdits(
     nameChanged ||
     desiredBrief !== baselineBrief ||
     plan.workspace.template !== input.baseline.template ||
-    plan.workspace.sourceMode !== input.baseline.sourceMode ||
+    !workspaceMaterializationsEqual(plan.workspace.materialization, input.baseline.materialization) ||
     !areWorkspaceCreateRulesEqual(plan.workspace.rules, input.baseline.rules) ||
     !areWorkspaceAgentsEqual(currentEnabledAgents, baselineEnabledAgents);
   const directoryChanged = Boolean(requestedDirectory && requestedDirectory !== baselineDirectory);
@@ -774,6 +784,7 @@ async function applyWorkspacePlanEdits(
 
   const currentWorkspacePath = targetPath;
   const projectManifestPath = path.join(currentWorkspacePath, ".openclaw", "project.json");
+  let existingManifest: unknown = {};
   let createdAt = new Date().toISOString();
   let hidden = false;
   let systemTag: string | null = null;
@@ -781,6 +792,7 @@ async function applyWorkspacePlanEdits(
   try {
     const raw = await readFile(projectManifestPath, "utf8");
     const parsed = JSON.parse(raw);
+    existingManifest = parsed;
 
     if (isObjectRecord(parsed)) {
       createdAt = typeof parsed.createdAt === "string" ? parsed.createdAt : createdAt;
@@ -816,16 +828,16 @@ async function applyWorkspacePlanEdits(
       : manifestAgents.every((agent) => agent.enabled)
         ? "core"
         : "custom";
-  const projectManifest = {
-    version: 1,
+  const projectManifest = serializeWorkspaceProjectManifestRecord(existingManifest, {
     slug: slugify(path.basename(currentWorkspacePath)),
     name: desiredName,
     directory: currentWorkspacePath,
     icon: getWorkspaceTemplateMeta(plan.workspace.template).icon,
     createdAt,
     updatedAt: new Date().toISOString(),
+    materialization: plan.workspace.materialization,
+    knowledgeSources: plan.knowledge.sources,
     template: plan.workspace.template,
-    sourceMode: plan.workspace.sourceMode,
     teamPreset,
     modelProfile: plan.workspace.modelProfile,
     agentTemplate: teamPreset === "solo" ? "solo" : "core-team",
@@ -835,23 +847,23 @@ async function applyWorkspacePlanEdits(
       generateMemory: plan.workspace.rules.generateMemory,
       kickoffMission: plan.workspace.rules.kickoffMission
     },
-    contextSources: plan.intake.sources,
     hidden,
     systemTag,
     agents: manifestAgents
-  };
+  });
 
   if (scaffoldInputsChanged) {
     const scaffoldDocuments = buildWorkspaceScaffoldDocuments({
       name: desiredName,
       brief: desiredBrief || desiredName,
       template: plan.workspace.template,
-      sourceMode: plan.workspace.sourceMode,
+      sourceMode: plan.workspace.materialization.mode,
+      materialization: plan.workspace.materialization,
       rules: plan.workspace.rules,
       agents: currentEnabledAgents,
       toolExamples: await detectWorkspaceToolExamples(currentWorkspacePath),
       docOverrides: currentDocOverrides,
-      contextSources: plan.intake.sources
+      knowledgeSources: plan.knowledge.sources
     });
     const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
 
@@ -872,11 +884,12 @@ async function applyWorkspacePlanEdits(
       brief: baselineBrief || baselineName,
       template: input.baseline.template,
       sourceMode: input.baseline.sourceMode,
+      materialization: input.baseline.materialization,
       rules: input.baseline.rules,
       agents: baselineEnabledAgents,
       toolExamples: [],
       docOverrides: [],
-      contextSources: input.baseline.contextSources ?? []
+      knowledgeSources: input.baseline.knowledgeSources
     });
     const scaffoldPathSet = new Set(scaffoldDocuments.map((document) => document.path));
 
@@ -1147,10 +1160,10 @@ async function resolveExistingWorkspaceCreateResult(
   const manifest = await readWorkspaceProjectManifest(targetDir);
   const enabledManifestAgents = manifest.agents.filter((agent) => agent.enabled);
   const hasExistingWorkspaceContent =
-    Boolean(manifest.name || manifest.template || manifest.sourceMode || manifest.agentTemplate) ||
+    Boolean(manifest.name || manifest.template || manifest.materialization || manifest.agentTemplate) ||
     enabledManifestAgents.length > 0 ||
     manifest.channels.length > 0 ||
-    manifest.contextSources.length > 0;
+    manifest.knowledgeSources.length > 0;
 
   if (!hasExistingWorkspaceContent) {
     return null;

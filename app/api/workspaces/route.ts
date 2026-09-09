@@ -38,15 +38,46 @@ const workspaceCreationSchema = z.object({
   idempotencyKey: z.string().min(1).max(200).optional()
 });
 
+const workspaceMaterializationSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("empty") }).strict(),
+  z.object({ mode: z.literal("clone"), repoUrl: z.string().min(1) }).strict(),
+  z.object({ mode: z.literal("existing"), existingPath: z.string().min(1) }).strict()
+]);
+
+const workspaceKnowledgeSourceSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["prompt", "website", "repository", "file", "folder", "connector"]),
+    label: z.string().min(1),
+    summary: z.string().min(1),
+    details: z.array(z.string()).default([]),
+    status: z.enum(["ready", "error"]),
+    createdAt: z.string().min(1),
+    provenance: z.enum(["operator", "wizard", "planner", "migration", "derived"]),
+    confidence: z.number().optional(),
+    error: z.string().optional(),
+    locator: z.union([
+      z.object({ kind: z.literal("prompt"), text: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("website"), url: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("repository"), remoteUrl: z.string().min(1).optional(), localPath: z.string().min(1).optional() }).strict().refine((value) => Boolean(value.remoteUrl || value.localPath), "Repository locator requires remoteUrl or localPath."),
+      z.object({ kind: z.literal("file"), path: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("folder"), path: z.string().min(1) }).strict(),
+      z.object({ kind: z.literal("connector"), provider: z.string().min(1), accountId: z.string().min(1).optional(), resourceId: z.string().min(1).optional(), resourceType: z.string().min(1).optional() }).strict()
+    ])
+  })
+  .strict();
+
 const workspaceSchema = z.object({
   name: z.string().min(1),
   brief: z.string().optional(),
   directory: z.string().optional(),
   modelId: z.string().optional(),
   thinking: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]).optional(),
+  materialization: workspaceMaterializationSchema.optional(),
   sourceMode: z.enum(["empty", "clone", "existing"]).optional(),
   repoUrl: z.string().optional(),
   existingPath: z.string().optional(),
+  knowledgeSources: z.array(workspaceKnowledgeSourceSchema).optional(),
   template: z.enum(["software", "frontend", "backend", "research", "content"]).optional(),
   teamPreset: z.enum(["solo", "core", "custom"]).optional(),
   modelProfile: z.enum(["balanced", "fast", "quality"]).optional(),

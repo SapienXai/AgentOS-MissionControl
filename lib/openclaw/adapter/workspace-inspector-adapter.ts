@@ -146,7 +146,7 @@ export async function readWorkspaceInspectorMetadata(
   return {
     bootstrap: {
       template: resolvedProjectMeta.template,
-      sourceMode: resolvedProjectMeta.sourceMode,
+      sourceMode: resolvedProjectMeta.materialization?.mode ?? resolvedProjectMeta.sourceMode,
       agentTemplate: resolvedProjectMeta.agentTemplate,
       coreFiles,
       optionalFiles,

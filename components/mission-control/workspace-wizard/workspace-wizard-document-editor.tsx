@@ -118,12 +118,12 @@ export function WorkspaceWizardDocumentEditor({
       name: plan.workspace.name || "Workspace",
       brief: plan.company.mission || plan.product.offer || undefined,
       template: plan.workspace.template,
-      sourceMode: plan.workspace.sourceMode,
+      sourceMode: plan.workspace.materialization.mode,
       rules: plan.workspace.rules,
       agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
       docOverrides: plan.workspace.docOverrides,
       toolExamples: [],
-      contextSources: plan.intake.sources
+      knowledgeSources: plan.knowledge.sources
     });
 
     return documents.find((entry) => entry.path === path) ?? null;

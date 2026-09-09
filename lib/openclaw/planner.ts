@@ -18,7 +18,7 @@ import {
   createPlannerAutomationSpec,
   createArchitectReply,
   createPlannerChannelSpec,
-  createPlannerContextSource,
+  createPlannerKnowledgeSource,
   createPlannerHookSpec,
   createInitialWorkspacePlan,
   createPlannerMessage,
@@ -27,15 +27,25 @@ import {
   createPlannerWorkflowSpec,
   detectPlannerTextLanguage,
   enrichWorkspacePlan,
+  normalizeWorkspacePlan,
   getPlannerWorkspaceSizeProfile,
   resolvePlannerReplyLanguage,
   synthesizePlannerAdvisors
 } from "@/lib/openclaw/planner-core";
 import {
+  mergeWorkspaceKnowledgeSources,
+  normalizeWorkspaceKnowledgeSources,
+  type WorkspaceKnowledgeSource
+} from "@/lib/agentos/domains/workspace-knowledge";
+import {
+  normalizeWorkspaceMaterializationInput
+} from "@/lib/agentos/domains/workspace-materialization";
+import {
   buildWorkspaceEditableDocuments,
   normalizeWorkspaceDocOverrides,
   type WorkspaceScaffoldDocument
 } from "@/lib/openclaw/workspace-docs";
+import { serializeWorkspaceProjectManifestRecord } from "@/lib/openclaw/domains/workspace-manifest";
 import {
   createAgent,
   createWorkspaceProject,
@@ -48,7 +58,6 @@ import type {
   PlannerExperienceMode,
   PlannerAutomationSpec,
   PlannerChannelSpec,
-  PlannerContextSource,
   PlannerHookSpec,
   OperationProgressSnapshot,
   PlannerPersistentAgentSpec,
@@ -202,6 +211,14 @@ type PlannerAgentPatch = {
   product?: Partial<WorkspacePlan["product"]>;
   workspace?: Partial<WorkspacePlan["workspace"]> & {
     removeDocOverridePaths?: string[];
+    sourceMode?: "empty" | "clone" | "existing";
+    repoUrl?: string;
+    existingPath?: string;
+  };
+  knowledge?: {
+    sources?: unknown[];
+    addSources?: unknown[];
+    removeSourceIds?: string[];
   };
   team?: {
     removeAgentIds?: string[];
@@ -288,7 +305,7 @@ export async function submitWorkspacePlanTurn(
   let nextPlan = applyPlannerInput(enrichWorkspacePlan(basePlan), trimmedMessage);
   nextPlan.conversation.push(createPlannerMessage("user", "Operator", trimmedMessage));
   const harvestedContext = await harvestedContextPromise;
-  nextPlan.intake.sources = mergePlannerSources(nextPlan.intake.sources, harvestedContext.sources);
+  nextPlan.knowledge.sources = mergePlannerSources(nextPlan.knowledge.sources, harvestedContext.sources);
   nextPlan = enrichWorkspacePlan(nextPlan);
 
   const runtimeReadyPlan = shouldUseLocalPlannerFastPath(nextPlan)
@@ -383,7 +400,7 @@ export async function simulateWorkspacePlan(
     nextPlan,
     "Simulate the specialist planning board and tell me what you would refine next.",
     {
-      sources: nextPlan.intake.sources,
+      sources: nextPlan.knowledge.sources,
       confirmations: nextPlan.intake.confirmations,
       inferenceText: nextPlan.intake.inferences.map((entry) => `${entry.label}: ${entry.value}`).join("\n"),
       companyName: nextPlan.company.name || undefined,
@@ -431,7 +448,7 @@ export async function deployWorkspacePlan(
   const hasPlannerKickoffs = nextPlan.deploy.firstMissions.some((mission) => mission.trim().length > 0);
   const progress = createOperationProgressTracker({
     template: buildPlannerDeployProgressTemplate({
-      sourceMode: nextPlan.workspace.sourceMode,
+      sourceMode: nextPlan.workspace.materialization.mode,
       agentCount: enabledAgentCount,
       kickoffMission: nextPlan.workspace.rules.kickoffMission,
       hasChannels,
@@ -621,18 +638,19 @@ export async function deployWorkspacePlan(
 
 async function persistIncomingPlan(planId: string, incomingPlan: WorkspacePlan) {
   const storedPlan = await readWorkspacePlan(planId).catch(() => createInitialWorkspacePlan(planId));
+  const normalizedIncomingPlan = normalizeWorkspacePlan(incomingPlan);
   const mergedPlan = enrichWorkspacePlan({
     ...storedPlan,
-    ...incomingPlan,
+    ...normalizedIncomingPlan,
     id: planId,
     createdAt: storedPlan.createdAt,
     runtime: {
       ...storedPlan.runtime,
-      ...incomingPlan.runtime
+      ...normalizedIncomingPlan.runtime
     },
     deploy: {
       ...storedPlan.deploy,
-      ...incomingPlan.deploy
+      ...normalizedIncomingPlan.deploy
     }
   });
 
@@ -643,7 +661,7 @@ async function persistIncomingPlan(planId: string, incomingPlan: WorkspacePlan) 
 async function readWorkspacePlan(planId: string) {
   const filePath = getWorkspacePlanFilePath(planId);
   const raw = await readFile(filePath, "utf8");
-  return enrichWorkspacePlan(JSON.parse(raw) as WorkspacePlan);
+  return normalizeWorkspacePlan(JSON.parse(raw));
 }
 
 async function saveWorkspacePlan(plan: WorkspacePlan) {
@@ -888,13 +906,15 @@ async function configurePlannerRuntimeWorkspace(workspacePath: string) {
     parsed = {};
   }
 
-  parsed.name = typeof parsed.name === "string" ? parsed.name : PLANNER_RUNTIME_NAME;
-  parsed.hidden = true;
-  parsed.systemTag = PLANNER_RUNTIME_SYSTEM_TAG;
-  parsed.updatedAt = new Date().toISOString();
+  const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+    name: typeof parsed.name === "string" ? parsed.name : PLANNER_RUNTIME_NAME,
+    hidden: true,
+    systemTag: PLANNER_RUNTIME_SYSTEM_TAG,
+    updatedAt: new Date().toISOString()
+  });
 
   await mkdir(path.dirname(projectFilePath), { recursive: true });
-  await writeFile(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  await writeFile(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`, "utf8");
 }
 
 async function synthesizePlannerAdvisorsWithRuntime(plan: WorkspacePlan, latestMessage: string) {
@@ -1373,6 +1393,9 @@ function createPlannerPromptContext(plan: WorkspacePlan) {
       escalationRules: plan.team.escalationRules
     },
     operations: plan.operations,
+    knowledge: {
+      sources: plan.knowledge.sources
+    },
     intake: {
       mode: plan.intake.mode,
       size: plan.intake.size,
@@ -1384,7 +1407,6 @@ function createPlannerPromptContext(plan: WorkspacePlan) {
       },
       reviewRequested: plan.intake.reviewRequested,
       confirmations: plan.intake.confirmations,
-      sources: plan.intake.sources,
       inferences: plan.intake.inferences
     }
   };
@@ -1412,43 +1434,67 @@ function applyPlannerAgentPatch(plan: WorkspacePlan, patch: PlannerAgentPatch) {
   }
 
   if (patch.workspace) {
+    const {
+      materialization: requestedMaterialization,
+      sourceMode,
+      repoUrl,
+      existingPath,
+      removeDocOverridePaths,
+      ...workspacePatch
+    } = patch.workspace;
+    let materialization = nextPlan.workspace.materialization;
+
+    if (requestedMaterialization !== undefined) {
+      materialization = normalizeWorkspaceMaterializationInput({
+        materialization: requestedMaterialization,
+        sourceMode,
+        repoUrl,
+        existingPath,
+        directory: nextPlan.workspace.directory
+      });
+    } else if (sourceMode !== undefined || repoUrl !== undefined || existingPath !== undefined) {
+      materialization = normalizeWorkspaceMaterializationInput({
+        sourceMode,
+        repoUrl,
+        existingPath,
+        directory: nextPlan.workspace.directory
+      });
+    }
+
     const nextWorkspace = {
       ...nextPlan.workspace,
-      ...patch.workspace,
+      ...workspacePatch,
+      materialization,
       rules: {
         ...nextPlan.workspace.rules,
         ...(patch.workspace.rules ?? {})
       }
     };
 
-    if (patch.workspace.sourceMode === "empty") {
-      nextWorkspace.repoUrl = undefined;
-      nextWorkspace.existingPath = undefined;
-    } else if (patch.workspace.sourceMode === "clone") {
-      nextWorkspace.existingPath = undefined;
-    } else if (patch.workspace.sourceMode === "existing") {
-      nextWorkspace.repoUrl = undefined;
-    }
-
-    if (patch.workspace.repoUrl !== undefined) {
-      nextWorkspace.sourceMode = "clone";
-      nextWorkspace.existingPath = undefined;
-    }
-
-    if (patch.workspace.existingPath !== undefined) {
-      nextWorkspace.sourceMode = "existing";
-      nextWorkspace.repoUrl = undefined;
-    }
-
-    if (patch.workspace.docOverrides || patch.workspace.removeDocOverridePaths?.length) {
+    if (patch.workspace.docOverrides || removeDocOverridePaths?.length) {
       nextWorkspace.docOverrides = mergePlannerDocOverrides(
         nextPlan.workspace.docOverrides,
         patch.workspace.docOverrides,
-        patch.workspace.removeDocOverridePaths
+        removeDocOverridePaths
       );
     }
 
     nextPlan.workspace = nextWorkspace;
+  }
+
+  if (patch.knowledge) {
+    let sources = nextPlan.knowledge.sources;
+    if (patch.knowledge.sources !== undefined) {
+      sources = normalizeWorkspaceKnowledgeSources(patch.knowledge.sources);
+    }
+    if (patch.knowledge.addSources?.length) {
+      sources = mergeWorkspaceKnowledgeSources(sources, normalizeWorkspaceKnowledgeSources(patch.knowledge.addSources));
+    }
+    if (patch.knowledge.removeSourceIds?.length) {
+      const removed = new Set(patch.knowledge.removeSourceIds);
+      sources = sources.filter((source) => !removed.has(source.id));
+    }
+    nextPlan.knowledge.sources = sources;
   }
 
   if (patch.team) {
@@ -1549,12 +1595,12 @@ function resolveWorkspaceScaffoldDocumentForRewrite(
     name: plan.workspace.name || "Workspace",
     brief: plan.company.mission || plan.product.offer || undefined,
     template: plan.workspace.template,
-    sourceMode: plan.workspace.sourceMode,
+    materialization: plan.workspace.materialization,
     rules: plan.workspace.rules,
     agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
     docOverrides: plan.workspace.docOverrides,
     toolExamples: [],
-    contextSources: plan.intake.sources
+    knowledgeSources: plan.knowledge.sources
   });
 
   const document = documents.find((entry) => entry.path === targetPath);
@@ -1790,9 +1836,8 @@ function buildWorkspaceCreateInput(plan: WorkspacePlan): WorkspaceCreateInput {
     brief: buildWorkspaceBrief(plan),
     directory: plan.workspace.directory,
     modelId: plan.workspace.modelId,
-    sourceMode: plan.workspace.sourceMode,
-    repoUrl: plan.workspace.repoUrl,
-    existingPath: plan.workspace.existingPath,
+    materialization: plan.workspace.materialization,
+    knowledgeSources: plan.knowledge.sources,
     template: plan.workspace.template,
     teamPreset: "custom",
     modelProfile: plan.workspace.modelProfile,
@@ -2221,7 +2266,7 @@ async function runPlannerKickoffMissions(
 }
 
 type PlannerHarvestResult = {
-  sources: PlannerContextSource[];
+  sources: WorkspaceKnowledgeSource[];
   confirmations: string[];
   inferenceText: string;
   companyName?: string;
@@ -2254,7 +2299,7 @@ type WebsitePageSignals = {
 async function harvestPlannerContext(message: string): Promise<PlannerHarvestResult> {
   const urls = extractUrls(message);
   const confirmations: string[] = [];
-  const sources: PlannerContextSource[] = [];
+  const sources: WorkspaceKnowledgeSource[] = [];
   const inferenceChunks: string[] = [];
   let companyName: string | undefined;
   let companyNameConfidence: number | undefined;
@@ -2270,8 +2315,8 @@ async function harvestPlannerContext(message: string): Promise<PlannerHarvestRes
   for (const url of urls) {
     if (isLikelyRepositoryUrl(url)) {
       sources.push(
-        createPlannerContextSource({
-          kind: "repo",
+        createPlannerKnowledgeSource({
+          kind: "repository",
           label: summarizeUrlLabel(url),
           url,
           summary: "Repository candidate detected from the prompt.",
@@ -2341,7 +2386,7 @@ async function harvestPlannerContext(message: string): Promise<PlannerHarvestRes
 }
 
 async function inspectWebsiteContext(url: string): Promise<{
-  source: PlannerContextSource;
+      source: WorkspaceKnowledgeSource;
   confirmations: string[];
   inferenceText: string;
   companyName?: string;
@@ -2468,7 +2513,7 @@ async function inspectWebsiteContext(url: string): Promise<{
     }
 
     return {
-      source: createPlannerContextSource({
+      source: createPlannerKnowledgeSource({
         kind: "website",
         label: inferredCompanyName || label,
         url,
@@ -2505,7 +2550,7 @@ async function inspectWebsiteContext(url: string): Promise<{
     };
   } catch (error) {
     return {
-      source: createPlannerContextSource({
+      source: createPlannerKnowledgeSource({
         kind: "website",
         label,
         url,
@@ -2707,23 +2752,8 @@ function applyHarvestedDefaults(plan: WorkspacePlan, harvest: PlannerHarvestResu
   return nextPlan;
 }
 
-function mergePlannerSources(current: PlannerContextSource[], incoming: PlannerContextSource[]) {
-  const merged = [...current];
-
-  for (const source of incoming) {
-    const existingIndex = merged.findIndex(
-      (entry) => (entry.url && source.url ? entry.url === source.url : entry.id === source.id)
-    );
-
-    if (existingIndex >= 0) {
-      merged[existingIndex] = source;
-      continue;
-    }
-
-    merged.push(source);
-  }
-
-  return merged;
+function mergePlannerSources(current: WorkspaceKnowledgeSource[], incoming: WorkspaceKnowledgeSource[]) {
+  return mergeWorkspaceKnowledgeSources(current, incoming);
 }
 
 function extractUrls(text: string) {

@@ -683,9 +683,9 @@ function createBlueprintDraftFromPlan(plan: WorkspacePlan): BlueprintDraft {
     productLaunchPriority: joinLines(plan.product.launchPriority),
     workspaceName: plan.workspace.name,
     workspaceDirectory: plan.workspace.directory ?? "",
-    workspaceSourceMode: plan.workspace.sourceMode,
-    workspaceRepoUrl: plan.workspace.repoUrl ?? "",
-    workspaceExistingPath: plan.workspace.existingPath ?? "",
+    workspaceSourceMode: plan.workspace.materialization.mode,
+    workspaceRepoUrl: plan.workspace.materialization.mode === "clone" ? plan.workspace.materialization.repoUrl : "",
+    workspaceExistingPath: plan.workspace.materialization.mode === "existing" ? plan.workspace.materialization.existingPath : "",
     workspaceTemplate: plan.workspace.template,
     workspaceModelProfile: plan.workspace.modelProfile,
     workspaceModelId: plan.workspace.modelId ?? "",
@@ -728,9 +728,15 @@ function applyBlueprintDraftToPlan(plan: WorkspacePlan, draft: BlueprintDraft) {
 
   next.workspace.name = nextWorkspaceName;
   next.workspace.directory = normalizeOptionalValue(draft.workspaceDirectory);
-  next.workspace.sourceMode = draft.workspaceSourceMode;
-  next.workspace.repoUrl = normalizeOptionalValue(draft.workspaceRepoUrl);
-  next.workspace.existingPath = normalizeOptionalValue(draft.workspaceExistingPath);
+  const nextRepoUrl = normalizeOptionalValue(draft.workspaceRepoUrl);
+  const nextExistingPath = normalizeOptionalValue(draft.workspaceExistingPath);
+  next.workspace.materialization = draft.workspaceSourceMode === "clone" && nextRepoUrl
+    ? { mode: "clone", repoUrl: nextRepoUrl }
+    : draft.workspaceSourceMode === "existing" && nextExistingPath
+      ? { mode: "existing", existingPath: nextExistingPath }
+      : draft.workspaceSourceMode === "empty"
+        ? { mode: "empty" }
+        : next.workspace.materialization;
   next.workspace.template = draft.workspaceTemplate;
   next.workspace.modelProfile = draft.workspaceModelProfile;
   next.workspace.modelId = normalizeOptionalValue(draft.workspaceModelId);

@@ -489,7 +489,7 @@ export function useWorkspaceWizardDraft({
     const initialProgress = createPendingOperationProgressSnapshot(
       {
         ...buildWorkspaceCreateProgressTemplate({
-          sourceMode: ensuredPlan.workspace.sourceMode,
+          sourceMode: ensuredPlan.workspace.materialization.mode,
           agentCount: buildDefaultWorkspaceAgents(
             ensuredPlan.workspace.template,
             basicTeamPreset,
@@ -646,7 +646,7 @@ export function useWorkspaceWizardDraft({
     setIsDeploying(true);
     const initialProgress = createPendingOperationProgressSnapshot(
       buildPlannerDeployProgressTemplate({
-        sourceMode: activePlan.workspace.sourceMode ?? "empty",
+        sourceMode: activePlan.workspace.materialization.mode,
         agentCount: activePlan.team.persistentAgents.filter((agent) => agent.enabled).length,
         kickoffMission: activePlan.workspace.rules.kickoffMission ?? true,
         hasChannels: Boolean(
@@ -829,12 +829,12 @@ export function useWorkspaceWizardDraft({
           name: result.plan.workspace.name || "Workspace",
           brief: result.plan.company.mission || result.plan.product.offer || undefined,
           template: result.plan.workspace.template,
-          sourceMode: result.plan.workspace.sourceMode,
+          sourceMode: result.plan.workspace.materialization.mode,
           rules: result.plan.workspace.rules,
           agents: result.plan.team.persistentAgents.filter((agent) => agent.enabled),
           docOverrides: result.plan.workspace.docOverrides,
           toolExamples: [],
-          contextSources: result.plan.intake.sources
+          knowledgeSources: result.plan.knowledge.sources
         });
         const rewrittenDocument = rewrittenDocuments.find((entry) => entry.path === trimmedPath);
 

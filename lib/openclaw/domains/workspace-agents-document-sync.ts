@@ -18,7 +18,7 @@ export async function syncWorkspaceAgentsMarkdown(workspacePath: string) {
   const templateLabel = manifest.template
     ? getWorkspaceTemplateMeta(manifest.template).label
     : "Workspace";
-  const sourceMode = manifest.sourceMode ?? "empty";
+  const sourceMode = manifest.materialization?.mode ?? manifest.sourceMode ?? "empty";
   const rules = manifest.rules ?? { workspaceOnly: true };
   const nextTeamSection = renderWorkspaceAgentsTeamSection(manifest.agents);
   const agentsPath = path.join(workspacePath, "AGENTS.md");

@@ -146,12 +146,12 @@ export function WorkspaceWizardDraftPane({
             name: plan.workspace.name || "Workspace",
             brief: plan.company.mission || plan.product.offer || undefined,
             template: plan.workspace.template,
-            sourceMode: plan.workspace.sourceMode,
+            sourceMode: plan.workspace.materialization.mode,
             rules: plan.workspace.rules,
             agents: plan.team.persistentAgents.filter((agent) => agent.enabled),
             docOverrides: plan.workspace.docOverrides,
             toolExamples: [],
-            contextSources: plan.intake.sources
+            knowledgeSources: plan.knowledge.sources
           })
         : [],
     [plan]
@@ -686,7 +686,7 @@ function buildTrackedDraftSnapshot({
             plan.company.targetCustomer,
             plan.workspace.template,
             JSON.stringify(plan.workspace.rules),
-            plan.intake.sources
+            plan.knowledge.sources
               .map((source) => `${source.kind}:${source.status}:${source.label}:${Math.round((source.confidence ?? 0) * 100)}`)
               .join("|"),
             plan.intake.inferences

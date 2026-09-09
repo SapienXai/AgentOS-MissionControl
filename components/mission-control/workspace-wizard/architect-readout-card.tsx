@@ -25,11 +25,11 @@ import {
 } from "@/lib/openclaw/workspace-docs";
 import type { WorkspaceBlueprintEditorFocus } from "@/components/mission-control/workspace-wizard/workspace-wizard-blueprint-editor";
 import type {
-  PlannerContextSource,
   PlannerInference,
   WorkspacePlan,
   WorkspaceTemplate
 } from "@/lib/agentos/contracts";
+import type { WorkspaceKnowledgeSource } from "@/lib/agentos/contracts";
 import { cn } from "@/lib/utils";
 
 export type SurfaceTheme = "dark" | "light";
@@ -39,7 +39,7 @@ const templateLabels = Object.fromEntries(
 ) as Record<WorkspaceTemplate, string>;
 
 const sourceMeta: Record<
-  PlannerContextSource["kind"],
+  WorkspaceKnowledgeSource["kind"],
   {
     label: string;
     icon: LucideIcon;
@@ -53,13 +53,21 @@ const sourceMeta: Record<
     label: "Website",
     icon: Globe
   },
-  repo: {
-    label: "Repo",
+  repository: {
+    label: "Repository",
     icon: GitBranch
   },
   folder: {
     label: "Folder",
     icon: FolderOpen
+  },
+  file: {
+    label: "File",
+    icon: FileText
+  },
+  connector: {
+    label: "Connector",
+    icon: Boxes
   }
 };
 
@@ -95,17 +103,17 @@ export function ArchitectReadoutCard({
   const projectName = plan.company.name || plan.workspace.name || "Workspace";
   const mission = plan.company.mission || plan.product.offer || "Mission still being shaped.";
   const audience = plan.company.targetCustomer || "Audience still being confirmed.";
-  const sourceModeLabel = humanizePlannerValue(plan.workspace.sourceMode);
+  const sourceModeLabel = humanizePlannerValue(plan.workspace.materialization.mode);
   const templateLabel = templateLabels[plan.workspace.template];
   const companyTypeLabel = humanizePlannerValue(plan.company.type);
   const stageLabel = getPlannerStageLabel(plan.stage);
   const statusLabel = plan.status === "blocked" ? "Blocked" : plan.status === "ready" ? "Ready" : plan.status === "deployed" ? "Live" : plan.status === "deploying" ? "Deploying" : "Draft";
   const readoutText = summaryText?.trim() || plan.architectSummary;
-  const primarySource = plan.intake.sources.find((source) => source.status === "ready") ?? plan.intake.sources[0] ?? null;
+  const primarySource = plan.knowledge.sources.find((source) => source.status === "ready") ?? plan.knowledge.sources[0] ?? null;
   const topInferences = plan.intake.inferences.slice(0, 4);
   const fileCount = contextManifest.resources.length;
   const initials = getProjectInitials(projectName);
-  const heroIcon = primarySource ? sourceMeta[primarySource.kind].icon : plan.workspace.sourceMode === "clone" ? GitBranch : plan.workspace.sourceMode === "existing" ? FolderOpen : Sparkles;
+  const heroIcon = primarySource ? sourceMeta[primarySource.kind].icon : plan.workspace.materialization.mode === "clone" ? GitBranch : plan.workspace.materialization.mode === "existing" ? FolderOpen : Sparkles;
   const sourceHeadline = primarySource ? primarySource.label : sourceModeLabel;
   const sourceSubline = primarySource ? `${sourceMeta[primarySource.kind].label} · ${sourceStatusLabel(primarySource.status)}` : sourceModeLabel;
   const statusTone = getPlanStatusTone(plan.status);
@@ -467,7 +475,7 @@ export function ArchitectReadoutCard({
                 <StatChip surfaceTheme={surfaceTheme} label="Template" value={templateLabel} icon={Boxes} revealDelayMs={0} />
                 <StatChip surfaceTheme={surfaceTheme} label="Company" value={companyTypeLabel} icon={Building2} revealDelayMs={110} />
                 <StatChip surfaceTheme={surfaceTheme} label="Stage" value={stageLabel} icon={ChevronRight} revealDelayMs={220} />
-                <StatChip surfaceTheme={surfaceTheme} label="Sources" value={String(plan.intake.sources.length)} icon={Globe} revealDelayMs={330} />
+                <StatChip surfaceTheme={surfaceTheme} label="Sources" value={String(plan.knowledge.sources.length)} icon={Globe} revealDelayMs={330} />
                 <StatChip surfaceTheme={surfaceTheme} label="Files" value={String(fileCount)} icon={FileText} revealDelayMs={440} />
               </>
             )}
@@ -478,14 +486,14 @@ export function ArchitectReadoutCard({
           <section className="space-y-3">
             <SectionHeading
               surfaceTheme={surfaceTheme}
-              title="Evidence"
-              subtitle="What the architect pulled from the prompt, website, repo, or existing folder."
+              title="Declared sources"
+              subtitle="Prompt, website, repository, file, folder, or connector references in this draft."
               revealDelayMs={0}
             />
 
-            {plan.intake.sources.length > 0 ? (
+            {plan.knowledge.sources.length > 0 ? (
               <div className="grid gap-2 md:grid-cols-2">
-                {plan.intake.sources.map((source, index) => (
+                {plan.knowledge.sources.map((source, index) => (
                   <SourceCard
                     key={source.id}
                     surfaceTheme={surfaceTheme}
@@ -857,7 +865,7 @@ function SourceCard({
   delayMs = 0
 }: {
   surfaceTheme: SurfaceTheme;
-  source: PlannerContextSource;
+  source: WorkspaceKnowledgeSource;
   delayMs?: number;
 }) {
   const isLight = surfaceTheme === "light";
@@ -1179,7 +1187,7 @@ function getPlanStatusTone(status: WorkspacePlan["status"]): "muted" | "success"
   }
 }
 
-function sourceStatusLabel(status: PlannerContextSource["status"]) {
+function sourceStatusLabel(status: WorkspaceKnowledgeSource["status"]) {
   return status === "ready" ? "Ready" : "Needs check";
 }
 

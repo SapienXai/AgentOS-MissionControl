@@ -80,11 +80,11 @@ export function getPlannerSectionHealth(plan: WorkspacePlan, sectionId: PlannerS
     case "workspace": {
       let missing = plan.workspace.name.trim() ? 0 : 1;
 
-      if (plan.workspace.sourceMode === "clone" && !plan.workspace.repoUrl?.trim()) {
+      if (plan.workspace.materialization.mode === "clone" && !plan.workspace.materialization.repoUrl.trim()) {
         missing += 1;
       }
 
-      if (plan.workspace.sourceMode === "existing" && !plan.workspace.existingPath?.trim()) {
+      if (plan.workspace.materialization.mode === "existing" && !plan.workspace.materialization.existingPath.trim()) {
         missing += 1;
       }
 
@@ -144,7 +144,7 @@ export function summarizePlannerSection(plan: WorkspacePlan, sectionId: PlannerS
     case "product":
       return plan.product.offer || "Offer and V1 scope are still being drafted.";
     case "workspace":
-      return `${humanizePlannerValue(plan.workspace.template)} · ${humanizePlannerValue(plan.workspace.sourceMode)}`;
+      return `${humanizePlannerValue(plan.workspace.template)} · ${humanizePlannerValue(plan.workspace.materialization.mode)}`;
     case "team":
       return `${plan.team.persistentAgents.filter((agent) => agent.enabled).length} agents drafted`;
     case "operations":

@@ -5,6 +5,18 @@ import {
 } from "@/lib/openclaw/workspace-presets";
 import { normalizeWorkspaceDocOverrides } from "@/lib/openclaw/workspace-docs";
 import { resolveAgentPolicy } from "@/lib/openclaw/agent-presets";
+import {
+  normalizeWorkspaceMaterialization,
+  normalizeWorkspaceMaterializationInput,
+  type WorkspaceMaterialization
+} from "@/lib/agentos/domains/workspace-materialization";
+import {
+  createWorkspaceKnowledgeSource,
+  legacyPlannerContextSourceToKnowledgeSource,
+  normalizeWorkspaceKnowledgeSources,
+  type WorkspaceKnowledgeSource,
+  type WorkspaceKnowledgeSourceKind
+} from "@/lib/agentos/domains/workspace-knowledge";
 import type {
   PlannerAdvisorId,
   PlannerAdvisorNote,
@@ -205,6 +217,47 @@ export function createPlannerContextSource(
   };
 }
 
+export function createPlannerKnowledgeSource(seed: {
+  id?: string;
+  kind: WorkspaceKnowledgeSourceKind | "repo";
+  label: string;
+  summary: string;
+  details?: string[];
+  url?: string;
+  localPath?: string;
+  text?: string;
+  provenance?: "operator" | "wizard" | "planner" | "migration" | "derived";
+  status?: "ready" | "error";
+  createdAt?: string;
+  confidence?: number;
+  error?: string;
+}): WorkspaceKnowledgeSource {
+  const kind = seed.kind === "repo" ? "repository" : seed.kind;
+  const locator = kind === "prompt"
+    ? { kind: "prompt" as const, text: seed.text ?? seed.summary }
+    : kind === "website"
+      ? { kind: "website" as const, url: seed.url ?? seed.summary }
+      : kind === "repository"
+        ? { kind: "repository" as const, ...(seed.url ? { remoteUrl: seed.url } : { localPath: seed.localPath ?? seed.summary }) }
+        : kind === "file" || kind === "folder"
+          ? { kind, path: seed.localPath ?? seed.url ?? seed.summary }
+          : { kind: "connector" as const, provider: seed.label };
+
+  return createWorkspaceKnowledgeSource({
+    id: seed.id ?? createWorkspacePlanId(),
+    kind,
+    label: seed.label,
+    summary: seed.summary,
+    details: seed.details,
+    locator,
+    provenance: seed.provenance ?? "planner",
+    status: seed.status,
+    createdAt: seed.createdAt,
+    confidence: seed.confidence,
+    error: seed.error
+  });
+}
+
 export function createPlannerInference(
   seed: Partial<PlannerInference> & {
     section: PlannerInference["section"];
@@ -348,7 +401,6 @@ export function createPlannerIntakeState(seed?: Partial<PlannerIntakeState>): Pl
     started: Boolean(seed?.started),
     initialPrompt: normalizeText(seed?.initialPrompt ?? ""),
     latestPrompt: normalizeText(seed?.latestPrompt ?? ""),
-    sources: (seed?.sources ?? []).map((source) => createPlannerContextSource(source)),
     confirmations: normalizeList(seed?.confirmations)
       .map((entry) => entry.trim())
       .filter(Boolean)
@@ -870,6 +922,9 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
     architectSummary: "",
     runtime: createPlannerRuntimeState(id),
     intake: createPlannerIntakeState(),
+    knowledge: {
+      sources: []
+    },
     company: {
       name: "",
       type: "saas",
@@ -887,7 +942,7 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
     },
     workspace: {
       name: "",
-      sourceMode: "empty",
+      materialization: { mode: "empty" },
       template,
       modelProfile: "balanced",
       stackDecisions: [],
@@ -938,6 +993,61 @@ export function createInitialWorkspacePlan(id = createWorkspacePlanId()): Worksp
   return enrichWorkspacePlan(basePlan);
 }
 
+/** Normalize persisted V1 planner plans into the V2 domain without writing them back. */
+export function normalizeWorkspacePlan(value: unknown): WorkspacePlan {
+  const raw = isRecord(value) ? value : {};
+  const id = typeof raw.id === "string" && raw.id.trim() ? raw.id : createWorkspacePlanId();
+  const base = createInitialWorkspacePlan(id);
+  const rawIntake = isRecord(raw.intake) ? raw.intake : {};
+  const rawWorkspace = isRecord(raw.workspace) ? raw.workspace : {};
+  const legacySources = Array.isArray(rawIntake.sources)
+    ? rawIntake.sources.map((source) => legacyPlannerContextSourceToKnowledgeSource(source))
+    : [];
+  const knowledgeRaw = isRecord(raw.knowledge) ? raw.knowledge : {};
+  const knowledgeSources = Array.isArray(knowledgeRaw.sources)
+    ? normalizeWorkspaceKnowledgeSources(knowledgeRaw.sources)
+    : legacySources;
+  const materialization = normalizeWorkspaceMaterializationInput({
+    ...(Object.prototype.hasOwnProperty.call(rawWorkspace, "materialization")
+      ? { materialization: rawWorkspace.materialization }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(rawWorkspace, "sourceMode")
+      ? { sourceMode: rawWorkspace.sourceMode as WorkspacePlan["workspace"]["materialization"]["mode"] }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(rawWorkspace, "repoUrl") ? { repoUrl: rawWorkspace.repoUrl as string } : {}),
+    ...(Object.prototype.hasOwnProperty.call(rawWorkspace, "existingPath") ? { existingPath: rawWorkspace.existingPath as string } : {}),
+    ...(Object.prototype.hasOwnProperty.call(rawWorkspace, "directory") ? { directory: rawWorkspace.directory as string } : {})
+  });
+
+  const normalized = {
+    ...base,
+    ...raw,
+    id,
+    intake: {
+      ...base.intake,
+      ...rawIntake
+    },
+    knowledge: {
+      sources: knowledgeSources
+    },
+    workspace: {
+      ...base.workspace,
+      ...rawWorkspace,
+      materialization
+    }
+  } as WorkspacePlan;
+
+  delete (normalized.intake as PlannerIntakeState & { sources?: unknown }).sources;
+  delete (normalized.workspace as WorkspacePlan["workspace"] & { sourceMode?: unknown; repoUrl?: unknown; existingPath?: unknown }).sourceMode;
+  delete (normalized.workspace as WorkspacePlan["workspace"] & { sourceMode?: unknown; repoUrl?: unknown; existingPath?: unknown }).repoUrl;
+  delete (normalized.workspace as WorkspacePlan["workspace"] & { sourceMode?: unknown; repoUrl?: unknown; existingPath?: unknown }).existingPath;
+  return enrichWorkspacePlan(normalized);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export function applyPlannerTemplate(plan: WorkspacePlan, template: WorkspaceTemplate) {
   const nextPlan = clonePlan(plan);
   const recommendedAgents = buildRecommendedPlannerAgents(template, nextPlan.workspace.name);
@@ -960,7 +1070,35 @@ export function applyPlannerTemplate(plan: WorkspacePlan, template: WorkspaceTem
 
 export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
   let nextPlan = clonePlan(plan);
-  const isWorkspaceEditDraft = nextPlan.intake.sources.some((source) => source.id === workspaceEditSourceId);
+  const rawPlan = plan as WorkspacePlan & {
+    knowledge?: { sources?: unknown[] };
+    intake?: PlannerIntakeState & { sources?: unknown[] };
+    workspace?: WorkspacePlan["workspace"] & {
+      materialization?: unknown;
+      sourceMode?: "empty" | "clone" | "existing";
+      repoUrl?: string;
+      existingPath?: string;
+    };
+  };
+  const rawWorkspace = rawPlan.workspace ?? ({} as NonNullable<typeof rawPlan.workspace>);
+  const legacySources = Array.isArray(rawPlan.intake?.sources)
+    ? rawPlan.intake.sources.map((source) => legacyPlannerContextSourceToKnowledgeSource(source))
+    : [];
+  if (!rawPlan.knowledge) {
+    nextPlan.knowledge = { sources: legacySources };
+  }
+  if (!rawWorkspace.materialization) {
+    nextPlan.workspace.materialization = normalizeWorkspaceMaterializationInput({
+      ...(rawWorkspace.sourceMode !== undefined ? { sourceMode: rawWorkspace.sourceMode } : {}),
+      ...(rawWorkspace.repoUrl !== undefined ? { repoUrl: rawWorkspace.repoUrl } : {}),
+      ...(rawWorkspace.existingPath !== undefined ? { existingPath: rawWorkspace.existingPath } : {}),
+      ...(rawWorkspace.directory !== undefined ? { directory: rawWorkspace.directory } : {})
+    });
+  }
+  nextPlan.knowledge = {
+    sources: normalizeWorkspaceKnowledgeSources(nextPlan.knowledge?.sources ?? [])
+  };
+  const isWorkspaceEditDraft = nextPlan.knowledge.sources.some((source) => source.id === workspaceEditSourceId);
   nextPlan.runtime = createPlannerRuntimeState(nextPlan.id, nextPlan.runtime);
 
   nextPlan.intake = createPlannerIntakeState({
@@ -984,8 +1122,7 @@ export function enrichWorkspacePlan(plan: WorkspacePlan): WorkspacePlan {
 
   nextPlan.workspace.name = normalizeText(nextPlan.workspace.name);
   nextPlan.workspace.directory = normalizeOptional(nextPlan.workspace.directory);
-  nextPlan.workspace.repoUrl = normalizeOptional(nextPlan.workspace.repoUrl);
-  nextPlan.workspace.existingPath = normalizeOptional(nextPlan.workspace.existingPath);
+  nextPlan.workspace.materialization = normalizeWorkspaceMaterialization(nextPlan.workspace.materialization);
   nextPlan.workspace.stackDecisions = normalizeList(nextPlan.workspace.stackDecisions);
   nextPlan.workspace.docs = uniqueStrings(
     normalizeList(nextPlan.workspace.docs).concat(
@@ -1155,16 +1292,31 @@ export function applyPlannerInput(plan: WorkspacePlan, message: string) {
   }
 
   if (repoUrl) {
-    nextPlan.workspace.sourceMode = "clone";
-    nextPlan.workspace.repoUrl = repoUrl;
+    nextPlan.workspace.materialization = { mode: "clone", repoUrl };
+    nextPlan.knowledge.sources = normalizeWorkspaceKnowledgeSources([
+      ...nextPlan.knowledge.sources,
+      createPlannerKnowledgeSource({
+        id: `planner-repository-${repoUrl}`,
+        kind: "repository",
+        label: "Repository",
+        summary: repoUrl,
+        url: repoUrl,
+        provenance: "planner"
+      })
+    ]);
   }
 
   if (/\b(existing folder|existing workspace|existing repo|mevcut klas[oö]r|mevcut workspace|mevcut repo)\b/.test(lower)) {
-    nextPlan.workspace.sourceMode = "existing";
+    if (nextPlan.workspace.directory) {
+      nextPlan.workspace.materialization = {
+        mode: "existing",
+        existingPath: nextPlan.workspace.directory
+      };
+    }
   }
 
   if (/\b(empty workspace|from scratch|greenfield|s[ıi]f[ıi]rdan|bo[sş] workspace|bo[sş] proje)\b/.test(lower)) {
-    nextPlan.workspace.sourceMode = "empty";
+    nextPlan.workspace.materialization = { mode: "empty" };
   }
 
   const template = detectTemplateFromText(lower);
@@ -1331,7 +1483,7 @@ export async function synthesizePlannerAdvisors(plan: WorkspacePlan) {
           : "Agent ownership and workflow design still need alignment.",
       recommendations: [
         `Workspace template: ${prettify(plan.workspace.template)}`,
-        `Source mode: ${plan.workspace.sourceMode}`,
+        `Materialization: ${plan.workspace.materialization.mode}`,
         plan.workspace.stackDecisions.length > 0
           ? `Stack decisions: ${plan.workspace.stackDecisions.join(", ")}`
           : "Add the critical stack or platform decisions."
@@ -1427,8 +1579,8 @@ export function createArchitectReply(
   const topInferences = plan.intake.inferences
     .slice(0, isDialogueFirstTurn ? 3 : 4)
     .map((entry) => `${entry.label}: ${entry.value}`);
-  const sourceReadout = plan.intake.sources
-    .slice(Math.max(0, plan.intake.sources.length - 2))
+  const sourceReadout = plan.knowledge.sources
+    .slice(Math.max(0, plan.knowledge.sources.length - 2))
     .map((source) => `${source.label} (${source.status === "ready" ? source.kind : `${source.kind}, needs confirmation`})`);
   const topRecommendations = advisorNotes
     .flatMap((note) => note.recommendations.slice(0, 1))
@@ -1554,11 +1706,11 @@ function buildArchitectSummary(
   if (!reviewMode && isDialogueFirstTurn) {
     const focus = plan.company.mission || plan.product.offer || plan.company.name || plan.workspace.name;
     const sourceDescription =
-      plan.workspace.sourceMode === "clone"
+      plan.workspace.materialization.mode === "clone"
         ? language === "tr"
           ? "klon repo"
           : "a cloned repo"
-        : plan.workspace.sourceMode === "existing"
+        : plan.workspace.materialization.mode === "existing"
           ? language === "tr"
             ? "mevcut klasör"
             : "an existing folder"
@@ -1592,8 +1744,8 @@ function buildArchitectSummary(
           plan.company.targetCustomer
             ? `Kitle: ${plan.company.targetCustomer}.`
             : "Kitle açık.",
-          plan.intake.sources.length > 0
-            ? `${plan.intake.sources.length} kaynak topladım.`
+          plan.knowledge.sources.length > 0
+            ? `${plan.knowledge.sources.length} kaynak topladım.`
             : "URL, repo ya da kısa brief yeterli.",
           `${enabledAgents} agent, ${enabledWorkflows} görev, ${enabledAutomations} automation.`,
           confirmations > 0
@@ -1607,8 +1759,8 @@ function buildArchitectSummary(
           plan.company.targetCustomer
             ? `Audience: ${plan.company.targetCustomer}.`
             : "Audience open.",
-          plan.intake.sources.length > 0
-            ? `I have ${plan.intake.sources.length} source${plan.intake.sources.length === 1 ? "" : "s"}.`
+          plan.knowledge.sources.length > 0
+            ? `I have ${plan.knowledge.sources.length} source${plan.knowledge.sources.length === 1 ? "" : "s"}.`
             : "Add a URL, repo, or short brief.",
           `${enabledAgents} agents, ${enabledWorkflows} workflows, ${enabledAutomations} automations.`,
           confirmations > 0
@@ -1664,7 +1816,7 @@ function resolvePlanStage(
   }
 
   if (!reviewMode && isPlannerDialogueFirstTurn(plan)) {
-    return plan.intake.sources.length > 0 ? "context-harvest" : "intake";
+    return plan.knowledge.sources.length > 0 ? "context-harvest" : "intake";
   }
 
   if (plan.status === "deploying") {
@@ -1745,7 +1897,7 @@ function calculateReadinessScore(
   if (plan.product.offer) score += 10;
   if (plan.product.scopeV1.length > 0) score += 10;
   if (plan.workspace.name) score += 10;
-  if (plan.intake.sources.length > 0) score += 6;
+  if (plan.knowledge.sources.length > 0) score += 6;
   if (plan.team.persistentAgents.some((agent) => agent.enabled && agent.isPrimary)) score += 10;
   if (plan.operations.workflows.some((workflow) => workflow.enabled)) score += 10;
   if (plan.operations.automations.some((automation) => automation.enabled)) score += 5;
@@ -1769,7 +1921,7 @@ function hasPlannerDirection(plan: WorkspacePlan) {
     plan.company.mission ||
       plan.product.offer ||
       plan.workspace.name ||
-      plan.intake.sources.length > 0
+      plan.knowledge.sources.length > 0
   );
 }
 
@@ -1801,11 +1953,11 @@ function collectPlanBlockers(plan: WorkspacePlan) {
     blockers.push("Workspace name is missing.");
   }
 
-  if (plan.workspace.sourceMode === "clone" && !plan.workspace.repoUrl) {
+  if (plan.workspace.materialization.mode === "clone" && !plan.workspace.materialization.repoUrl) {
     blockers.push("Clone mode needs a repository URL.");
   }
 
-  if (plan.workspace.sourceMode === "existing" && !plan.workspace.existingPath) {
+  if (plan.workspace.materialization.mode === "existing" && !plan.workspace.materialization.existingPath) {
     blockers.push("Existing-folder mode needs a folder path.");
   }
 
@@ -1894,7 +2046,7 @@ function isPlannerDialogueFirstTurn(plan: WorkspacePlan) {
 }
 
 function getPlannerLowConfidenceWebsiteSource(plan: WorkspacePlan) {
-  return plan.intake.sources.find(
+  return plan.knowledge.sources.find(
     (source) =>
       source.kind === "website" &&
       source.status === "ready" &&
@@ -1908,7 +2060,7 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
   const confirmations: string[] = [];
   const sizeProfile = getPlannerWorkspaceSizeProfile(plan.intake.size);
 
-  for (const source of plan.intake.sources.filter((entry) => entry.status === "error")) {
+  for (const source of plan.knowledge.sources.filter((entry) => entry.status === "error")) {
     confirmations.push(
       resolvePlannerReplyLanguage(plan) === "tr"
         ? `${source.label} kaynağını inceleyemedim. Bu kaynak önemliyse şirket bağlamını manuel olarak doğrula.`
@@ -1921,7 +2073,7 @@ function buildPlannerConfirmations(plan: WorkspacePlan) {
 
 function buildPlannerInferences(plan: WorkspacePlan) {
   const inferences: PlannerInference[] = [];
-  const sourceLabels = plan.intake.sources
+  const sourceLabels = plan.knowledge.sources
     .filter((source) => source.status === "ready")
     .map((source) => source.label);
   const confirmationText = plan.intake.confirmations.join(" ").toLowerCase();
@@ -1985,10 +2137,10 @@ function buildPlannerInferences(plan: WorkspacePlan) {
       section: "workspace",
       label: "Starting point",
       value:
-        plan.workspace.sourceMode === "clone"
-          ? plan.workspace.repoUrl || "Clone an existing repository"
-          : plan.workspace.sourceMode === "existing"
-            ? plan.workspace.existingPath || "Attach an existing folder"
+        plan.workspace.materialization.mode === "clone"
+          ? plan.workspace.materialization.repoUrl
+          : plan.workspace.materialization.mode === "existing"
+            ? plan.workspace.materialization.existingPath
             : "Start from scratch",
       confidence: estimateInferenceConfidence(plan, "source-mode"),
       status: resolveInferenceStatus(confirmationText, "start"),
@@ -2112,8 +2264,7 @@ function buildPlannerSuggestedReplies(plan: WorkspacePlan, confirmations: string
   }
 
   if (
-    !plan.workspace.repoUrl &&
-    !plan.workspace.existingPath &&
+    plan.workspace.materialization.mode === "empty" &&
     !mentionsSourceMode(plan.intake.latestPrompt || plan.intake.initialPrompt)
   ) {
     suggestions.push(
@@ -2236,7 +2387,7 @@ function localizePlannerPrompt(value: string, language: "en" | "tr") {
 }
 
 function getPlannerReadySourceText(plan: WorkspacePlan) {
-  return plan.intake.sources
+  return plan.knowledge.sources
     .filter((source) => source.status === "ready")
     .flatMap((source) => [source.label, source.summary, ...source.details])
     .join(" ")
@@ -2291,7 +2442,7 @@ function mentionsSourceMode(text: string) {
 
 function estimateInferenceConfidence(plan: WorkspacePlan, kind: string) {
   const prompt = `${plan.intake.initialPrompt} ${plan.intake.latestPrompt}`.toLowerCase();
-  const readySources = plan.intake.sources.filter((source) => source.status === "ready");
+  const readySources = plan.knowledge.sources.filter((source) => source.status === "ready");
   let score = 66;
 
   if (readySources.length > 0) {
@@ -2715,12 +2866,12 @@ function summarizePlannerChanges(previousPlan: WorkspacePlan | undefined, plan: 
     changes.push(`Core offer is ${plan.product.offer}.`);
   }
 
-  if (previousPlan.workspace.sourceMode !== plan.workspace.sourceMode) {
-    changes.push(`Starting point is ${describeSourceMode(plan.workspace.sourceMode)}.`);
+  if (previousPlan.workspace.materialization.mode !== plan.workspace.materialization.mode) {
+    changes.push(`Starting point is ${describeSourceMode(plan.workspace.materialization.mode)}.`);
   }
 
-  if (previousPlan.intake.sources.length !== plan.intake.sources.length) {
-    const delta = plan.intake.sources.length - previousPlan.intake.sources.length;
+  if (previousPlan.knowledge.sources.length !== plan.knowledge.sources.length) {
+    const delta = plan.knowledge.sources.length - previousPlan.knowledge.sources.length;
     if (delta > 0) {
       changes.push(`Added ${delta} new context source${delta === 1 ? "" : "s"}.`);
     }
@@ -2729,7 +2880,7 @@ function summarizePlannerChanges(previousPlan: WorkspacePlan | undefined, plan: 
   return changes;
 }
 
-function describeSourceMode(sourceMode: WorkspacePlan["workspace"]["sourceMode"]) {
+function describeSourceMode(sourceMode: WorkspaceMaterialization["mode"]) {
   if (sourceMode === "clone") {
     return "clone an existing repository";
   }

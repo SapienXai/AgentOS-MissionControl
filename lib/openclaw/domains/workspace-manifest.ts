@@ -13,6 +13,17 @@ import {
   isAgentNetworkAccess,
   isAgentPreset
 } from "@/lib/openclaw/agent-presets";
+import {
+  legacyWorkspaceMaterializationFromFields,
+  materializationToLegacyWorkspaceFields,
+  normalizeWorkspaceMaterialization,
+  type WorkspaceMaterialization
+} from "@/lib/agentos/domains/workspace-materialization";
+import {
+  legacyPlannerContextSourceToKnowledgeSource,
+  normalizeWorkspaceKnowledgeSources,
+  type WorkspaceKnowledgeSource
+} from "@/lib/agentos/domains/workspace-knowledge";
 import { DEFAULT_WORKSPACE_RULES } from "@/lib/openclaw/workspace-presets";
 import type {
   AgentPolicy,
@@ -48,9 +59,13 @@ export type WorkspaceProjectManifestAgent = {
 };
 
 export type WorkspaceProjectManifest = {
+  version: 2;
   name: string | null;
   directory: string | null;
   template: WorkspaceTemplate | null;
+  materialization: WorkspaceMaterialization | null;
+  knowledgeSources: WorkspaceKnowledgeSource[];
+  /** Deprecated projections retained only for older read consumers. */
   sourceMode: WorkspaceSourceMode | null;
   agentTemplate: string | null;
   teamPreset: WorkspaceTeamPreset | null;
@@ -94,51 +109,131 @@ export async function readWorkspaceProjectManifest(
   try {
     const raw = await readFile(projectFilePath, "utf8");
     const candidate = JSON.parse(raw);
-    const parsed = isObjectRecord(candidate) ? candidate : {};
-    const agents = Array.isArray(parsed.agents)
-      ? parsed.agents
-          .map((entry) => parseWorkspaceProjectManifestAgent(entry))
-          .filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
-      : [];
-    const channels = Array.isArray(parsed.channels)
-      ? parsed.channels
-          .map((entry) => parseWorkspaceProjectManifestChannel(entry))
-          .filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
-      : [];
-    const rules = parseWorkspaceCreateRules(parsed.rules);
-
-    return {
-      name: typeof parsed.name === "string" ? parsed.name : null,
-      directory: typeof parsed.directory === "string" ? parsed.directory : null,
-      template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
-      sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null,
-      agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
-      teamPreset: isWorkspaceTeamPreset(parsed.teamPreset) ? parsed.teamPreset : null,
-      modelProfile: isWorkspaceModelProfile(parsed.modelProfile) ? parsed.modelProfile : null,
-      rules,
-      hidden: parsed.hidden === true,
-      systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
-      contextSources: parseWorkspaceProjectManifestContextSources(parsed.contextSources),
-      agents,
-      channels
-    };
+    return normalizeWorkspaceProjectManifestRecord(isObjectRecord(candidate) ? candidate : {});
   } catch {
-    return {
-      name: null,
-      directory: null,
-      template: null,
-      sourceMode: null,
-      agentTemplate: null,
-      teamPreset: null,
-      modelProfile: null,
-      rules: null,
-      hidden: false,
-      systemTag: null,
-      contextSources: [],
+    return normalizeWorkspaceProjectManifestRecord({
+      version: 2,
+      materialization: null,
+      knowledgeSources: [],
       agents: [],
       channels: []
-    };
+    });
   }
+}
+
+/** Read V1 and V2 without rewriting the project file. */
+export function normalizeWorkspaceProjectManifestRecord(value: unknown): WorkspaceProjectManifest {
+  const parsed = isObjectRecord(value) ? value : {};
+  let materialization: WorkspaceMaterialization | null = null;
+
+  try {
+    if (parsed.materialization !== undefined && parsed.materialization !== null) {
+      materialization = normalizeWorkspaceMaterialization(parsed.materialization);
+    } else if (parsed.materialization === undefined && (parsed.sourceMode !== undefined || parsed.repoUrl !== undefined || parsed.existingPath !== undefined)) {
+      materialization = legacyWorkspaceMaterializationFromFields({
+        sourceMode: isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : undefined,
+        repoUrl: typeof parsed.repoUrl === "string" ? parsed.repoUrl : undefined,
+        existingPath: typeof parsed.existingPath === "string" ? parsed.existingPath : undefined,
+        directory: typeof parsed.directory === "string" ? parsed.directory : undefined
+      });
+    }
+  } catch {
+    materialization = null;
+  }
+
+  const legacySources = parseWorkspaceProjectManifestContextSources(parsed.contextSources);
+  let knowledgeSources: WorkspaceKnowledgeSource[] = [];
+  try {
+    knowledgeSources = Array.isArray(parsed.knowledgeSources)
+      ? normalizeWorkspaceKnowledgeSources(parsed.knowledgeSources)
+      : legacySources.map((source) => legacyPlannerContextSourceToKnowledgeSource(source));
+  } catch {
+    knowledgeSources = [];
+  }
+  const legacyMaterialization = materialization
+    ? materializationToLegacyWorkspaceFields(materialization)
+    : { sourceMode: null, repoUrl: undefined, existingPath: undefined };
+  const agents = Array.isArray(parsed.agents)
+    ? parsed.agents.map((entry) => parseWorkspaceProjectManifestAgent(entry)).filter((entry): entry is WorkspaceProjectManifestAgent => Boolean(entry))
+    : [];
+  const channels = Array.isArray(parsed.channels)
+    ? parsed.channels.map((entry) => parseWorkspaceProjectManifestChannel(entry)).filter((entry): entry is WorkspaceChannelSummary => Boolean(entry))
+    : [];
+
+  return {
+    version: 2,
+    name: typeof parsed.name === "string" ? parsed.name : null,
+    directory: typeof parsed.directory === "string" ? parsed.directory : null,
+    template: isWorkspaceTemplate(parsed.template) ? parsed.template : null,
+    materialization,
+    knowledgeSources,
+    sourceMode: legacyMaterialization.sourceMode ?? (isWorkspaceSourceMode(parsed.sourceMode) ? parsed.sourceMode : null),
+    agentTemplate: typeof parsed.agentTemplate === "string" ? parsed.agentTemplate : null,
+    teamPreset: isWorkspaceTeamPreset(parsed.teamPreset) ? parsed.teamPreset : null,
+    modelProfile: isWorkspaceModelProfile(parsed.modelProfile) ? parsed.modelProfile : null,
+    rules: parseWorkspaceCreateRules(parsed.rules),
+    hidden: parsed.hidden === true,
+    systemTag: typeof parsed.systemTag === "string" ? parsed.systemTag : null,
+    contextSources: knowledgeSources.map((source) => knowledgeSourceToLegacyPlannerContextSource(source)),
+    agents,
+    channels: channels
+  };
+}
+
+/** Serialize canonical V2 metadata while preserving unrelated and unknown fields. */
+export function serializeWorkspaceProjectManifestRecord(
+  value: unknown,
+  updates: {
+    materialization?: WorkspaceMaterialization | null;
+    knowledgeSources?: WorkspaceKnowledgeSource[];
+    [key: string]: unknown;
+  } = {}
+) {
+  const existing = isObjectRecord(value) ? { ...value } : {};
+  const normalized = normalizeWorkspaceProjectManifestRecord(existing);
+  const next: Record<string, unknown> = {
+    ...existing,
+    version: 2,
+    materialization: updates.materialization !== undefined
+      ? (updates.materialization === null ? null : normalizeWorkspaceMaterialization(updates.materialization))
+      : normalized.materialization ?? { mode: "empty" },
+    knowledgeSources: updates.knowledgeSources !== undefined ? normalizeWorkspaceKnowledgeSources(updates.knowledgeSources) : normalized.knowledgeSources
+  };
+
+  delete next.sourceMode;
+  delete next.repoUrl;
+  delete next.existingPath;
+  delete next.contextSources;
+
+  for (const [key, update] of Object.entries(updates)) {
+    if (key !== "materialization" && key !== "knowledgeSources" && update !== undefined) {
+      next[key] = update;
+    }
+  }
+
+  return next;
+}
+
+function knowledgeSourceToLegacyPlannerContextSource(source: WorkspaceKnowledgeSource): PlannerContextSource {
+  const url = source.locator.kind === "website"
+    ? source.locator.url
+    : source.locator.kind === "repository"
+      ? source.locator.remoteUrl ?? source.locator.localPath
+      : source.locator.kind === "file" || source.locator.kind === "folder"
+        ? source.locator.path
+        : undefined;
+  return {
+    id: source.id,
+    kind: source.kind === "repository" ? "repo" : source.kind === "file" || source.kind === "connector" ? "prompt" : source.kind,
+    label: source.label,
+    summary: source.summary,
+    details: source.details,
+    status: source.status,
+    createdAt: source.createdAt,
+    ...(source.confidence !== undefined ? { confidence: source.confidence } : {}),
+    ...(url ? { url } : {}),
+    ...(source.error ? { error: source.error } : {})
+  };
 }
 
 /**
@@ -199,8 +294,11 @@ export async function updateWorkspaceProjectManifestAgentProfile(
       );
 
   agent.workerProfile = workerProfile;
-  parsed.updatedAt = new Date().toISOString();
-  await writeFile(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+  const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+    updatedAt: new Date().toISOString(),
+    agents: parsed.agents
+  });
+  await writeFile(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`, "utf8");
 
   return readWorkspaceProjectManifest(workspacePath);
 }
@@ -249,10 +347,12 @@ export async function reconcileWorkspaceProjectManifestAgents(
       };
     }
 
-    parsed.updatedAt = new Date().toISOString();
-    parsed.agents = nextAgents;
+    const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+      updatedAt: new Date().toISOString(),
+      agents: nextAgents
+    });
 
-    await writeFile(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    await writeFile(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`, "utf8");
     await Promise.all(
       staleAgentIds.map((agentId) =>
         rm(path.join(workspacePath, "skills", buildAgentPolicySkillDirectoryName(agentId)), {

@@ -5,7 +5,7 @@ import { readWorkspaceEditSeed } from "@/lib/agentos/control-plane";
 import type { WorkspaceEditSeed } from "@/lib/agentos/contracts";
 import {
   createPlannerAgentSpec,
-  createPlannerContextSource,
+  createPlannerKnowledgeSource,
   createPlannerMessage,
   enrichWorkspacePlan,
   buildRecommendedPlannerAgents,
@@ -50,11 +50,13 @@ export async function createWorkspaceEditDraft(workspaceId: string): Promise<{
     name: seed.name,
     brief: seed.brief,
     template: seed.template,
-    sourceMode: seed.sourceMode,
+    sourceMode: seed.materialization.mode,
+    materialization: seed.materialization,
     rules: seed.rules,
     agents: seed.agents,
     docOverrides: seed.docOverrides,
-    toolExamples: []
+    toolExamples: [],
+    knowledgeSources: seed.knowledgeSources
   });
   const channels = buildRecommendedPlannerChannels();
   const plan = enrichWorkspacePlan({
@@ -75,12 +77,10 @@ export async function createWorkspaceEditDraft(workspaceId: string): Promise<{
       ...basePlan.workspace,
       name: seed.name,
       directory: seed.directory,
-      sourceMode: seed.sourceMode,
+      materialization: seed.materialization,
       template: seed.template,
       modelProfile: seed.modelProfile,
       modelId: seed.modelId,
-      repoUrl: seed.repoUrl,
-      existingPath: seed.existingPath,
       docs: editableDocuments.map((document) => document.path),
       docOverrides: seed.docOverrides,
       rules: seed.rules
@@ -103,22 +103,26 @@ export async function createWorkspaceEditDraft(workspaceId: string): Promise<{
       ...basePlan.deploy,
       firstMissions: []
     },
+    knowledge: {
+      sources: [
+        ...seed.knowledgeSources,
+        createPlannerKnowledgeSource({
+          id: "workspace-edit-source",
+          kind: "folder",
+          label: "Existing workspace",
+          summary: seed.directory,
+          details: [seed.directory],
+          localPath: seed.directory,
+          provenance: "derived"
+        })
+      ]
+    },
     intake: {
       ...basePlan.intake,
       size: editWorkspaceSize,
       started: true,
       initialPrompt: seed.brief,
       latestPrompt: seed.brief,
-      sources: [
-        createPlannerContextSource({
-          id: "workspace-edit-source",
-          kind: "folder",
-          label: "Existing workspace",
-          summary: seed.directory,
-          details: [seed.directory],
-          url: seed.directory
-        })
-      ]
     },
     conversation: [
       createPlannerMessage(

@@ -5,6 +5,21 @@ import type {
   AgentOSWorkerProfile,
   AgentOSWorkerProfileInput
 } from "@/lib/agentos/worker-profile";
+import type { WorkspaceMaterialization } from "@/lib/agentos/domains/workspace-materialization";
+import type {
+  WorkspaceKnowledgeSource,
+  WorkspaceKnowledgeSourceKind,
+  WorkspaceKnowledgeSourceProvenance,
+  WorkspaceKnowledgeSourceStatus
+} from "@/lib/agentos/domains/workspace-knowledge";
+
+export type {
+  WorkspaceMaterialization,
+  WorkspaceKnowledgeSource,
+  WorkspaceKnowledgeSourceKind,
+  WorkspaceKnowledgeSourceProvenance,
+  WorkspaceKnowledgeSourceStatus
+};
 
 export type DiagnosticHealth = "healthy" | "degraded" | "offline";
 export type OpenClawBinarySelectionMode = "auto" | "local-prefix" | "global-path" | "custom";
@@ -2110,6 +2125,8 @@ export interface WorkspaceCreateInput {
   directory?: string;
   modelId?: string;
   thinking?: OpenClawThinkingLevel;
+  /** Canonical physical materialization. Legacy source fields remain API-compatible. */
+  materialization?: WorkspaceMaterialization;
   sourceMode?: WorkspaceSourceMode;
   repoUrl?: string;
   existingPath?: string;
@@ -2119,6 +2136,8 @@ export interface WorkspaceCreateInput {
   rules?: Partial<WorkspaceCreateRules>;
   docOverrides?: WorkspaceDocOverride[];
   agents?: WorkspaceAgentBlueprintInput[];
+  /** Canonical declared/reference knowledge sources. Never contains credentials. */
+  knowledgeSources?: WorkspaceKnowledgeSource[];
   contextSources?: PlannerContextSource[];
   creation?: WorkspaceCreationContext;
 }
@@ -2137,6 +2156,7 @@ export interface WorkspaceEditSeed {
   name: string;
   directory: string;
   template: WorkspaceTemplate;
+  materialization: WorkspaceMaterialization;
   sourceMode: WorkspaceSourceMode;
   teamPreset: WorkspaceTeamPreset;
   modelProfile: WorkspaceModelProfile;
@@ -2147,6 +2167,7 @@ export interface WorkspaceEditSeed {
   docOverrides: WorkspaceDocOverride[];
   agents: WorkspaceAgentBlueprintInput[];
   brief: string;
+  knowledgeSources: WorkspaceKnowledgeSource[];
   contextSources?: PlannerContextSource[];
 }
 
@@ -2323,7 +2344,6 @@ export interface PlannerIntakeState {
   started: boolean;
   initialPrompt: string;
   latestPrompt: string;
-  sources: PlannerContextSource[];
   confirmations: string[];
   mode: PlannerExperienceMode;
   size: PlannerWorkspaceSize;
@@ -2428,6 +2448,9 @@ export interface WorkspacePlan {
   architectSummary: string;
   runtime: PlannerRuntimeState;
   intake: PlannerIntakeState;
+  knowledge: {
+    sources: WorkspaceKnowledgeSource[];
+  };
   company: {
     name: string;
     type: PlannerCompanyType;
@@ -2446,9 +2469,7 @@ export interface WorkspacePlan {
   workspace: {
     name: string;
     directory?: string;
-    sourceMode: WorkspaceSourceMode;
-    repoUrl?: string;
-    existingPath?: string;
+    materialization: WorkspaceMaterialization;
     template: WorkspaceTemplate;
     modelProfile: WorkspaceModelProfile;
     modelId?: string;

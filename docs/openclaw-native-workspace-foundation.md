@@ -43,13 +43,19 @@ Primary upstream references:
 
 The single registry is `lib/openclaw/workspace-bootstrap-files.ts`.
 
-Current persistent context is:
+The registry now records requirement and lifecycle separately, matching the
+OpenClaw 2026.9.3 contract:
 
-- `AGENTS.md`
-- `SOUL.md`
-- `IDENTITY.md`
-- optional `USER.md`
-- optional curated `MEMORY.md`
+- required persistent `AGENTS.md`
+- optional persistent `SOUL.md`, `IDENTITY.md`, `USER.md`, and curated `MEMORY.md`
+- optional `BOOT.md` hook
+- first-run-required `BOOTSTRAP.md`
+
+OpenClaw's `skipOptionalBootstrapFiles` applies to the optional persona/user
+files while required `AGENTS.md` and first-run `BOOTSTRAP.md` retain their
+distinct semantics. This distinction is represented in
+`lib/openclaw/workspace-bootstrap-files.ts`; the former single `optional`
+boolean is no longer used.
 
 `BOOTSTRAP.md` is a first-run lifecycle artifact owned by OpenClaw. AgentOS
 does not generate it, recreate it after removal, or treat it as a permanent

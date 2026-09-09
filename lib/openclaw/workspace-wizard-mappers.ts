@@ -1,5 +1,5 @@
 import {
-  createPlannerContextSource,
+  createPlannerKnowledgeSource,
   createPlannerMessage,
   enrichWorkspacePlan
 } from "@/lib/openclaw/planner-core";
@@ -93,22 +93,24 @@ export function applyBasicInputToWorkspacePlan(
   }
 
   next.workspace.name = resolvedName;
-  next.workspace.sourceMode = sourceAnalysis.createSourceMode;
-  next.workspace.repoUrl = sourceAnalysis.repoUrl;
-  next.workspace.existingPath = sourceAnalysis.existingPath;
+  next.workspace.materialization = sourceAnalysis.createSourceMode === "clone" && sourceAnalysis.repoUrl
+    ? { mode: "clone", repoUrl: sourceAnalysis.repoUrl }
+    : sourceAnalysis.createSourceMode === "existing" && sourceAnalysis.existingPath
+      ? { mode: "existing", existingPath: sourceAnalysis.existingPath }
+      : { mode: "empty" };
   next.workspace.template = shapeOverride?.template ?? inferWorkspaceWizardTemplate(`${goal}\n${draft.source}`);
   next.workspace.modelProfile = shapeOverride?.modelProfile ?? next.workspace.modelProfile ?? "balanced";
   next.workspace.rules = normalizeWorkspaceWizardQuickCreateRules(rulesOverride ?? next.workspace.rules);
 
-  next.intake.sources = next.intake.sources.filter((source) => source.id !== basicSourceId);
+  next.knowledge.sources = next.knowledge.sources.filter((source) => source.id !== basicSourceId);
 
   if (sourceAnalysis.kind !== "empty") {
-    next.intake.sources.unshift(
-      createPlannerContextSource({
+    next.knowledge.sources.unshift(
+      createPlannerKnowledgeSource({
         id: basicSourceId,
         kind:
           sourceAnalysis.kind === "clone"
-            ? "repo"
+            ? "repository"
             : sourceAnalysis.kind === "existing"
               ? "folder"
               : sourceAnalysis.kind === "website"
@@ -117,7 +119,10 @@ export function applyBasicInputToWorkspacePlan(
         label: sourceAnalysis.label,
         summary: sourceAnalysis.hint,
         details: [sourceAnalysis.hint],
-        url: sourceAnalysis.repoUrl ?? sourceAnalysis.websiteUrl
+        url: sourceAnalysis.repoUrl ?? sourceAnalysis.websiteUrl,
+        localPath: sourceAnalysis.existingPath,
+        text: sourceAnalysis.contextText ?? draft.source,
+        provenance: "wizard"
       })
     );
   }
@@ -166,15 +171,13 @@ export function buildWorkspaceCreateInputFromPlan(
     brief: buildWorkspaceCreateBriefFromPlan(plan),
     directory: plan.workspace.directory,
     modelId: plan.workspace.modelId,
-    sourceMode: plan.workspace.sourceMode,
-    repoUrl: plan.workspace.repoUrl,
-    existingPath: plan.workspace.existingPath,
+    materialization: plan.workspace.materialization,
+    knowledgeSources: plan.knowledge.sources,
     template: plan.workspace.template,
     teamPreset: options.teamPreset ?? "solo",
     modelProfile: plan.workspace.modelProfile || "balanced",
     docOverrides: plan.workspace.docOverrides,
     rules: normalizeWorkspaceWizardQuickCreateRules(plan.workspace.rules),
-    contextSources: plan.intake.sources,
     creation: {
       source: "quick-create"
     }
@@ -193,22 +196,22 @@ export function buildWorkspaceCreateBriefFromPlan(plan: WorkspacePlan) {
     plan.product.offer.trim() ? `Offer: ${plan.product.offer.trim()}` : null,
     plan.company.successSignals.length > 0 ? `Success signals: ${plan.company.successSignals.join(", ")}` : null,
     plan.product.scopeV1.length > 0 ? `Scope: ${plan.product.scopeV1.join(", ")}` : null,
-    ...plan.intake.sources.flatMap((source) => {
+    ...plan.knowledge.sources.flatMap((source) => {
       if (source.id !== basicSourceId && source.kind !== "website") {
         return [];
       }
 
-      if (source.kind === "repo" && source.url) {
-        return [`Bootstrap source: clone ${source.url}`];
+      if (source.kind === "repository" && source.locator.kind === "repository") {
+        return [`Declared repository source: ${source.locator.remoteUrl ?? source.locator.localPath ?? source.summary}`];
       }
 
-      if (source.kind === "folder") {
-        return [`Bootstrap source: existing folder ${source.summary}`];
+      if (source.kind === "folder" && source.locator.kind === "folder") {
+        return [`Declared folder source: ${source.locator.path}`];
       }
 
-      if (source.kind === "website" && source.url) {
+      if (source.kind === "website" && source.locator.kind === "website") {
         const confidence = typeof source.confidence === "number" ? ` (${source.confidence}%)` : "";
-        return [`Reference website${confidence}: ${source.url} - ${source.summary}`];
+        return [`Reference website${confidence}: ${source.locator.url} - ${source.summary}`];
       }
 
       if (source.kind === "prompt") {

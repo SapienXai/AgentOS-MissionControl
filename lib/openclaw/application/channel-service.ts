@@ -37,6 +37,7 @@ import {
 } from "@/lib/openclaw/surface-runtime";
 import {
   normalizeChannelRegistry,
+  serializeWorkspaceProjectManifestRecord,
   uniqueByChatId
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { writeTextFileEnsured } from "@/lib/openclaw/domains/workspace-bootstrap";
@@ -994,11 +995,13 @@ async function removeWorkspaceProjectChannelReferences(
     return;
   }
 
-  parsed.updatedAt = new Date().toISOString();
-  parsed.agents = nextAgents;
+  const serialized = serializeWorkspaceProjectManifestRecord(parsed, {
+    updatedAt: new Date().toISOString(),
+    agents: nextAgents
+  });
 
   await measureTiming(timings, `workspace-project.${path.basename(workspacePath)}.write`, () =>
-    writeTextFileEnsured(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`)
+    writeTextFileEnsured(projectFilePath, `${JSON.stringify(serialized, null, 2)}\n`)
   );
 }
 

@@ -34,6 +34,17 @@ import type {
   WorkspaceSourceMode,
   WorkspaceTemplate
 } from "@/lib/openclaw/types";
+import {
+  legacyWorkspaceMaterializationFromFields,
+  materializationToLegacyWorkspaceFields,
+  normalizeWorkspaceMaterializationInput,
+  type WorkspaceMaterialization
+} from "@/lib/agentos/domains/workspace-materialization";
+import {
+  legacyPlannerContextSourceToKnowledgeSource,
+  normalizeWorkspaceKnowledgeSources,
+  type WorkspaceKnowledgeSource
+} from "@/lib/agentos/domains/workspace-knowledge";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +55,9 @@ export type ResolvedWorkspaceBootstrapInput = {
   directory?: string;
   modelId?: string;
   thinking?: OpenClawThinkingLevel;
+  materialization: WorkspaceMaterialization;
+  knowledgeSources: WorkspaceKnowledgeSource[];
+  /** Deprecated projections used only by progress and compatibility callers. */
   repoUrl?: string;
   existingPath?: string;
   sourceMode: WorkspaceSourceMode;
@@ -485,68 +499,12 @@ export function buildAgentPolicyPromptLines(policy: AgentPolicy, setupAgentId?: 
   return lines;
 }
 
-function normalizeWorkspaceContextSources(
-  sources?: WorkspaceCreateInput["contextSources"]
-): PlannerContextSource[] {
-  return (sources ?? []).flatMap((source) => {
-    if (!source || typeof source !== "object") {
-      return [];
-    }
-
-    const kind = isPlannerContextSourceKind(source.kind) ? source.kind : "prompt";
-    const label = normalizeOptionalValue(source.label) ?? kind;
-    const summary = normalizeOptionalValue(source.summary) ?? label;
-    const status = source.status === "error" ? "error" : "ready";
-    const createdAt = normalizeOptionalValue(source.createdAt) ?? new Date().toISOString();
-
-    if (!label || !summary) {
-      return [];
-    }
-
-    const normalizedSource: PlannerContextSource = {
-      id: normalizeOptionalValue(source.id) ?? `${kind}-${slugify(label) || "context"}`,
-      kind,
-      label,
-      summary,
-      details: Array.isArray(source.details)
-        ? source.details
-            .map((entry) => normalizeOptionalValue(entry) ?? "")
-            .filter((entry): entry is string => Boolean(entry))
-        : [],
-      status,
-      createdAt
-    };
-
-    const confidence = typeof source.confidence === "number" ? source.confidence : undefined;
-    const error = normalizeOptionalValue(source.error) ?? undefined;
-    const url = normalizeOptionalValue(source.url) ?? undefined;
-
-    if (confidence !== undefined) {
-      normalizedSource.confidence = confidence;
-    }
-
-    if (error !== undefined) {
-      normalizedSource.error = error;
-    }
-
-    if (url !== undefined) {
-      normalizedSource.url = url;
-    }
-
-    return [normalizedSource];
-  });
-}
-
-function isPlannerContextSourceKind(value: unknown): value is PlannerContextSource["kind"] {
-  return value === "prompt" || value === "website" || value === "repo" || value === "folder";
-}
-
 export function resolveWorkspaceCreationTargetDir(
   input: ResolvedWorkspaceBootstrapInput,
   workspaceRoot: string
 ) {
-  if (input.sourceMode === "existing") {
-    const existingPath = input.existingPath || input.directory;
+  if (input.materialization.mode === "existing") {
+    const existingPath = input.materialization.existingPath || input.directory;
 
     if (!existingPath) {
       throw new Error("Choose an existing folder for this workspace.");
@@ -564,21 +522,19 @@ export function resolveWorkspaceCreationTargetDir(
 
 export async function materializeWorkspaceSource(params: {
   targetDir: string;
-  sourceMode: WorkspaceSourceMode;
+  materialization?: WorkspaceMaterialization;
+  sourceMode?: WorkspaceSourceMode;
   repoUrl?: string;
 }) {
-  if (params.sourceMode === "existing") {
+  const materialization = params.materialization ?? legacyWorkspaceMaterializationFromFields(params);
+
+  if (materialization.mode === "existing") {
     await ensureExistingDirectory(params.targetDir);
     return;
   }
 
-  if (params.sourceMode === "clone") {
-    const repoUrl = normalizeOptionalValue(params.repoUrl);
-
-    if (!repoUrl) {
-      throw new Error("Repository URL is required when cloning a repo.");
-    }
-
+  if (materialization.mode === "clone") {
+    const repoUrl = materialization.repoUrl;
     assertSafeWorkspaceCloneRepoUrl(repoUrl);
     await ensureTargetPathVacant(params.targetDir);
     await mkdir(path.dirname(params.targetDir), { recursive: true });
@@ -637,12 +593,18 @@ export async function scaffoldWorkspaceContents(
     teamPreset: NonNullable<WorkspaceCreateInput["teamPreset"]>;
     modelProfile: WorkspaceModelProfile;
     rules: WorkspaceCreateRules;
-    sourceMode: WorkspaceSourceMode;
+    materialization?: WorkspaceMaterialization;
+    sourceMode?: WorkspaceSourceMode;
     docOverrides: WorkspaceDocOverride[];
     agents: WorkspaceAgentBlueprintInput[];
-    contextSources: WorkspaceScaffoldDocumentContext["contextSources"];
+    knowledgeSources?: WorkspaceKnowledgeSource[];
+    contextSources?: WorkspaceScaffoldDocumentContext["contextSources"];
   }
 ) {
+  const materialization = options.materialization ?? legacyWorkspaceMaterializationFromFields({ sourceMode: options.sourceMode });
+  const knowledgeSources = options.knowledgeSources ?? normalizeWorkspaceKnowledgeSources(
+    (options.contextSources ?? []).map((source) => legacyPlannerContextSourceToKnowledgeSource(source))
+  );
   const templateMeta = getWorkspaceTemplateMeta(options.template);
   const createdAt = new Date().toISOString();
   const toolExamples = await detectWorkspaceToolExamples(workspacePath);
@@ -658,14 +620,14 @@ export async function scaffoldWorkspaceContents(
     path.join(workspacePath, ".openclaw", "project.json"),
     `${JSON.stringify(
       {
-        version: 1,
+        version: 2,
         slug: slugify(options.name),
         name: options.name,
         icon: templateMeta.icon,
         createdAt,
         updatedAt: createdAt,
         template: options.template,
-        sourceMode: options.sourceMode,
+        materialization,
         teamPreset: options.teamPreset,
         modelProfile: options.modelProfile,
         agentTemplate: options.teamPreset === "solo" ? "solo" : "core-team",
@@ -675,7 +637,7 @@ export async function scaffoldWorkspaceContents(
           generateMemory: options.rules.generateMemory,
           kickoffMission: options.rules.kickoffMission
         },
-        contextSources: options.contextSources,
+        knowledgeSources,
         agents: options.agents.map((agent) => {
           const skillIds = normalizeWorkspaceAgentSkillIds(agent);
 
@@ -720,12 +682,12 @@ export async function scaffoldWorkspaceContents(
     name: options.name,
     brief: options.brief,
     template: options.template,
-    sourceMode: options.sourceMode,
+    materialization,
     rules: options.rules,
     agents: options.agents,
     toolExamples,
     docOverrides: options.docOverrides,
-    contextSources: options.contextSources
+    knowledgeSources
   });
 
   for (const document of scaffoldDocuments) {
@@ -757,7 +719,14 @@ export function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): Res
 
   const template = input.template ?? "software";
   const teamPreset = input.teamPreset ?? "core";
-  const sourceMode = input.sourceMode ?? "empty";
+  const materialization = normalizeWorkspaceMaterializationInput({
+    ...(Object.prototype.hasOwnProperty.call(input, "materialization") ? { materialization: input.materialization } : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "sourceMode") ? { sourceMode: input.sourceMode } : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "repoUrl") ? { repoUrl: input.repoUrl } : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "existingPath") ? { existingPath: input.existingPath } : {}),
+    ...(Object.prototype.hasOwnProperty.call(input, "directory") ? { directory: input.directory } : {})
+  });
+  const legacyMaterialization = materializationToLegacyWorkspaceFields(materialization);
   const modelProfile = input.modelProfile ?? "balanced";
   const rules: WorkspaceCreateRules = {
     ...DEFAULT_WORKSPACE_RULES,
@@ -825,16 +794,45 @@ export function resolveWorkspaceBootstrapInput(input: WorkspaceCreateInput): Res
     directory: normalizeOptionalValue(input.directory) ?? undefined,
     modelId: normalizeOptionalValue(input.modelId) ?? undefined,
     thinking: input.thinking,
-    repoUrl: normalizeOptionalValue(input.repoUrl) ?? undefined,
-    existingPath: normalizeOptionalValue(input.existingPath) ?? undefined,
-    sourceMode,
+    materialization,
+    repoUrl: legacyMaterialization.repoUrl,
+    existingPath: legacyMaterialization.existingPath,
+    sourceMode: legacyMaterialization.sourceMode,
     template,
     teamPreset,
     modelProfile,
     rules,
     docOverrides: normalizeWorkspaceDocOverrides(input.docOverrides),
     agents: normalizedAgents,
-    contextSources: normalizeWorkspaceContextSources(input.contextSources)
+    knowledgeSources: input.knowledgeSources !== undefined
+      ? normalizeWorkspaceKnowledgeSources(input.knowledgeSources)
+      : normalizeWorkspaceKnowledgeSources((input.contextSources ?? []).map((source) => legacyPlannerContextSourceToKnowledgeSource(source))),
+    contextSources: (input.knowledgeSources !== undefined
+      ? normalizeWorkspaceKnowledgeSources(input.knowledgeSources)
+      : normalizeWorkspaceKnowledgeSources((input.contextSources ?? []).map((source) => legacyPlannerContextSourceToKnowledgeSource(source))))
+      .map(knowledgeSourceToPlannerContextSource)
+  };
+}
+
+function knowledgeSourceToPlannerContextSource(source: WorkspaceKnowledgeSource): PlannerContextSource {
+  const url = source.locator.kind === "website"
+    ? source.locator.url
+    : source.locator.kind === "repository"
+      ? source.locator.remoteUrl ?? source.locator.localPath
+      : source.locator.kind === "file" || source.locator.kind === "folder"
+        ? source.locator.path
+        : undefined;
+  return {
+    id: source.id,
+    kind: source.kind === "repository" ? "repo" : source.kind === "file" || source.kind === "connector" ? "prompt" : source.kind,
+    label: source.label,
+    summary: source.summary,
+    details: source.details,
+    status: source.status,
+    createdAt: source.createdAt,
+    ...(source.confidence !== undefined ? { confidence: source.confidence } : {}),
+    ...(url ? { url } : {}),
+    ...(source.error ? { error: source.error } : {})
   };
 }
 
