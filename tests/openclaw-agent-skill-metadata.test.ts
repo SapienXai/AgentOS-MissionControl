@@ -9,10 +9,7 @@ import { getAgentPresetMeta } from "@/lib/openclaw/agent-presets";
 import {
   pruneUnreferencedGeneratedWorkspaceSkills
 } from "@/lib/openclaw/domains/agent-provisioning";
-import {
-  mergeWorkspaceAgentRolesSection,
-  renderWorkspaceAgentRolesSection
-} from "@/lib/openclaw/domains/workspace-agents-document";
+import { renderWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document";
 import { parseWorkspaceProjectManifestAgent } from "@/lib/openclaw/domains/workspace-manifest";
 import { renderSkillMarkdown } from "@/lib/openclaw/domains/workspace-bootstrap";
 
@@ -40,59 +37,29 @@ test("workspace agent manifest keeps all declared skill ids", () => {
   assert.deepEqual(parsed.skillIds, ["project-researcher", "project-builder", "project-analyst"]);
 });
 
-test("workspace AGENTS.md role section renders multiple skills", () => {
-  const markdown = renderWorkspaceAgentRolesSection([
-    {
-      id: "cyberpunk3-custom-agent",
-      name: "Digital Kazım",
-      role: "Custom",
-      enabled: true,
-      skillIds: ["project-researcher", "project-builder", "project-analyst"]
-    }
-  ]);
+test("new workspace AGENTS.md keeps agent-specific behavior out of shared context", () => {
+  const markdown = renderWorkspaceAgentsMarkdown({
+    name: "Workspace",
+    templateLabel: "Software project",
+    sourceMode: "empty",
+    workspaceOnly: true,
+    toolExamples: ["Use `pnpm test` for verification."],
+    agents: [
+      {
+        id: "cyberpunk3-custom-agent",
+        name: "Digital Kazım",
+        role: "Custom",
+        enabled: true,
+        skillIds: ["project-researcher", "project-builder", "project-analyst"]
+      }
+    ]
+  });
 
-  assert.match(
-    markdown,
-    /Skills: `project-researcher`, `project-builder`, `project-analyst`/
-  );
-});
-
-test("workspace AGENTS.md role sync preserves custom agent notes", () => {
-  const current = `# Workspace
-
-## Agent Roles
-Each agent should use only the subsection matching its current OpenClaw agent id as its personal role/persona. Other subsections describe teammates in the same workspace.
-
-### Old Name (\`cyberpunk3-custom-agent\`)
-- Agent id: \`cyberpunk3-custom-agent\`
-- Runtime rule: stale
-- Role: stale
-- Personality: Speak like a patient operator.
-
-Keep answers grounded in the CyberPunk3 workspace.
-
-### Deleted Agent (\`stale-agent\`)
-- Agent id: \`stale-agent\`
-- Personality: remove me
-`;
-
-  const merged = mergeWorkspaceAgentRolesSection(current, [
-    {
-      id: "cyberpunk3-custom-agent",
-      name: "Digital Kazım",
-      role: "Custom",
-      enabled: true,
-      skillIds: ["project-researcher"],
-      modelId: "openai/gpt-5.4-mini"
-    }
-  ]);
-
-  assert.match(merged, /### Digital Kazım \(`cyberpunk3-custom-agent`\)/);
-  assert.match(merged, /- Role: Custom/);
-  assert.match(merged, /- Model: `openai\/gpt-5\.4-mini`/);
-  assert.match(merged, /- Personality: Speak like a patient operator\./);
-  assert.match(merged, /Keep answers grounded in the CyberPunk3 workspace\./);
-  assert.doesNotMatch(merged, /stale-agent/);
+  assert.match(markdown, /## Tools/);
+  assert.match(markdown, /Use `pnpm test` for verification\./);
+  assert.match(markdown, /Digital Kazım/);
+  assert.doesNotMatch(markdown, /## Agent Roles/);
+  assert.doesNotMatch(markdown, /agent-specific role\/persona/);
 });
 
 test("generated workspace skills are pruned only when unreferenced and unchanged", async () => {

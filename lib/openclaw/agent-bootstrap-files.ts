@@ -1,9 +1,9 @@
 import { getAgentPresetMeta } from "@/lib/openclaw/agent-presets";
-import type { AgentHeartbeatInput, AgentBootstrapFilePath, AgentPreset } from "@/lib/openclaw/types";
+import type { AgentBootstrapFilePath, AgentPreset } from "@/lib/openclaw/types";
 
 export type { AgentBootstrapFilePath } from "@/lib/openclaw/types";
 
-export type AgentBootstrapFileKind = "identity" | "soul" | "tools" | "heartbeat";
+export type AgentBootstrapFileKind = "identity" | "soul";
 
 export interface AgentBootstrapFileDraft {
   kind: AgentBootstrapFileKind;
@@ -41,22 +41,6 @@ export const AGENT_BOOTSTRAP_FILE_OPTIONS = [
     required: false,
     removable: true
   },
-  {
-    kind: "tools",
-    path: "TOOLS.md",
-    label: "Tools",
-    description: "Preferred tools and workflow cues.",
-    required: false,
-    removable: true
-  },
-  {
-    kind: "heartbeat",
-    path: "HEARTBEAT.md",
-    label: "Heartbeat",
-    description: "Recurring check-in guidance.",
-    required: false,
-    removable: true
-  }
 ] as const satisfies ReadonlyArray<{
   kind: AgentBootstrapFileKind;
   path: AgentBootstrapFilePath;
@@ -68,9 +52,7 @@ export const AGENT_BOOTSTRAP_FILE_OPTIONS = [
 
 export const AGENT_BOOTSTRAP_FILE_PATHS = [
   "IDENTITY.md",
-  "SOUL.md",
-  "TOOLS.md",
-  "HEARTBEAT.md"
+  "SOUL.md"
 ] as const satisfies ReadonlyArray<AgentBootstrapFilePath>;
 
 export function buildAgentBootstrapFileDrafts(input: {
@@ -79,7 +61,6 @@ export function buildAgentBootstrapFileDrafts(input: {
   theme?: string | null;
   avatar?: string | null;
   preset: AgentPreset;
-  heartbeat: AgentHeartbeatInput;
 }) {
   const presetMeta = getAgentPresetMeta(input.preset);
   const displayName = normalizeBootstrapValue(input.name) ?? presetMeta.defaultName;
@@ -96,15 +77,6 @@ export function buildAgentBootstrapFileDrafts(input: {
     presetLabel: presetMeta.label,
     presetDescription: presetMeta.description
   });
-  const toolsContent = renderAgentToolsMarkdown({
-    presetLabel: presetMeta.label,
-    tools: presetMeta.tools
-  });
-  const heartbeatContent = renderAgentHeartbeatMarkdown({
-    enabled: input.heartbeat.enabled,
-    every: normalizeBootstrapValue(input.heartbeat.every)
-  });
-
   return [
     {
       kind: "identity" as const,
@@ -127,28 +99,6 @@ export function buildAgentBootstrapFileDrafts(input: {
       content: soulContent,
       baseContent: soulContent,
       manuallyEdited: false
-    },
-    {
-      kind: "tools" as const,
-      path: "TOOLS.md" as const,
-      label: "Tools",
-      description: "Preferred tools and workflow cues.",
-      required: false,
-      removable: true,
-      content: toolsContent,
-      baseContent: toolsContent,
-      manuallyEdited: false
-    },
-    {
-      kind: "heartbeat" as const,
-      path: "HEARTBEAT.md" as const,
-      label: "Heartbeat",
-      description: "Recurring check-in guidance.",
-      required: false,
-      removable: true,
-      content: heartbeatContent,
-      baseContent: heartbeatContent,
-      manuallyEdited: false
     }
   ] satisfies AgentBootstrapFileDraft[];
 }
@@ -161,6 +111,7 @@ export function rebaseAgentBootstrapFileDrafts(
   const orderByPath = new Map(nextDefaults.map((entry, index) => [entry.path, index] as const));
 
   return [...current]
+    .filter((entry) => nextByPath.has(entry.path))
     .map((entry) => {
       const next = nextByPath.get(entry.path);
 
@@ -239,38 +190,6 @@ export function renderAgentSoulMarkdown(input: {
     "",
     "## Notes",
     input.presetDescription
-  ].join("\n");
-}
-
-export function renderAgentToolsMarkdown(input: {
-  presetLabel: string;
-  tools: string[];
-}) {
-  return [
-    "# TOOLS.md",
-    "",
-    "## Preferred tools",
-    ...input.tools.map((tool) => `- \`${tool}\``),
-    "",
-    "## Notes",
-    `This ${input.presetLabel.toLowerCase()} agent is seeded with the tools above.`
-  ].join("\n");
-}
-
-export function renderAgentHeartbeatMarkdown(input: {
-  enabled: boolean;
-  every?: string | null;
-}) {
-  return [
-    "# HEARTBEAT.md",
-    "",
-    "## Schedule",
-    input.enabled ? `Every ${input.every ?? "unspecified"}` : "Off",
-    "",
-    "## Notes",
-    input.enabled
-      ? "Use this file for recurring check-ins, triage reminders, and lightweight watch instructions."
-      : "Add a heartbeat only when the agent needs recurring watch-cycle guidance."
   ].join("\n");
 }
 

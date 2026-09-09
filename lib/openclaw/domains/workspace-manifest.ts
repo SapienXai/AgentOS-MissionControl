@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   parseAgentOSWorkerProfile,
+  mergeAgentOSWorkerProfile,
   type AgentOSWorkerProfile
 } from "@/lib/agentos/worker-profile";
 import {
@@ -138,6 +139,70 @@ export async function readWorkspaceProjectManifest(
       channels: []
     };
   }
+}
+
+/**
+ * Persists the AgentOS worker-profile projection without putting agent
+ * persona/policy content into the shared OpenClaw AGENTS.md context file.
+ */
+export async function updateWorkspaceProjectManifestAgentProfile(
+  workspacePath: string,
+  agentId: string,
+  behaviorInstructions: string
+) {
+  const projectFilePath = path.join(workspacePath, ".openclaw", "project.json");
+  const raw = await readFile(projectFilePath, "utf8");
+  const candidate = JSON.parse(raw);
+  const parsed = isObjectRecord(candidate) ? candidate : {};
+
+  if (!Array.isArray(parsed.agents)) {
+    throw new Error("Workspace project manifest does not contain agents.");
+  }
+
+  const agent = parsed.agents.find(
+    (entry): entry is Record<string, unknown> => isObjectRecord(entry) && entry.id === agentId
+  );
+
+  if (!agent) {
+    throw new Error("Agent was not found in the workspace project manifest.");
+  }
+
+  const currentProfile = parseAgentOSWorkerProfile(agent.workerProfile, {
+    name: typeof agent.name === "string" ? agent.name : null,
+    role: typeof agent.role === "string" ? agent.role : null,
+    emoji: typeof agent.emoji === "string" ? agent.emoji : null,
+    theme: typeof agent.theme === "string" ? agent.theme : null
+  });
+  const normalizedBehavior = behaviorInstructions.trim();
+  const workerProfile = currentProfile
+    ? {
+        ...currentProfile,
+        employment: {
+          ...currentProfile.employment,
+          behaviorInstructions: normalizedBehavior || null
+        }
+      }
+    : mergeAgentOSWorkerProfile(
+        null,
+        {
+          schemaVersion: 1,
+          employment: {
+            behaviorInstructions: normalizedBehavior || null
+          }
+        },
+        {
+          name: typeof agent.name === "string" ? agent.name : null,
+          role: typeof agent.role === "string" ? agent.role : null,
+          emoji: typeof agent.emoji === "string" ? agent.emoji : null,
+          theme: typeof agent.theme === "string" ? agent.theme : null
+        }
+      );
+
+  agent.workerProfile = workerProfile;
+  parsed.updatedAt = new Date().toISOString();
+  await writeFile(projectFilePath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+
+  return readWorkspaceProjectManifest(workspacePath);
 }
 
 export async function reconcileWorkspaceProjectManifestAgents(

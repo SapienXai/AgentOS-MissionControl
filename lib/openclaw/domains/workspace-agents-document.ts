@@ -1,4 +1,3 @@
-import { formatAgentPresetLabel } from "@/lib/openclaw/agent-presets";
 import type { AgentPolicy, WorkspaceSourceMode } from "@/lib/openclaw/types";
 
 export type WorkspaceAgentsMarkdownAgentInput = {
@@ -37,6 +36,7 @@ export function renderWorkspaceAgentsMarkdown(params: {
   workspaceOnly: boolean;
   agents: WorkspaceAgentsMarkdownAgentInput[];
   workspaceSlug?: string | null;
+  toolExamples?: string[];
 }) {
   return `# ${params.name}
 
@@ -49,7 +49,7 @@ Shared project context for all agents working in this workspace.
 
 ${renderWorkspaceAgentsTeamSection(params.agents, params.workspaceSlug)}
 
-${renderWorkspaceAgentRolesSection(params.agents, params.workspaceSlug)}
+${renderWorkspaceToolsSection(params.toolExamples)}
 
 ## Customize
 ${params.brief || "Clarify the project goal, definition of done, constraints, and success signals before large changes."}
@@ -63,7 +63,7 @@ ${params.brief || "Clarify the project goal, definition of done, constraints, an
 - Route environment preparation to setup-oriented agents when the work depends on new tooling.
 
 ## Daily memory
-- Capture durable facts in MEMORY.md and memory/*.md.
+- Keep MEMORY.md curated and concise; put focused durable notes in memory/*.md.
 - Record stable decisions in memory/decisions.md.
 - Keep temporary chatter and scratch notes in memory/.
 
@@ -74,6 +74,21 @@ ${params.brief || "Clarify the project goal, definition of done, constraints, an
 `;
 }
 
+export function renderWorkspaceToolsSection(toolExamples: string[] = []) {
+  const examples = uniqueStrings(toolExamples);
+
+  return `## Tools
+Repository-local command and workflow guidance for this workspace. These notes are guidance only; OpenClaw config and policy determine actual permissions.
+
+${(examples.length > 0
+  ? examples
+  : [
+      "Use repository-local scripts or documented commands for repeatable workflows.",
+      "Prefer commands that can be verified by another agent without interpretation drift."
+    ]
+  ).map((line) => `- ${line}`).join("\n")}`;
+}
+
 export function renderWorkspaceAgentsTeamSection(
   agents: WorkspaceAgentsMarkdownAgentInput[],
   workspaceSlug?: string | null
@@ -82,8 +97,7 @@ export function renderWorkspaceAgentsTeamSection(
   const lines = activeAgents.map((agent) => {
     const labels = [
       agent.isPrimary ? "primary" : null,
-      agent.role,
-      agent.policy ? formatAgentPresetLabel(agent.policy.preset) : null
+      agent.role
     ].filter((value): value is string => Boolean(value));
 
     return `- ${agent.name} (\`${agent.id}\`)${labels.length > 0 ? ` · ${labels.join(" · ")}` : ""}`;
@@ -91,229 +105,6 @@ export function renderWorkspaceAgentsTeamSection(
 
   return `## Team
 ${lines.length > 0 ? lines.join("\n") : "- No active agents configured yet."}`;
-}
-
-export function renderWorkspaceAgentRolesSection(
-  agents: WorkspaceAgentsMarkdownAgentInput[],
-  workspaceSlug?: string | null
-) {
-  const activeAgents = normalizeAgentInputs(agents, workspaceSlug).filter((agent) => agent.enabled);
-  const sections = activeAgents.map(renderWorkspaceAgentRoleSubsection);
-
-  return buildWorkspaceAgentRolesSection(sections);
-}
-
-export function mergeWorkspaceAgentRolesSection(
-  content: string,
-  agents: WorkspaceAgentsMarkdownAgentInput[],
-  workspaceSlug?: string | null
-) {
-  const activeAgents = normalizeAgentInputs(agents, workspaceSlug).filter((agent) => agent.enabled);
-  const sectionMatch = findMarkdownSection(content, "Agent Roles");
-
-  if (!sectionMatch) {
-    return renderWorkspaceAgentRolesSection(agents, workspaceSlug);
-  }
-
-  const existingSections = parseExistingAgentRoleSubsections(
-    content.slice(sectionMatch.start, sectionMatch.end)
-  );
-  const sections = activeAgents.map((agent) => {
-    const generated = renderWorkspaceAgentRoleSubsection(agent);
-    const existing = existingSections.get(agent.id);
-
-    return existing ? mergeWorkspaceAgentRoleSubsection(generated, existing) : generated;
-  });
-
-  return buildWorkspaceAgentRolesSection(sections);
-}
-
-export function renderDefaultWorkspaceAgentProfileContent() {
-  return `#### Persona
-
-#### Responsibilities
-
-#### Operating Notes
-
-#### Boundaries`;
-}
-
-export function extractWorkspaceAgentProfileContent(content: string, agentId: string) {
-  const subsection = findWorkspaceAgentRoleSubsection(content, agentId)?.content;
-
-  if (!subsection) {
-    return renderDefaultWorkspaceAgentProfileContent();
-  }
-
-  const lines = subsection.trim().split(/\r?\n/);
-  const customLines = trimBlankLines(
-    lines.slice(1).filter((line) => !isManagedAgentRoleLine(line))
-  );
-
-  return customLines.length > 0
-    ? customLines.join("\n")
-    : renderDefaultWorkspaceAgentProfileContent();
-}
-
-export function replaceWorkspaceAgentProfileContent(
-  content: string,
-  agentId: string,
-  profileContent: string
-) {
-  const subsection = findWorkspaceAgentRoleSubsection(content, agentId);
-
-  if (!subsection) {
-    throw new Error("Agent profile section was not found in AGENTS.md.");
-  }
-
-  const lines = subsection.content.trim().split(/\r?\n/);
-  const managedLines = lines.slice(1).filter((line) => isManagedAgentRoleLine(line));
-  const normalizedProfileContent = profileContent.trim();
-  const nextSubsection = [
-    lines[0],
-    ...managedLines,
-    ...(normalizedProfileContent ? ["", normalizedProfileContent] : [])
-  ].join("\n");
-
-  return [
-    content.slice(0, subsection.start),
-    nextSubsection,
-    content.slice(subsection.end)
-  ].join("");
-}
-
-function buildWorkspaceAgentRolesSection(sections: string[]) {
-  return `## Agent Roles
-Each agent should use only the subsection matching its current OpenClaw agent id as its personal role/persona. Other subsections describe teammates in the same workspace.
-
-${sections.length > 0 ? sections.join("\n\n") : "- No active agent role sections are configured yet."}`;
-}
-
-function renderWorkspaceAgentRoleSubsection(agent: NormalizedWorkspaceAgentInput) {
-  const policy = agent.policy;
-  const skills = agent.skillIds;
-  const tools = uniqueStrings([
-    ...(agent.toolIds ?? []),
-    ...(policy?.fileAccess === "workspace-only" ? ["fs.workspaceOnly"] : [])
-  ]);
-  const channels = uniqueStrings(agent.channelIds ?? []);
-
-  return [
-    `### ${agent.name} (\`${agent.id}\`)`,
-    `- Agent id: \`${agent.id}\``,
-    `- Runtime rule: when the current OpenClaw agent id is \`${agent.id}\`, use this section as the agent-specific role and persona.`,
-    `- Role: ${agent.role || "Agent"}`,
-    `- Primary: ${agent.isPrimary ? "yes" : "no"}`,
-    ...(policy ? [`- Preset: ${formatAgentPresetLabel(policy.preset)}`] : []),
-    ...(agent.modelId ? [`- Model: \`${agent.modelId}\``] : []),
-    ...(skills.length > 0 ? [`- Skills: ${skills.map((skill) => `\`${skill}\``).join(", ")}`] : []),
-    ...(tools.length > 0 ? [`- Tools: ${tools.map((tool) => `\`${tool}\``).join(", ")}`] : []),
-    ...(policy
-      ? [
-          `- File access: ${policy.fileAccess}`,
-          `- Network access: ${policy.networkAccess}`,
-          `- Install scope: ${policy.installScope}`,
-          `- Missing tools: ${policy.missingToolBehavior}`
-        ]
-      : []),
-    ...(channels.length > 0 ? [`- Channels: ${channels.map((channel) => `\`${channel}\``).join(", ")}`] : [])
-  ].join("\n");
-}
-
-function parseExistingAgentRoleSubsections(section: string) {
-  const sections = new Map<string, string>();
-  const matches = Array.from(section.matchAll(/^###\s+.+$/gm));
-
-  for (const [index, match] of matches.entries()) {
-    if (match.index === undefined) {
-      continue;
-    }
-
-    const start = match.index;
-    const end = matches[index + 1]?.index ?? section.length;
-    const subsection = section.slice(start, end).trim();
-    const agentId = extractAgentIdFromRoleSubsection(subsection);
-
-    if (agentId) {
-      sections.set(agentId, subsection);
-    }
-  }
-
-  return sections;
-}
-
-function findWorkspaceAgentRoleSubsection(content: string, agentId: string) {
-  const sectionMatch = findMarkdownSection(content, "Agent Roles");
-
-  if (!sectionMatch) {
-    return null;
-  }
-
-  const section = content.slice(sectionMatch.start, sectionMatch.end);
-  const matches = Array.from(section.matchAll(/^###\s+.+$/gm));
-
-  for (const [index, match] of matches.entries()) {
-    if (match.index === undefined) {
-      continue;
-    }
-
-    const localStart = match.index;
-    const localEnd = matches[index + 1]?.index ?? section.length;
-    const subsection = section.slice(localStart, localEnd).trim();
-
-    if (extractAgentIdFromRoleSubsection(subsection) !== agentId) {
-      continue;
-    }
-
-    return {
-      start: sectionMatch.start + localStart,
-      end: sectionMatch.start + localEnd,
-      content: subsection
-    };
-  }
-
-  return null;
-}
-
-function extractAgentIdFromRoleSubsection(subsection: string) {
-  return (
-    /^###\s+.*?\(`([^`]+)`\)/m.exec(subsection)?.[1] ??
-    /^-\s+Agent id:\s+`([^`]+)`/m.exec(subsection)?.[1] ??
-    null
-  );
-}
-
-function mergeWorkspaceAgentRoleSubsection(generated: string, existing: string) {
-  const generatedLines = generated.trim().split(/\r?\n/);
-  const existingLines = existing.trim().split(/\r?\n/);
-  const customLines = trimBlankLines(
-    existingLines.slice(1).filter((line) => !isManagedAgentRoleLine(line))
-  );
-
-  return [
-    generatedLines[0],
-    ...generatedLines.slice(1),
-    ...(customLines.length > 0 ? ["", ...customLines] : [])
-  ].join("\n");
-}
-
-function isManagedAgentRoleLine(line: string) {
-  return /^-\s+(Agent id|Runtime rule|Role|Primary|Preset|Model|Skills|Tools|File access|Network access|Install scope|Missing tools|Channels):/.test(line.trim());
-}
-
-function trimBlankLines(lines: string[]) {
-  let start = 0;
-  let end = lines.length;
-
-  while (start < end && lines[start]?.trim() === "") {
-    start += 1;
-  }
-
-  while (end > start && lines[end - 1]?.trim() === "") {
-    end -= 1;
-  }
-
-  return lines.slice(start, end);
 }
 
 function normalizeAgentInputs(

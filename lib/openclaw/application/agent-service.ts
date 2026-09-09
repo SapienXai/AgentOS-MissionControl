@@ -35,7 +35,7 @@ import {
   normalizeDeclaredAgentSkills,
   normalizeDeclaredAgentTools,
   readAgentConfigList,
-  removeLegacyAgentContextFiles,
+  preserveLegacyAgentContextFiles,
   upsertAgentConfigEntry,
   writeAgentConfigList
 } from "@/lib/openclaw/domains/agent-config";
@@ -225,7 +225,7 @@ export async function createAgent(input: AgentCreateInput, gatewayOptions: OpenC
     resolvedWorkspacePath,
     collectWorkspaceSkillReferences(snapshot, resolvedWorkspacePath, new Map([[agentId, declaredSkillIds]]))
   );
-  await removeLegacyAgentContextFiles(agentId, resolvedWorkspacePath, agentDir);
+  await preserveLegacyAgentContextFiles(agentId, resolvedWorkspacePath, agentDir);
 
   invalidateMissionControlSnapshotCache();
   try {
@@ -466,7 +466,7 @@ export async function updateAgent(input: AgentUpdateInput, gatewayOptions: OpenC
       workerProfile
     });
     await syncWorkspaceAgentsMarkdown(resolvedWorkspacePath);
-    await removeLegacyAgentContextFiles(
+    await preserveLegacyAgentContextFiles(
       agentId,
       resolvedWorkspacePath,
       agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId)
@@ -574,7 +574,7 @@ export async function updateAgent(input: AgentUpdateInput, gatewayOptions: OpenC
     resolvedWorkspacePath,
     collectWorkspaceSkillReferences(snapshot, resolvedWorkspacePath, new Map([[agentId, nextDeclaredSkills]]))
   );
-  await removeLegacyAgentContextFiles(
+  await preserveLegacyAgentContextFiles(
     agentId,
     resolvedWorkspacePath,
     agent.agentDir ?? buildWorkspaceAgentStatePath(resolvedWorkspacePath, agentId)
@@ -630,7 +630,7 @@ export async function deleteAgent(input: AgentDeleteInput, gatewayOptions: OpenC
       workspace.path,
       collectWorkspaceSkillReferences(snapshot, workspace.path, new Map([[agent.id, []]]))
     );
-    await removeLegacyAgentContextFiles(agent.id, workspace.path, agent.agentDir);
+  await preserveLegacyAgentContextFiles(agent.id, workspace.path, agent.agentDir);
 
     try {
       await rm(path.join(workspace.path, "skills", buildAgentPolicySkillId(agent.id)), {

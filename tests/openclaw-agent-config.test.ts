@@ -1,11 +1,41 @@
 import assert from "node:assert/strict";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, test } from "node:test";
 
 import { setOpenClawAdapterForTesting, type OpenClawAdapter } from "@/lib/openclaw/adapter/openclaw-adapter";
-import { upsertAgentConfigEntry, type MutableAgentConfigEntry } from "@/lib/openclaw/domains/agent-config";
+import {
+  buildWorkspaceAgentStatePath,
+  preserveLegacyAgentContextFiles,
+  upsertAgentConfigEntry,
+  type MutableAgentConfigEntry
+} from "@/lib/openclaw/domains/agent-config";
 
-afterEach(() => {
+const tempRoots: string[] = [];
+
+afterEach(async () => {
   setOpenClawAdapterForTesting(null);
+  await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+test("agent provisioning preserves existing legacy agent context files", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "agentos-agent-config-"));
+  tempRoots.push(tempRoot);
+  const workspacePath = path.join(tempRoot, "workspace");
+  const agentDir = buildWorkspaceAgentStatePath(workspacePath, "agent-1");
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(path.join(agentDir, "TOOLS.md"), "# Custom tool notes\n");
+  await writeFile(path.join(agentDir, "HEARTBEAT.md"), "# Custom watch notes\n");
+
+  const preserved = await preserveLegacyAgentContextFiles("agent-1", workspacePath, agentDir);
+
+  assert.deepEqual(preserved.sort(), [
+    path.join(agentDir, "HEARTBEAT.md"),
+    path.join(agentDir, "TOOLS.md")
+  ]);
+  assert.equal(await readFile(path.join(agentDir, "TOOLS.md"), "utf8"), "# Custom tool notes\n");
+  await access(path.join(agentDir, "HEARTBEAT.md"));
 });
 
 test("agent config upsert preserves omitted fields while updating identity and model", async () => {

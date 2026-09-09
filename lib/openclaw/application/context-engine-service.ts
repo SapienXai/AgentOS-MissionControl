@@ -36,6 +36,7 @@ import type {
   ContextEngineSnapshot
 } from "@/lib/openclaw/context-engine-types";
 import type { OpenClawAgent, RuntimeRecord } from "@/lib/openclaw/types";
+import { isLegacyOpenClawWorkspaceFile } from "@/lib/openclaw/workspace-bootstrap-files";
 import type { WorkspaceManagedFile } from "@/lib/openclaw/workspace-file-types";
 
 type RuntimeReportCandidate = {
@@ -200,8 +201,9 @@ export function decorateContextEngineFile(
   const runtimeFile = runtimeFiles.find((entry) => normalizeReportPath(entry.path) === normalizeReportPath(file.path));
   const selectedAgentProfilePath = `agents/${agentId}/PROFILE.md`;
   const configuredEnabled = configuration?.files.find((entry) => entry.path === file.path)?.enabled;
-  const defaultEnabled = file.exists && file.editable !== false;
-  const enabled = file.exists ? configuredEnabled ?? defaultEnabled : false;
+  const isLegacy = owner === "legacy-bootstrap";
+  const defaultEnabled = !isLegacy && file.exists && file.editable !== false;
+  const enabled = isLegacy ? false : file.exists ? configuredEnabled ?? defaultEnabled : false;
   const status = resolveFileStatus(file, enabled, runtimeFile);
   const rawTokens = estimateTokensFromFile(file);
   const injectedTokens = enabled ? runtimeFile?.tokens ?? rawTokens : 0;
@@ -214,7 +216,7 @@ export function decorateContextEngineFile(
     selectedAgentOwned: file.path === selectedAgentProfilePath || owner === "agent-policy",
     enabled,
     savedEnabled: enabled,
-    canToggle: file.exists && file.editable !== false,
+    canToggle: !isLegacy && file.exists && file.editable !== false,
     status,
     statusReason: resolveFileStatusReason(file, status),
     scope: resolveFileScope(owner),
@@ -254,6 +256,10 @@ export function classifyContextEngineFileOwner(
 ): ContextEngineFileOwner {
   if (/^agents\/[^/]+\/PROFILE\.md$/.test(file.path)) {
     return "agent-profile";
+  }
+
+  if (isLegacyOpenClawWorkspaceFile(file.path)) {
+    return "legacy-bootstrap";
   }
 
   if (file.category === "agent-policy-config" || /(^|\/)agent-policy[-_/]/i.test(file.path)) {
@@ -300,6 +306,10 @@ function resolveFileStatus(
 }
 
 function resolveFileStatusReason(file: WorkspaceManagedFile, status: ContextEngineFile["status"]) {
+  if (isLegacyOpenClawWorkspaceFile(file.path)) {
+    return "Preserved for compatibility only. OpenClaw does not include this legacy file in the current bootstrap context.";
+  }
+
   if (status === "missing") {
     return file.createable
       ? "The file is allowlisted but does not exist yet. Create it before enabling it."
@@ -360,11 +370,7 @@ function buildContextBudget(
       .filter((file) => file.enabled && isSkillBudgetFile(file))
       .map((file) => file.injectedTokens)
   );
-  const fileToolsTokens = sumKnownTokens(
-    files
-      .filter((file) => file.enabled && isToolBudgetFile(file))
-      .map((file) => file.injectedTokens)
-  );
+  const fileToolsTokens = 0;
   const estimatedSkillTokens = estimateCollectionTokens(policy.effectiveSkills, 80);
   const estimatedToolTokens = estimateCollectionTokens(policy.effectiveTools, 160);
   const skillsTokens = charsToTokens(runtimeReport.skillsPromptChars) ?? sumKnownTokens([fileSkillsTokens, estimatedSkillTokens]);
@@ -1011,17 +1017,12 @@ function isProjectContextFile(file: ContextEngineFile) {
 
 function isProjectBudgetFile(file: ContextEngineFile) {
   return (
-    (file.owner === "workspace-global" || file.owner === "agent-profile" || file.owner === "memory") &&
-    !isToolBudgetFile(file)
+    file.owner === "workspace-global" || file.owner === "agent-profile" || file.owner === "memory"
   );
 }
 
 function isSkillBudgetFile(file: ContextEngineFile) {
   return file.owner === "workspace-skill" || file.owner === "agent-policy";
-}
-
-function isToolBudgetFile(file: ContextEngineFile) {
-  return file.path === "TOOLS.md";
 }
 
 function charsToTokens(value: number | null | undefined) {
@@ -1089,6 +1090,7 @@ function uniqueStrings(values: string[]) {
 
 const contextEngineOwnerLabels: Record<ContextEngineFileOwner, string> = {
   "workspace-global": "Workspace global",
+  "legacy-bootstrap": "Legacy bootstrap",
   "agent-profile": "Agent profile",
   "agent-policy": "Agent policy",
   "workspace-skill": "Workspace skill",

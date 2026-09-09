@@ -223,8 +223,7 @@ export function buildAgentBootstrapFileDraftsForDraft(
     emoji: draft.emoji,
     theme: draft.theme,
     avatar: draft.avatar,
-    preset: draft.policy.preset,
-    heartbeat: draft.heartbeat
+    preset: draft.policy.preset
   });
 }
 

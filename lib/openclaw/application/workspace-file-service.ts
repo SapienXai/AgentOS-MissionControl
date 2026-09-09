@@ -5,16 +5,14 @@ import { lstat, mkdir, readdir, readFile, realpath, writeFile } from "node:fs/pr
 import path from "node:path";
 
 import { getMissionControlSnapshot } from "@/lib/openclaw/application/mission-control-service";
-import {
-  extractWorkspaceAgentProfileContent,
-  replaceWorkspaceAgentProfileContent
-} from "@/lib/openclaw/domains/workspace-agents-document";
-import { syncWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document-sync";
+import { ensureAgentPolicySkill } from "@/lib/openclaw/domains/agent-provisioning";
 import {
   readWorkspaceProjectManifest,
+  updateWorkspaceProjectManifestAgentProfile,
   type WorkspaceProjectManifestAgent
 } from "@/lib/openclaw/domains/workspace-manifest";
 import { workspacePathMatchesId } from "@/lib/openclaw/domains/workspace-id";
+import { OPENCLAW_LEGACY_WORKSPACE_FILES } from "@/lib/openclaw/workspace-bootstrap-files";
 import type {
   WorkspaceManagedFile,
   WorkspaceManagedFileCategory,
@@ -52,8 +50,8 @@ const officialWorkspaceFileSpecs: WorkspaceFileSpec[] = [
     path: "AGENTS.md",
     category: "context",
     language: "markdown",
-    description: "Agent roster, roles, persona, teammate context, and shared operating rules.",
-    usage: "Write each agent's character, voice, responsibilities, boundaries, and team relationships under the matching Agent Roles section.",
+    description: "Shared workspace context, team roster, tool notes, and operating rules.",
+    usage: "Keep workspace-wide instructions here. Agent-specific behavior belongs in the AgentOS worker profile and assigned policy skill.",
     runtimeBehavior: "OpenClaw loads AGENTS.md from the workspace root as bootstrap context for every agent turn."
   },
   {
@@ -61,7 +59,7 @@ const officialWorkspaceFileSpecs: WorkspaceFileSpec[] = [
     category: "context",
     language: "markdown",
     description: "Workspace-level purpose, operating style, and active focus.",
-    usage: "Use this for the project/workspace mission and shared working philosophy. Keep agent-specific character in AGENTS.md.",
+    usage: "Use this for the project/workspace mission and shared working philosophy. Keep agent-specific behavior in the agent profile and policy skill.",
     runtimeBehavior: "OpenClaw loads SOUL.md from the workspace root as shared context for all agents."
   },
   {
@@ -81,22 +79,6 @@ const officialWorkspaceFileSpecs: WorkspaceFileSpec[] = [
     runtimeBehavior: "OpenClaw loads IDENTITY.md from the workspace root as shared identity context."
   },
   {
-    path: "TOOLS.md",
-    category: "tools",
-    language: "markdown",
-    description: "Workspace tool, command, and workflow conventions.",
-    usage: "Document trusted commands, repo workflows, verification steps, and tool usage guidance.",
-    runtimeBehavior: "OpenClaw loads TOOLS.md as guidance. It does not grant permissions by itself."
-  },
-  {
-    path: "HEARTBEAT.md",
-    category: "boot",
-    language: "markdown",
-    description: "Recurring check-in and workspace coherence guidance.",
-    usage: "Describe what agents should refresh or verify during heartbeat-style runs.",
-    runtimeBehavior: "OpenClaw can load HEARTBEAT.md for heartbeat/check-in sessions."
-  },
-  {
     path: "BOOT.md",
     category: "boot",
     language: "markdown",
@@ -110,7 +92,8 @@ const officialWorkspaceFileSpecs: WorkspaceFileSpec[] = [
     language: "markdown",
     description: "One-time first-run bootstrap ritual.",
     usage: "Use this for initial setup or first-run orientation instructions.",
-    runtimeBehavior: "OpenClaw loads BOOTSTRAP.md from the workspace root as bootstrap context."
+    runtimeBehavior: "OpenClaw may create BOOTSTRAP.md for a brand-new workspace. It is a one-time first-run file and is not recreated after it is removed.",
+    createable: false
   },
   {
     path: "MEMORY.md",
@@ -140,6 +123,20 @@ const officialWorkspaceFileSpecs: WorkspaceFileSpec[] = [
 ];
 
 const officialSpecByPath = new Map(officialWorkspaceFileSpecs.map((spec) => [spec.path, spec]));
+const legacyWorkspaceFileSpecs: Map<string, WorkspaceFileSpec> = new Map(
+  OPENCLAW_LEGACY_WORKSPACE_FILES.map((legacy) => [
+    legacy.path,
+    {
+      path: legacy.path,
+      category: legacy.path === "TOOLS.md" ? "tools" : "boot",
+      language: "markdown",
+      description: `${legacy.path} is a preserved legacy OpenClaw workspace file.`,
+      usage: `Preserve or edit this file only for compatibility. Move current guidance to ${legacy.replacement}.`,
+      runtimeBehavior: `${legacy.runtime} Run the supported OpenClaw Doctor migration when available.`,
+      createable: false
+    } satisfies WorkspaceFileSpec
+  ])
+);
 const blockedPathTokenPattern = /(^|[-_.])(auth|credential|credentials|secret|secrets|token|tokens|key|keys|session|sessions|provider|providers|env|oauth|cookie|cookies)([-_.]|$)/i;
 const safeOpenClawRootFileNames = new Set([
   "project.json",
@@ -289,6 +286,22 @@ export async function listWorkspaceManagedFilesForPath(workspacePath: string) {
     }));
   }
 
+  for (const [relativePath, spec] of legacyWorkspaceFileSpecs) {
+    const file = await buildFileEntry(workspacePath, workspaceRealPath, relativePath, {
+      category: spec.category,
+      language: spec.language,
+      source: "discovered",
+      description: spec.description,
+      usage: spec.usage,
+      runtimeBehavior: spec.runtimeBehavior,
+      createable: false
+    });
+
+    if (file.exists) {
+      fileMap.set(relativePath, file);
+    }
+  }
+
   for (const relativePath of await discoverSafeWorkspaceFilePaths(workspacePath)) {
     if (fileMap.has(relativePath)) {
       continue;
@@ -403,8 +416,10 @@ async function readWorkspaceAgentProfileFileForPath(
   agentId: string
 ): Promise<Omit<WorkspaceManagedFileReadResponse, "workspaceId" | "workspacePath">> {
   const file = await resolveAgentProfileVirtualFile(workspacePath, agentId);
-  const agentsMarkdown = await readAgentsMarkdownForVirtualProfile(workspacePath);
-  const content = extractWorkspaceAgentProfileContent(agentsMarkdown, agentId);
+  const manifest = await readWorkspaceProjectManifest(workspacePath);
+  const content =
+    manifest.agents.find((agent) => agent.id === agentId)?.workerProfile?.employment.behaviorInstructions ??
+    "#### Persona\n\n#### Responsibilities\n\n#### Operating Notes\n\n#### Boundaries";
 
   return {
     file: {
@@ -431,14 +446,29 @@ async function writeWorkspaceAgentProfileFileForPath(
     throw new Error("Agent Profile content must use level-4 headings or plain text inside the agent section.");
   }
 
-  await assertAgentsMarkdownSafeForVirtualProfile(workspacePath, true);
-  await syncWorkspaceAgentsMarkdown(workspacePath);
+  const manifest = await updateWorkspaceProjectManifestAgentProfile(workspacePath, agentId, content);
+  const snapshot = await getMissionControlSnapshot({ force: true, includeHidden: true });
+  const runtimeAgent = snapshot.agents.find(
+    (entry) => entry.id === agentId && entry.workspacePath === workspacePath
+  );
 
-  const agentsPath = path.join(workspacePath, "AGENTS.md");
-  await assertAgentsMarkdownSafeForVirtualProfile(workspacePath, false);
-  const current = await readFile(agentsPath, "utf8");
-  const next = replaceWorkspaceAgentProfileContent(current, agentId, content);
-  await writeFile(agentsPath, next, "utf8");
+  if (runtimeAgent) {
+    const setupAgentId =
+      snapshot.agents.find(
+        (entry) => entry.workspaceId === runtimeAgent.workspaceId && entry.policy.preset === "setup" && entry.id !== agentId
+      )?.id ?? null;
+
+    await ensureAgentPolicySkill({
+      workspacePath,
+      agentId,
+      agentName: runtimeAgent.name,
+      policy: runtimeAgent.policy,
+      behaviorInstructions:
+        manifest.agents.find((entry) => entry.id === agentId)?.workerProfile?.employment.behaviorInstructions,
+      setupAgentId,
+      snapshot
+    });
+  }
 
   return readWorkspaceAgentProfileFileForPath(workspacePath, agentId);
 }
@@ -470,8 +500,8 @@ function buildAgentProfileVirtualFile(agent: WorkspaceProjectManifestAgent): Wor
     size: null,
     source: "virtual",
     description: `${agent.name ?? agent.id} persona, responsibilities, boundaries, and operating notes.`,
-    usage: "Write agent-specific character, voice, duties, boundaries, and handoff notes here. Use level-4 headings such as #### Persona so the AGENTS.md structure stays valid.",
-    runtimeBehavior: "This virtual file is stored inside the matching agent subsection in workspace root AGENTS.md, which OpenClaw loads as runtime context."
+    usage: "Write agent-specific character, voice, duties, boundaries, and handoff notes here. Use level-4 headings such as #### Persona.",
+    runtimeBehavior: "This AgentOS virtual file is stored in the worker profile sidecar and compiled into the assigned agent policy skill; it is not shared workspace context."
   };
 }
 
@@ -488,37 +518,6 @@ function parseAgentProfileVirtualPath(relativePath: string) {
 
 function isSafeVirtualAgentId(agentId: string) {
   return /^[A-Za-z0-9_.-]+$/.test(agentId);
-}
-
-async function readAgentsMarkdownForVirtualProfile(workspacePath: string) {
-  try {
-    await assertAgentsMarkdownSafeForVirtualProfile(workspacePath, false);
-    return await readFile(path.join(workspacePath, "AGENTS.md"), "utf8");
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return "";
-    }
-
-    throw error;
-  }
-}
-
-async function assertAgentsMarkdownSafeForVirtualProfile(
-  workspacePath: string,
-  allowMissing: boolean
-) {
-  const workspaceRealPath = await realpath(workspacePath);
-  const agentsPath = resolveWorkspaceChildPath(workspacePath, "AGENTS.md");
-
-  try {
-    await assertExistingFileSafe(agentsPath, workspaceRealPath);
-  } catch (error) {
-    if (allowMissing && isNotFoundError(error)) {
-      return;
-    }
-
-    throw error;
-  }
 }
 
 function isNotFoundError(error: unknown) {
@@ -668,6 +667,19 @@ function describeAllowedWorkspaceFile(
       usage: official.usage,
       runtimeBehavior: official.runtimeBehavior,
       createable: official.createable !== false
+    };
+  }
+
+  const legacy = legacyWorkspaceFileSpecs.get(relativePath);
+  if (legacy) {
+    return {
+      category: legacy.category,
+      language: legacy.language,
+      source: "discovered",
+      description: legacy.description,
+      usage: legacy.usage,
+      runtimeBehavior: legacy.runtimeBehavior,
+      createable: false
     };
   }
 

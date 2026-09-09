@@ -39,8 +39,8 @@ test("lists official OpenClaw workspace files and discovered safe context files"
   assert.ok(paths.includes("SOUL.md"));
   assert.ok(paths.includes("USER.md"));
   assert.ok(paths.includes("IDENTITY.md"));
-  assert.ok(paths.includes("TOOLS.md"));
-  assert.ok(paths.includes("HEARTBEAT.md"));
+  assert.equal(paths.includes("TOOLS.md"), false);
+  assert.equal(paths.includes("HEARTBEAT.md"), false);
   assert.ok(paths.includes("BOOT.md"));
   assert.ok(paths.includes("BOOTSTRAP.md"));
   assert.ok(paths.includes("MEMORY.md"));
@@ -55,7 +55,33 @@ test("lists official OpenClaw workspace files and discovered safe context files"
 
   assert.equal(files.find((file) => file.path === "USER.md")?.exists, false);
   assert.equal(files.find((file) => file.path === "USER.md")?.createable, true);
+  assert.equal(files.find((file) => file.path === "BOOTSTRAP.md")?.createable, false);
   assert.equal(files.find((file) => file.path === ".openclaw/project.json")?.category, "project-config");
+});
+
+test("preserves legacy TOOLS.md and HEARTBEAT.md without treating them as current bootstrap", async () => {
+  const workspacePath = await createWorkspaceRoot();
+  await writeFile(path.join(workspacePath, "TOOLS.md"), "# Legacy tools\n");
+  await writeFile(path.join(workspacePath, "HEARTBEAT.md"), "# Legacy heartbeat\n");
+
+  const files = await listWorkspaceManagedFilesForPath(workspacePath);
+  const tools = files.find((file) => file.path === "TOOLS.md");
+  const heartbeat = files.find((file) => file.path === "HEARTBEAT.md");
+
+  assert.equal(tools?.source, "discovered");
+  assert.equal(tools?.createable, false);
+  assert.equal(tools?.editable, true);
+  assert.equal(heartbeat?.source, "discovered");
+  assert.equal(heartbeat?.createable, false);
+  assert.equal(heartbeat?.editable, true);
+
+  await writeWorkspaceManagedFileForPath(workspacePath, "TOOLS.md", "# Preserved tools\n");
+  assert.equal(await readFile(path.join(workspacePath, "TOOLS.md"), "utf8"), "# Preserved tools\n");
+  await rm(path.join(workspacePath, "TOOLS.md"), { force: true });
+  await assert.rejects(
+    () => writeWorkspaceManagedFileForPath(workspacePath, "TOOLS.md", "# New tools\n"),
+    /cannot be created/
+  );
 });
 
 test("reads and writes safe workspace files while blocking traversal and invalid JSON", async () => {
@@ -90,7 +116,7 @@ test("reads and writes safe workspace files while blocking traversal and invalid
   assert.equal(await readFile(path.join(workspacePath, "USER.md"), "utf8"), "User profile\n");
 });
 
-test("reads and writes virtual agent profiles through AGENTS.md", async () => {
+test("reads and writes virtual agent profiles through the worker-profile sidecar", async () => {
   const workspacePath = await createWorkspaceRoot();
   await mkdir(path.join(workspacePath, ".openclaw"), { recursive: true });
   await writeFile(
@@ -104,7 +130,17 @@ test("reads and writes virtual agent profiles through AGENTS.md", async () => {
             name: "Lab Builder",
             role: "Builder",
             enabled: true,
-            skillIds: ["project-builder"]
+            skillIds: ["project-builder"],
+            workerProfile: {
+              schemaVersion: 1,
+              identity: { displayName: "Lab Builder", emoji: null, theme: null, avatar: null },
+              employment: {
+                role: "Builder",
+                mission: null,
+                behaviorInstructions: "#### Persona\nCalm operator."
+              },
+              operator: { labels: [] }
+            }
           }
         ]
       },
@@ -153,10 +189,14 @@ Calm operator.
 
   const agentsMarkdown = await readFile(path.join(workspacePath, "AGENTS.md"), "utf8");
   assert.match(agentsMarkdown, /### Lab Builder \(`lab-builder`\)/);
-  assert.match(agentsMarkdown, /- Agent id: `lab-builder`/);
-  assert.match(agentsMarkdown, /- Skills: `project-builder`/);
-  assert.match(agentsMarkdown, /#### Persona\nPrecise builder\./);
-  assert.match(agentsMarkdown, /#### Boundaries\nStay inside the workspace\./);
+  assert.match(agentsMarkdown, /- Runtime rule: stale/);
+  assert.match(agentsMarkdown, /#### Persona\nCalm operator\./);
+  assert.doesNotMatch(agentsMarkdown, /Precise builder/);
+
+  const manifest = JSON.parse(await readFile(path.join(workspacePath, ".openclaw", "project.json"), "utf8")) as {
+    agents: Array<{ workerProfile?: { employment?: { behaviorInstructions?: string | null } } }>;
+  };
+  assert.equal(manifest.agents[0]?.workerProfile?.employment?.behaviorInstructions, "#### Persona\nPrecise builder.\n\n#### Boundaries\nStay inside the workspace.");
 });
 
 test("does not expose symlinked files that resolve outside the workspace", async () => {

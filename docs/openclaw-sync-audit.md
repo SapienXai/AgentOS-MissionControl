@@ -70,7 +70,7 @@ The CLI fallback remains intentional for:
 - Gateway process control: start/stop/restart still uses CLI because the Gateway cannot fully control its own process lifecycle from an unavailable or restarting state.
 - `models.scan`, because the current Gateway source does not expose a native `models.scan` method.
 - Gateway probe/discovery helpers, because the current supported native read surface is `health`/`status`; CLI `gateway probe` still provides broader reachability diagnostics.
-- Agent create/update fallback, when the Gateway does not advertise `agents.create` / `agents.update` or rejects the request. Native create uses only the exact 2026.9.1 fields (`name`, `workspace`, `model`, `emoji`, `avatar`); AgentOS still owns policy skills, bootstrap files, identity files, workspace manifests, and local metadata around those Gateway calls.
+- Agent create/update fallback, when the Gateway does not advertise `agents.create` / `agents.update` or rejects the request. Native create uses only the exact 2026.9.3 fields (`name`, `workspace`, `model`, `emoji`, `avatar`); AgentOS still owns policy skills, worker-profile sidecar metadata, workspace manifests, and local metadata around those Gateway calls.
 - Streaming chat transcript fallback where native session events are unavailable or older Gateways do not advertise compatible event subscriptions.
 - Channel/provider provisioning and route discovery with side effects across OpenClaw config, channel registries, logs, session stores, and AgentOS managed surface records.
 - Legacy planner/runtime compatibility paths that still depend on local OpenClaw state and CLI behavior.
@@ -126,7 +126,7 @@ AgentOS now treats the current method names listed above as the native path and 
 
 ## Remaining Risks
 
-- `agents.create` does not accept every AgentOS metadata side effect directly. AgentOS uses the native method first, then applies AgentOS-owned policy skills, bootstrap files, identity files, workspace manifests, and local metadata. Unsupported Gateways still use CLI/application fallback.
+- `agents.create` does not accept every AgentOS metadata side effect directly. AgentOS uses the native method first, then applies AgentOS-owned policy skills, worker-profile sidecar metadata, workspace manifests, and local metadata. Unsupported Gateways still use CLI/application fallback.
 - Older native-create attempts could leave a duplicate global OpenClaw agent beside the AgentOS workspace-local agent when the Gateway generated its own id/path. AgentOS suppresses that legacy duplicate in snapshots when the workspace and display name match and the workspace-local agent is present.
 - Direct streamed chat UI now attempts native Gateway streaming first. Transcript/history polling remains as response recovery because Gateway session events can be status-only and may omit assistant response text.
 - Config merge-patch paths cannot represent array-index writes safely; those paths continue through CLI fallback.

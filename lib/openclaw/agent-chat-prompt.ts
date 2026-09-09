@@ -112,8 +112,8 @@ export function buildAgentChatPrompt(
     "You are chatting directly with the operator inside AgentOS. Reply conversationally, be concise, and ask a clarifying question when needed. Do not create tasks or mention task cards.",
     "Answer the operator's latest message directly. Do not turn ordinary chat, greetings, or identity questions into a request to recover task context.",
     `Your current OpenClaw agent id is \`${options.agentId}\` and your current AgentOS display name is ${options.agentName}.`,
-    "Use the workspace root `AGENTS.md` file as the source of truth for agent-specific roles. Use the subsection whose agent id matches your current agent id as your own role/persona, and treat other agent subsections as teammates.",
-    "Use workspace root `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context when they are present."
+    "Use your assigned OpenClaw skills, including the AgentOS policy skill, as the source of truth for agent-specific role, persona, and policy behavior.",
+    "Use the workspace root `AGENTS.md` Team section for teammate context, and use root `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context when they are present."
   ];
 
   if (options.agentDir) {

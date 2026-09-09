@@ -798,17 +798,12 @@ function sortAgentManagedFiles(files: WorkspaceManagedFile[]) {
   return files.toSorted(
     (left, right) =>
       Number(isAgentProfileFile(right)) - Number(isAgentProfileFile(left)) ||
-      Number(isAgentHeartbeatFile(left)) - Number(isAgentHeartbeatFile(right)) ||
       left.path.localeCompare(right.path)
   );
 }
 
 function isAgentProfileFile(file: WorkspaceManagedFile) {
   return /^agents\/[^/]+\/PROFILE\.md$/.test(file.path);
-}
-
-function isAgentHeartbeatFile(file: WorkspaceManagedFile) {
-  return file.path === "HEARTBEAT.md" || file.path.endsWith("/HEARTBEAT.md");
 }
 
 function getWorkspaceManagedFileAgentId(file: WorkspaceManagedFile, agents: WorkspaceDialogAgent[]) {

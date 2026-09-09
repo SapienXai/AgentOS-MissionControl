@@ -1,4 +1,8 @@
 import { renderWorkspaceAgentsMarkdown } from "@/lib/openclaw/domains/workspace-agents-document";
+import {
+  OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS,
+  OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS
+} from "@/lib/openclaw/workspace-bootstrap-files";
 import type {
   AgentPolicy,
   PlannerContextSource,
@@ -42,16 +46,9 @@ export interface WorkspaceContextManifest {
   resources: WorkspaceContextResourceSpec[];
 }
 
-export const WORKSPACE_CONTEXT_CORE_PATHS = [
-  "AGENTS.md",
-  "SOUL.md",
-  "IDENTITY.md",
-  "USER.md",
-  "TOOLS.md",
-  "HEARTBEAT.md"
-] as const;
+export const WORKSPACE_CONTEXT_CORE_PATHS = OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS;
 
-export const WORKSPACE_CONTEXT_OPTIONAL_PATHS = ["MEMORY.md"] as const;
+export const WORKSPACE_CONTEXT_OPTIONAL_PATHS = OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS;
 
 export interface WorkspaceScaffoldDocumentContext {
   name: string;
@@ -89,11 +86,6 @@ const TEMPLATE_LABELS: Record<WorkspaceTemplate, string> = {
   content: "Content/Growth"
 };
 
-const DEFAULT_TOOL_EXAMPLES = [
-  "Use repository-local scripts or documented commands for repeatable workflows.",
-  "Update this file when the project exposes a cleaner build, test, or release path."
-];
-
 export function buildWorkspaceScaffoldDocumentPaths(
   template: WorkspaceTemplate,
   rules: WorkspaceCreateRules
@@ -108,7 +100,7 @@ export function buildWorkspaceContextResourceSpecs(template?: WorkspaceTemplate 
       label: "AGENTS.md",
       relativePath: "AGENTS.md",
       kind: "file",
-      headings: ["Workspace", "Team", "Customize", "Safety defaults", "Daily memory", "Output"]
+      headings: ["Workspace", "Team", "Tools", "Customize", "Safety defaults", "Daily memory", "Output"]
     },
     {
       id: "soul",
@@ -130,20 +122,6 @@ export function buildWorkspaceContextResourceSpecs(template?: WorkspaceTemplate 
       relativePath: "USER.md",
       kind: "file",
       headings: ["Operator Profile", "Preferences"]
-    },
-    {
-      id: "tools",
-      label: "TOOLS.md",
-      relativePath: "TOOLS.md",
-      kind: "file",
-      headings: ["Examples", "Notes"]
-    },
-    {
-      id: "heartbeat",
-      label: "HEARTBEAT.md",
-      relativePath: "HEARTBEAT.md",
-      kind: "file",
-      headings: []
     },
     {
       id: "memory-md",
@@ -368,7 +346,7 @@ export function renderSkillMarkdown(skillId: string, role: string) {
 Use this skill when implementing changes in the current project.
 
 - Prefer direct code or artifact changes over speculative planning.
-- Respect AGENTS.md, TOOLS.md, MEMORY.md, and memory/*.md before large edits.
+- Respect AGENTS.md (including its ## Tools section), MEMORY.md, and memory/*.md before large edits.
 - Put task-specific artifacts under the current deliverables run folder instead of the workspace root.
 - Verify impact before finishing and leave the workspace in a clearer state.
 `;
@@ -492,20 +470,6 @@ function buildWorkspaceScaffoldDocumentSpecs(
       category: "core",
       render: () => renderUserMarkdown()
     },
-    {
-      path: "TOOLS.md",
-      title: "TOOLS.md",
-      description: "Repository commands and workflow notes.",
-      category: "core",
-      render: ({ template, toolExamples }) => renderToolsMarkdown(template, toolExamples ?? DEFAULT_TOOL_EXAMPLES)
-    },
-    {
-      path: "HEARTBEAT.md",
-      title: "HEARTBEAT.md",
-      description: "Refresh ritual and coherence checks.",
-      category: "core",
-      render: ({ template }) => renderHeartbeatMarkdown(template)
-    }
   ];
 
   if (rules.generateMemory) {
@@ -627,7 +591,8 @@ function renderAgentsMarkdown({
   template,
   sourceMode,
   rules,
-  agents = []
+  agents = [],
+  toolExamples = []
 }: WorkspaceScaffoldDocumentContext) {
   return renderWorkspaceAgentsMarkdown({
     name,
@@ -636,7 +601,8 @@ function renderAgentsMarkdown({
     sourceMode,
     workspaceOnly: rules.workspaceOnly,
     workspaceSlug: slugify(name),
-    agents
+    agents,
+    toolExamples
   });
 }
 
@@ -695,29 +661,6 @@ function renderUserMarkdown() {
 ## Preferences
 - Capture stable user preferences, review style, delivery expectations, and project-specific working agreements here.
 - Keep sensitive personal details out unless the operator explicitly asks to remember them.
-`;
-}
-
-function renderToolsMarkdown(template: WorkspaceTemplate, toolExamples: string[]) {
-  return `# TOOLS
-
-Repository commands and workflow notes for this ${TEMPLATE_LABELS[template].toLowerCase()} workspace.
-
-## Examples
-${toolExamples.map((line) => `- ${line}`).join("\n")}
-
-## Notes
-- Replace these examples with sharper project-specific commands when the repo exposes them.
-- Prefer repeatable commands that other agents can run without interpretation drift.
-`;
-}
-
-function renderHeartbeatMarkdown(template: WorkspaceTemplate) {
-  return `# HEARTBEAT
-
-- Start each substantial task by refreshing the brief, docs, and current files.
-- Keep the ${TEMPLATE_LABELS[template].toLowerCase()} workspace coherent across code, docs, and memory.
-- Prefer explicit handoffs between implementation, review, testing, and knowledge capture.
 `;
 }
 

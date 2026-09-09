@@ -71,9 +71,9 @@ export function composeMissionWithOutputRouting(
     ? [
         "Agent workspace context:",
         `- Your current OpenClaw agent id is \`${currentAgent.id}\`${currentAgent.name ? ` and your AgentOS display name is ${currentAgent.name}` : ""}.`,
-        "- Use the matching subsection in workspace root `AGENTS.md` as your agent-specific role/persona.",
-        "- Treat other `AGENTS.md` agent subsections as teammates in the same workspace.",
-        "- Use root `SOUL.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context."
+        "- Use your assigned OpenClaw skills, including the AgentOS policy skill, for agent-specific behavior and policy.",
+        "- Use the `AGENTS.md` Team section to identify teammates; it is shared workspace context, not a persona store.",
+        "- Use root `AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, `memory/*.md`, and `docs/*.md` as shared workspace/project context."
       ]
     : [];
 

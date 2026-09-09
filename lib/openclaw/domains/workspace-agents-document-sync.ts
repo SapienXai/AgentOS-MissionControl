@@ -5,7 +5,6 @@ import path from "node:path";
 
 import {
   ensureTrailingNewline,
-  mergeWorkspaceAgentRolesSection,
   renderWorkspaceAgentsMarkdown,
   renderWorkspaceAgentsTeamSection,
   replaceOrInsertMarkdownSection
@@ -38,9 +37,10 @@ export async function syncWorkspaceAgentsMarkdown(workspacePath: string) {
   }
 
   const withTeam = replaceOrInsertMarkdownSection(current, "Team", nextTeamSection, "Workspace");
-  const nextRolesSection = mergeWorkspaceAgentRolesSection(withTeam, manifest.agents);
-  const withRoles = replaceOrInsertMarkdownSection(withTeam, "Agent Roles", nextRolesSection, "Team");
-  const nextContent = ensureTrailingNewline(withRoles);
+  // Existing Agent Roles sections are intentionally left untouched. They are
+  // legacy shared-context content and may contain user-authored material;
+  // new agent-specific behavior belongs in the manifest and policy skill.
+  const nextContent = ensureTrailingNewline(withTeam);
 
   if (nextContent === current) {
     return;

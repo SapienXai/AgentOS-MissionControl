@@ -219,7 +219,7 @@ If OpenClaw is already installed, AgentOS connects to the live Gateway and proje
 
 - Create and edit workers with role presets such as `worker`, `setup`, `browser`, `monitoring`, and `custom`.
 - Configure identity, model, heartbeat, file access, install scope, network policy, and operating instructions.
-- Maintain workspace context through `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`, `docs/`, `memory/`, `deliverables/`, and `skills/`.
+- Maintain OpenClaw-native workspace context through `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, and optional `USER.md`; keep command guidance in `AGENTS.md` under `## Tools`, curated memory in `MEMORY.md`/`memory/`, and AgentOS project docs in `docs/`, `deliverables/`, and `skills/`. Heartbeat cadence is native OpenClaw agent configuration, not a workspace Markdown file.
 - Start from presets, import existing setups, or build a worker from scratch.
 
 ### Organize real work

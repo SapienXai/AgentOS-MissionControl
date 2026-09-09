@@ -15,7 +15,7 @@ import { measureTiming, type TimingCollector } from "@/lib/openclaw/timing";
 import {
   buildAgentPolicySkillId,
   buildWorkspaceAgentStatePath,
-  removeLegacyAgentContextFiles,
+  preserveLegacyAgentContextFiles,
   upsertAgentConfigEntry
 } from "@/lib/openclaw/domains/agent-config";
 import { buildAgentPolicyPromptLines, renderSkillMarkdown, writeTextFileEnsured, writeTextFileIfMissing } from "@/lib/openclaw/domains/workspace-bootstrap";
@@ -241,7 +241,7 @@ export async function createBootstrappedWorkspaceAgent(params: {
   });
 
   await syncWorkspaceAgentsMarkdown(params.workspacePath);
-  await removeLegacyAgentContextFiles(agentId, params.workspacePath, agentDir);
+  await preserveLegacyAgentContextFiles(agentId, params.workspacePath, agentDir);
 
   return agentId;
 }

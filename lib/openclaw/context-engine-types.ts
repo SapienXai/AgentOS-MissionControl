@@ -11,6 +11,7 @@ export type ContextEngineScope = "agent" | "workspace" | "global" | "session";
 
 export type ContextEngineFileOwner =
   | "workspace-global"
+  | "legacy-bootstrap"
   | "agent-profile"
   | "agent-policy"
   | "workspace-skill"

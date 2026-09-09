@@ -17,6 +17,11 @@ import {
 } from "@/lib/openclaw/domains/agent-provisioning";
 import { submitMissionDispatch } from "@/lib/openclaw/domains/mission-dispatch-workflow";
 import {
+  OPENCLAW_NATIVE_WORKSPACE_BOOTSTRAP_FILES,
+  OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS,
+  OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS
+} from "@/lib/openclaw/workspace-bootstrap-files";
+import {
   resolveWorkspaceBootstrapInput,
   scaffoldWorkspaceContents
 } from "@/lib/openclaw/domains/workspace-bootstrap";
@@ -84,9 +89,10 @@ test("workspace context survives create, dispatch, restart, and second-workspace
   assertAgentConfig(adapterState.agentConfig, first.builderAgentId, first.workspacePath);
   assert.equal(adapterState.identityInputs.length, 0);
   const agentsMarkdown = await readFile(path.join(first.workspacePath, "AGENTS.md"), "utf8");
-  assert.match(agentsMarkdown, /## Agent Roles/);
-  assert.match(agentsMarkdown, new RegExp(`Agent id: \`${first.builderAgentId}\``));
-  assert.match(agentsMarkdown, /Role: Implementation lead/);
+  assert.match(agentsMarkdown, /## Team/);
+  assert.match(agentsMarkdown, new RegExp(first.builderAgentId));
+  assert.match(agentsMarkdown, /## Tools/);
+  assert.doesNotMatch(agentsMarkdown, /## Agent Roles/);
   await assert.rejects(
     () => readFile(path.join(buildWorkspaceAgentStatePath(first.workspacePath, first.builderAgentId), "SOUL.md"), "utf8"),
     /ENOENT/
@@ -123,11 +129,9 @@ test("workspace context survives create, dispatch, restart, and second-workspace
   assert.match(firstTranscript.answer, /workspace-only/);
   assert.deepEqual(firstTranscript.presentBootstrapFiles.sort(), [
     "AGENTS.md",
-    "HEARTBEAT.md",
     "IDENTITY.md",
     "MEMORY.md",
     "SOUL.md",
-    "TOOLS.md",
     "USER.md"
   ]);
   assert.ok(firstTranscript.toolReads.includes("docs/brief.md"));
@@ -458,8 +462,8 @@ function createSnapshot(input: {
           template: "software",
           sourceMode: "empty",
           agentTemplate: "core-team",
-          coreFiles: resourceStates(["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"]),
-          optionalFiles: resourceStates(["MEMORY.md"]),
+          coreFiles: resourceStates([...OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS]),
+          optionalFiles: resourceStates([...OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS]),
           folders: resourceStates(["memory", "docs", "skills"]),
           projectShell: [],
           localSkillIds: ["project-builder", "project-reviewer"]
@@ -585,16 +589,9 @@ class FakeOpenClawRuntime {
 }
 
 async function readBootstrapFiles(workspacePath: string) {
-  const bootstrapFiles = [
-    "AGENTS.md",
-    "SOUL.md",
-    "TOOLS.md",
-    "IDENTITY.md",
-    "USER.md",
-    "HEARTBEAT.md",
-    "BOOTSTRAP.md",
-    "MEMORY.md"
-  ];
+  const bootstrapFiles = OPENCLAW_NATIVE_WORKSPACE_BOOTSTRAP_FILES
+    .filter((file) => file.kind !== "hook")
+    .map((file) => file.path);
 
   const results = [];
   for (const relativePath of bootstrapFiles) {
@@ -605,7 +602,7 @@ async function readBootstrapFiles(workspacePath: string) {
         missing: false
       });
     } catch {
-      if (relativePath !== "MEMORY.md") {
+      if (!OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS.includes(relativePath as (typeof OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS)[number])) {
         results.push({ relativePath, content: "", missing: true });
       }
     }

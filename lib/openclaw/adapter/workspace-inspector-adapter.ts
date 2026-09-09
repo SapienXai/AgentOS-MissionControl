@@ -2,6 +2,11 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { DEFAULT_WORKSPACE_RULES } from "@/lib/openclaw/workspace-presets";
+import {
+  OPENCLAW_NATIVE_WORKSPACE_BOOTSTRAP_FILES,
+  OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS,
+  OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS
+} from "@/lib/openclaw/workspace-bootstrap-files";
 import { buildWorkspaceContextManifest } from "@/lib/openclaw/workspace-docs";
 import {
   collectWorkspaceResourceState,
@@ -35,7 +40,9 @@ export async function buildWorkspaceBootstrapProfileCache(
   rules?: WorkspaceCreateRules
 ): Promise<WorkspaceBootstrapProfileCache> {
   const contextManifest = buildWorkspaceContextManifest(template, rules ?? DEFAULT_WORKSPACE_RULES);
-  const bootstrapFiles = ["AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"] as const;
+  const bootstrapFiles = OPENCLAW_NATIVE_WORKSPACE_BOOTSTRAP_FILES
+    .filter((file) => file.kind !== "hook")
+    .map((file) => file.path);
   const profileFiles = [
     ...new Set([...bootstrapFiles, ...contextManifest.resources.map((spec) => spec.relativePath)])
   ];
@@ -73,25 +80,25 @@ export async function readWorkspaceInspectorMetadata(
     resolvedProjectMeta.rules ?? DEFAULT_WORKSPACE_RULES
   );
   const nonContextPaths = new Set<string>([
-    "AGENTS.md",
-    "SOUL.md",
-    "IDENTITY.md",
-    "USER.md",
-    "TOOLS.md",
-    "HEARTBEAT.md",
-    "MEMORY.md"
+    ...OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS,
+    ...OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS
   ]);
   const [coreFiles, optionalFiles, contextFiles, folders, projectShell, localSkillIds] = await Promise.all([
     collectWorkspaceResourceState(workspacePath, [
-      { id: "agents", label: "AGENTS.md", relativePath: "AGENTS.md", kind: "file" },
-      { id: "soul", label: "SOUL.md", relativePath: "SOUL.md", kind: "file" },
-      { id: "identity", label: "IDENTITY.md", relativePath: "IDENTITY.md", kind: "file" },
-      { id: "user", label: "USER.md", relativePath: "USER.md", kind: "file" },
-      { id: "tools", label: "TOOLS.md", relativePath: "TOOLS.md", kind: "file" },
-      { id: "heartbeat", label: "HEARTBEAT.md", relativePath: "HEARTBEAT.md", kind: "file" }
+      ...OPENCLAW_NATIVE_WORKSPACE_CONTEXT_PATHS.map((relativePath) => ({
+        id: relativePath.toLowerCase().replace(/\.md$/, ""),
+        label: relativePath,
+        relativePath,
+        kind: "file" as const
+      }))
     ]),
     collectWorkspaceResourceState(workspacePath, [
-      { id: "memory-md", label: "MEMORY.md", relativePath: "MEMORY.md", kind: "file" }
+      ...OPENCLAW_NATIVE_WORKSPACE_MEMORY_PATHS.map((relativePath) => ({
+        id: relativePath.toLowerCase().replace(/\.md$/, ""),
+        label: relativePath,
+        relativePath,
+        kind: "file" as const
+      }))
     ]),
     collectWorkspaceResourceState(
       workspacePath,

@@ -312,7 +312,7 @@ export async function detectWorkspaceToolExamples(workspacePath: string) {
   if (examples.length === 0) {
     examples.push(
       "Use repository-local scripts or documented commands for repeatable workflows.",
-      "Update this file when the project exposes a cleaner build, test, or release path."
+      "Prefer commands that can be verified by another agent without interpretation drift."
     );
   }
 
@@ -327,7 +327,7 @@ export function renderSkillMarkdown(skillId: string, role: string) {
 Use this skill when implementing changes in the current project.
 
 - Prefer direct code or artifact changes over speculative planning.
-- Respect AGENTS.md, TOOLS.md, MEMORY.md, and memory/*.md before large edits.
+- Respect AGENTS.md (including its ## Tools section), MEMORY.md, and memory/*.md before large edits.
 - Put task-specific artifacts under the current deliverables run folder instead of the workspace root.
 - Verify impact before finishing and leave the workspace in a clearer state.
 `;
@@ -690,7 +690,24 @@ export async function scaffoldWorkspaceContents(
             skillId: skillIds[0] ?? null,
             skillIds,
             modelId: normalizeOptionalValue(agent.modelId) ?? null,
-            policy: agent.policy ?? null
+            policy: agent.policy ?? null,
+            workerProfile: {
+              schemaVersion: 1,
+              identity: {
+                displayName: normalizeOptionalValue(agent.name),
+                emoji: normalizeOptionalValue(agent.emoji),
+                theme: normalizeOptionalValue(agent.theme),
+                avatar: null
+              },
+              employment: {
+                role: agent.role,
+                mission: null,
+                behaviorInstructions: null
+              },
+              operator: {
+                labels: []
+              }
+            }
           };
         })
       },

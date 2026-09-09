@@ -38,11 +38,25 @@ function file(path: string, category: WorkspaceManagedFile["category"]): Workspa
 
 test("classifyContextEngineFileOwner separates workspace and selected-agent files", () => {
   assert.equal(classifyContextEngineFileOwner(file("AGENTS.md", "context")), "workspace-global");
+  assert.equal(classifyContextEngineFileOwner(file("TOOLS.md", "tools")), "legacy-bootstrap");
+  assert.equal(classifyContextEngineFileOwner(file("HEARTBEAT.md", "boot")), "legacy-bootstrap");
   assert.equal(classifyContextEngineFileOwner(file("MEMORY.md", "memory")), "memory");
   assert.equal(classifyContextEngineFileOwner(file("memory/decisions.md", "memory")), "memory");
   assert.equal(classifyContextEngineFileOwner(file("skills/reviewer/SKILL.md", "skills")), "workspace-skill");
   assert.equal(classifyContextEngineFileOwner(file("agents/agent-1/PROFILE.md", "identity")), "agent-profile");
   assert.equal(classifyContextEngineFileOwner(file("agents/agent-2/PROFILE.md", "identity")), "agent-profile");
+});
+
+test("legacy bootstrap files remain visible but excluded from Context Engine inclusion", () => {
+  const tools = decorateContextEngineFile(file("TOOLS.md", "tools"), "agent-1", [
+    { path: "TOOLS.md", tokens: 120 }
+  ]);
+
+  assert.equal(tools.enabled, false);
+  assert.equal(tools.canToggle, false);
+  assert.equal(tools.status, "disabled");
+  assert.match(tools.statusReason ?? "", /legacy file/i);
+  assert.equal(tools.injectedTokens, 0);
 });
 
 test("decorateContextEngineFile marks runtime-included files without claiming unrelated files", () => {

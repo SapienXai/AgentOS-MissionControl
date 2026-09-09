@@ -93,7 +93,7 @@ export interface AgentHeartbeatInput {
   every?: string;
 }
 
-export type AgentBootstrapFilePath = "IDENTITY.md" | "SOUL.md" | "TOOLS.md" | "HEARTBEAT.md";
+export type AgentBootstrapFilePath = "IDENTITY.md" | "SOUL.md";
 
 export interface AgentBootstrapFileInput {
   path: AgentBootstrapFilePath;

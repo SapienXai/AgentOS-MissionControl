@@ -2,6 +2,7 @@ import {
   buildWorkspaceBootstrapProfileCache,
   type WorkspaceBootstrapProfileCache
 } from "@/lib/openclaw/adapter/workspace-inspector-adapter";
+import { readWorkspaceProjectManifest } from "@/lib/openclaw/domains/workspace-manifest";
 import type {
   OpenClawAgent,
   WorkspaceCreateRules,
@@ -33,9 +34,13 @@ export async function readAgentBootstrapProfile(
   const contextManifest = workspaceBootstrapProfile.contextManifest;
   const sections = new Map(workspaceBootstrapProfile.workspaceSections);
   const sources = [...workspaceBootstrapProfile.workspaceSources];
+  const projectManifest = await readWorkspaceProjectManifest(workspacePath);
+  const workerProfile = projectManifest.agents.find((agent) => agent.id === options.agentId)?.workerProfile ?? null;
   const agentRoleSection = extractAgentRoleSection(sections.get("AGENTS.md"), options.agentId);
 
   const purpose =
+    workerProfile?.employment.mission ??
+    workerProfile?.employment.role ??
     extractInlineValue(agentRoleSection, "Role") ??
     extractPurpose(sections) ??
     inferPurposeFromConfig({
@@ -43,12 +48,14 @@ export async function readAgentBootstrapProfile(
       agentName: options.agentName,
       skills: options.configuredSkills
     });
-  const operatingInstructions = collectBulletSections(sections, [
+  const operatingInstructions = uniqueStrings([
+    ...(workerProfile?.employment.behaviorInstructions ? [workerProfile.employment.behaviorInstructions] : []),
+    ...collectBulletSections(sections, [
     { file: "AGENTS.md", heading: "Safety defaults" },
     { file: "AGENTS.md", heading: "Daily memory" },
     { file: "AGENTS.md", heading: "Output" },
     { file: "SOUL.md", heading: "How I Operate" },
-    { file: "TOOLS.md", heading: "Examples" },
+    { file: "AGENTS.md", heading: "Tools" },
     { file: "MEMORY.md", heading: "Stable facts" },
     { file: "memory/blueprint.md", heading: "Constraints" },
     { file: "memory/blueprint.md", heading: "Unknowns" },
@@ -65,6 +72,7 @@ export async function readAgentBootstrapProfile(
           spec.relativePath !== "docs/architecture.md"
       )
       .flatMap((spec) => spec.headings.map((heading) => ({ file: spec.relativePath, heading })))
+    ])
   ]).slice(0, 8);
   const responseStyle =
     uniqueStrings([
